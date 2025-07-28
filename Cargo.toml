@@ -5,5 +5,8 @@ members = [
     "crates/rustmat-repl",
     "crates/rustmat-hir",
     "crates/rustmat-ignition"
+    ,"crates/rustmat-plot"
+    ,"crates/rustmat-macros"
+    ,"crates/rustmat-builtins"
 ]
 resolver = "2"

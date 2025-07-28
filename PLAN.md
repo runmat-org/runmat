@@ -39,7 +39,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
       indexing so that typical MATLAB files can be parsed without errors.
 - [x] High-level IR (`rustmat-hir`) with scope and type annotations.
 - [x] Simple interpreter running on an unoptimised bytecode (`rustmat-ignition`).
-- [ ] Headless plotting backend emitting SVG/PNG.
+- [x] Headless plotting backend emitting SVG/PNG.
 - [ ] Jupyter kernel communication skeleton.
 
 ### Milestone P2 – Performance Features
@@ -135,3 +135,59 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 ### 2025-08-15
 - Addressed CI failure by removing a boolean comparison in the interpreter tests.
 - Verified `cargo check`, `cargo clippy` and `cargo test` all succeed.
+
+### 2025-08-16
+- Implemented `rustmat-plot` crate providing headless SVG/PNG rendering with
+  configurable defaults loaded via `RUSTMAT_PLOT_CONFIG`.
+- Added integration tests covering config loading, rendering and invalid style
+  handling. All workspace tests pass.
+
+### 2025-08-17
+- Expanded `rustmat-plot` with scatter, bar and histogram plots and per-type
+  styling options loaded from YAML. Updated integration tests to cover the new
+  functions and fixed a bar chart label bug. All checks pass.
+
+### 2025-08-18
+- Added stub 3D plotting APIs (`plot_3d_scatter` and `plot_surface`) returning
+  errors as Plotters lacks native 3D support.
+- Extended the `rustmat-plot` test suite with numerous positive and negative
+  cases, including validation of error paths. All workspace tests pass.
+
+### 2025-08-19
+- Replaced the 3D stubs with working implementations using a simple isometric
+  projection so scatter and surface plots now render to SVG/PNG.
+- Added integration tests covering the new 3D functions and error cases for
+  length mismatch and non-square grids.
+
+### 2025-08-20
+- Introduced `rustmat-macros` crate with a `matlab_fn` attribute to mark
+  standard library functions.
+- Annotated all plotting functions with their MATLAB names and documented the
+  library design in `docs/LIBRARY.md`.
+
+### 2025-08-21
+- Extended the `matlab_fn` macro to register builtins via the new
+  `rustmat-builtins` crate using `inventory`.
+- Added tests verifying registration and updated docs to explain the process.
+
+### 2025-08-22
+- Added comprehensive tests for the builtin registry and `matlab_fn` macro.
+  Compile-fail checks ensure attribute misuse is caught at build time.
+  New tests validate documentation capture and registration across modules.
+- Addressed clippy errors in `rustmat-macros` and `rustmat-plot` after review.
+
+### 2025-08-23
+- Replaced the isometric 3D projection with a perspective transform and updated
+  the plotting code accordingly.
+- Updated integration tests and documentation to reflect the new approach.
+
+### 2025-08-24
+- Removed clippy allowances in the plotting crate by computing plot bounds
+  internally.
+- Verified that perspective-based 3D plotting works without lint overrides and
+  all tests pass.
+
+### 2025-08-25
+- Disabled Plotters default features so tests no longer require the system `fontconfig`
+  library. PNG output now relies on the `bitmap_encoder` feature only.
+- Confirmed `cargo clippy` and the full test suite pass in a minimal environment.
