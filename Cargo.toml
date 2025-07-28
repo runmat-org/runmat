@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/rustmat-lexer",
+    "crates/rustmat-parser",
     "crates/rustmat-repl"
 ]
 resolver = "2"
