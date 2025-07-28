@@ -78,6 +78,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustmat-parser"
+version = "0.0.1"
+dependencies = [
+ "logos",
+ "rustmat-lexer",
+]
+
+[[package]]
 name = "rustmat-repl"
 version = "0.0.1"
 dependencies = [

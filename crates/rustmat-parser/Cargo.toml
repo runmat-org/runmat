@@ -1,0 +1,8 @@
+[package]
+name = "rustmat-parser"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+rustmat-lexer = { path = "../rustmat-lexer" }
+logos = "0.13"
