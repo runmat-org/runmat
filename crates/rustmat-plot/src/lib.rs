@@ -376,6 +376,24 @@ pub fn plot_3d_scatter(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result
         .zip(zs)
         .map(|((&x, &y), &z)| project_perspective(x, y, z))
         .collect();
+    if path.ends_with(".svg") {
+        let backend = SVGBackend::new(path, (config.width, config.height));
+        draw_scatter2d(backend, &points, &config, color, bg)
+    } else if path.ends_with(".png") {
+        let backend = BitMapBackend::new(path, (config.width, config.height));
+        draw_scatter2d(backend, &points, &config, color, bg)
+    } else {
+        Err("unsupported extension".into())
+    }
+}
+
+fn draw_scatter2d<B: DrawingBackend>(
+    backend: B,
+    points: &[(f64, f64)],
+    config: &PlotConfig,
+    color: RGBColor,
+    bg: RGBColor,
+) -> Result<(), String> {
     let (xmin, xmax) = points
         .iter()
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), (x, _)| {
@@ -386,29 +404,6 @@ pub fn plot_3d_scatter(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), (_, y)| {
             (min.min(*y), max.max(*y))
         });
-    if path.ends_with(".svg") {
-        let backend = SVGBackend::new(path, (config.width, config.height));
-        draw_scatter2d(backend, &points, &config, color, bg, xmin, xmax, ymin, ymax)
-    } else if path.ends_with(".png") {
-        let backend = BitMapBackend::new(path, (config.width, config.height));
-        draw_scatter2d(backend, &points, &config, color, bg, xmin, xmax, ymin, ymax)
-    } else {
-        Err("unsupported extension".into())
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn draw_scatter2d<B: DrawingBackend>(
-    backend: B,
-    points: &[(f64, f64)],
-    config: &PlotConfig,
-    color: RGBColor,
-    bg: RGBColor,
-    xmin: f64,
-    xmax: f64,
-    ymin: f64,
-    ymax: f64,
-) -> Result<(), String> {
     let root = backend.into_drawing_area();
     root.fill(&bg).map_err(|e| e.to_string())?;
     let mut chart = ChartBuilder::on(&root)
@@ -442,43 +437,34 @@ pub fn plot_surface(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result<()
     for ((&x, &y), &z) in xs.iter().zip(ys).zip(zs) {
         projected.push(project_perspective(x, y, z));
     }
-    let (xmin, xmax) = projected
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), (x, _)| {
-            (min.min(*x), max.max(*x))
-        });
-    let (ymin, ymax) = projected
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), (_, y)| {
-            (min.min(*y), max.max(*y))
-        });
     if path.ends_with(".svg") {
         let backend = SVGBackend::new(path, (config.width, config.height));
-        draw_surface2d(
-            backend, &projected, n, line_color, bg, xmin, xmax, ymin, ymax,
-        )
+        draw_surface2d(backend, &projected, n, line_color, bg)
     } else if path.ends_with(".png") {
         let backend = BitMapBackend::new(path, (config.width, config.height));
-        draw_surface2d(
-            backend, &projected, n, line_color, bg, xmin, xmax, ymin, ymax,
-        )
+        draw_surface2d(backend, &projected, n, line_color, bg)
     } else {
         Err("unsupported extension".into())
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw_surface2d<B: DrawingBackend>(
     backend: B,
     points: &[(f64, f64)],
     n: usize,
     color: RGBColor,
     bg: RGBColor,
-    xmin: f64,
-    xmax: f64,
-    ymin: f64,
-    ymax: f64,
 ) -> Result<(), String> {
+    let (xmin, xmax) = points
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), (x, _)| {
+            (min.min(*x), max.max(*x))
+        });
+    let (ymin, ymax) = points
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), (_, y)| {
+            (min.min(*y), max.max(*y))
+        });
     let root = backend.into_drawing_area();
     root.fill(&bg).map_err(|e| e.to_string())?;
     let mut chart = ChartBuilder::on(&root)

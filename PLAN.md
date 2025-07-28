@@ -180,3 +180,9 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Replaced the isometric 3D projection with a perspective transform and updated
   the plotting code accordingly.
 - Updated integration tests and documentation to reflect the new approach.
+
+### 2025-08-24
+- Removed clippy allowances in the plotting crate by computing plot bounds
+  internally.
+- Verified that perspective-based 3D plotting works without lint overrides and
+  all tests pass.
