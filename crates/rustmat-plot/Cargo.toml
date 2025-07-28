@@ -1,0 +1,16 @@
+[package]
+name = "rustmat-plot"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+plotters = { version = "0.3", features = ["svg_backend", "bitmap_backend"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+rustmat-macros = { path = "../rustmat-macros" }
+rustmat-builtins = { path = "../rustmat-builtins" }
+inventory = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+serial_test = "2"
