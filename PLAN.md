@@ -35,7 +35,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 ### Milestone P1 – Language Core
 
 - [x] Complete parser with precedence rules and matrix syntax.
-- [ ] Extend parser to support control flow, function definitions and array
+ - [x] Extend parser to support control flow, function definitions and array
       indexing so that typical MATLAB files can be parsed without errors.
 - [ ] High-level IR (`rustmat-hir`) with scope and type annotations.
 - [ ] Simple interpreter running on an unoptimised bytecode (`rustmat-ignition`).
@@ -99,3 +99,8 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
   operators bringing parser tests above twenty cases.
 - Marked the parser milestone complete and noted future grammar tasks
   (control flow, functions, indexing).
+
+### 2025-08-08
+- Extended parser with control flow statements, function definitions and array
+  indexing. Added tests exercising these features so typical MATLAB files parse
+  without errors.
