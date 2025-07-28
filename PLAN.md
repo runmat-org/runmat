@@ -38,7 +38,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
  - [x] Extend parser to support control flow, function definitions and array
       indexing so that typical MATLAB files can be parsed without errors.
 - [x] High-level IR (`rustmat-hir`) with scope and type annotations.
-- [ ] Simple interpreter running on an unoptimised bytecode (`rustmat-ignition`).
+- [x] Simple interpreter running on an unoptimised bytecode (`rustmat-ignition`).
 - [ ] Headless plotting backend emitting SVG/PNG.
 - [ ] Jupyter kernel communication skeleton.
 
@@ -117,3 +117,13 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 ### 2025-08-11
 - Fixed clippy warnings in `rustmat-hir` after review.
+
+### 2025-08-12
+- Implemented `rustmat-ignition` crate with a simple bytecode interpreter. The
+  interpreter supports numeric operations, variable assignments, `if`, `while`
+  and `for` loops with break/continue. Added comprehensive tests covering
+  normal execution, error cases and edge conditions. All workspace tests pass.
+
+### 2025-08-13
+- Added support for `elseif` branches in the Ignition compiler and updated the
+  interpreter tests accordingly. Marked the interpreter milestone complete.

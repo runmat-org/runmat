@@ -78,6 +78,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustmat-ignition"
+version = "0.0.1"
+dependencies = [
+ "rustmat-hir",
+ "rustmat-parser",
+]
+
+[[package]]
 name = "rustmat-lexer"
 version = "0.0.1"
 dependencies = [
