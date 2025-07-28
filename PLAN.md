@@ -27,7 +27,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 ### Milestone P0 – Bootstrapping
 
-- [ ] Expand lexer to cover MATLAB operators, keywords and comments.
+- [x] Expand lexer to cover MATLAB operators, keywords and comments.
 - [ ] Introduce `rustmat-parser` crate producing an AST.
 - [ ] Basic `rustmat-repl` that tokenizes input and prints tokens.
 - [ ] Set up CI with `cargo fmt` and `cargo check`.
@@ -57,3 +57,9 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 ### 2025-07-28
 - Repository initialised with lexer crate, repl placeholder and docs.
+
+### 2025-07-29
+- Expanded lexer with operators, comments and tests.
+
+### 2025-07-30
+- Added error token, case-sensitivity tests and failure handling in lexer.
