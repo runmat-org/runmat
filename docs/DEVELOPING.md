@@ -15,7 +15,7 @@ cargo build
 
 ## Running the REPL
 
-At this early stage the REPL only prints a placeholder message:
+At this early stage the REPL simply tokenizes input and prints the token names:
 
 ```bash
 cargo run -p rustmat-repl
