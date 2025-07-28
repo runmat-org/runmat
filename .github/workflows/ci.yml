@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v1
+
+      - name: Format
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Check
+        run: cargo check --all-targets
+
+      - name: Test
+        run: |
+          set -o pipefail
+          cargo test --all-targets --all-features 2>&1 | tee test.log
+
+      - name: Test Summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const log = fs.readFileSync('test.log', 'utf8');
+            let passed = 0;
+            let failed = 0;
+            const summary = log.split('\n').find(l => l.startsWith('test result:'));
+            if (summary) {
+              const m = summary.match(/(\d+) passed; (\d+) failed/);
+              if (m) {
+                passed = parseInt(m[1], 10);
+                failed = parseInt(m[2], 10);
+              }
+            }
+            const body = `**Test Summary**\n- Passed: ${passed}\n- Failed: ${failed}`;
+            if (context.payload.pull_request) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            } else {
+              console.log(body);
+            }
