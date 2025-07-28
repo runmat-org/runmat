@@ -29,7 +29,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 - [x] Expand lexer to cover MATLAB operators, keywords and comments.
 - [x] Introduce `rustmat-parser` crate producing an AST.
-- [ ] Basic `rustmat-repl` that tokenizes input and prints tokens.
+- [x] Basic `rustmat-repl` that tokenizes input and prints tokens.
 - [ ] Set up CI with `cargo fmt` and `cargo check`.
 
 ### Milestone P1 – Language Core
@@ -66,3 +66,10 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 ### 2025-07-31
 - Introduced `rustmat-parser` crate with simple AST and parser tests.
+
+### 2025-08-01
+- Added basic rustmat-repl that tokenizes input and prints tokens. Included integration tests.
+
+### 2025-08-02
+- Expanded REPL test suite with edge cases and error handling.
+- Updated docs to describe the tokenizing behaviour.
