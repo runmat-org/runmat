@@ -5,8 +5,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-/// Environment variable specifying the path to the YAML config file.
-/// Environment variable specifying the YAML config path.
+/// Environment variable specifying the path to the optional YAML config file.
 pub const CONFIG_ENV: &str = "RUSTMAT_PLOT_CONFIG";
 
 /// Style configuration loaded from YAML.
