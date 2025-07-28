@@ -13,7 +13,7 @@ pub enum Expr {
     Colon,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum BinOp {
     Add,
     Sub,
@@ -24,7 +24,7 @@ pub enum BinOp {
     Colon,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum UnOp {
     Plus,
     Minus,
