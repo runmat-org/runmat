@@ -16,7 +16,6 @@ use syn::{parse_macro_input, AttributeArgs, ItemFn, Lit, Meta, MetaNameValue, Ne
 ///
 /// This attaches documentation and registers the function with the
 /// `rustmat-builtins` inventory so the runtime can discover it at start-up.
-
 #[proc_macro_attribute]
 pub fn matlab_fn(args: TokenStream, input: TokenStream) -> TokenStream {
     // Parse attribute arguments as `name = "..."`
@@ -51,7 +50,7 @@ pub fn matlab_fn(args: TokenStream, input: TokenStream) -> TokenStream {
             }
         }
     }
-    let builtin_doc = format!("Matlab builtin `{}`", name_str);
+    let builtin_doc = format!("Matlab builtin `{name_str}`");
     func.attrs.push(syn::parse_quote!(#[doc = #builtin_doc]));
     let joined_docs = docs.join("\n");
 

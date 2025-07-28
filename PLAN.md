@@ -174,3 +174,4 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Added comprehensive tests for the builtin registry and `matlab_fn` macro.
   Compile-fail checks ensure attribute misuse is caught at build time.
   New tests validate documentation capture and registration across modules.
+- Addressed clippy errors in `rustmat-macros` and `rustmat-plot` after review.

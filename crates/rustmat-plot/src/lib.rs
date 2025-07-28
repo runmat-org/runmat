@@ -384,6 +384,7 @@ pub fn plot_3d_scatter(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_scatter2d<B: DrawingBackend>(
     backend: B,
     points: &[(f64, f64)],
@@ -404,11 +405,7 @@ fn draw_scatter2d<B: DrawingBackend>(
     chart.configure_mesh().draw().map_err(|e| e.to_string())?;
     chart
         .draw_series(points.iter().map(|&(x, y)| {
-            Circle::new(
-                (x, y),
-                config.marker_size,
-                ShapeStyle::from(&color).filled(),
-            )
+            Circle::new((x, y), config.marker_size, ShapeStyle::from(color).filled())
         }))
         .map_err(|e| e.to_string())?;
     root.present().map_err(|e| e.to_string())
@@ -457,6 +454,7 @@ pub fn plot_surface(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result<()
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_surface2d<B: DrawingBackend>(
     backend: B,
     points: &[(f64, f64)],
@@ -481,7 +479,7 @@ fn draw_surface2d<B: DrawingBackend>(
             let p1 = points[i * n + j];
             let p2 = points[i * n + j + 1];
             chart
-                .draw_series(std::iter::once(PathElement::new(vec![p1, p2], &color)))
+                .draw_series(std::iter::once(PathElement::new(vec![p1, p2], color)))
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -490,7 +488,7 @@ fn draw_surface2d<B: DrawingBackend>(
             let p1 = points[i * n + j];
             let p2 = points[(i + 1) * n + j];
             chart
-                .draw_series(std::iter::once(PathElement::new(vec![p1, p2], &color)))
+                .draw_series(std::iter::once(PathElement::new(vec![p1, p2], color)))
                 .map_err(|e| e.to_string())?;
         }
     }
