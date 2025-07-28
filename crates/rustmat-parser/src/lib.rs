@@ -5,7 +5,9 @@ use rustmat_lexer::Token;
 pub enum Expr {
     Number(String),
     Ident(String),
+    Unary(UnOp, Box<Expr>),
     Binary(Box<Expr>, BinOp, Box<Expr>),
+    Matrix(Vec<Vec<Expr>>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -14,6 +16,14 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    Pow,
+    LeftDiv,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum UnOp {
+    Plus,
+    Minus,
 }
 
 #[derive(Debug, PartialEq)]
@@ -99,18 +109,40 @@ impl Parser {
     }
 
     fn parse_mul_div(&mut self) -> Result<Expr, String> {
-        let mut node = self.parse_primary()?;
+        let mut node = self.parse_unary()?;
         loop {
             let op = match self.peek_token() {
-                Some(Token::Star) => BinOp::Mul,
-                Some(Token::Slash) => BinOp::Div,
+                Some(Token::Star) | Some(Token::DotStar) => BinOp::Mul,
+                Some(Token::Slash) | Some(Token::DotSlash) => BinOp::Div,
+                Some(Token::Backslash) | Some(Token::DotBackslash) => BinOp::LeftDiv,
                 _ => break,
             };
             self.pos += 1; // consume op
-            let rhs = self.parse_primary()?;
+            let rhs = self.parse_unary()?;
             node = Expr::Binary(Box::new(node), op, Box::new(rhs));
         }
         Ok(node)
+    }
+
+    fn parse_pow(&mut self) -> Result<Expr, String> {
+        let node = self.parse_primary()?;
+        if matches!(self.peek_token(), Some(Token::Caret | Token::DotCaret)) {
+            self.pos += 1; // consume
+            let rhs = self.parse_pow()?; // right associative
+            Ok(Expr::Binary(Box::new(node), BinOp::Pow, Box::new(rhs)))
+        } else {
+            Ok(node)
+        }
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, String> {
+        if self.consume(&Token::Plus) {
+            Ok(Expr::Unary(UnOp::Plus, Box::new(self.parse_unary()?)))
+        } else if self.consume(&Token::Minus) {
+            Ok(Expr::Unary(UnOp::Minus, Box::new(self.parse_unary()?)))
+        } else {
+            self.parse_pow()
+        }
     }
 
     fn parse_primary(&mut self) -> Result<Expr, String> {
@@ -125,10 +157,38 @@ impl Parser {
                     }
                     Ok(expr)
                 }
+                Token::LBracket => {
+                    let matrix = self.parse_matrix()?;
+                    if !self.consume(&Token::RBracket) {
+                        return Err("expected ']'".into());
+                    }
+                    Ok(matrix)
+                }
                 _ => Err("unexpected token".into()),
             },
             None => Err("unexpected end of input".into()),
         }
+    }
+
+    fn parse_matrix(&mut self) -> Result<Expr, String> {
+        let mut rows = Vec::new();
+        if self.peek_token() == Some(&Token::RBracket) {
+            return Ok(Expr::Matrix(rows));
+        }
+        loop {
+            let mut row = Vec::new();
+            row.push(self.parse_expr()?);
+            while self.consume(&Token::Comma) {
+                row.push(self.parse_expr()?);
+            }
+            rows.push(row);
+            if self.consume(&Token::Semicolon) {
+                continue;
+            } else {
+                break;
+            }
+        }
+        Ok(Expr::Matrix(rows))
     }
 
     fn peek_token(&self) -> Option<&Token> {

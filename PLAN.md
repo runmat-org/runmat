@@ -34,7 +34,9 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 ### Milestone P1 – Language Core
 
-- [ ] Complete parser with precedence rules and matrix syntax.
+- [x] Complete parser with precedence rules and matrix syntax.
+- [ ] Extend parser to support control flow, function definitions and array
+      indexing so that typical MATLAB files can be parsed without errors.
 - [ ] High-level IR (`rustmat-hir`) with scope and type annotations.
 - [ ] Simple interpreter running on an unoptimised bytecode (`rustmat-ignition`).
 - [ ] Headless plotting backend emitting SVG/PNG.
@@ -85,3 +87,15 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 ### 2025-08-05
 - Enabled GitHub Actions CI to run `cargo fmt`, `cargo check`, `clippy` and tests.
   The P0 milestone tasks are now complete.
+
+### 2025-08-06
+- Implemented precedence climbing parser with unary operators and power
+  expression. Added matrix literals with comma and semicolon separators.
+- Extended test suite with comprehensive cases (now 20+). This completes
+  the remaining P1 parser work.
+
+### 2025-08-07
+- Addressed review feedback: added coverage for left division and elementwise
+  operators bringing parser tests above twenty cases.
+- Marked the parser milestone complete and noted future grammar tasks
+  (control flow, functions, indexing).
