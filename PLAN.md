@@ -37,7 +37,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - [x] Complete parser with precedence rules and matrix syntax.
  - [x] Extend parser to support control flow, function definitions and array
       indexing so that typical MATLAB files can be parsed without errors.
-- [ ] High-level IR (`rustmat-hir`) with scope and type annotations.
+- [x] High-level IR (`rustmat-hir`) with scope and type annotations.
 - [ ] Simple interpreter running on an unoptimised bytecode (`rustmat-ignition`).
 - [ ] Headless plotting backend emitting SVG/PNG.
 - [ ] Jupyter kernel communication skeleton.
@@ -104,3 +104,16 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Extended parser with control flow statements, function definitions and array
   indexing. Added tests exercising these features so typical MATLAB files parse
   without errors.
+
+### 2025-08-09
+- Introduced `rustmat-hir` crate implementing high-level IR with scope and type
+  annotations. Includes translation from AST, simple type inference and error
+  handling for undefined variables. Added comprehensive tests covering normal
+  cases, failures and scope edge cases.
+
+### 2025-08-10
+- Extended HIR lowering with variable type tracking and updated tests to verify
+  inference across assignments and redefinitions.
+
+### 2025-08-11
+- Fixed clippy warnings in `rustmat-hir` after review.
