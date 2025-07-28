@@ -8,8 +8,8 @@ Key ideas:
 - Snapshotting of the standard library for fast start‑up.
 - Compatibility with the Jupyter kernel protocol.
 
-See `docs/architecture.md` for a full description of the design and
+See `docs/ARCHITECTURE.md` for a full description of the design and
 `docs/DEVELOPING.md` for contributing guidelines.
 
-Ongoing plans and design notes are tracked in `PLAN.md`. Read it before
+Ongoing plans and design notes are tracked in `docs/PLAN.md`. Read it before
 starting work to understand the current roadmap and past decisions.

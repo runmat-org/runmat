@@ -15,7 +15,7 @@ any observations or blockers.
 explaining why.
 - **Run `cargo check`** before committing and document the result in the PR.
 
-The detailed architecture lives in `docs/architecture.md`. Consult it for the
+The detailed architecture lives in `docs/ARCHITECTURE.md`. Consult it for the
 rationale behind each crate and subsystem.
 
 ## Roadmap
