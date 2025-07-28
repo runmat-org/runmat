@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/rustmat-lexer",
+    "crates/rustmat-repl"
+]
+resolver = "2"
