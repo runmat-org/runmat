@@ -1,0 +1,7 @@
+[package]
+name = "rustmat-lexer"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+logos = "0.13"
