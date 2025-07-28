@@ -286,3 +286,75 @@ fn elementwise_power_operator() {
         }
     );
 }
+
+#[test]
+fn parse_if_else_statement() {
+    let program = parse("if x; y=1; else y=2; end").unwrap();
+    assert_eq!(
+        program,
+        Program {
+            body: vec![Stmt::If {
+                cond: Expr::Ident("x".into()),
+                then_body: vec![Stmt::Assign("y".into(), Expr::Number("1".into()))],
+                elseif_blocks: vec![],
+                else_body: Some(vec![Stmt::Assign("y".into(), Expr::Number("2".into()))]),
+            }]
+        }
+    );
+}
+
+#[test]
+fn parse_for_loop() {
+    let program = parse("for i=1:3; x=i; end").unwrap();
+    assert_eq!(
+        program,
+        Program {
+            body: vec![Stmt::For {
+                var: "i".into(),
+                expr: Expr::Range(
+                    Box::new(Expr::Number("1".into())),
+                    None,
+                    Box::new(Expr::Number("3".into())),
+                ),
+                body: vec![Stmt::Assign("x".into(), Expr::Ident("i".into()))],
+            }]
+        }
+    );
+}
+
+#[test]
+fn parse_function_definition() {
+    let program = parse("function y=add(x); y=x+1; end").unwrap();
+    assert_eq!(
+        program,
+        Program {
+            body: vec![Stmt::Function {
+                name: "add".into(),
+                params: vec!["x".into()],
+                outputs: vec!["y".into()],
+                body: vec![Stmt::Assign(
+                    "y".into(),
+                    Expr::Binary(
+                        Box::new(Expr::Ident("x".into())),
+                        BinOp::Add,
+                        Box::new(Expr::Number("1".into())),
+                    ),
+                )],
+            }]
+        }
+    );
+}
+
+#[test]
+fn parse_array_indexing() {
+    let program = parse("A(1,2)").unwrap();
+    assert_eq!(
+        program,
+        Program {
+            body: vec![Stmt::ExprStmt(Expr::Index(
+                Box::new(Expr::Ident("A".into())),
+                vec![Expr::Number("1".into()), Expr::Number("2".into())],
+            ))]
+        }
+    );
+}
