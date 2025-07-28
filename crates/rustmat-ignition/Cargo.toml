@@ -1,0 +1,12 @@
+[package]
+name = "rustmat-ignition"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+rustmat-hir = { path = "../rustmat-hir" }
+rustmat-parser = { path = "../rustmat-parser" }
+
+[dev-dependencies]
+rustmat-parser = { path = "../rustmat-parser" }
+rustmat-hir = { path = "../rustmat-hir" }
