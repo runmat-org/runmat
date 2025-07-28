@@ -4,7 +4,13 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-plotters = { version = "0.3", features = ["svg_backend", "bitmap_backend"] }
+plotters = { version = "0.3", default-features = false, features = [
+    "svg_backend",
+    "bitmap_backend",
+    "bitmap_encoder",
+    "line_series",
+    "point_series"
+] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 rustmat-macros = { path = "../rustmat-macros" }

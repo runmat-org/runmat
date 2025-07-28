@@ -186,3 +186,8 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
   internally.
 - Verified that perspective-based 3D plotting works without lint overrides and
   all tests pass.
+
+### 2025-08-25
+- Disabled Plotters default features so tests no longer require the system `fontconfig`
+  library. PNG output now relies on the `bitmap_encoder` feature only.
+- Confirmed `cargo clippy` and the full test suite pass in a minimal environment.
