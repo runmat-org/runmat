@@ -30,7 +30,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - [x] Expand lexer to cover MATLAB operators, keywords and comments.
 - [x] Introduce `rustmat-parser` crate producing an AST.
 - [x] Basic `rustmat-repl` that tokenizes input and prints tokens.
-- [ ] Set up CI with `cargo fmt` and `cargo check`.
+- [x] Set up CI with `cargo fmt` and `cargo check`.
 
 ### Milestone P1 – Language Core
 
@@ -81,3 +81,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Removed `assert_cmd` and `predicates` dev dependencies to avoid pulling in an
   extra version of `regex-syntax`. Rewrote the REPL binary test using
   `std::process::Command`.
+
+### 2025-08-05
+- Enabled GitHub Actions CI to run `cargo fmt`, `cargo check`, `clippy` and tests.
+  The P0 milestone tasks are now complete.
