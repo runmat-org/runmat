@@ -2,6 +2,7 @@
 members = [
     "crates/rustmat-lexer",
     "crates/rustmat-parser",
-    "crates/rustmat-repl"
+    "crates/rustmat-repl",
+    "crates/rustmat-hir"
 ]
 resolver = "2"
