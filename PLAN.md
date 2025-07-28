@@ -175,3 +175,8 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
   Compile-fail checks ensure attribute misuse is caught at build time.
   New tests validate documentation capture and registration across modules.
 - Addressed clippy errors in `rustmat-macros` and `rustmat-plot` after review.
+
+### 2025-08-23
+- Replaced the isometric 3D projection with a perspective transform and updated
+  the plotting code accordingly.
+- Updated integration tests and documentation to reflect the new approach.

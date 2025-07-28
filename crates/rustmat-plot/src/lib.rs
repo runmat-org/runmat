@@ -338,16 +338,30 @@ fn draw_hist<B: DrawingBackend>(
     root.present().map_err(|e| e.to_string())
 }
 
-/// Convert a 3D point into 2D screen coordinates using a fixed isometric
-/// projection. This is not a true perspective projection but provides a stable
-/// view suitable for simple 3D visualisation.
-fn project_iso(x: f64, y: f64, z: f64) -> (f64, f64) {
-    let sx = x - y;
-    let sy = (x + y) / 2.0 - z;
-    (sx, sy)
+/// Convert a 3D point into 2D screen coordinates using a simple perspective
+/// projection with a fixed camera orientation. This replaces the earlier
+/// isometric approach and provides a more natural view.
+const ROT_X: f64 = std::f64::consts::FRAC_PI_4; // 45 deg tilt
+const ROT_Y: f64 = std::f64::consts::FRAC_PI_4; // 45 deg rotation
+const CAMERA_DIST: f64 = 5.0;
+
+fn project_perspective(x: f64, y: f64, z: f64) -> (f64, f64) {
+    // rotate around X axis
+    let (sin_x, cos_x) = ROT_X.sin_cos();
+    let y1 = cos_x * y - sin_x * z;
+    let z1 = sin_x * y + cos_x * z;
+
+    // rotate around Y axis
+    let (sin_y, cos_y) = ROT_Y.sin_cos();
+    let x2 = cos_y * x + sin_y * z1;
+    let z2 = -sin_y * x + cos_y * z1;
+
+    // perspective divide
+    let scale = CAMERA_DIST / (CAMERA_DIST + z2);
+    (x2 * scale, y1 * scale)
 }
 
-/// Plot a 3D scatter plot using an isometric projection.
+/// Plot a 3D scatter plot using a perspective projection.
 #[matlab_fn(name = "scatter3")]
 pub fn plot_3d_scatter(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result<(), String> {
     if xs.len() != ys.len() || xs.len() != zs.len() {
@@ -360,7 +374,7 @@ pub fn plot_3d_scatter(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result
         .iter()
         .zip(ys)
         .zip(zs)
-        .map(|((&x, &y), &z)| project_iso(x, y, z))
+        .map(|((&x, &y), &z)| project_perspective(x, y, z))
         .collect();
     let (xmin, xmax) = points
         .iter()
@@ -410,7 +424,7 @@ fn draw_scatter2d<B: DrawingBackend>(
     root.present().map_err(|e| e.to_string())
 }
 
-/// Plot a surface defined on a square grid using an isometric projection.
+/// Plot a surface defined on a square grid using a perspective projection.
 /// The number of points must form an `n x n` grid.
 #[matlab_fn(name = "surf")]
 pub fn plot_surface(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result<(), String> {
@@ -426,7 +440,7 @@ pub fn plot_surface(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result<()
     let bg = parse_color(&config.background)?;
     let mut projected = Vec::with_capacity(xs.len());
     for ((&x, &y), &z) in xs.iter().zip(ys).zip(zs) {
-        projected.push(project_iso(x, y, z));
+        projected.push(project_perspective(x, y, z));
     }
     let (xmin, xmax) = projected
         .iter()
