@@ -117,3 +117,9 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 ### 2025-08-11
 - Fixed clippy warnings in `rustmat-hir` after review.
+
+### 2025-08-12
+- Implemented `rustmat-ignition` crate with a simple bytecode interpreter. The
+  interpreter supports numeric operations, variable assignments, `if`, `while`
+  and `for` loops with break/continue. Added comprehensive tests covering
+  normal execution, error cases and edge conditions. All workspace tests pass.
