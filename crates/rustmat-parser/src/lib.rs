@@ -8,6 +8,9 @@ pub enum Expr {
     Unary(UnOp, Box<Expr>),
     Binary(Box<Expr>, BinOp, Box<Expr>),
     Matrix(Vec<Vec<Expr>>),
+    Index(Box<Expr>, Vec<Expr>),
+    Range(Box<Expr>, Option<Box<Expr>>, Box<Expr>),
+    Colon,
 }
 
 #[derive(Debug, PartialEq)]
@@ -18,6 +21,7 @@ pub enum BinOp {
     Div,
     Pow,
     LeftDiv,
+    Colon,
 }
 
 #[derive(Debug, PartialEq)]
@@ -30,6 +34,30 @@ pub enum UnOp {
 pub enum Stmt {
     ExprStmt(Expr),
     Assign(String, Expr),
+    If {
+        cond: Expr,
+        then_body: Vec<Stmt>,
+        elseif_blocks: Vec<(Expr, Vec<Stmt>)>,
+        else_body: Option<Vec<Stmt>>,
+    },
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
+    For {
+        var: String,
+        expr: Expr,
+        body: Vec<Stmt>,
+    },
+    Break,
+    Continue,
+    Return,
+    Function {
+        name: String,
+        params: Vec<String>,
+        outputs: Vec<String>,
+        body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -66,31 +94,65 @@ impl Parser {
     fn parse_program(&mut self) -> Result<Program, String> {
         let mut body = Vec::new();
         while self.pos < self.tokens.len() {
-            body.push(self.parse_stmt()?);
             if self.consume(&Token::Semicolon) {
-                // continue
-            } else {
-                break;
+                continue;
             }
+            body.push(self.parse_stmt()?);
+            self.consume(&Token::Semicolon);
         }
         Ok(Program { body })
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
-        if self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
-        {
-            let name = self.next().unwrap().lexeme;
-            self.consume(&Token::Assign);
-            let expr = self.parse_expr()?;
-            Ok(Stmt::Assign(name, expr))
-        } else {
-            let expr = self.parse_expr()?;
-            Ok(Stmt::ExprStmt(expr))
+        match self.peek_token() {
+            Some(Token::If) => self.parse_if(),
+            Some(Token::For) => self.parse_for(),
+            Some(Token::While) => self.parse_while(),
+            Some(Token::Break) => {
+                self.pos += 1;
+                Ok(Stmt::Break)
+            }
+            Some(Token::Continue) => {
+                self.pos += 1;
+                Ok(Stmt::Continue)
+            }
+            Some(Token::Return) => {
+                self.pos += 1;
+                Ok(Stmt::Return)
+            }
+            Some(Token::Function) => self.parse_function(),
+            _ => {
+                if self.peek_token() == Some(&Token::Ident)
+                    && self.peek_token_at(1) == Some(&Token::Assign)
+                {
+                    let name = self.next().unwrap().lexeme;
+                    self.consume(&Token::Assign);
+                    let expr = self.parse_expr()?;
+                    Ok(Stmt::Assign(name, expr))
+                } else {
+                    let expr = self.parse_expr()?;
+                    Ok(Stmt::ExprStmt(expr))
+                }
+            }
         }
     }
 
     fn parse_expr(&mut self) -> Result<Expr, String> {
-        self.parse_add_sub()
+        self.parse_range()
+    }
+
+    fn parse_range(&mut self) -> Result<Expr, String> {
+        let mut node = self.parse_add_sub()?;
+        if self.consume(&Token::Colon) {
+            let mid = self.parse_add_sub()?;
+            if self.consume(&Token::Colon) {
+                let end = self.parse_add_sub()?;
+                node = Expr::Range(Box::new(node), Some(Box::new(mid)), Box::new(end));
+            } else {
+                node = Expr::Range(Box::new(node), None, Box::new(mid));
+            }
+        }
+        Ok(node)
     }
 
     fn parse_add_sub(&mut self) -> Result<Expr, String> {
@@ -125,7 +187,7 @@ impl Parser {
     }
 
     fn parse_pow(&mut self) -> Result<Expr, String> {
-        let node = self.parse_primary()?;
+        let node = self.parse_postfix()?;
         if matches!(self.peek_token(), Some(Token::Caret | Token::DotCaret)) {
             self.pos += 1; // consume
             let rhs = self.parse_pow()?; // right associative
@@ -133,6 +195,28 @@ impl Parser {
         } else {
             Ok(node)
         }
+    }
+
+    fn parse_postfix(&mut self) -> Result<Expr, String> {
+        let mut node = self.parse_primary()?;
+        loop {
+            if self.consume(&Token::LParen) {
+                let mut args = Vec::new();
+                if !self.consume(&Token::RParen) {
+                    args.push(self.parse_expr()?);
+                    while self.consume(&Token::Comma) {
+                        args.push(self.parse_expr()?);
+                    }
+                    if !self.consume(&Token::RParen) {
+                        return Err("expected ')'".into());
+                    }
+                }
+                node = Expr::Index(Box::new(node), args);
+            } else {
+                break;
+            }
+        }
+        Ok(node)
     }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
@@ -164,6 +248,7 @@ impl Parser {
                     }
                     Ok(matrix)
                 }
+                Token::Colon => Ok(Expr::Colon),
                 _ => Err("unexpected token".into()),
             },
             None => Err("unexpected end of input".into()),
@@ -189,6 +274,132 @@ impl Parser {
             }
         }
         Ok(Expr::Matrix(rows))
+    }
+
+    fn parse_if(&mut self) -> Result<Stmt, String> {
+        self.consume(&Token::If);
+        let cond = self.parse_expr()?;
+        let then_body =
+            self.parse_block(|t| matches!(t, Token::Else | Token::ElseIf | Token::End))?;
+        let mut elseif_blocks = Vec::new();
+        while self.consume(&Token::ElseIf) {
+            let c = self.parse_expr()?;
+            let body =
+                self.parse_block(|t| matches!(t, Token::Else | Token::ElseIf | Token::End))?;
+            elseif_blocks.push((c, body));
+        }
+        let else_body = if self.consume(&Token::Else) {
+            Some(self.parse_block(|t| matches!(t, Token::End))?)
+        } else {
+            None
+        };
+        if !self.consume(&Token::End) {
+            return Err("expected 'end'".into());
+        }
+        Ok(Stmt::If {
+            cond,
+            then_body,
+            elseif_blocks,
+            else_body,
+        })
+    }
+
+    fn parse_while(&mut self) -> Result<Stmt, String> {
+        self.consume(&Token::While);
+        let cond = self.parse_expr()?;
+        let body = self.parse_block(|t| matches!(t, Token::End))?;
+        if !self.consume(&Token::End) {
+            return Err("expected 'end'".into());
+        }
+        Ok(Stmt::While { cond, body })
+    }
+
+    fn parse_for(&mut self) -> Result<Stmt, String> {
+        self.consume(&Token::For);
+        let var = self.expect_ident()?;
+        if !self.consume(&Token::Assign) {
+            return Err("expected '='".into());
+        }
+        let expr = self.parse_expr()?;
+        let body = self.parse_block(|t| matches!(t, Token::End))?;
+        if !self.consume(&Token::End) {
+            return Err("expected 'end'".into());
+        }
+        Ok(Stmt::For { var, expr, body })
+    }
+
+    fn parse_function(&mut self) -> Result<Stmt, String> {
+        self.consume(&Token::Function);
+        let mut outputs = Vec::new();
+        if self.consume(&Token::LBracket) {
+            outputs.push(self.expect_ident()?);
+            while self.consume(&Token::Comma) {
+                outputs.push(self.expect_ident()?);
+            }
+            if !self.consume(&Token::RBracket) {
+                return Err("expected ']'".into());
+            }
+            if !self.consume(&Token::Assign) {
+                return Err("expected '='".into());
+            }
+        } else if self.peek_token() == Some(&Token::Ident)
+            && self.peek_token_at(1) == Some(&Token::Assign)
+        {
+            outputs.push(self.next().unwrap().lexeme);
+            self.consume(&Token::Assign);
+        }
+        let name = self.expect_ident()?;
+        if !self.consume(&Token::LParen) {
+            return Err("expected '('".into());
+        }
+        let mut params = Vec::new();
+        if !self.consume(&Token::RParen) {
+            params.push(self.expect_ident()?);
+            while self.consume(&Token::Comma) {
+                params.push(self.expect_ident()?);
+            }
+            if !self.consume(&Token::RParen) {
+                return Err("expected ')'".into());
+            }
+        }
+        let body = self.parse_block(|t| matches!(t, Token::End))?;
+        if !self.consume(&Token::End) {
+            return Err("expected 'end'".into());
+        }
+        Ok(Stmt::Function {
+            name,
+            params,
+            outputs,
+            body,
+        })
+    }
+
+    fn parse_block<F>(&mut self, term: F) -> Result<Vec<Stmt>, String>
+    where
+        F: Fn(&Token) -> bool,
+    {
+        let mut body = Vec::new();
+        while let Some(tok) = self.peek_token() {
+            if term(tok) {
+                break;
+            }
+            if self.consume(&Token::Semicolon) {
+                continue;
+            }
+            body.push(self.parse_stmt()?);
+            self.consume(&Token::Semicolon);
+        }
+        Ok(body)
+    }
+
+    fn expect_ident(&mut self) -> Result<String, String> {
+        match self.next() {
+            Some(TokenInfo {
+                token: Token::Ident,
+                lexeme,
+            }) => Ok(lexeme),
+            _ => Err("expected identifier".into()),
+        }
     }
 
     fn peek_token(&self) -> Option<&Token> {
