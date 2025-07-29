@@ -2,14 +2,15 @@
 members = [
     "crates/rustmat-lexer",
     "crates/rustmat-parser",
-    "crates/rustmat-repl",
     "crates/rustmat-hir",
     "crates/rustmat-ignition",
     "crates/rustmat-plot",
+    "crates/rustmat-repl",
     "crates/rustmat-macros",
     "crates/rustmat-builtins",
     "crates/rustmat-runtime",
     "crates/rustmat-kernel",
+    "crates/rustmat-turbine",
     "rustmat",
 ]
 resolver = "2"
@@ -32,6 +33,12 @@ log = "0.4"
 thiserror = "1"
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
+cranelift = "0.115"
+cranelift-jit = "0.115"
+cranelift-module = "0.115"
+cranelift-codegen = "0.115"
+cranelift-native = "0.115"
+target-lexicon = "0.12"
 
 # Internal workspace crates
 rustmat-lexer = { path = "crates/rustmat-lexer" }
@@ -39,8 +46,9 @@ rustmat-parser = { path = "crates/rustmat-parser" }
 rustmat-hir = { path = "crates/rustmat-hir" }
 rustmat-ignition = { path = "crates/rustmat-ignition" }
 rustmat-plot = { path = "crates/rustmat-plot" }
+rustmat-repl = { path = "crates/rustmat-repl" }
 rustmat-macros = { path = "crates/rustmat-macros" }
 rustmat-builtins = { path = "crates/rustmat-builtins" }
 rustmat-runtime = { path = "crates/rustmat-runtime" }
 rustmat-kernel = { path = "crates/rustmat-kernel" }
-rustmat-repl = { path = "crates/rustmat-repl" }
+rustmat-turbine = { path = "crates/rustmat-turbine" }

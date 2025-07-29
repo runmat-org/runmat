@@ -4,10 +4,11 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-rustmat-hir = { workspace = true }
-rustmat-parser = { workspace = true }
 rustmat-builtins = { workspace = true }
 rustmat-runtime = { workspace = true }
+rustmat-lexer = { workspace = true }
+rustmat-parser = { workspace = true }
+rustmat-hir = { workspace = true }
 
 [dev-dependencies]
 rustmat-lexer = { workspace = true }

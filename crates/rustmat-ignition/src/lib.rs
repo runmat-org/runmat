@@ -1,6 +1,6 @@
-use rustmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
 use rustmat_builtins::Value;
 use rustmat_runtime::call_builtin;
+use rustmat_hir::{HirProgram, HirStmt, HirExpr, HirExprKind};
 use std::convert::TryInto;
 
 #[derive(Debug, Clone)]
@@ -12,14 +12,20 @@ pub enum Instr {
     Sub,
     Mul,
     Div,
-    Neg,
     Pow,
+    Neg,
     LessEqual,
+    Less,
+    Greater,
+    GreaterEqual,
+    Equal,
+    NotEqual,
     JumpIfFalse(usize),
     Jump(usize),
     Pop,
-    CallBuiltin(String, usize), // function name, arg count
-    Halt,
+    CallBuiltin(String, usize),
+    CreateMatrix(usize, usize),
+    Return,
 }
 
 #[derive(Debug)]
@@ -104,7 +110,6 @@ impl Compiler {
         for stmt in &prog.body {
             self.compile_stmt(stmt)?;
         }
-        self.emit(Instr::Halt);
         Ok(())
     }
 
@@ -238,7 +243,7 @@ impl Compiler {
                 }
             }
             HirStmt::Return => {
-                self.emit(Instr::Halt);
+                self.emit(Instr::Return);
             }
             HirStmt::Function { .. } => {
                 return Err("function definitions not supported".into());
@@ -291,7 +296,20 @@ impl Compiler {
                 }
                 self.emit(Instr::CallBuiltin(name.clone(), args.len()));
             }
-            HirExprKind::Matrix(_) | HirExprKind::Index(..) | HirExprKind::Colon => {
+            HirExprKind::Matrix(matrix_data) => {
+                let rows = matrix_data.len();
+                let cols = if rows > 0 { matrix_data[0].len() } else { 0 };
+                
+                // Compile all matrix elements onto the stack in row-major order
+                for row in matrix_data {
+                    for element in row {
+                        self.compile_expr(element)?;
+                    }
+                }
+                
+                self.emit(Instr::CreateMatrix(rows, cols));
+            }
+            HirExprKind::Index(..) | HirExprKind::Colon => {
                 return Err("expression not supported".into());
             }
         }
@@ -329,6 +347,31 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
                 let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                 stack.push(Value::Num(if a <= b { 1.0 } else { 0.0 }));
             }
+            Instr::Less => {
+                let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                stack.push(Value::Num(if a < b { 1.0 } else { 0.0 }));
+            }
+            Instr::Greater => {
+                let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                stack.push(Value::Num(if a > b { 1.0 } else { 0.0 }));
+            }
+            Instr::GreaterEqual => {
+                let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                stack.push(Value::Num(if a >= b { 1.0 } else { 0.0 }));
+            }
+            Instr::Equal => {
+                let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                stack.push(Value::Num(if a == b { 1.0 } else { 0.0 }));
+            }
+            Instr::NotEqual => {
+                let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                stack.push(Value::Num(if a != b { 1.0 } else { 0.0 }));
+            }
             Instr::JumpIfFalse(target) => {
                 let cond: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                 if cond == 0.0 {
@@ -349,10 +392,30 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
                 let result = call_builtin(&name, &args)?;
                 stack.push(result);
             }
+            Instr::CreateMatrix(rows, cols) => {
+                let total_elements = rows * cols;
+                let mut data = Vec::with_capacity(total_elements);
+                
+                // Pop elements from stack in reverse order (since stack is LIFO)
+                for _ in 0..total_elements {
+                    let val: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    data.push(val);
+                }
+                
+                // Reverse to get row-major order
+                data.reverse();
+                
+                let matrix = rustmat_builtins::Matrix::new(data, rows, cols)
+                    .map_err(|e| format!("Matrix creation error: {}", e))?;
+                stack.push(Value::Matrix(matrix));
+            }
             Instr::Pop => {
                 stack.pop();
             }
-            Instr::Halt => break,
+            Instr::Return => {
+                break; // Halt execution immediately
+            }
+
         }
         pc += 1;
     }

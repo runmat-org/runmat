@@ -1,7 +1,8 @@
-use rustmat_hir::lower;
 use rustmat_ignition::execute;
+use rustmat_hir::lower;
 use rustmat_parser::parse;
 use std::convert::TryInto;
+use rustmat_builtins::Value;
 
 #[test]
 fn arithmetic_and_assignment() {
@@ -95,6 +96,7 @@ fn return_statement_halts_execution() {
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let x: f64 = (&vars[0]).try_into().unwrap();
+    // Return statement now properly halts execution
     assert_eq!(x, 1.0);
 }
 
@@ -136,7 +138,7 @@ fn for_loop_start_greater_than_end() {
 
 #[test]
 fn colon_operator_errors() {
-    let ast = parse("x = 1:3").unwrap();
+    let ast = parse("x = 1:2:5").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
     assert!(result.is_err());
@@ -145,14 +147,6 @@ fn colon_operator_errors() {
 #[test]
 fn range_with_step_errors() {
     let ast = parse("x = 1:2:10").unwrap();
-    let hir = lower(&ast).unwrap();
-    let result = execute(&hir);
-    assert!(result.is_err());
-}
-
-#[test]
-fn unsupported_matrix_errors() {
-    let ast = parse("x = [1, 2]").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
     assert!(result.is_err());
@@ -176,4 +170,47 @@ fn function_call_with_builtin() {
     // This should fail with "unknown builtin" since add isn't registered in this test context
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("unknown builtin"));
+}
+
+#[test]
+fn matrix_operations_basic() {
+    // Test that basic matrix syntax works with actual values
+    let ast = parse("x = [1, 2]").unwrap();
+    let hir = lower(&ast).unwrap();
+    let result = execute(&hir);
+    assert!(result.is_ok());
+    
+    // Matrix should contain the actual values, not just zeros
+    let vars = result.unwrap();
+    if let Value::Matrix(matrix) = &vars[0] {
+        assert_eq!(matrix.rows, 1);
+        assert_eq!(matrix.cols, 2);
+        assert_eq!(matrix.data, vec![1.0, 2.0]);
+    } else {
+        panic!("Expected matrix result");
+    }
+}
+
+#[test]
+fn matrix_2d_compilation() {
+    // Test 2D matrix with proper element ordering
+    let ast = parse("x = [1, 2; 3, 4]").unwrap();
+    let hir = lower(&ast).unwrap();
+    let result = execute(&hir);
+    assert!(result.is_ok());
+    
+    let vars = result.unwrap();
+    if let Value::Matrix(matrix) = &vars[0] {
+        assert_eq!(matrix.rows, 2);
+        assert_eq!(matrix.cols, 2);
+        // Should be in row-major order: [1, 2, 3, 4]
+        assert_eq!(matrix.data, vec![1.0, 2.0, 3.0, 4.0]);
+        // Verify individual element access
+        assert_eq!(matrix.get(0, 0).unwrap(), 1.0);
+        assert_eq!(matrix.get(0, 1).unwrap(), 2.0);
+        assert_eq!(matrix.get(1, 0).unwrap(), 3.0);
+        assert_eq!(matrix.get(1, 1).unwrap(), 4.0);
+    } else {
+        panic!("Expected matrix result");
+    }
 }

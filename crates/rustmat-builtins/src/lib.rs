@@ -56,6 +56,14 @@ impl Matrix {
         self.data[row * self.cols + col] = value;
         Ok(())
     }
+
+    pub fn scalar_to_matrix(scalar: f64, rows: usize, cols: usize) -> Matrix {
+        Matrix {
+            data: vec![scalar; rows * cols],
+            rows,
+            cols,
+        }
+    }
 }
 
 // From implementations for Value

@@ -1,0 +1,23 @@
+[package]
+name = "rustmat-turbine"
+version = "0.0.1"
+edition = "2021"
+description = "Cranelift-based JIT compiler for RustMat - the optimizing tier of our V8-inspired execution model"
+authors = ["RustMat Team"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+cranelift = { workspace = true }
+cranelift-jit = { workspace = true }
+cranelift-module = { workspace = true }
+cranelift-codegen = { workspace = true }
+cranelift-native = { workspace = true }
+target-lexicon = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+rustmat-ignition = { workspace = true }
+rustmat-builtins = { workspace = true }
+rustmat-runtime = { workspace = true }
+
+[dev-dependencies]
+env_logger = { workspace = true } 

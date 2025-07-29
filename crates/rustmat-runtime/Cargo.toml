@@ -4,8 +4,9 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-rustmat-builtins = { workspace = true }
 inventory = { workspace = true }
+rustmat-builtins = { workspace = true }
+rustmat-macros = { workspace = true }
 
 [dev-dependencies]
 rustmat-macros = { workspace = true } 

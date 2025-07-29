@@ -129,14 +129,31 @@ fn test_unsupported_syntax_errors() {
     
     // Test syntax that should currently fail (as expected)
     let test_cases = vec![
-        ("matrix = [1, 2, 3]", ExecutionStatus::Error),  // Matrices not supported in interpreter
-        ("if x > 0; y = 1; end", ExecutionStatus::Error),  // Greater than not implemented
-        ("result = matrix(1)", ExecutionStatus::Error),   // Indexing not supported
+        ("if x > 0; y = 1; end", ExecutionStatus::Error),  // Greater than not implemented yet
+        ("result = matrix(1)", ExecutionStatus::Error),   // Indexing not supported yet
+        ("x = 1:2:5", ExecutionStatus::Error),           // Range with step not supported
     ];
     
     for (code, expected_status) in test_cases {
         let result = engine.execute(code).unwrap();
         assert_eq!(result.status, expected_status, "Failed for code: {} (should have failed)", code);
+    }
+}
+
+#[test]
+fn test_matrix_syntax_support() {
+    let mut engine = ExecutionEngine::new();
+    
+    // Test that matrix syntax is properly supported
+    let test_cases = vec![
+        ("matrix = [1, 2, 3]", ExecutionStatus::Success),
+        ("zeros_mat = [0, 0]", ExecutionStatus::Success), 
+        ("single = [42]", ExecutionStatus::Success),
+    ];
+    
+    for (code, expected_status) in test_cases {
+        let result = engine.execute(code).unwrap();
+        assert_eq!(result.status, expected_status, "Failed for code: {}", code);
     }
 }
 
