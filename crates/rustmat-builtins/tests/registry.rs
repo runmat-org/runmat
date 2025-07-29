@@ -34,20 +34,20 @@ fn contains_registered_functions() {
 fn test_value_conversions() {
     // Test basic types
     let int_val = Value::Int(42);
-    let num_val = Value::Num(3.14);
+    let num_val = Value::Num(3.15);
     let bool_val = Value::Bool(true);
     let str_val = Value::String("hello".to_string());
     
     // Test From implementations
     assert_eq!(Value::from(42), int_val);
-    assert_eq!(Value::from(3.14), num_val);
+    assert_eq!(Value::from(3.15), num_val);
     assert_eq!(Value::from(true), bool_val);
     assert_eq!(Value::from("hello"), str_val);
     
     // Test TryFrom implementations
     use std::convert::TryInto;
     assert_eq!((&int_val).try_into(), Ok(42i32));
-    assert_eq!((&num_val).try_into(), Ok(3.14f64));
+    assert_eq!((&num_val).try_into(), Ok(3.15f64));
     assert_eq!((&bool_val).try_into(), Ok(true));
     assert_eq!((&str_val).try_into(), Ok("hello".to_string()));
 }

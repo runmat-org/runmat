@@ -3,6 +3,9 @@ use rustmat_hir::lower;
 use rustmat_parser::parse;
 use std::convert::TryInto;
 use rustmat_builtins::Value;
+use rustmat_ignition::Bytecode;
+use rustmat_ignition::Instr;
+use rustmat_ignition::interpret;
 
 #[test]
 fn arithmetic_and_assignment() {
@@ -212,5 +215,50 @@ fn matrix_2d_compilation() {
         assert_eq!(matrix.get(1, 1).unwrap(), 4.0);
     } else {
         panic!("Expected matrix result");
+    }
+}
+
+#[test]
+fn test_turbine_control_flow_pattern() {
+    // Test the exact same bytecode pattern that's failing in turbine
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(2.0),      // 0
+            Instr::StoreVar(0),         // 1: x = 2
+            Instr::LoadVar(0),          // 2
+            Instr::LoadConst(5.0),      // 3
+            Instr::Less,                // 4: x < 5? -> true for x=2
+            Instr::JumpIfFalse(9),      // 5: if false, jump to else
+            // True branch
+            Instr::LoadConst(100.0),    // 6: result = 100
+            Instr::StoreVar(1),         // 7
+            Instr::Jump(11),            // 8: jump over else
+            // False branch  
+            Instr::LoadConst(200.0),    // 9: result = 200
+            Instr::StoreVar(1),         // 10
+            // End
+            Instr::Return,              // 11
+        ],
+        var_count: 2,
+    };
+    
+    let result = interpret(&bytecode);
+    assert!(result.is_ok(), "Interpreter should handle this control flow: {:?}", result);
+    
+    let vars = result.unwrap();
+    assert_eq!(vars.len(), 2);
+    
+    // x should be 2.0
+    if let Value::Num(x) = &vars[0] {
+        assert_eq!(*x, 2.0);
+    } else {
+        panic!("Variable 0 should be Num(2.0), got {:?}", vars[0]);
+    }
+    
+    // result should be 100.0 (true branch executed since 2 < 5)
+    if let Value::Num(result) = &vars[1] {
+        assert_eq!(*result, 100.0);
+    } else {
+        panic!("Variable 1 should be Num(100.0), got {:?}", vars[1]);
     }
 }

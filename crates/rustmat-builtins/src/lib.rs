@@ -116,7 +116,7 @@ impl TryFrom<&Value> for i32 {
         match v {
             Value::Int(i) => Ok(*i),
             Value::Num(n) => Ok(*n as i32),
-            _ => Err(format!("cannot convert {:?} to i32", v)),
+            _ => Err(format!("cannot convert {v:?} to i32")),
         }
     }
 }
@@ -127,7 +127,7 @@ impl TryFrom<&Value> for f64 {
         match v {
             Value::Num(n) => Ok(*n),
             Value::Int(i) => Ok(*i as f64),
-            _ => Err(format!("cannot convert {:?} to f64", v)),
+            _ => Err(format!("cannot convert {v:?} to f64")),
         }
     }
 }
@@ -139,7 +139,7 @@ impl TryFrom<&Value> for bool {
             Value::Bool(b) => Ok(*b),
             Value::Int(i) => Ok(*i != 0),
             Value::Num(n) => Ok(*n != 0.0),
-            _ => Err(format!("cannot convert {:?} to bool", v)),
+            _ => Err(format!("cannot convert {v:?} to bool")),
         }
     }
 }
@@ -152,7 +152,7 @@ impl TryFrom<&Value> for String {
             Value::Int(i) => Ok(i.to_string()),
             Value::Num(n) => Ok(n.to_string()),
             Value::Bool(b) => Ok(b.to_string()),
-            _ => Err(format!("cannot convert {:?} to String", v)),
+            _ => Err(format!("cannot convert {v:?} to String")),
         }
     }
 }
@@ -162,7 +162,7 @@ impl TryFrom<&Value> for Matrix {
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
             Value::Matrix(m) => Ok(m.clone()),
-            _ => Err(format!("cannot convert {:?} to Matrix", v)),
+            _ => Err(format!("cannot convert {v:?} to Matrix")),
         }
     }
 }
@@ -172,7 +172,7 @@ impl TryFrom<&Value> for Vec<Value> {
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
             Value::Cell(c) => Ok(c.clone()),
-            _ => Err(format!("cannot convert {:?} to Vec<Value>", v)),
+            _ => Err(format!("cannot convert {v:?} to Vec<Value>")),
         }
     }
 }

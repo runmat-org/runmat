@@ -406,7 +406,7 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
                 data.reverse();
                 
                 let matrix = rustmat_builtins::Matrix::new(data, rows, cols)
-                    .map_err(|e| format!("Matrix creation error: {}", e))?;
+                    .map_err(|e| format!("Matrix creation error: {e}"))?;
                 stack.push(Value::Matrix(matrix));
             }
             Instr::Pop => {
