@@ -1,10 +1,11 @@
 [package]
-name = "rustmat-builtins"
+name = "rustmat-runtime"
 version = "0.0.1"
 edition = "2021"
 
 [dependencies]
+rustmat-builtins = { workspace = true }
 inventory = { workspace = true }
 
 [dev-dependencies]
-rustmat-macros = { workspace = true }
+rustmat-macros = { workspace = true } 

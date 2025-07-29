@@ -1,4 +1,7 @@
 use rustmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
+use rustmat_builtins::Value;
+use rustmat_runtime::call_builtin;
+use std::convert::TryInto;
 
 #[derive(Debug, Clone)]
 pub enum Instr {
@@ -15,6 +18,7 @@ pub enum Instr {
     JumpIfFalse(usize),
     Jump(usize),
     Pop,
+    CallBuiltin(String, usize), // function name, arg count
     Halt,
 }
 
@@ -280,6 +284,13 @@ impl Compiler {
             HirExprKind::Range(..) => {
                 return Err("standalone range not supported".into());
             }
+            HirExprKind::FuncCall(name, args) => {
+                // Compile arguments in order
+                for arg in args {
+                    self.compile_expr(arg)?;
+                }
+                self.emit(Instr::CallBuiltin(name.clone(), args.len()));
+            }
             HirExprKind::Matrix(_) | HirExprKind::Index(..) | HirExprKind::Colon => {
                 return Err("expression not supported".into());
             }
@@ -289,19 +300,6 @@ impl Compiler {
 
     fn patch(&mut self, idx: usize, instr: Instr) {
         self.instructions[idx] = instr;
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum Value {
-    Num(f64),
-}
-
-impl Value {
-    pub fn as_num(&self) -> f64 {
-        match *self {
-            Value::Num(n) => n,
-        }
     }
 }
 
@@ -327,12 +325,12 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
             Instr::Pow => binary(&mut stack, |a, b| a.powf(b))?,
             Instr::Neg => unary(&mut stack, |a| -a)?,
             Instr::LessEqual => {
-                let b = stack.pop().ok_or("stack underflow")?.as_num();
-                let a = stack.pop().ok_or("stack underflow")?.as_num();
+                let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                 stack.push(Value::Num(if a <= b { 1.0 } else { 0.0 }));
             }
             Instr::JumpIfFalse(target) => {
-                let cond = stack.pop().ok_or("stack underflow")?.as_num();
+                let cond: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                 if cond == 0.0 {
                     pc = target;
                     continue;
@@ -341,6 +339,15 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
             Instr::Jump(target) => {
                 pc = target;
                 continue;
+            }
+            Instr::CallBuiltin(name, arg_count) => {
+                let mut args = Vec::new();
+                for _ in 0..arg_count {
+                    args.push(stack.pop().ok_or("stack underflow")?);
+                }
+                args.reverse(); // Arguments were pushed in reverse order
+                let result = call_builtin(&name, &args)?;
+                stack.push(result);
             }
             Instr::Pop => {
                 stack.pop();
@@ -356,8 +363,8 @@ fn binary<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
 where
     F: Fn(f64, f64) -> f64,
 {
-    let b = stack.pop().ok_or("stack underflow")?.as_num();
-    let a = stack.pop().ok_or("stack underflow")?.as_num();
+    let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+    let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
     stack.push(Value::Num(f(a, b)));
     Ok(())
 }
@@ -366,7 +373,7 @@ fn unary<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
 where
     F: Fn(f64) -> f64,
 {
-    let a = stack.pop().ok_or("stack underflow")?.as_num();
+    let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
     stack.push(Value::Num(f(a)));
     Ok(())
 }

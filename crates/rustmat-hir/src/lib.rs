@@ -30,6 +30,7 @@ pub enum HirExprKind {
     Index(Box<HirExpr>, Vec<HirExpr>),
     Range(Box<HirExpr>, Option<Box<HirExpr>>, Box<HirExpr>),
     Colon,
+    FuncCall(String, Vec<HirExpr>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -257,41 +258,40 @@ impl Ctx {
                     ty,
                 )
             }
+            FuncCall(name, args) => {
+                let arg_exprs: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();
+                let arg_exprs = arg_exprs?;
+                // For now, assume all function calls return scalars - this could be improved with type analysis
+                (HirExprKind::FuncCall(name.clone(), arg_exprs), Type::Scalar)
+            }
             Matrix(rows) => {
-                let mut rows_hir = Vec::new();
-                for r in rows {
-                    let mut row_hir = Vec::new();
-                    for e in r {
-                        row_hir.push(self.lower_expr(e)?);
+                let mut hir_rows = Vec::new();
+                for row in rows {
+                    let mut hir_row = Vec::new();
+                    for expr in row {
+                        hir_row.push(self.lower_expr(expr)?);
                     }
-                    rows_hir.push(row_hir);
+                    hir_rows.push(hir_row);
                 }
-                (HirExprKind::Matrix(rows_hir), Type::Matrix)
+                (HirExprKind::Matrix(hir_rows), Type::Matrix)
             }
-            Index(base, idxs) => {
-                let base_hir = self.lower_expr(base)?;
-                let mut idx_hirs = Vec::new();
-                for e in idxs {
-                    idx_hirs.push(self.lower_expr(e)?);
-                }
-                (
-                    HirExprKind::Index(Box::new(base_hir), idx_hirs),
-                    Type::Unknown,
-                )
+            Index(expr, indices) => {
+                let base = self.lower_expr(expr)?;
+                let idx_exprs: Result<Vec<_>, _> = indices.iter().map(|i| self.lower_expr(i)).collect();
+                let idx_exprs = idx_exprs?;
+                let ty = base.ty; // Indexing preserves base type for now
+                (HirExprKind::Index(Box::new(base), idx_exprs), ty)
             }
-            Range(start, maybe_step, end) => {
+            Range(start, step, end) => {
                 let start_hir = self.lower_expr(start)?;
-                let step_hir = match maybe_step {
-                    Some(e) => Some(Box::new(self.lower_expr(e)?)),
-                    None => None,
-                };
                 let end_hir = self.lower_expr(end)?;
+                let step_hir = step.as_ref().map(|s| self.lower_expr(s)).transpose()?;
                 (
-                    HirExprKind::Range(Box::new(start_hir), step_hir, Box::new(end_hir)),
+                    HirExprKind::Range(Box::new(start_hir), step_hir.map(Box::new), Box::new(end_hir)),
                     Type::Matrix,
                 )
             }
-            Colon => (HirExprKind::Colon, Type::Unknown),
+            Colon => (HirExprKind::Colon, Type::Matrix),
         };
         Ok(HirExpr { kind, ty })
     }

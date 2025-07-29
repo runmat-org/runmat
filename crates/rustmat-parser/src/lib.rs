@@ -1,7 +1,7 @@
 use logos::Logos;
 use rustmat_lexer::Token;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Number(String),
     Ident(String),
@@ -11,6 +11,7 @@ pub enum Expr {
     Index(Box<Expr>, Vec<Expr>),
     Range(Box<Expr>, Option<Box<Expr>>, Box<Expr>),
     Colon,
+    FuncCall(String, Vec<Expr>),
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -198,9 +199,14 @@ impl Parser {
     }
 
     fn parse_postfix(&mut self) -> Result<Expr, String> {
-        let mut node = self.parse_primary()?;
+        let mut expr = self.parse_primary()?;
         loop {
             if self.consume(&Token::LParen) {
+                // Function call
+                let func_name = match expr {
+                    Expr::Ident(name) => name,
+                    _ => return Err("expected function name before '('".into()),
+                };
                 let mut args = Vec::new();
                 if !self.consume(&Token::RParen) {
                     args.push(self.parse_expr()?);
@@ -208,15 +214,26 @@ impl Parser {
                         args.push(self.parse_expr()?);
                     }
                     if !self.consume(&Token::RParen) {
-                        return Err("expected ')'".into());
+                        return Err("expected ')' after function arguments".into());
                     }
                 }
-                node = Expr::Index(Box::new(node), args);
+                expr = Expr::FuncCall(func_name, args);
+            } else if self.consume(&Token::LBracket) {
+                // Array indexing
+                let mut indices = Vec::new();
+                indices.push(self.parse_expr()?);
+                while self.consume(&Token::Comma) {
+                    indices.push(self.parse_expr()?);
+                }
+                if !self.consume(&Token::RBracket) {
+                    return Err("expected ']'".into());
+                }
+                expr = Expr::Index(Box::new(expr), indices);
             } else {
                 break;
             }
         }
-        Ok(node)
+        Ok(expr)
     }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
@@ -429,3 +446,5 @@ impl Parser {
         }
     }
 }
+
+

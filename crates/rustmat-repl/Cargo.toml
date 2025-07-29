@@ -4,4 +4,7 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-rustmat-lexer = { path = "../rustmat-lexer" }
+rustmat-lexer = { workspace = true }
+rustmat-parser = { workspace = true }
+rustmat-hir = { workspace = true }
+rustmat-ignition = { workspace = true }

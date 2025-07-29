@@ -1,7 +1,7 @@
 error: custom attribute panicked
  --> tests/ui/fail_non_string.rs:3:1
   |
-3 | #[matlab_fn(name = 123)]
-  | ^^^^^^^^^^^^^^^^^^^^^^^^
+3 | #[runtime_builtin(name = 123)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   |
   = help: message: name must be a string literal

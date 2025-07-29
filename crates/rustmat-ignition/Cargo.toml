@@ -4,9 +4,10 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-rustmat-hir = { path = "../rustmat-hir" }
-rustmat-parser = { path = "../rustmat-parser" }
+rustmat-hir = { workspace = true }
+rustmat-parser = { workspace = true }
+rustmat-builtins = { workspace = true }
+rustmat-runtime = { workspace = true }
 
 [dev-dependencies]
-rustmat-parser = { path = "../rustmat-parser" }
-rustmat-hir = { path = "../rustmat-hir" }
+rustmat-lexer = { workspace = true }

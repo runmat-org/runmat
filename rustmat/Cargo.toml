@@ -1,0 +1,33 @@
+[package]
+name = "rustmat"
+version = "0.0.1"
+edition = "2021"
+description = "High-performance MATLAB/Octave runtime with Jupyter kernel support"
+authors = ["RustMat Team"]
+license = "MIT OR Apache-2.0"
+readme = "../README.md"
+repository = "https://github.com/rustmat/rustmat"
+keywords = ["matlab", "octave", "jupyter", "kernel", "interpreter"]
+categories = ["science", "development-tools"]
+
+[[bin]]
+name = "rustmat"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+
+# RustMat crates
+rustmat-kernel = { workspace = true }
+rustmat-repl = { workspace = true }
+rustmat-parser = { workspace = true }
+rustmat-hir = { workspace = true }
+rustmat-ignition = { workspace = true } 

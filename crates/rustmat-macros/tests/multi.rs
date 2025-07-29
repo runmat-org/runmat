@@ -1,18 +1,18 @@
 use rustmat_builtins::builtins;
-use rustmat_macros::matlab_fn;
+use rustmat_macros::runtime_builtin;
 
 mod inner {
     use super::*;
 
-    #[matlab_fn(name = "add")]
-    pub fn add(x: i32, y: i32) -> i32 {
-        x + y
+    #[runtime_builtin(name = "add")]
+    pub fn add(a: i32, b: i32) -> Result<i32, String> {
+        Ok(a + b)
     }
 }
 
-#[matlab_fn(name = "sub")]
-pub fn sub(x: i32, y: i32) -> i32 {
-    x - y
+#[runtime_builtin(name = "sub")]
+pub fn sub(a: i32, b: i32) -> Result<i32, String> {
+    Ok(a - b)
 }
 
 #[test]

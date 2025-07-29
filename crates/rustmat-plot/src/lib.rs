@@ -1,5 +1,4 @@
 use plotters::prelude::*;
-use rustmat_macros::matlab_fn;
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -118,7 +117,6 @@ fn parse_color(hex: &str) -> Result<RGBColor, String> {
 }
 
 /// Plot a line series and write to PNG or SVG depending on the file extension.
-#[matlab_fn(name = "plot")]
 pub fn plot_line(xs: &[f64], ys: &[f64], path: &str) -> Result<(), String> {
     if xs.len() != ys.len() {
         return Err("input length mismatch".into());
@@ -173,7 +171,6 @@ fn draw_line<B: DrawingBackend>(
 }
 
 /// Plot an XY scatter plot using circular markers.
-#[matlab_fn(name = "scatter")]
 pub fn plot_scatter(xs: &[f64], ys: &[f64], path: &str) -> Result<(), String> {
     if xs.len() != ys.len() {
         return Err("input length mismatch".into());
@@ -230,7 +227,6 @@ fn draw_scatter<B: DrawingBackend>(
 }
 
 /// Plot a vertical bar chart.
-#[matlab_fn(name = "bar")]
 pub fn plot_bar(labels: &[&str], values: &[f64], path: &str) -> Result<(), String> {
     if labels.len() != values.len() {
         return Err("input length mismatch".into());
@@ -283,7 +279,6 @@ fn draw_bar<B: DrawingBackend>(
 }
 
 /// Plot a histogram given a set of samples and number of bins.
-#[matlab_fn(name = "histogram")]
 pub fn plot_histogram(values: &[f64], bins: usize, path: &str) -> Result<(), String> {
     if bins == 0 {
         return Err("bins must be > 0".into());
@@ -362,7 +357,6 @@ fn project_perspective(x: f64, y: f64, z: f64) -> (f64, f64) {
 }
 
 /// Plot a 3D scatter plot using a perspective projection.
-#[matlab_fn(name = "scatter3")]
 pub fn plot_3d_scatter(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result<(), String> {
     if xs.len() != ys.len() || xs.len() != zs.len() {
         return Err("input length mismatch".into());
@@ -421,7 +415,6 @@ fn draw_scatter2d<B: DrawingBackend>(
 
 /// Plot a surface defined on a square grid using a perspective projection.
 /// The number of points must form an `n x n` grid.
-#[matlab_fn(name = "surf")]
 pub fn plot_surface(xs: &[f64], ys: &[f64], zs: &[f64], path: &str) -> Result<(), String> {
     if xs.len() != ys.len() || xs.len() != zs.len() {
         return Err("input length mismatch".into());

@@ -1,6 +1,6 @@
-use rustmat_macros::matlab_fn;
+use rustmat_macros::runtime_builtin;
 
-#[matlab_fn]
+#[runtime_builtin]
 fn foo() {}
 
 fn main() {}

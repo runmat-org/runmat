@@ -11,11 +11,9 @@ plotters = { version = "0.3", default-features = false, features = [
     "line_series",
     "point_series"
 ] }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_yaml = "0.9"
-rustmat-macros = { path = "../rustmat-macros" }
-rustmat-builtins = { path = "../rustmat-builtins" }
-inventory = "0.1"
+inventory = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

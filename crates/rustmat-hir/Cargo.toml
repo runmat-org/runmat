@@ -1,7 +1,10 @@
 [package]
 name = "rustmat-hir"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 
 [dependencies]
-rustmat-parser = { path = "../rustmat-parser" }
+rustmat-parser = { workspace = true }
+
+[dev-dependencies]
+rustmat-lexer = { workspace = true }
