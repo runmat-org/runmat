@@ -5,9 +5,24 @@ pub mod matrix;
 pub mod comparison;
 pub mod indexing;
 
+#[cfg(feature = "blas-lapack")]
+pub mod blas;
+#[cfg(feature = "blas-lapack")]
+pub mod lapack;
+
+// Link to Apple's Accelerate framework on macOS
+#[cfg(all(feature = "blas-lapack", target_os = "macos"))]
+#[link(name = "Accelerate", kind = "framework")]
+extern "C" {}
+
 pub use matrix::*;
 pub use comparison::*;
 pub use indexing::*;
+
+#[cfg(feature = "blas-lapack")]
+pub use blas::*;
+#[cfg(feature = "blas-lapack")]
+pub use lapack::*;
 
 /// Call a registered MATLAB builtin by name.
 /// Returns an error if no builtin with that name is found.
