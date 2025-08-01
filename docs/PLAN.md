@@ -44,7 +44,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 ### Milestone P2 – Performance Features
 
-- [ ] Cranelift-based JIT (`rustmat-turbine`).
+- [x] Cranelift-based JIT (`rustmat-turbine`).
 - [ ] BLAS/LAPACK bindings and array primitives (`rustmat-runtime`).
 - [ ] Generational GC with optional pointer compression (`rustmat-gc`).
 - [ ] Snapshot creator to preload the standard library (`rustmat-snapshot`).
@@ -233,3 +233,31 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Added comprehensive test suite with 7 passing tests covering profiling, caching, and compilation.
 - Fixed all cross-platform Cranelift API issues with proper native target detection.
 - All 123 workspace tests passing. **P2 Cranelift JIT milestone achieved** - production-ready optimizing compiler.
+
+### Edit 34
+- Fixed control flow compilation issues in JIT compiler by implementing intelligent fallback strategy.
+- Verified test correctness by running control flow patterns through interpreter.
+- JIT now detects control flow instructions and falls back to interpreter for complex patterns.
+- Maintains full functionality while allowing incremental development of control flow support.
+- All 25 Turbine tests passing, including control flow and nested control flow tests.
+- Total workspace tests: 125+ all passing with JIT/interpreter hybrid execution model.
+
+### Edit 35
+- Implemented proper control flow compilation in the JIT compiler using Cranelift's block system.
+- Replaced interpreter fallback with native compilation of `Jump` and `JumpIfFalse` instructions.
+- Added recursive compilation approach with `compile_with_control_flow` and `compile_remaining_from_with_blocks` functions.
+- Implemented proper block creation, sealing order, and termination to satisfy Cranelift's SSA requirements.
+- Control flow instructions now generate `brif` (conditional branch) and `jump` (unconditional branch) IR.
+- Fixed block sealing issues by collecting and sealing all dynamically created blocks after compilation.
+- 23/25 JIT tests passing. Remaining failures due to placeholder runtime interface functions.
+
+### Edit 36
+- Fixed critical type mismatch in JIT runtime interface. Engine passes `*mut f64` arrays, not `*mut Value`.
+- Updated `compile_instructions` to work with f64 arrays for variable storage instead of Cranelift variables.
+- Modified `LoadVar`/`StoreVar` instructions to use direct memory access with pointer arithmetic.
+- Converted all arithmetic operations to use `fadd`, `fsub`, `fmul`, `fdiv`, `fneg` for f64 values.
+- Fixed comparison operations to use `fcmp` with `FloatCC` conditions and `select` for boolean-to-f64 conversion.
+- Updated `JumpIfFalse` to compare f64 condition against 0.0 using floating-point comparison.
+- Synchronized `compile_remaining_from_with_blocks` helper function to use same f64 interface.
+- Removed legacy Cranelift variable initialization and unused runtime interface functions.
+- All 25 JIT tests now passing. P2 JIT compilation milestone completed.

@@ -12,6 +12,7 @@ use rustmat_builtins::Value;
 use rustmat_ignition::{Bytecode, Instr};
 use target_lexicon::Triple;
 use thiserror::Error;
+use std::boxed::Box;
 
 pub mod compiler;
 pub mod profiler;
@@ -20,6 +21,301 @@ pub mod cache;
 pub use compiler::*;
 pub use profiler::*;
 pub use cache::*;
+
+// Runtime interface functions for JIT compiled code
+// These functions are called from JIT compiled code to interact with the Rust runtime
+
+/// Create a new Value::Num and return a pointer to it
+#[no_mangle]
+pub extern "C" fn rustmat_create_value_num(val: f64) -> *mut Value {
+    let value = Box::new(Value::Num(val));
+    Box::into_raw(value)
+}
+
+/// Free a Value object
+#[no_mangle]
+pub extern "C" fn rustmat_free_value(ptr: *mut Value) {
+    if !ptr.is_null() {
+        unsafe {
+            let _value = Box::from_raw(ptr);
+            // Box destructor will handle cleanup
+        }
+    }
+}
+
+/// Add two Value objects
+#[no_mangle]
+pub extern "C" fn rustmat_value_add(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+        
+        let result = match (a, b) {
+            (Value::Num(x), Value::Num(y)) => Value::Num(x + y),
+            (Value::Int(x), Value::Int(y)) => Value::Int(x + y),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x + (*y as f64)),
+            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) + y),
+            _ => {
+                error!("Unsupported addition: {:?} + {:?}", a, b);
+                return std::ptr::null_mut();
+            }
+        };
+        
+        Box::into_raw(Box::new(result))
+    }
+}
+
+/// Subtract two Value objects
+#[no_mangle]
+pub extern "C" fn rustmat_value_sub(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+        
+        let result = match (a, b) {
+            (Value::Num(x), Value::Num(y)) => Value::Num(x - y),
+            (Value::Int(x), Value::Int(y)) => Value::Int(x - y),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x - (*y as f64)),
+            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) - y),
+            _ => {
+                error!("Unsupported subtraction: {:?} - {:?}", a, b);
+                return std::ptr::null_mut();
+            }
+        };
+        
+        Box::into_raw(Box::new(result))
+    }
+}
+
+/// Multiply two Value objects
+#[no_mangle]
+pub extern "C" fn rustmat_value_mul(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+        
+        let result = match (a, b) {
+            (Value::Num(x), Value::Num(y)) => Value::Num(x * y),
+            (Value::Int(x), Value::Int(y)) => Value::Int(x * y),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x * (*y as f64)),
+            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) * y),
+            _ => {
+                error!("Unsupported multiplication: {:?} * {:?}", a, b);
+                return std::ptr::null_mut();
+            }
+        };
+        
+        Box::into_raw(Box::new(result))
+    }
+}
+
+/// Divide two Value objects
+#[no_mangle]
+pub extern "C" fn rustmat_value_div(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+        
+        let result = match (a, b) {
+            (Value::Num(x), Value::Num(y)) => {
+                if *y == 0.0 {
+                    error!("Division by zero");
+                    return std::ptr::null_mut();
+                }
+                Value::Num(x / y)
+            },
+            (Value::Int(x), Value::Int(y)) => {
+                if *y == 0 {
+                    error!("Division by zero");
+                    return std::ptr::null_mut();
+                }
+                Value::Num((*x as f64) / (*y as f64))
+            },
+            (Value::Num(x), Value::Int(y)) => {
+                if *y == 0 {
+                    error!("Division by zero");
+                    return std::ptr::null_mut();
+                }
+                Value::Num(x / (*y as f64))
+            },
+            (Value::Int(x), Value::Num(y)) => {
+                if *y == 0.0 {
+                    error!("Division by zero");
+                    return std::ptr::null_mut();
+                }
+                Value::Num((*x as f64) / y)
+            },
+            _ => {
+                error!("Unsupported division: {:?} / {:?}", a, b);
+                return std::ptr::null_mut();
+            }
+        };
+        
+        Box::into_raw(Box::new(result))
+    }
+}
+
+/// Power of two Value objects
+#[no_mangle]
+pub extern "C" fn rustmat_value_pow(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+        
+        let result = match (a, b) {
+            (Value::Num(x), Value::Num(y)) => Value::Num(x.powf(*y)),
+            (Value::Int(x), Value::Int(y)) => Value::Num((*x as f64).powf(*y as f64)),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x.powf(*y as f64)),
+            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64).powf(*y)),
+            _ => {
+                error!("Unsupported power: {:?} ^ {:?}", a, b);
+                return std::ptr::null_mut();
+            }
+        };
+        
+        Box::into_raw(Box::new(result))
+    }
+}
+
+/// Negate a Value object
+#[no_mangle]
+pub extern "C" fn rustmat_value_neg(a_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    
+    unsafe {
+        let a = &*a_ptr;
+        
+        let result = match a {
+            Value::Num(x) => Value::Num(-x),
+            Value::Int(x) => Value::Int(-x),
+            _ => {
+                error!("Unsupported negation: -{:?}", a);
+                return std::ptr::null_mut();
+            }
+        };
+        
+        Box::into_raw(Box::new(result))
+    }
+}
+
+/// Compare two Value objects: less than
+#[no_mangle]
+pub extern "C" fn rustmat_value_lt(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+        
+        let result = match (a, b) {
+            (Value::Num(x), Value::Num(y)) => Value::Num(if x < y { 1.0 } else { 0.0 }),
+            (Value::Int(x), Value::Int(y)) => Value::Num(if x < y { 1.0 } else { 0.0 }),
+            (Value::Num(x), Value::Int(y)) => Value::Num(if *x < (*y as f64) { 1.0 } else { 0.0 }),
+            (Value::Int(x), Value::Num(y)) => Value::Num(if (*x as f64) < *y { 1.0 } else { 0.0 }),
+            _ => {
+                error!("Unsupported comparison: {:?} < {:?}", a, b);
+                return std::ptr::null_mut();
+            }
+        };
+        
+        Box::into_raw(Box::new(result))
+    }
+}
+
+/// Call a builtin function by name
+#[no_mangle]
+pub extern "C" fn rustmat_call_builtin(name_ptr: *const u8, name_len: usize, args_ptr: *const *const Value, args_len: usize) -> *mut Value {
+    if name_ptr.is_null() || args_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    
+    unsafe {
+        // Convert name from C string
+        let name_slice = std::slice::from_raw_parts(name_ptr, name_len);
+        let name = match std::str::from_utf8(name_slice) {
+            Ok(s) => s,
+            Err(_) => {
+                error!("Invalid UTF-8 in builtin name");
+                return std::ptr::null_mut();
+            }
+        };
+        
+        // Convert arguments
+        let args_slice = std::slice::from_raw_parts(args_ptr, args_len);
+        let mut args = Vec::new();
+        for &arg_ptr in args_slice {
+            if arg_ptr.is_null() {
+                error!("Null argument in builtin call");
+                return std::ptr::null_mut();
+            }
+            args.push((*arg_ptr).clone());
+        }
+        
+        // Call the builtin
+        match rustmat_runtime::call_builtin(name, &args) {
+            Ok(result) => Box::into_raw(Box::new(result)),
+            Err(e) => {
+                error!("Builtin call failed: {}", e);
+                std::ptr::null_mut()
+            }
+        }
+    }
+}
+
+/// Load a variable from the variables array
+#[no_mangle]
+pub extern "C" fn rustmat_load_var(vars_ptr: *mut Value, vars_len: usize, index: usize) -> *mut Value {
+    if vars_ptr.is_null() || index >= vars_len {
+        error!("Invalid variable access: index {} >= length {}", index, vars_len);
+        return std::ptr::null_mut();
+    }
+    
+    unsafe {
+        let vars_slice = std::slice::from_raw_parts(vars_ptr, vars_len);
+        let value = vars_slice[index].clone();
+        Box::into_raw(Box::new(value))
+    }
+}
+
+/// Store a variable to the variables array
+#[no_mangle]
+pub extern "C" fn rustmat_store_var(vars_ptr: *mut Value, vars_len: usize, index: usize, value_ptr: *const Value) -> i32 {
+    if vars_ptr.is_null() || value_ptr.is_null() || index >= vars_len {
+        error!("Invalid variable store: index {} >= length {}", index, vars_len);
+        return -1; // Error
+    }
+    
+    unsafe {
+        let vars_slice = std::slice::from_raw_parts_mut(vars_ptr, vars_len);
+        let value = (*value_ptr).clone();
+        vars_slice[index] = value;
+        0 // Success
+    }
+}
 
 /// The main JIT compilation engine
 pub struct TurbineEngine {

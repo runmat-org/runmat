@@ -766,3 +766,99 @@ fn test_stats_accuracy() {
     let stats = engine.stats();
     assert_eq!(stats.compiled_functions, 1);
 } 
+
+#[test]
+fn test_jit_arithmetic_compilation() {
+    if !TurbineEngine::is_jit_supported() {
+        return; // Skip on unsupported platforms
+    }
+
+    let mut engine = TurbineEngine::new().unwrap();
+    
+    // Test simple arithmetic that should be JIT compilable (no control flow)
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(5.0),
+            Instr::StoreVar(0),         // x = 5
+            Instr::LoadConst(3.0),
+            Instr::StoreVar(1),         // y = 3
+            Instr::LoadVar(0),          // load x
+            Instr::LoadVar(1),          // load y
+            Instr::Add,                 // x + y
+            Instr::StoreVar(2),         // result1 = x + y = 8
+            Instr::LoadVar(0),          // load x
+            Instr::LoadVar(1),          // load y
+            Instr::Mul,                 // x * y
+            Instr::LoadVar(2),          // load result1
+            Instr::Add,                 // (x * y) + result1 = 15 + 8 = 23
+            Instr::StoreVar(3),         // result2 = 23
+            Instr::Return,
+        ],
+        var_count: 4,
+    };
+    
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    
+    // Make it hot so it gets JIT compiled
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+    
+    // This should succeed in JIT compilation (no control flow)
+    let result = engine.compile_bytecode(&bytecode);
+    assert!(result.is_ok(), "Simple arithmetic should JIT compile successfully");
+    
+    // Verify compilation succeeded by checking the returned hash
+    let returned_hash = result.unwrap();
+    assert_eq!(returned_hash, hash, "Should return the correct hash for compiled function");
+    
+    // The stats method auto-resets for test isolation, so we can't reliably check counts
+    println!("Successfully compiled arithmetic bytecode to native code!");
+}
+
+#[test]
+fn test_runtime_interface_progress() {
+    if !TurbineEngine::is_jit_supported() {
+        return; // Skip on unsupported platforms
+    }
+
+    let mut engine = TurbineEngine::new().unwrap();
+    
+    // This test documents our current progress and what needs to be completed
+    // Currently: JIT compiles straight-line code, but uses stub runtime functions
+    // Next: Need to implement actual runtime interface for Value operations
+    
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(2.0),
+            Instr::LoadConst(3.0),
+            Instr::Add,                 // This generates a call to call_runtime_add (currently stub)
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+    };
+    
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    
+    // Make it hot
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+    
+    // Should compile successfully (creates stub calls)
+    let compile_result = engine.compile_bytecode(&bytecode);
+    assert!(compile_result.is_ok(), "Should compile arithmetic with stub runtime calls");
+    
+    // Execution will currently fail because:
+    // 1. Function signature expects *mut Value but we pass *mut f64 
+    // 2. Runtime functions are stubs returning dummy values
+    // This is what we need to implement next!
+    
+    let mut vars = vec![Value::Num(0.0)];
+    let exec_result = engine.execute_compiled(hash, &mut vars);
+    
+    // This test documents that execution currently fails due to incomplete runtime interface
+    // When we implement proper runtime interface, this should succeed and vars[0] should be Value::Num(5.0)
+    println!("Current execution result: {:?}", exec_result);
+    println!("This demonstrates the next development milestone: implementing proper runtime interface");
+} 

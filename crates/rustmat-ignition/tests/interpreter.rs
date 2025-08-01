@@ -219,6 +219,70 @@ fn matrix_2d_compilation() {
 }
 
 #[test]
+fn verify_jit_test_control_flow() {
+    // Test simple control flow from JIT tests
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(2.0),
+            Instr::StoreVar(0),         // x = 2
+            Instr::LoadVar(0),
+            Instr::LoadConst(5.0),
+            Instr::Less,                // x < 5? -> true for x=2
+            Instr::JumpIfFalse(9),      // if false, jump to else
+            // True branch
+            Instr::LoadConst(100.0),    // result = 100
+            Instr::StoreVar(1),
+            Instr::Jump(11),            // jump over else
+            // False branch  
+            Instr::LoadConst(200.0),    // result = 200
+            Instr::StoreVar(1),
+            // End
+            Instr::Return,
+        ],
+        var_count: 2,
+    };
+    
+    let result = interpret(&bytecode).unwrap();
+    assert_eq!(result[0], Value::Num(2.0));
+    assert_eq!(result[1], Value::Num(100.0));
+}
+
+#[test]
+fn verify_jit_test_nested_control_flow() {
+    // Test nested control flow from JIT tests
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(3.0),
+            Instr::StoreVar(0),         // x = 3
+            Instr::LoadVar(0),
+            Instr::LoadConst(5.0),
+            Instr::Less,                // x < 5? -> true
+            Instr::JumpIfFalse(14),     // if false, jump to outer else (LoadConst(0.0))
+            // Outer true branch
+            Instr::LoadVar(0),
+            Instr::LoadConst(2.0),
+            Instr::Greater,             // x > 2? -> true
+            Instr::JumpIfFalse(12),     // if false, jump to inner else (LoadConst(24.0))
+            // Inner true branch
+            Instr::LoadConst(42.0),     // result = 42
+            Instr::Jump(15),            // jump to end
+            // Inner false branch
+            Instr::LoadConst(24.0),     // result = 24
+            Instr::Jump(15),            // jump to end
+            // Outer false branch
+            Instr::LoadConst(0.0),      // result = 0
+            // End
+            Instr::StoreVar(1),
+        ],
+        var_count: 2,
+    };
+    
+    let result = interpret(&bytecode).unwrap();
+    assert_eq!(result[0], Value::Num(3.0));
+    assert_eq!(result[1], Value::Num(42.0));
+}
+
+#[test]
 fn test_turbine_control_flow_pattern() {
     // Test the exact same bytecode pattern that's failing in turbine
     let bytecode = Bytecode {
