@@ -11,6 +11,7 @@ members = [
     "crates/rustmat-runtime",
     "crates/rustmat-kernel",
     "crates/rustmat-turbine",
+    "crates/rustmat-gc",
     "rustmat",
 ]
 resolver = "2"
