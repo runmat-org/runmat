@@ -22,18 +22,20 @@ fn test_minor_collection() {
 
 #[test]
 fn test_major_collection() {
-    let initial_stats = gc_stats();
-    let initial_collections = initial_stats.major_collections.load(Ordering::Relaxed);
-    
-    // Trigger a major collection
-    let _collected = gc_collect_major().expect("major collection should succeed");
-    
-    let final_stats = gc_stats();
-    let final_collections = final_stats.major_collections.load(Ordering::Relaxed);
-    
-    // Should have performed one additional collection
-    assert_eq!(final_collections - initial_collections, 1);
-    // collected is always valid (usize)
+    gc_test_context(|| {
+        let initial_stats = gc_stats();
+        let initial_collections = initial_stats.major_collections.load(Ordering::Relaxed);
+        
+        // Trigger a major collection
+        let _collected = gc_collect_major().expect("major collection should succeed");
+        
+        let final_stats = gc_stats();
+        let final_collections = final_stats.major_collections.load(Ordering::Relaxed);
+        
+        // Should have performed one additional collection
+        assert_eq!(final_collections - initial_collections, 1);
+        // collected is always valid (usize)
+    });
 }
 
 #[test]
@@ -46,6 +48,7 @@ fn test_collection_with_live_objects() {
     let mut live_objects = Vec::new();
     for i in 0..10 {
         let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
+        gc_add_root(ptr).expect("root registration should succeed"); // Explicitly protect from collection
         live_objects.push(ptr);
     }
     
@@ -75,6 +78,11 @@ fn test_collection_with_live_objects() {
     let after_collection = gc_stats();
     let after_allocations = after_collection.total_allocations.load(Ordering::Relaxed);
     assert_eq!(before_allocations, after_allocations);
+    
+    // Clean up roots
+    for ptr in &live_objects {
+        gc_remove_root(*ptr).expect("root removal should succeed");
+    }
 }
 
 #[test]
@@ -149,6 +157,7 @@ fn test_collection_with_different_generations() {
     let mut young_objects = Vec::new();
     for i in 0..5 {
         let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
+        gc_add_root(ptr).expect("root registration should succeed"); // Protect from collection
         young_objects.push(ptr);
     }
     
@@ -168,31 +177,38 @@ fn test_collection_with_different_generations() {
         assert_eq!(**ptr, Value::Num(i as f64));
     }
     
+    // Clean up roots
+    for ptr in &young_objects {
+        gc_remove_root(*ptr).expect("root removal should succeed");
+    }
+    
     // collected values are always valid (usize)
 }
 
 #[test]
 fn test_collection_stats_accuracy() {
-    let initial_stats = gc_stats();
-    let initial_minor = initial_stats.minor_collections.load(Ordering::Relaxed);
-    let initial_major = initial_stats.major_collections.load(Ordering::Relaxed);
-    
-    // Perform specific numbers of collections
-    for _ in 0..3 {
-        let _ = gc_collect_minor().expect("minor collection should succeed");
-    }
-    
-    for _ in 0..2 {
-        let _ = gc_collect_major().expect("major collection should succeed");
-    }
-    
-    let final_stats = gc_stats();
-    let final_minor = final_stats.minor_collections.load(Ordering::Relaxed);
-    let final_major = final_stats.major_collections.load(Ordering::Relaxed);
-    
-    // Verify exact counts
-    assert_eq!(final_minor - initial_minor, 3);
-    assert_eq!(final_major - initial_major, 2);
+    gc_test_context(|| {
+        let initial_stats = gc_stats();
+        let initial_minor = initial_stats.minor_collections.load(Ordering::Relaxed);
+        let initial_major = initial_stats.major_collections.load(Ordering::Relaxed);
+        
+        // Perform specific numbers of collections
+        for _ in 0..3 {
+            let _ = gc_collect_minor().expect("minor collection should succeed");
+        }
+        
+        for _ in 0..2 {
+            let _ = gc_collect_major().expect("major collection should succeed");
+        }
+        
+        let final_stats = gc_stats();
+        let final_minor = final_stats.minor_collections.load(Ordering::Relaxed);
+        let final_major = final_stats.major_collections.load(Ordering::Relaxed);
+        
+        // Verify exact counts
+        assert_eq!(final_minor - initial_minor, 3);
+        assert_eq!(final_major - initial_major, 2);
+    });
 }
 
 #[test]
@@ -274,6 +290,7 @@ fn test_collection_performance() {
     let alloc_start = Instant::now();
     for i in 0..num_objects {
         let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
+        gc_add_root(ptr).expect("root registration should succeed"); // Protect from collection
         objects.push(ptr);
     }
     let alloc_duration = alloc_start.elapsed();
@@ -291,8 +308,13 @@ fn test_collection_performance() {
     // Collection should be reasonably fast
     assert!(collect_duration.as_millis() < 50);
     
-    // Objects should still be accessible
+    // Objects should still be accessible (they're kept alive by the Vec)
     for (i, ptr) in objects.iter().enumerate() {
         assert_eq!(**ptr, Value::Num(i as f64));
+    }
+    
+    // Clean up roots
+    for ptr in &objects {
+        gc_remove_root(*ptr).expect("root removal should succeed");
     }
 }

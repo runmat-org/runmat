@@ -17,6 +17,9 @@ page_size = "0.6"
 [dev-dependencies]
 rand = "0.8"
 criterion = "0.5"
+rustmat-ignition = { workspace = true }
+rustmat-hir = { workspace = true }
+rustmat-parser = { workspace = true }
 
 [features]
 default = []

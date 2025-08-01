@@ -53,3 +53,4 @@ rustmat-builtins = { path = "crates/rustmat-builtins" }
 rustmat-runtime = { path = "crates/rustmat-runtime" }
 rustmat-kernel = { path = "crates/rustmat-kernel" }
 rustmat-turbine = { path = "crates/rustmat-turbine" }
+rustmat-gc = { path = "crates/rustmat-gc" }

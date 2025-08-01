@@ -77,23 +77,22 @@ fn test_cell_allocation() {
 
 #[test]
 fn test_allocation_stats() {
-    // Ensure we have a reasonable configuration for this test
-    let config = GcConfig::default();
-    gc_configure(config).expect("configuration should succeed");
-    
-    let initial_stats = gc_stats();
-    let initial_allocations = initial_stats.total_allocations.load(std::sync::atomic::Ordering::Relaxed);
-    
-    // Allocate some values
-    for i in 0..10 {
-        let _ = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-    }
-    
-    let final_stats = gc_stats();
-    let final_allocations = final_stats.total_allocations.load(std::sync::atomic::Ordering::Relaxed);
-    
-    // Check that exactly 10 allocations were made (regardless of initial state)
-    assert_eq!(final_allocations - initial_allocations, 10);
+    gc_test_context(|| {
+        let initial_stats = gc_stats();
+        let initial_allocations = initial_stats.total_allocations.load(std::sync::atomic::Ordering::Relaxed);
+        
+        // Allocate some values
+        for i in 0..10 {
+            let _ = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
+        }
+        
+        let final_stats = gc_stats();
+        let final_allocations = final_stats.total_allocations.load(std::sync::atomic::Ordering::Relaxed);
+        
+        // Check that exactly 10 allocations were made (since we have clean GC state)
+        assert_eq!(final_allocations - initial_allocations, 10, 
+                  "Expected exactly 10 allocations");
+    });
 }
 
 #[test]
@@ -122,28 +121,33 @@ fn test_large_allocation() {
 
 #[test]
 fn test_allocation_triggers_collection() {
-    // Configure GC for more frequent collections
-    let config = GcConfig {
-        minor_gc_threshold: 0.1, // Very low threshold
-        young_generation_size: 1024, // Small generation
-        ..GcConfig::default()
-    };
-    
-    gc_configure(config).expect("configuration should succeed");
-    
-    let initial_stats = gc_stats();
-    let initial_collections = initial_stats.minor_collections.load(std::sync::atomic::Ordering::Relaxed);
-    
-    // Allocate small values to trigger collection
-    for i in 0..5 {
-        let _ = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-    }
-    
-    let final_stats = gc_stats();
-    let final_collections = final_stats.minor_collections.load(std::sync::atomic::Ordering::Relaxed);
-    
-    // Should have triggered at least one collection
-    assert!(final_collections > initial_collections);
+    gc_test_context(|| {
+        // Configure GC for more frequent collections
+        let config = GcConfig {
+            minor_gc_threshold: 0.05, // Very low threshold (5% instead of 10%)
+            young_generation_size: 512, // Even smaller generation 
+            ..GcConfig::default()
+        };
+        
+        gc_configure(config).expect("configuration should succeed");
+        
+        let initial_stats = gc_stats();
+        let initial_collections = initial_stats.minor_collections.load(std::sync::atomic::Ordering::Relaxed);
+        
+        // Allocate enough values to definitely trigger collection
+        // Each Value is ~40 bytes, so 20 values = ~800 bytes, which should exceed 5% of 512 bytes
+        for i in 0..20 {
+            let _ = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
+        }
+        
+        let final_stats = gc_stats();
+        let final_collections = final_stats.minor_collections.load(std::sync::atomic::Ordering::Relaxed);
+        
+        // Should have triggered at least one collection
+        assert!(final_collections > initial_collections, 
+               "Expected collections to increase from {} but got {}", 
+               initial_collections, final_collections);
+    });
 }
 
 #[test]
@@ -184,27 +188,27 @@ fn test_nested_cell_allocation() {
 
 #[test]
 fn test_allocation_with_roots() {
-    use rustmat_gc::{GlobalRoot, gc_register_root};
-    
-    // Create a global root to keep some values alive
-    let global_values = vec![
-        Value::Num(42.0),
-        Value::String("global".to_string()),
-    ];
-    let root = Box::new(GlobalRoot::new(global_values, "test global".to_string()));
-    let _root_id = gc_register_root(root).expect("root registration should succeed");
-    
-    // Allocate some values
-    let ptr1 = gc_allocate(Value::Num(1.0)).expect("allocation should succeed");
-    let ptr2 = gc_allocate(Value::Num(2.0)).expect("allocation should succeed");
-    
-    assert_eq!(*ptr1, Value::Num(1.0));
-    assert_eq!(*ptr2, Value::Num(2.0));
-    
-    // Force a collection - global roots should keep their values alive
-    let _collected = gc_collect_minor().expect("collection should succeed");
-    
-    // Values should still be accessible
-    assert_eq!(*ptr1, Value::Num(1.0));
-    assert_eq!(*ptr2, Value::Num(2.0));
+    gc_test_context(|| {
+        // Allocate some values and explicitly register them as roots
+        let ptr1 = gc_allocate(Value::Num(1.0)).expect("allocation should succeed");
+        let ptr2 = gc_allocate(Value::Num(2.0)).expect("allocation should succeed");
+        
+        // Register as roots to protect from collection
+        gc_add_root(ptr1).expect("root registration should succeed");
+        gc_add_root(ptr2).expect("root registration should succeed");
+        
+        assert_eq!(*ptr1, Value::Num(1.0));
+        assert_eq!(*ptr2, Value::Num(2.0));
+        
+        // Force a collection - roots should keep their values alive
+        let _collected = gc_collect_minor().expect("collection should succeed");
+        
+        // Values should still be accessible
+        assert_eq!(*ptr1, Value::Num(1.0));
+        assert_eq!(*ptr2, Value::Num(2.0));
+        
+        // Clean up roots
+        gc_remove_root(ptr1).expect("root removal should succeed");
+        gc_remove_root(ptr2).expect("root removal should succeed");
+    });
 }

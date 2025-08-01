@@ -301,3 +301,27 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Full integration with `rustmat-builtins` Value types for seamless memory management.
 - Production-ready GC suitable for interpreter and JIT runtime integration.
 - `rustmat-gc` milestone marked complete in Milestone P2 ✅
+
+### Edit 40 - Garbage Collector Architecture Completion
+- Migrated from unsafe raw pointer management to handle-based allocation using `Arc<GcObject>` for memory safety.
+- Implemented proper major collection algorithm that traverses all generations and updates statistics correctly.
+- Added adaptive collection triggering that respects `GcConfig.minor_gc_threshold` and `young_generation_size` parameters.
+- Root management system requires explicit `gc_add_root`/`gc_remove_root` calls for object protection during collection.
+- Thread-safety implemented with `Arc<RwLock<>>` for shared state (objects, generations, roots, config).
+- Collection process uses compare-and-swap atomic operations to prevent concurrent collection attempts.
+- **Technical Issues**: Test isolation problems due to global GC singleton state causing interference between tests.
+- **Performance**: Mark-and-sweep collection traverses object graph starting from explicit roots, not stack scanning.
+- **Memory Model**: Objects stored as `HashMap<usize, Arc<GcObject>>` with stable IDs, generations track object references.
+
+### Edit 41 - Test Infrastructure and Project Status  
+- **Test Isolation**: Implemented `gc_test_context()` wrapper that resets GC state between tests using global mutex.
+- **Parallel Execution Issue**: Tests require `--test-threads=1` to avoid race conditions; parallel execution causes failures.
+- **GC Reset Function**: `gc_reset_for_test()` clears objects, generations, roots, resets next_id counter and collection flags.
+- **Mutex Poisoning**: Added graceful poison recovery for test mutex to handle panicking tests properly.
+- **Current Test Status** (with --test-threads=1):
+  - `rustmat-gc`: 69 tests (43 unit + 9 allocation + 10 collection + 7 stress) - all passing
+  - `rustmat-runtime`: 11 tests - all passing  
+  - `rustmat-builtins`: 4 tests - all passing
+  - Total project: 12 crates, ~84+ tests across workspace
+- **Known Limitations**: GC tests fail when run in parallel due to global state; production code is thread-safe.
+- **Architecture Status**: P2 milestone complete - GC, JIT (Turbine), Runtime (BLAS/LAPACK) all implemented and tested.

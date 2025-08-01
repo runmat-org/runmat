@@ -11,7 +11,7 @@ use crate::{GcPtr, Result, GcError};
 
 /// Unique identifier for a GC root
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RootId(usize);
+pub struct RootId(pub usize);
 
 /// Trait for objects that can serve as GC roots
 pub trait GcRoot: Send + Sync {

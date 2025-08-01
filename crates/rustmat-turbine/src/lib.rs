@@ -13,6 +13,7 @@ use rustmat_ignition::{Bytecode, Instr};
 use target_lexicon::Triple;
 use thiserror::Error;
 use std::boxed::Box;
+use rustmat_gc::gc_allocate;
 
 pub mod compiler;
 pub mod profiler;
@@ -28,19 +29,17 @@ pub use cache::*;
 /// Create a new Value::Num and return a pointer to it
 #[no_mangle]
 pub extern "C" fn rustmat_create_value_num(val: f64) -> *mut Value {
-    let value = Box::new(Value::Num(val));
-    Box::into_raw(value)
+    match gc_allocate(Value::Num(val)) {
+        Ok(gc_ptr) => unsafe { gc_ptr.as_raw_mut() },
+        Err(_) => std::ptr::null_mut(),
+    }
 }
 
-/// Free a Value object
+/// Free a Value object (no-op with GC, kept for compatibility)
 #[no_mangle]
-pub extern "C" fn rustmat_free_value(ptr: *mut Value) {
-    if !ptr.is_null() {
-        unsafe {
-            let _value = Box::from_raw(ptr);
-            // Box destructor will handle cleanup
-        }
-    }
+pub extern "C" fn rustmat_free_value(_ptr: *mut Value) {
+    // With garbage collection, explicit freeing is not needed
+    // The GC will automatically collect unreachable objects
 }
 
 /// Add two Value objects
@@ -65,7 +64,10 @@ pub extern "C" fn rustmat_value_add(a_ptr: *const Value, b_ptr: *const Value) ->
             }
         };
         
-        Box::into_raw(Box::new(result))
+        match gc_allocate(result) {
+            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 }
 
@@ -91,7 +93,10 @@ pub extern "C" fn rustmat_value_sub(a_ptr: *const Value, b_ptr: *const Value) ->
             }
         };
         
-        Box::into_raw(Box::new(result))
+        match gc_allocate(result) {
+            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 }
 
@@ -117,7 +122,10 @@ pub extern "C" fn rustmat_value_mul(a_ptr: *const Value, b_ptr: *const Value) ->
             }
         };
         
-        Box::into_raw(Box::new(result))
+        match gc_allocate(result) {
+            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 }
 
@@ -167,7 +175,10 @@ pub extern "C" fn rustmat_value_div(a_ptr: *const Value, b_ptr: *const Value) ->
             }
         };
         
-        Box::into_raw(Box::new(result))
+        match gc_allocate(result) {
+            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 }
 
@@ -193,7 +204,10 @@ pub extern "C" fn rustmat_value_pow(a_ptr: *const Value, b_ptr: *const Value) ->
             }
         };
         
-        Box::into_raw(Box::new(result))
+        match gc_allocate(result) {
+            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 }
 
@@ -216,7 +230,10 @@ pub extern "C" fn rustmat_value_neg(a_ptr: *const Value) -> *mut Value {
             }
         };
         
-        Box::into_raw(Box::new(result))
+        match gc_allocate(result) {
+            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 }
 
@@ -242,7 +259,10 @@ pub extern "C" fn rustmat_value_lt(a_ptr: *const Value, b_ptr: *const Value) -> 
             }
         };
         
-        Box::into_raw(Box::new(result))
+        match gc_allocate(result) {
+            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 }
 
@@ -277,7 +297,10 @@ pub extern "C" fn rustmat_call_builtin(name_ptr: *const u8, name_len: usize, arg
         
         // Call the builtin
         match rustmat_runtime::call_builtin(name, &args) {
-            Ok(result) => Box::into_raw(Box::new(result)),
+            Ok(result) => match gc_allocate(result) {
+                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+                Err(_) => std::ptr::null_mut(),
+            },
             Err(e) => {
                 error!("Builtin call failed: {}", e);
                 std::ptr::null_mut()
@@ -297,7 +320,10 @@ pub extern "C" fn rustmat_load_var(vars_ptr: *mut Value, vars_len: usize, index:
     unsafe {
         let vars_slice = std::slice::from_raw_parts(vars_ptr, vars_len);
         let value = vars_slice[index].clone();
-        Box::into_raw(Box::new(value))
+        match gc_allocate(value) {
+            Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 }
 

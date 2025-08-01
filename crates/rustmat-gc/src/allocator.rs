@@ -231,7 +231,7 @@ impl GenerationalAllocator {
     }
     
     /// Allocate a Value object
-    pub fn allocate(&mut self, value: Value, stats: &mut GcStats) -> Result<GcPtr<Value>> {
+    pub fn allocate(&mut self, value: Value, stats: &GcStats) -> Result<GcPtr<Value>> {
         let size = self.estimate_value_size(&value);
         
         // Always allocate in young generation first

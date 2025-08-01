@@ -32,7 +32,7 @@ impl<T> GcPtr<T> {
     /// # Safety
     /// 
     /// The pointer must be valid and point to GC-managed memory
-    pub(crate) unsafe fn from_raw(ptr: *const T) -> Self {
+    pub unsafe fn from_raw(ptr: *const T) -> Self {
         Self {
             #[cfg(not(feature = "pointer-compression"))]
             ptr,
@@ -50,7 +50,7 @@ impl<T> GcPtr<T> {
     /// 
     /// The returned pointer is only valid as long as the GC hasn't
     /// moved or collected the object
-    pub(crate) unsafe fn as_raw(&self) -> *const T {
+    pub unsafe fn as_raw(&self) -> *const T {
         #[cfg(not(feature = "pointer-compression"))]
         {
             self.ptr
@@ -68,7 +68,7 @@ impl<T> GcPtr<T> {
     /// 
     /// Same safety requirements as as_raw(), plus the caller must ensure
     /// exclusive access to the object
-    pub(crate) unsafe fn as_raw_mut(&self) -> *mut T {
+    pub unsafe fn as_raw_mut(&self) -> *mut T {
         self.as_raw() as *mut T
     }
     

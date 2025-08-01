@@ -9,6 +9,7 @@ rustmat-runtime = { workspace = true }
 rustmat-lexer = { workspace = true }
 rustmat-parser = { workspace = true }
 rustmat-hir = { workspace = true }
+rustmat-gc = { workspace = true }
 
 [dev-dependencies]
 rustmat-lexer = { workspace = true }

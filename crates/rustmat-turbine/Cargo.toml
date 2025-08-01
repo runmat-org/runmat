@@ -18,6 +18,7 @@ thiserror = { workspace = true }
 rustmat-ignition = { workspace = true }
 rustmat-builtins = { workspace = true }
 rustmat-runtime = { workspace = true }
+rustmat-gc = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true } 

@@ -38,7 +38,7 @@ impl MarkSweepCollector {
         &mut self,
         allocator: &mut GenerationalAllocator,
         roots: &[GcPtr<Value>],
-        stats: &mut GcStats,
+        stats: &GcStats,
     ) -> Result<usize> {
         log::debug!("Starting young generation collection");
         let start_time = Instant::now();
@@ -67,7 +67,7 @@ impl MarkSweepCollector {
         &mut self,
         allocator: &mut GenerationalAllocator,
         roots: &[GcPtr<Value>],
-        stats: &mut GcStats,
+        stats: &GcStats,
     ) -> Result<usize> {
         log::debug!("Starting full heap collection");
         let start_time = Instant::now();
@@ -96,8 +96,9 @@ impl MarkSweepCollector {
         
         // Mark all objects reachable from roots
         for root in roots {
-            if !root.is_null() {
-                self.mark_object(*root, max_generation)?;
+            let root_ptr: GcPtr<Value> = *root;
+            if !root_ptr.is_null() {
+                self.mark_object(root_ptr, max_generation)?;
             }
         }
         
@@ -107,7 +108,7 @@ impl MarkSweepCollector {
     
     /// Mark an object and recursively mark all objects it references
     fn mark_object(&mut self, obj: GcPtr<Value>, max_generation: usize) -> Result<()> {
-        let ptr = unsafe { obj.as_raw() } as *const u8;
+        let ptr = unsafe { obj.as_raw() as *const Value } as *const u8;
         let ptr_addr = ptr as usize;
         
         // Skip if already marked
@@ -164,7 +165,7 @@ impl MarkSweepCollector {
     fn sweep_young_generation(
         &mut self,
         _allocator: &mut GenerationalAllocator,
-        stats: &mut GcStats,
+        stats: &GcStats,
     ) -> Result<usize> {
         log::trace!("Starting sweep of young generation");
         
@@ -191,7 +192,7 @@ impl MarkSweepCollector {
     fn sweep_all_generations(
         &mut self,
         _allocator: &mut GenerationalAllocator,
-        stats: &mut GcStats,
+        stats: &GcStats,
     ) -> Result<usize> {
         log::trace!("Starting sweep of all generations");
         
@@ -207,7 +208,7 @@ impl MarkSweepCollector {
     }
     
     /// Simulate sweeping for placeholder implementation
-    fn simulate_sweep(&self, _stats: &mut GcStats, description: &str) -> usize {
+    fn simulate_sweep(&self, _stats: &GcStats, description: &str) -> usize {
         // In a real implementation, this would actually free memory
         // For now, just simulate collecting some objects
         let marked_objects = self.marked_objects.lock();
@@ -227,7 +228,7 @@ impl MarkSweepCollector {
     fn promote_survivors(
         &mut self,
         _allocator: &mut GenerationalAllocator,
-        stats: &mut GcStats,
+        stats: &GcStats,
     ) -> Result<usize> {
         log::trace!("Starting survivor promotion");
         

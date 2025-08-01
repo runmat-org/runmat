@@ -1800,6 +1800,9 @@ dependencies = [
  "parking_lot",
  "rand",
  "rustmat-builtins",
+ "rustmat-hir",
+ "rustmat-ignition",
+ "rustmat-parser",
  "thiserror 1.0.69",
 ]
 
@@ -1816,6 +1819,7 @@ name = "rustmat-ignition"
 version = "0.0.1"
 dependencies = [
  "rustmat-builtins",
+ "rustmat-gc",
  "rustmat-hir",
  "rustmat-lexer",
  "rustmat-parser",
@@ -1917,6 +1921,7 @@ dependencies = [
  "env_logger",
  "log",
  "rustmat-builtins",
+ "rustmat-gc",
  "rustmat-ignition",
  "rustmat-runtime",
  "target-lexicon",

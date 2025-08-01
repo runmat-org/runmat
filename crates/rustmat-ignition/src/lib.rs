@@ -1,6 +1,7 @@
 use rustmat_builtins::Value;
 use rustmat_runtime::call_builtin;
 use rustmat_hir::{HirProgram, HirStmt, HirExpr, HirExprKind};
+use rustmat_gc::{gc_register_root, gc_unregister_root, StackRoot, VariableArrayRoot, RootId};
 use std::convert::TryInto;
 
 #[derive(Debug, Clone)]
@@ -47,6 +48,38 @@ struct Compiler {
     instructions: Vec<Instr>,
     var_count: usize,
     loop_stack: Vec<LoopLabels>,
+}
+
+/// RAII wrapper for GC root management during interpretation
+struct InterpretContext {
+    stack_root_id: Option<RootId>,
+    vars_root_id: Option<RootId>,
+}
+
+impl InterpretContext {
+    fn new(stack: &Vec<Value>, vars: &Vec<Value>) -> Result<Self, String> {
+        let stack_root = Box::new(unsafe { StackRoot::new(stack as *const Vec<Value>, "interpreter_stack".to_string()) });
+        let vars_root = Box::new(unsafe { VariableArrayRoot::new(vars as *const Vec<Value>, "interpreter_vars".to_string()) });
+        
+        let stack_root_id = gc_register_root(stack_root).map_err(|e| format!("Failed to register stack root: {:?}", e))?;
+        let vars_root_id = gc_register_root(vars_root).map_err(|e| format!("Failed to register vars root: {:?}", e))?;
+        
+        Ok(InterpretContext {
+            stack_root_id: Some(stack_root_id),
+            vars_root_id: Some(vars_root_id),
+        })
+    }
+}
+
+impl Drop for InterpretContext {
+    fn drop(&mut self) {
+        if let Some(id) = self.stack_root_id.take() {
+            let _ = gc_unregister_root(id);
+        }
+        if let Some(id) = self.vars_root_id.take() {
+            let _ = gc_unregister_root(id);
+        }
+    }
 }
 
 struct LoopLabels {
@@ -325,6 +358,9 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
     let mut stack: Vec<Value> = Vec::new();
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
     let mut pc: usize = 0;
+
+    // Register GC roots for stack and variables (RAII cleanup)
+    let _gc_context = InterpretContext::new(&stack, &vars)?;
     while pc < bytecode.instructions.len() {
         match bytecode.instructions[pc].clone() {
             Instr::LoadConst(c) => stack.push(Value::Num(c)),
@@ -419,6 +455,7 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
         }
         pc += 1;
     }
+    
     Ok(vars)
 }
 
