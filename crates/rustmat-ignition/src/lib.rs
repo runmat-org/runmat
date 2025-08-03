@@ -90,38 +90,91 @@ struct LoopLabels {
 impl Compiler {
     fn new(prog: &HirProgram) -> Self {
         let mut max_var = 0;
+        fn visit_expr(expr: &rustmat_hir::HirExpr, max: &mut usize) {
+            use rustmat_hir::HirExprKind;
+            match &expr.kind {
+                HirExprKind::Var(id) => {
+                    if id.0 + 1 > *max {
+                        *max = id.0 + 1;
+                    }
+                }
+                HirExprKind::Unary(_, e) => visit_expr(e, max),
+                HirExprKind::Binary(left, _, right) => {
+                    visit_expr(left, max);
+                    visit_expr(right, max);
+                }
+                HirExprKind::Matrix(rows) => {
+                    for row in rows {
+                        for expr in row {
+                            visit_expr(expr, max);
+                        }
+                    }
+                }
+                HirExprKind::Index(expr, indices) => {
+                    visit_expr(expr, max);
+                    for idx in indices {
+                        visit_expr(idx, max);
+                    }
+                }
+                HirExprKind::Range(start, step, end) => {
+                    visit_expr(start, max);
+                    if let Some(step) = step {
+                        visit_expr(step, max);
+                    }
+                    visit_expr(end, max);
+                }
+                HirExprKind::FuncCall(_, args) => {
+                    for arg in args {
+                        visit_expr(arg, max);
+                    }
+                }
+                HirExprKind::Number(_) | HirExprKind::Colon => {
+                    // No variables here
+                }
+            }
+        }
+
         fn visit_stmts(stmts: &[HirStmt], max: &mut usize) {
             for s in stmts {
                 match s {
-                    HirStmt::Assign(id, _) => {
+                    HirStmt::Assign(id, expr) => {
                         if id.0 + 1 > *max {
                             *max = id.0 + 1;
                         }
+                        visit_expr(expr, max);
+                    }
+                    HirStmt::ExprStmt(expr) => {
+                        visit_expr(expr, max);
                     }
                     HirStmt::If {
+                        cond,
                         then_body,
                         elseif_blocks,
                         else_body,
-                        ..
                     } => {
+                        visit_expr(cond, max);
                         visit_stmts(then_body, max);
-                        for (_, b) in elseif_blocks {
-                            visit_stmts(b, max);
+                        for (cond, body) in elseif_blocks {
+                            visit_expr(cond, max);
+                            visit_stmts(body, max);
                         }
-                        if let Some(b) = else_body {
-                            visit_stmts(b, max);
+                        if let Some(body) = else_body {
+                            visit_stmts(body, max);
                         }
                     }
-                    HirStmt::While { body, .. } => visit_stmts(body, max),
-                    HirStmt::For { var, body, .. } => {
+                    HirStmt::While { cond, body } => {
+                        visit_expr(cond, max);
+                        visit_stmts(body, max);
+                    }
+                    HirStmt::For { var, expr, body } => {
                         if var.0 + 1 > *max {
                             *max = var.0 + 1;
                         }
+                        visit_expr(expr, max);
                         visit_stmts(body, max);
                     }
                     HirStmt::Function { .. } => {}
-                    HirStmt::ExprStmt(_) | HirStmt::Break | HirStmt::Continue | HirStmt::Return => {
-                    }
+                    HirStmt::Break | HirStmt::Continue | HirStmt::Return => {}
                 }
             }
         }
@@ -482,3 +535,4 @@ pub fn execute(program: &HirProgram) -> Result<Vec<Value>, String> {
     let bc = compile(program)?;
     interpret(&bc)
 }
+

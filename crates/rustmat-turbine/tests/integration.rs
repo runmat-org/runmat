@@ -228,7 +228,7 @@ fn test_execution_result_accuracy() {
             assert!(result.is_ok());
             
             // Check that execution doesn't crash and returns reasonable result
-            assert_eq!(result.unwrap(), 0); // Execution status
+            assert_eq!(result.unwrap(), (0, false)); // (status, used_jit)
         }
     });
 }

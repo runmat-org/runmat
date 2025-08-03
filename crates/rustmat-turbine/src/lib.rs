@@ -626,6 +626,7 @@ impl TurbineEngine {
         debug!("Executing compiled function {hash}");
         
         // Convert Value array to f64 array for JIT function
+        // Ensure f64_vars has at least vars.len() elements to preserve all variables
         let mut f64_vars: Vec<f64> = Vec::with_capacity(vars.len());
         for value in vars.iter() {
             match value {
@@ -664,12 +665,13 @@ impl TurbineEngine {
     }
     
     /// Try to execute bytecode using JIT if available, fallback to interpreter
-    pub fn execute_or_compile(&mut self, bytecode: &Bytecode, vars: &mut [Value]) -> Result<i32> {
+    /// Returns (result, used_jit) to indicate whether JIT was actually used
+    pub fn execute_or_compile(&mut self, bytecode: &Bytecode, vars: &mut [Value]) -> Result<(i32, bool)> {
         let hash = self.calculate_bytecode_hash(bytecode);
         
         // If function is compiled, execute it
         if self.cache.contains(hash) {
-            return self.execute_compiled(hash, vars);
+            return self.execute_compiled(hash, vars).map(|result| (result, true));
         }
         
         // Check if we should compile this function
@@ -677,7 +679,7 @@ impl TurbineEngine {
             match self.compile_bytecode(bytecode) {
                 Ok(_) => {
                     info!("Bytecode compiled successfully, executing JIT version");
-                    return self.execute_compiled(hash, vars);
+                    return self.execute_compiled(hash, vars).map(|result| (result, true));
                 }
                 Err(e) => {
                     warn!("JIT compilation failed, falling back to interpreter: {e}");
@@ -691,18 +693,164 @@ impl TurbineEngine {
         
         // Fallback to interpreter
         debug!("Executing bytecode in interpreter mode");
-        match rustmat_ignition::interpret(bytecode) {
-            Ok(interpreter_vars) => {
-                // Convert interpreter results back to vars array
+        // Create a proper variable array with current state and execute with ignition interpreter
+        let mut interpreter_vars = vars.to_vec();
+        
+        // Ensure interpreter_vars is large enough for the bytecode
+        if interpreter_vars.len() < bytecode.var_count {
+            interpreter_vars.resize(bytecode.var_count, Value::Num(0.0));
+        }
+        
+        match Self::interpret_with_vars(bytecode, &mut interpreter_vars) {
+            Ok(_) => {
+                // Copy back only the variables that exist in the original vars array
                 for (i, interpreter_val) in interpreter_vars.iter().enumerate() {
                     if i < vars.len() {
                         vars[i] = interpreter_val.clone();
                     }
                 }
-                Ok(0)
+                Ok((0, false)) // false indicates interpreter was used
             }
             Err(e) => Err(TurbineError::ExecutionError(e)),
         }
+    }
+    
+    /// Internal interpreter that preserves variable state (similar to REPL's custom interpreter)
+    fn interpret_with_vars(bytecode: &Bytecode, vars: &mut Vec<Value>) -> std::result::Result<Vec<Value>, String> {
+        use rustmat_ignition::Instr;
+        use std::convert::TryInto;
+
+        let mut stack: Vec<Value> = Vec::new();
+        let mut pc: usize = 0;
+
+        while pc < bytecode.instructions.len() {
+            match &bytecode.instructions[pc] {
+                Instr::LoadConst(c) => stack.push(Value::Num(*c)),
+                Instr::LoadVar(i) => {
+                    if *i < vars.len() {
+                        stack.push(vars[*i].clone())
+                    } else {
+                        stack.push(Value::Num(0.0))
+                    }
+                },
+                Instr::StoreVar(i) => {
+                    let val = stack.pop().ok_or("stack underflow".to_string())?;
+                    if *i >= vars.len() {
+                        vars.resize(i + 1, Value::Num(0.0));
+                    }
+                    vars[*i] = val;
+                }
+                Instr::Add => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(a + b));
+                }
+                Instr::Sub => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(a - b));
+                }
+                Instr::Mul => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(a * b));
+                }
+                Instr::Div => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(a / b));
+                }
+                Instr::Pow => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(a.powf(b)));
+                }
+                Instr::Neg => {
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(-a));
+                }
+                Instr::Less => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(if a < b { 1.0 } else { 0.0 }));
+                }
+                Instr::LessEqual => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(if a <= b { 1.0 } else { 0.0 }));
+                }
+                Instr::Greater => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(if a > b { 1.0 } else { 0.0 }));
+                }
+                Instr::GreaterEqual => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(if a >= b { 1.0 } else { 0.0 }));
+                }
+                Instr::Equal => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(if (a - b).abs() < f64::EPSILON { 1.0 } else { 0.0 }));
+                }
+                Instr::NotEqual => {
+                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    stack.push(Value::Num(if (a - b).abs() >= f64::EPSILON { 1.0 } else { 0.0 }));
+                }
+                Instr::Jump(target) => {
+                    pc = *target;
+                    continue;
+                }
+                Instr::JumpIfFalse(target) => {
+                    let cond: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                    if cond == 0.0 {
+                        pc = *target;
+                        continue;
+                    }
+                }
+                Instr::Return => {
+                    break;
+                }
+                Instr::Pop => {
+                    stack.pop().ok_or("stack underflow".to_string())?;
+                }
+                Instr::CallBuiltin(name, arg_count) => {
+                    // For builtin functions, use the runtime dispatcher
+                    let mut args = Vec::new();
+                    for _ in 0..*arg_count {
+                        args.push(stack.pop().ok_or("stack underflow".to_string())?);
+                    }
+                    args.reverse(); // Arguments are popped in reverse order
+                    
+                    // Call the runtime dispatcher
+                    match rustmat_runtime::call_builtin(name, &args) {
+                        Ok(result) => stack.push(result),
+                        Err(e) => return Err(format!("Builtin function '{}' failed: {}", name, e)),
+                    }
+                }
+                Instr::CreateMatrix(rows, cols) => {
+                    let total_elements = rows * cols;
+                    let mut elements = Vec::new();
+                    
+                    for _ in 0..total_elements {
+                        let val: f64 = (&stack.pop().ok_or("stack underflow".to_string())?).try_into().map_err(|e: String| e)?;
+                        elements.push(val);
+                    }
+                    elements.reverse(); // Elements are popped in reverse order
+                    
+                    // Create matrix using the runtime
+                    match rustmat_builtins::Matrix::new(elements, *rows, *cols) {
+                        Ok(matrix) => stack.push(Value::Matrix(matrix)),
+                        Err(e) => return Err(format!("Matrix creation failed: {}", e)),
+                    }
+                }
+            }
+            pc += 1;
+        }
+        
+        Ok(vars.clone())
     }
     
     /// Get compilation statistics

@@ -76,11 +76,11 @@ For more information, visit: https://github.com/rustmat/rustmat
 #[command(propagate_version = true)]
 struct Cli {
     /// Enable debug logging
-    #[arg(short, long, env = "RUSTMAT_DEBUG")]
+    #[arg(short, long, env = "RUSTMAT_DEBUG", value_parser = parse_bool_env)]
     debug: bool,
 
     /// Set log level
-    #[arg(long, value_enum, env = "RUSTMAT_LOG_LEVEL", default_value = "info")]
+    #[arg(long, value_enum, env = "RUSTMAT_LOG_LEVEL", default_value = "info", value_parser = parse_log_level_env)]
     log_level: LogLevel,
 
     /// Execution timeout in seconds
@@ -93,7 +93,7 @@ struct Cli {
 
     // JIT Compiler Options
     /// Disable JIT compilation (use interpreter only)
-    #[arg(long, env = "RUSTMAT_JIT_DISABLE")]
+    #[arg(long, env = "RUSTMAT_JIT_DISABLE", value_parser = parse_bool_env)]
     no_jit: bool,
 
     /// JIT compilation threshold (number of executions before JIT)
@@ -118,7 +118,7 @@ struct Cli {
     gc_threads: Option<usize>,
 
     /// Enable GC statistics collection
-    #[arg(long, env = "RUSTMAT_GC_STATS")]
+    #[arg(long, env = "RUSTMAT_GC_STATS", value_parser = parse_bool_env)]
     gc_stats: bool,
 
     /// Verbose output for REPL and execution
@@ -303,6 +303,32 @@ impl From<GcPreset> for GcConfig {
             GcPreset::LowMemory => GcConfig::low_memory(),
             GcPreset::Debug => GcConfig::debug(),
         }
+    }
+}
+
+/// Custom parser for boolean environment variables that accepts both "1"/"0" and "true"/"false"
+fn parse_bool_env(s: &str) -> Result<bool, String> {
+    match s.to_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        "" => Ok(false), // Empty string defaults to false
+        _ => Err(format!("Invalid boolean value '{s}'. Expected: 1/0, true/false, yes/no, on/off")),
+    }
+}
+
+/// Custom parser for log level environment variables that handles empty strings
+fn parse_log_level_env(s: &str) -> Result<LogLevel, String> {
+    if s.is_empty() {
+        return Ok(LogLevel::Info); // Default to info for empty string
+    }
+    
+    match s.to_lowercase().as_str() {
+        "error" => Ok(LogLevel::Error),
+        "warn" => Ok(LogLevel::Warn),
+        "info" => Ok(LogLevel::Info),
+        "debug" => Ok(LogLevel::Debug),
+        "trace" => Ok(LogLevel::Trace),
+        _ => Err(format!("Invalid log level '{s}'. Expected: error, warn, info, debug, trace")),
     }
 }
 

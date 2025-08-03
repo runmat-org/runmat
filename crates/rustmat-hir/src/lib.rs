@@ -74,6 +74,34 @@ pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
     Ok(HirProgram { body })
 }
 
+/// Lower AST to HIR with existing variable context for REPL
+pub fn lower_with_context(prog: &AstProgram, existing_vars: &HashMap<String, usize>) -> Result<(HirProgram, HashMap<String, usize>), String> {
+    let mut ctx = Ctx::new();
+    
+    // Pre-populate the context with existing variables
+    for (name, var_id) in existing_vars {
+        ctx.scopes[0].bindings.insert(name.clone(), VarId(*var_id));
+        // Ensure var_types has enough capacity
+        while ctx.var_types.len() <= *var_id {
+            ctx.var_types.push(Type::Unknown);
+        }
+        // Update next_var to be at least one more than the highest existing var
+        if *var_id >= ctx.next_var {
+            ctx.next_var = var_id + 1;
+        }
+    }
+    
+    let body = ctx.lower_stmts(&prog.body)?;
+    
+    // Extract all variable bindings (both existing and newly defined)
+    let mut all_vars = HashMap::new();
+    for (name, var_id) in &ctx.scopes[0].bindings {
+        all_vars.insert(name.clone(), var_id.0);
+    }
+    
+    Ok((HirProgram { body }, all_vars))
+}
+
 struct Scope {
     parent: Option<usize>,
     bindings: HashMap<String, VarId>,

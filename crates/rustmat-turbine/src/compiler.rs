@@ -197,7 +197,7 @@ impl BytecodeCompiler {
         
         // Function parameters  
         let vars_ptr = builder.block_params(entry_block)[0]; // *mut f64 (not Value!)
-        let vars_len = builder.block_params(entry_block)[1]; // usize
+        let _vars_len = builder.block_params(entry_block)[1]; // usize
         
         // Initialize stack (no need for Cranelift variables since we use direct memory access)
         let mut stack = StackSimulator::new();
@@ -214,16 +214,13 @@ impl BytecodeCompiler {
             }
         }
         
-        // Compile with proper control flow
-        let created_blocks = Self::compile_with_control_flow(&mut builder, &mut stack, instructions, vars_ptr, vars_len)?;
+        // Compile with proper control flow graph
+        Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, vars_ptr)?;
         
-        // Seal all dynamically created blocks
-        for block in created_blocks {
-            builder.seal_block(block);
+        // Seal all blocks (including entry block which is in cfg.blocks)
+        for (&_pc, basic_block) in &cfg.blocks {
+            builder.seal_block(basic_block.block);
         }
-        
-        // Seal the entry block
-        builder.seal_block(entry_block);
         
         builder.finalize();
         Ok(())
@@ -231,196 +228,208 @@ impl BytecodeCompiler {
 
 
     
-    fn compile_with_control_flow(
+    fn compile_with_cfg(
         builder: &mut FunctionBuilder,
-        stack: &mut StackSimulator,
+        _stack: &mut StackSimulator,
         instructions: &[Instr],
+        cfg: &ControlFlowGraph,
         vars_ptr: Value,
-        _vars_len: Value,
-    ) -> Result<Vec<Block>> {
-        let mut created_blocks = Vec::new();
-
-        // Simple linear compilation - just execute instructions in order
-        for instr in instructions {
-            match instr {
-                Instr::LoadConst(val) => {
-                    // Create f64 constant and push to stack
-                    let const_val = builder.ins().f64const(*val);
-                    stack.push(const_val);
-                }
-                Instr::LoadVar(idx) => {
-                    // Load f64 from vars_ptr[idx]
-                    let idx_val = builder.ins().iconst(types::I64, *idx as i64);
-                    let element_size = builder.ins().iconst(types::I64, 8); // size of f64
-                    let offset = builder.ins().imul(idx_val, element_size);
-                    let var_addr = builder.ins().iadd(vars_ptr, offset);
-                    
-                    // Load f64 from memory
-                    let val = builder.ins().load(types::F64, MemFlags::new(), var_addr, 0);
-                        stack.push(val);
-                }
-                Instr::StoreVar(idx) => {
-                    let val = stack.pop()?;
-                    
-                    // Store f64 to vars_ptr[idx]
-                    let idx_val = builder.ins().iconst(types::I64, *idx as i64);
-                    let element_size = builder.ins().iconst(types::I64, 8); // size of f64
-                    let offset = builder.ins().imul(idx_val, element_size);
-                    let var_addr = builder.ins().iadd(vars_ptr, offset);
-                    
-                    // Store f64 to memory
-                    builder.ins().store(MemFlags::new(), val, var_addr, 0);
-                }
-                Instr::Add => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_add_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Sub => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_sub_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Mul => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_mul_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Div => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_div_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Pow => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_pow_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Neg => {
-                    let val = stack.pop()?;
-                    let result = Self::call_runtime_neg_static(builder, val);
-                    stack.push(result);
-                }
-                Instr::LessEqual => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_le_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Less => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_lt_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Greater => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_gt_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::GreaterEqual => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_ge_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Equal => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_eq_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::NotEqual => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_ne_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::CallBuiltin(name, arg_count) => {
-                    let mut args = Vec::new();
-                    for _ in 0..*arg_count {
-                        args.push(stack.pop()?);
+    ) -> Result<()> {
+        // Get all blocks sorted by start PC for processing
+        let mut sorted_blocks: Vec<_> = cfg.blocks.iter().collect();
+        sorted_blocks.sort_by_key(|(start_pc, _)| *start_pc);
+        
+        // Track processed blocks to avoid recompilation
+        let mut processed_blocks = std::collections::HashSet::new();
+        
+        // Process blocks in topological order (starting from entry point)
+        for (&start_pc, basic_block) in &sorted_blocks {
+            if processed_blocks.contains(&start_pc) {
+                continue;
+            }
+            
+            // Switch to this basic block
+            builder.switch_to_block(basic_block.block);
+            
+            // Create local stack for this block
+            let mut local_stack = StackSimulator::new();
+            
+            // Compile instructions in this basic block
+            let mut pc = start_pc;
+            let mut block_terminated = false;
+            
+            while pc < basic_block.end_pc && pc < instructions.len() && !block_terminated {
+                let instr = &instructions[pc];
+                
+                match instr {
+                    Instr::LoadConst(val) => {
+                        let const_val = builder.ins().f64const(*val);
+                        local_stack.push(const_val);
                     }
-                    args.reverse();
-                    
-                    let result = Self::call_runtime_builtin_static(builder, name, &args);
-                    stack.push(result);
-                }
-                Instr::CreateMatrix(rows, cols) => {
-                    let total_elements = rows * cols;
-                    let mut elements = Vec::new();
-                    
-                    for _ in 0..total_elements {
-                        elements.push(stack.pop()?);
+                    Instr::LoadVar(idx) => {
+                        let idx_val = builder.ins().iconst(types::I64, *idx as i64);
+                        let element_size = builder.ins().iconst(types::I64, 8);
+                        let offset = builder.ins().imul(idx_val, element_size);
+                        let var_addr = builder.ins().iadd(vars_ptr, offset);
+                        let val = builder.ins().load(types::F64, MemFlags::new(), var_addr, 0);
+                        local_stack.push(val);
                     }
-                    elements.reverse();
-                    
-                    let result = Self::call_runtime_create_matrix_static(builder, *rows, *cols, &elements);
-                    stack.push(result);
+                    Instr::StoreVar(idx) => {
+                        let val = local_stack.pop()?;
+                        let idx_val = builder.ins().iconst(types::I64, *idx as i64);
+                        let element_size = builder.ins().iconst(types::I64, 8);
+                        let offset = builder.ins().imul(idx_val, element_size);
+                        let var_addr = builder.ins().iadd(vars_ptr, offset);
+                        builder.ins().store(MemFlags::new(), val, var_addr, 0);
+                    }
+                    Instr::Add => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_add_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::Sub => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_sub_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::Mul => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_mul_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::Div => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_div_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::Pow => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_pow_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::Neg => {
+                        let val = local_stack.pop()?;
+                        let result = Self::call_runtime_neg_static(builder, val);
+                        local_stack.push(result);
+                    }
+                    Instr::LessEqual => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_le_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::Less => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_lt_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::Greater => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_gt_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::GreaterEqual => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_ge_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::Equal => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_eq_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::NotEqual => {
+                        let (a, b) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_ne_static(builder, a, b);
+                        local_stack.push(result);
+                    }
+                    Instr::CallBuiltin(name, arg_count) => {
+                        let mut args = Vec::new();
+                        for _ in 0..*arg_count {
+                            args.push(local_stack.pop()?);
+                        }
+                        args.reverse();
+                        let result = Self::call_runtime_builtin_static(builder, name, &args);
+                        local_stack.push(result);
+                    }
+                    Instr::CreateMatrix(rows, cols) => {
+                        let total_elements = rows * cols;
+                        let mut elements = Vec::new();
+                        for _ in 0..total_elements {
+                            elements.push(local_stack.pop()?);
+                        }
+                        elements.reverse();
+                        let result = Self::call_runtime_create_matrix_static(builder, *rows, *cols, &elements);
+                        local_stack.push(result);
+                    }
+                    Instr::Pop => {
+                        local_stack.pop()?;
+                    }
+                    Instr::Return => {
+                        let zero = builder.ins().iconst(types::I32, 0);
+                        builder.ins().return_(&[zero]);
+                        block_terminated = true;
+                    }
+                    Instr::Jump(target) => {
+                        // Emit unconditional jump to target block
+                        if let Some(target_basic_block) = cfg.blocks.get(target) {
+                            builder.ins().jump(target_basic_block.block, &[]);
+                        } else {
+                            return Err(TurbineError::ModuleError(format!("Invalid jump target: {}", target)));
+                        }
+                        block_terminated = true;
+                    }
+                    Instr::JumpIfFalse(target) => {
+                        // Emit conditional jump
+                        let condition = local_stack.pop()?;
+                        let zero = builder.ins().f64const(0.0);
+                        let is_false = builder.ins().fcmp(FloatCC::Equal, condition, zero);
+                        
+                        // Get target blocks
+                        let false_block = cfg.blocks.get(target)
+                            .ok_or_else(|| TurbineError::ModuleError(format!("Invalid jump target: {}", target)))?
+                            .block;
+                        
+                        // Find the fallthrough block (next instruction)
+                        let fallthrough_pc = pc + 1;
+                        let true_block = cfg.blocks.get(&fallthrough_pc)
+                            .ok_or_else(|| TurbineError::ModuleError(format!("No fallthrough block at PC: {}", fallthrough_pc)))?
+                            .block;
+                        
+                        builder.ins().brif(is_false, false_block, &[], true_block, &[]);
+                        block_terminated = true;
+                    }
                 }
-                Instr::Pop => {
-                    stack.pop()?;
-                }
-                Instr::Return => {
+                
+                pc += 1;
+            }
+            
+            // Ensure this block has a proper terminator if not already terminated
+            if !block_terminated {
+                // If this block reaches the end of the function, add return
+                if basic_block.end_pc >= instructions.len() {
                     let zero = builder.ins().iconst(types::I32, 0);
                     builder.ins().return_(&[zero]);
-                    return Ok(created_blocks);
-                }
-                Instr::Jump(target) => {
-                    // Create a block for the jump target
-                    let target_block = builder.create_block();
-                    created_blocks.push(target_block);
-                    builder.ins().jump(target_block, &[]);
-                    
-                    // Switch to the target block and continue compilation from there
-                    builder.switch_to_block(target_block);
-                    
-                    // Compile remaining instructions starting from the target
-                    if *target < instructions.len() {
-                        let mut remaining_blocks = Self::compile_remaining_from_with_blocks(builder, stack, instructions, *target, vars_ptr)?;
-                        created_blocks.append(&mut remaining_blocks);
-                        return Ok(created_blocks);
+                } else {
+                    // Otherwise, add fallthrough jump to next block
+                    if let Some(next_block_start) = cfg.blocks.keys().find(|&&start| start >= basic_block.end_pc) {
+                        if let Some(next_basic_block) = cfg.blocks.get(next_block_start) {
+                            builder.ins().jump(next_basic_block.block, &[]);
+                        }
                     } else {
-                        // Jump past end - just return
-                        let zero = builder.ins().iconst(types::I32, 0);
-                        builder.ins().return_(&[zero]);
-                        return Ok(created_blocks);
-                    }
-                }
-                Instr::JumpIfFalse(target) => {
-                    let condition = stack.pop()?;
-                    let zero = builder.ins().f64const(0.0);
-                    let is_false = builder.ins().fcmp(FloatCC::Equal, condition, zero);
-                    
-                    // Create blocks for both branches
-                    let false_block = builder.create_block();
-                    let true_block = builder.create_block();
-                    created_blocks.push(false_block);
-                    created_blocks.push(true_block);
-                    
-                    // Conditional branch
-                    builder.ins().brif(is_false, false_block, &[], true_block, &[]);
-                    
-                    // Compile false branch
-                    builder.switch_to_block(false_block);
-                    if *target < instructions.len() {
-                        let mut false_blocks = Self::compile_remaining_from_with_blocks(builder, &mut stack.clone(), instructions, *target, vars_ptr)?;
-                        created_blocks.append(&mut false_blocks);
-                    } else {
+                        // No next block - must be end of function
                         let zero = builder.ins().iconst(types::I32, 0);
                         builder.ins().return_(&[zero]);
                     }
-                    
-                    // Compile true branch (fallthrough)
-                    builder.switch_to_block(true_block);
-                    // Continue with the next instruction after the current one
-                    // This will be handled by the loop continuation
                 }
             }
+            
+            processed_blocks.insert(start_pc);
         }
         
-        // If no explicit return, add one
-        let zero = builder.ins().iconst(types::I32, 0);
-        builder.ins().return_(&[zero]);
-        
-        Ok(created_blocks)
+        Ok(())
     }
     
+    #[allow(dead_code)]
     fn compile_remaining_from_with_blocks(
         builder: &mut FunctionBuilder,
         stack: &mut StackSimulator,

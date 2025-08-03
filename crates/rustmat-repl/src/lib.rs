@@ -1,6 +1,6 @@
 use rustmat_lexer::tokenize;
 use rustmat_parser::parse;
-use rustmat_hir::lower;
+use rustmat_hir::lower_with_context;
 use rustmat_ignition::compile;
 use rustmat_turbine::TurbineEngine;
 use rustmat_gc::{gc_configure, gc_stats, GcConfig};
@@ -46,7 +46,7 @@ pub struct ExecutionResult {
 impl ReplEngine {
     /// Create a new REPL engine
     pub fn new() -> Result<Self> {
-        Self::with_options(true, false)
+        Self::with_options(true, false) // JIT enabled, verbose disabled
     }
 
     /// Create a new REPL engine with specific options
@@ -92,8 +92,8 @@ impl ReplEngine {
             debug!("AST: {ast:?}");
         }
 
-        // Lower to HIR
-        let hir = lower(&ast).map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?;
+        // Lower to HIR with existing variable context
+        let (hir, updated_vars) = lower_with_context(&ast, &self.variable_names).map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?;
         if self.verbose {
             debug!("HIR generated successfully");
         }
@@ -108,19 +108,39 @@ impl ReplEngine {
         let mut result_value = None;
         let mut error = None;
 
-        // Try JIT compilation/execution first if available
-        if let Some(ref mut jit_engine) = self.jit_engine {
-            // Create a mutable variable array for JIT execution
-            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        // Check if this is an expression statement (ends with Pop)
+        let is_expression_stmt = bytecode.instructions.last()
+            .map(|instr| matches!(instr, rustmat_ignition::Instr::Pop))
+            .unwrap_or(false);
+        
+        // Use JIT for assignments, interpreter for expressions (to capture results properly)
+        if let Some(ref mut jit_engine) = &mut self.jit_engine {
+            if !is_expression_stmt {
+            // Ensure variable array is large enough
+            if self.variable_array.len() < bytecode.var_count {
+                self.variable_array.resize(bytecode.var_count, Value::Num(0.0));
+            }
             
-            match jit_engine.execute_or_compile(&bytecode, &mut vars) {
-                Ok(_) => {
-                    used_jit = true;
-                    self.stats.jit_compiled += 1;
-                    // Find the last non-zero result in vars as the result value
-                    result_value = vars.into_iter().rev().find(|v| !matches!(v, Value::Num(0.0)));
+            if self.verbose {
+                debug!("JIT path for assignment: variable_array size: {}, bytecode.var_count: {}", self.variable_array.len(), bytecode.var_count);
+            }
+            
+            // Use JIT for assignments
+            match jit_engine.execute_or_compile(&bytecode, &mut self.variable_array) {
+                Ok((_, actual_used_jit)) => {
+                    used_jit = actual_used_jit;
+                    if actual_used_jit {
+                        self.stats.jit_compiled += 1;
+                    } else {
+                        self.stats.interpreter_fallback += 1;
+                    }
+                    // For assignments, the result is typically the assigned value
+                    result_value = self.variable_array.iter().rev().find(|v| !matches!(v, Value::Num(0.0))).cloned();
+                    
                     if self.verbose {
-                        debug!("JIT execution successful");
+                        debug!("{} assignment successful, variable_array: {:?}", 
+                               if actual_used_jit { "JIT" } else { "Interpreter" }, 
+                               self.variable_array);
                     }
                 }
                 Err(e) => {
@@ -130,19 +150,25 @@ impl ReplEngine {
                     // Fall back to interpreter
                 }
             }
+            }
         }
 
         // Use interpreter if JIT failed or is disabled
         if !used_jit {
+            if self.verbose {
+                debug!("Interpreter path: variable_array size: {}, bytecode.var_count: {}", self.variable_array.len(), bytecode.var_count);
+            }
             match self.interpret_with_context(&bytecode) {
                 Ok(results) => {
-                    self.stats.interpreter_fallback += 1;
-                    result_value = results.into_iter().last();
-                    if self.verbose {
-                        debug!("Interpreter execution successful");
+                    // Only increment interpreter_fallback if JIT wasn't attempted
+                    if self.jit_engine.is_none() || is_expression_stmt {
+                        self.stats.interpreter_fallback += 1;
                     }
+                    result_value = results.into_iter().last();
+                    debug!("Interpreter execution successful, variable_array: {:?}", self.variable_array);
                 }
                 Err(e) => {
+                    debug!("Interpreter execution failed: {e}");
                     error = Some(format!("Execution failed: {e}"));
                 }
             }
@@ -154,6 +180,11 @@ impl ReplEngine {
         self.stats.total_execution_time_ms += execution_time_ms;
         self.stats.average_execution_time_ms = 
             self.stats.total_execution_time_ms as f64 / self.stats.total_executions as f64;
+
+        // Update variable names mapping if execution was successful
+        if error.is_none() {
+            self.variable_names = updated_vars;
+        }
 
         if self.verbose {
             debug!("Execution completed in {execution_time_ms}ms (JIT: {used_jit})");
@@ -199,8 +230,8 @@ impl ReplEngine {
         // Take ownership of the variable array temporarily to avoid borrowing issues
         let mut vars = std::mem::take(&mut self.variable_array);
         
-        // Use the existing interpreter
-        let result = Self::interpret_bytecode_static(bytecode, &mut vars)?;
+        // Use the existing interpreter with stack result capture
+        let (result, stack_result) = Self::interpret_bytecode_static(bytecode, &mut vars)?;
         
         // Restore the variable array
         self.variable_array = vars;
@@ -214,16 +245,30 @@ impl ReplEngine {
             }
         }
 
-        Ok(result)
+        // Prefer stack result over variable array result for expressions
+        let final_result = if let Some(stack_val) = stack_result {
+            vec![stack_val]
+        } else {
+            result
+        };
+        
+        Ok(final_result)
     }
 
     /// Internal static interpreter that accepts a mutable variable array
-    fn interpret_bytecode_static(bytecode: &rustmat_ignition::Bytecode, vars: &mut Vec<Value>) -> Result<Vec<Value>, String> {
+    fn interpret_bytecode_static(bytecode: &rustmat_ignition::Bytecode, vars: &mut Vec<Value>) -> Result<(Vec<Value>, Option<Value>), String> {
         use rustmat_ignition::Instr;
         use std::convert::TryInto;
 
         let mut stack: Vec<Value> = Vec::new();
         let mut pc: usize = 0;
+        
+        // Check if the last instruction is Pop (indicating an expression statement that should return a value in REPL)
+        let skip_final_pop = if let Some(last_instr) = bytecode.instructions.last() {
+            matches!(last_instr, Instr::Pop)
+        } else {
+            false
+        };
 
         while pc < bytecode.instructions.len() {
             match &bytecode.instructions[pc] {
@@ -329,13 +374,20 @@ impl ReplEngine {
                     pc = *target;
                     continue; // Skip the pc += 1 at the end
                 }
-                Instr::Pop => { stack.pop(); }
+                Instr::Pop => { 
+                    // Skip the final pop if it's the last instruction and we want to capture the expression result
+                    if !(skip_final_pop && pc == bytecode.instructions.len() - 1) {
+                        stack.pop(); 
+                    }
+                }
                 Instr::Return => break,
             }
             pc += 1;
         }
         
-        Ok(vars.clone())
+        // Return both variable array and stack top (if any) for expression results
+        let stack_result = stack.pop();
+        Ok((vars.clone(), stack_result))
     }
 
     /// Helper for binary operations
