@@ -34,7 +34,7 @@ jobs:
       - name: Test
         run: |
           set -o pipefail
-          cargo test --all-targets --all-features 2>&1 | tee test.log
+          cargo test --all-targets --all-features 2>&1 -- --test-threads=1 | tee test.log
 
       - name: Test Summary
         if: always() && github.event_name == 'pull_request'
