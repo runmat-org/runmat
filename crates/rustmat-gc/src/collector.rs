@@ -108,7 +108,7 @@ impl MarkSweepCollector {
     
     /// Mark an object and recursively mark all objects it references
     fn mark_object(&mut self, obj: GcPtr<Value>, max_generation: usize) -> Result<()> {
-        let ptr = unsafe { obj.as_raw() as *const Value } as *const u8;
+        let ptr = unsafe { obj.as_raw() } as *const u8;
         let ptr_addr = ptr as usize;
         
         // Skip if already marked

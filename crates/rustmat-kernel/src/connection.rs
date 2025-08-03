@@ -50,7 +50,7 @@ impl ConnectionInfo {
     /// Create connection info from a Jupyter connection file
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| KernelError::Connection(format!("Failed to read connection file: {}", e)))?;
+            .map_err(|e| KernelError::Connection(format!("Failed to read connection file: {e}")))?;
         
         Self::from_json(&content)
     }
@@ -58,20 +58,20 @@ impl ConnectionInfo {
     /// Parse connection info from JSON string
     pub fn from_json(json: &str) -> Result<Self> {
         serde_json::from_str(json)
-            .map_err(|e| KernelError::Connection(format!("Invalid connection JSON: {}", e)))
+            .map_err(|e| KernelError::Connection(format!("Invalid connection JSON: {e}")))
     }
 
     /// Serialize connection info to JSON
     pub fn to_json(&self) -> Result<String> {
         serde_json::to_string_pretty(self)
-            .map_err(|e| KernelError::Json(e))
+            .map_err(KernelError::Json)
     }
 
     /// Write connection info to a file
     pub fn write_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let json = self.to_json()?;
         std::fs::write(path, json)
-            .map_err(|e| KernelError::Connection(format!("Failed to write connection file: {}", e)))
+            .map_err(|e| KernelError::Connection(format!("Failed to write connection file: {e}")))
     }
 
     /// Generate a connection URL for a given socket type
@@ -129,7 +129,7 @@ impl ConnectionInfo {
 
         for (name, port) in ports {
             if port == 0 {
-                return Err(KernelError::Connection(format!("{} port must be assigned", name)));
+                return Err(KernelError::Connection(format!("{name} port must be assigned")));
             }
         }
 
@@ -143,9 +143,9 @@ impl ConnectionInfo {
         // Helper to find an available port
         fn find_available_port() -> Result<u16> {
             let listener = TcpListener::bind("127.0.0.1:0")
-                .map_err(|e| KernelError::Connection(format!("Failed to find available port: {}", e)))?;
+                .map_err(|e| KernelError::Connection(format!("Failed to find available port: {e}")))?;
             Ok(listener.local_addr()
-                .map_err(|e| KernelError::Connection(format!("Failed to get port: {}", e)))?
+                .map_err(|e| KernelError::Connection(format!("Failed to get port: {e}")))?
                 .port())
         }
 

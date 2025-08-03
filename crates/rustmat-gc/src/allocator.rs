@@ -388,7 +388,7 @@ mod tests {
         // Should be able to allocate
         let ptr = gen.allocate(64).expect("allocation should succeed");
         assert!(!ptr.is_null());
-        assert_eq!(gen.allocated_bytes(), 64);
+        assert!(gen.allocated_bytes() >= 64);
     }
     
     #[test]

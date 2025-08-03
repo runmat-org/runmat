@@ -8,3 +8,11 @@ rustmat-lexer = { workspace = true }
 rustmat-parser = { workspace = true }
 rustmat-hir = { workspace = true }
 rustmat-ignition = { workspace = true }
+rustmat-runtime = { workspace = true }
+rustmat-turbine = { workspace = true }
+rustmat-gc = { workspace = true }
+rustmat-builtins = { workspace = true }
+rustyline = "14.0"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"

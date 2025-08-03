@@ -4,6 +4,9 @@
 //! Turbine compiles hot bytecode sequences from Ignition into native machine code
 //! using Cranelift for maximum performance.
 
+// Allow raw pointer dereference in FFI functions - they're inherently unsafe
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, Linkage, Module};
@@ -18,10 +21,12 @@ use rustmat_gc::gc_allocate;
 pub mod compiler;
 pub mod profiler;
 pub mod cache;
+pub mod jit_memory;
 
 pub use compiler::*;
 pub use profiler::*;
 pub use cache::*;
+pub use jit_memory::*;
 
 // Runtime interface functions for JIT compiled code
 // These functions are called from JIT compiled code to interact with the Rust runtime
@@ -59,7 +64,7 @@ pub extern "C" fn rustmat_value_add(a_ptr: *const Value, b_ptr: *const Value) ->
             (Value::Num(x), Value::Int(y)) => Value::Num(x + (*y as f64)),
             (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) + y),
             _ => {
-                error!("Unsupported addition: {:?} + {:?}", a, b);
+                error!("Unsupported addition: {a:?} + {b:?}");
                 return std::ptr::null_mut();
             }
         };
@@ -88,7 +93,7 @@ pub extern "C" fn rustmat_value_sub(a_ptr: *const Value, b_ptr: *const Value) ->
             (Value::Num(x), Value::Int(y)) => Value::Num(x - (*y as f64)),
             (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) - y),
             _ => {
-                error!("Unsupported subtraction: {:?} - {:?}", a, b);
+                error!("Unsupported subtraction: {a:?} - {b:?}");
                 return std::ptr::null_mut();
             }
         };
@@ -117,7 +122,7 @@ pub extern "C" fn rustmat_value_mul(a_ptr: *const Value, b_ptr: *const Value) ->
             (Value::Num(x), Value::Int(y)) => Value::Num(x * (*y as f64)),
             (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) * y),
             _ => {
-                error!("Unsupported multiplication: {:?} * {:?}", a, b);
+                error!("Unsupported multiplication: {a:?} * {b:?}");
                 return std::ptr::null_mut();
             }
         };
@@ -170,7 +175,7 @@ pub extern "C" fn rustmat_value_div(a_ptr: *const Value, b_ptr: *const Value) ->
                 Value::Num((*x as f64) / y)
             },
             _ => {
-                error!("Unsupported division: {:?} / {:?}", a, b);
+                error!("Unsupported division: {a:?} / {b:?}");
                 return std::ptr::null_mut();
             }
         };
@@ -199,7 +204,7 @@ pub extern "C" fn rustmat_value_pow(a_ptr: *const Value, b_ptr: *const Value) ->
             (Value::Num(x), Value::Int(y)) => Value::Num(x.powf(*y as f64)),
             (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64).powf(*y)),
             _ => {
-                error!("Unsupported power: {:?} ^ {:?}", a, b);
+                error!("Unsupported power: {a:?} ^ {b:?}");
                 return std::ptr::null_mut();
             }
         };
@@ -225,7 +230,7 @@ pub extern "C" fn rustmat_value_neg(a_ptr: *const Value) -> *mut Value {
             Value::Num(x) => Value::Num(-x),
             Value::Int(x) => Value::Int(-x),
             _ => {
-                error!("Unsupported negation: -{:?}", a);
+                error!("Unsupported negation: -{a:?}");
                 return std::ptr::null_mut();
             }
         };
@@ -254,7 +259,7 @@ pub extern "C" fn rustmat_value_lt(a_ptr: *const Value, b_ptr: *const Value) -> 
             (Value::Num(x), Value::Int(y)) => Value::Num(if *x < (*y as f64) { 1.0 } else { 0.0 }),
             (Value::Int(x), Value::Num(y)) => Value::Num(if (*x as f64) < *y { 1.0 } else { 0.0 }),
             _ => {
-                error!("Unsupported comparison: {:?} < {:?}", a, b);
+                error!("Unsupported comparison: {a:?} < {b:?}");
                 return std::ptr::null_mut();
             }
         };
@@ -302,7 +307,7 @@ pub extern "C" fn rustmat_call_builtin(name_ptr: *const u8, name_len: usize, arg
                 Err(_) => std::ptr::null_mut(),
             },
             Err(e) => {
-                error!("Builtin call failed: {}", e);
+                error!("Builtin call failed: {e}");
                 std::ptr::null_mut()
             }
         }
@@ -313,7 +318,7 @@ pub extern "C" fn rustmat_call_builtin(name_ptr: *const u8, name_len: usize, arg
 #[no_mangle]
 pub extern "C" fn rustmat_load_var(vars_ptr: *mut Value, vars_len: usize, index: usize) -> *mut Value {
     if vars_ptr.is_null() || index >= vars_len {
-        error!("Invalid variable access: index {} >= length {}", index, vars_len);
+        error!("Invalid variable access: index {index} >= length {vars_len}");
         return std::ptr::null_mut();
     }
     
@@ -331,7 +336,7 @@ pub extern "C" fn rustmat_load_var(vars_ptr: *mut Value, vars_len: usize, index:
 #[no_mangle]
 pub extern "C" fn rustmat_store_var(vars_ptr: *mut Value, vars_len: usize, index: usize, value_ptr: *const Value) -> i32 {
     if vars_ptr.is_null() || value_ptr.is_null() || index >= vars_len {
-        error!("Invalid variable store: index {} >= length {}", index, vars_len);
+        error!("Invalid variable store: index {index} >= length {vars_len}");
         return -1; // Error
     }
     

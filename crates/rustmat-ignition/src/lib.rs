@@ -61,8 +61,8 @@ impl InterpretContext {
         let stack_root = Box::new(unsafe { StackRoot::new(stack as *const Vec<Value>, "interpreter_stack".to_string()) });
         let vars_root = Box::new(unsafe { VariableArrayRoot::new(vars as *const Vec<Value>, "interpreter_vars".to_string()) });
         
-        let stack_root_id = gc_register_root(stack_root).map_err(|e| format!("Failed to register stack root: {:?}", e))?;
-        let vars_root_id = gc_register_root(vars_root).map_err(|e| format!("Failed to register vars root: {:?}", e))?;
+        let stack_root_id = gc_register_root(stack_root).map_err(|e| format!("Failed to register stack root: {e:?}"))?;
+        let vars_root_id = gc_register_root(vars_root).map_err(|e| format!("Failed to register vars root: {e:?}"))?;
         
         Ok(InterpretContext {
             stack_root_id: Some(stack_root_id),

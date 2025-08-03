@@ -108,14 +108,14 @@ impl KernelServer {
         log::info!("Stopping kernel server");
         
         // Send shutdown signal
-        if let Err(_) = self.shutdown_tx.send(()).await {
+        if (self.shutdown_tx.send(()).await).is_err() {
             log::warn!("Failed to send shutdown signal");
         }
         
         // Wait for all tasks to complete
         for task in self.tasks.drain(..) {
             if let Err(e) = task.await {
-                log::error!("Task failed during shutdown: {:?}", e);
+                log::error!("Task failed during shutdown: {e:?}");
             }
         }
         

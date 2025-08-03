@@ -15,10 +15,13 @@ cranelift-native = { workspace = true }
 target-lexicon = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
+libm = "0.2"
 rustmat-ignition = { workspace = true }
 rustmat-builtins = { workspace = true }
 rustmat-runtime = { workspace = true }
 rustmat-gc = { workspace = true }
 
 [dev-dependencies]
-env_logger = { workspace = true } 
+env_logger = { workspace = true }
+rustmat-parser = { workspace = true }
+rustmat-hir = { workspace = true } 

@@ -62,9 +62,10 @@ fn repl_binary_processes_single_line() -> Result<(), Box<dyn std::error::Error>>
     child.stdin.as_mut().unwrap().write_all(b"x=1\n")?;
     let output = child.wait_with_output()?;
     assert!(output.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
-        "> Ident Assign Integer\n> "
-    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should contain REPL banner and show result of x=1 execution
+    assert!(stdout.contains("RustMat REPL"));
+    assert!(stdout.contains("rustmat>"));
+    assert!(stdout.contains("ans = Num(1.0)")); // Result of x=1
     Ok(())
 }

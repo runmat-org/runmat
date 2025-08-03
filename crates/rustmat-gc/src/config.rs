@@ -101,10 +101,11 @@ impl GcConfig {
     /// Create a configuration optimized for high throughput
     pub fn high_throughput() -> Self {
         Self {
-            young_generation_size: 8 * 1024 * 1024, // 8MB
+            young_generation_size: 64 * 1024 * 1024, // 64MB for high throughput
             minor_gc_threshold: 0.9, // Collect less frequently
             major_gc_threshold: 0.95,
             promotion_threshold: 3, // Keep objects young longer
+            parallel_collection: true, // Use parallel collection for throughput
             target_utilization: 0.8, // Allow higher heap usage
             heap_growth_factor: 2.0, // Grow heap more aggressively
             ..Default::default()
@@ -161,6 +162,10 @@ impl GcConfig {
         
         if self.promotion_threshold == 0 {
             return Err("Promotion threshold must be > 0".to_string());
+        }
+        
+        if self.max_gc_threads == 0 {
+            return Err("Must have at least 1 GC thread".to_string());
         }
         
         if !(0.0..=1.0).contains(&self.target_utilization) {

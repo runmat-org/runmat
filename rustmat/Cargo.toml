@@ -26,8 +26,15 @@ anyhow = { workspace = true }
 uuid = { workspace = true }
 
 # RustMat crates
-rustmat-kernel = { workspace = true }
-rustmat-repl = { workspace = true }
-rustmat-parser = { workspace = true }
-rustmat-hir = { workspace = true }
-rustmat-ignition = { workspace = true } 
+rustmat-kernel = { path = "../crates/rustmat-kernel" }
+rustmat-repl = { path = "../crates/rustmat-repl" }
+rustmat-parser = { path = "../crates/rustmat-parser" }
+rustmat-hir = { path = "../crates/rustmat-hir" }
+rustmat-ignition = { path = "../crates/rustmat-ignition" }
+rustmat-runtime = { path = "../crates/rustmat-runtime" }
+rustmat-turbine = { path = "../crates/rustmat-turbine" }
+rustmat-gc = { path = "../crates/rustmat-gc" }
+rustmat-builtins = { path = "../crates/rustmat-builtins" }
+
+[dev-dependencies]
+tempfile = "3.12" 

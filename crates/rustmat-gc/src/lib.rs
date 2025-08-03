@@ -60,6 +60,9 @@ pub enum GcError {
 
 pub type Result<T> = std::result::Result<T, GcError>;
 
+/// Type alias to simplify complex generational map type
+type GenerationMap = Arc<RwLock<HashMap<usize, Arc<GcObject>>>>;
+
 /// Handle to a GC-managed object (safer than raw pointers)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GcHandle(usize);
@@ -129,7 +132,7 @@ pub struct HighPerformanceGC {
     objects: Arc<RwLock<HashMap<usize, Arc<GcObject>>>>,
     
     /// Objects by generation for efficient collection
-    generations: Vec<Arc<RwLock<HashMap<usize, Arc<GcObject>>>>>,
+    generations: Vec<GenerationMap>,
     
     /// Root set - handles to live objects
     roots: Arc<RwLock<HashMap<GcHandle, ()>>>,
@@ -234,9 +237,9 @@ impl HighPerformanceGC {
     
     /// Perform minor collection (young generation)
     pub fn collect_minor(&self) -> Result<usize> {
-        if !self.collection_in_progress.compare_exchange(
+        if self.collection_in_progress.compare_exchange(
             false, true, Ordering::AcqRel, Ordering::Relaxed
-        ).is_ok() {
+        ).is_err() {
             return Ok(0);
         }
         
@@ -290,8 +293,7 @@ impl HighPerformanceGC {
         
         self.collection_in_progress.store(false, Ordering::Release);
         
-        log::info!("Minor GC: marked {} objects, collected {} objects in {:?}", 
-                  marked_count, collected_count, duration);
+        log::info!("Minor GC: marked {marked_count} objects, collected {collected_count} objects in {duration:?}");
         
         Ok(collected_count)
     }
@@ -338,9 +340,9 @@ impl HighPerformanceGC {
     
     /// Perform major collection (all generations)
     pub fn collect_major(&self) -> Result<usize> {
-        if !self.collection_in_progress.compare_exchange(
+        if self.collection_in_progress.compare_exchange(
             false, true, Ordering::AcqRel, Ordering::Relaxed
-        ).is_ok() {
+        ).is_err() {
             return Ok(0);
         }
         
@@ -396,8 +398,7 @@ impl HighPerformanceGC {
         
         self.collection_in_progress.store(false, Ordering::Release);
         
-        log::info!("Major GC: marked {} objects, collected {} objects in {:?}", 
-                  marked_count, collected_count, duration);
+        log::info!("Major GC: marked {marked_count} objects, collected {collected_count} objects in {duration:?}");
         
         Ok(collected_count)
     }
