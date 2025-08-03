@@ -17,7 +17,7 @@ impl HotspotProfiler {
     pub fn new() -> Self {
         Self::with_threshold(10) // Functions become "hot" after 10 executions
     }
-    
+
     /// Create a profiler with custom hot threshold
     pub fn with_threshold(hot_threshold: u32) -> Self {
         Self {
@@ -26,13 +26,13 @@ impl HotspotProfiler {
             hot_threshold,
         }
     }
-    
+
     /// Record an execution of bytecode
     pub fn record_execution(&mut self, bytecode_hash: u64) {
         *self.execution_counts.entry(bytecode_hash).or_insert(0) += 1;
         self.total_executions += 1;
     }
-    
+
     /// Check if a bytecode sequence is hot enough to compile
     pub fn is_hot(&self, bytecode_hash: u64) -> bool {
         self.execution_counts
@@ -40,7 +40,7 @@ impl HotspotProfiler {
             .map(|&count| count >= self.hot_threshold)
             .unwrap_or(false)
     }
-    
+
     /// Get the execution count for a bytecode sequence
     pub fn get_hotness(&self, bytecode_hash: u64) -> u32 {
         self.execution_counts
@@ -48,35 +48,39 @@ impl HotspotProfiler {
             .copied()
             .unwrap_or(0)
     }
-    
+
     /// Get total number of executions tracked
     pub fn total_executions(&self) -> u64 {
         self.total_executions
     }
-    
+
     /// Get the hottest functions (most frequently executed)
     pub fn get_hottest_functions(&self, limit: usize) -> Vec<(u64, u32)> {
-        let mut functions: Vec<_> = self.execution_counts.iter()
+        let mut functions: Vec<_> = self
+            .execution_counts
+            .iter()
             .map(|(&hash, &count)| (hash, count))
             .collect();
-        
+
         functions.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by count descending
         functions.truncate(limit);
         functions
     }
-    
+
     /// Reset profiling data
     pub fn reset(&mut self) {
         self.execution_counts.clear();
         self.total_executions = 0;
     }
-    
+
     /// Get profiling statistics
     pub fn stats(&self) -> ProfilerStats {
-        let hot_functions = self.execution_counts.iter()
+        let hot_functions = self
+            .execution_counts
+            .iter()
             .filter(|(_, &count)| count >= self.hot_threshold)
             .count();
-        
+
         ProfilerStats {
             total_functions: self.execution_counts.len(),
             hot_functions,
@@ -99,4 +103,4 @@ pub struct ProfilerStats {
     pub hot_functions: usize,
     pub total_executions: u64,
     pub hot_threshold: u32,
-} 
+}

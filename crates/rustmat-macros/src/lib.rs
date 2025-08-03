@@ -1,6 +1,8 @@
 use proc_macro::TokenStream;
-use quote::{quote, format_ident};
-use syn::{parse_macro_input, AttributeArgs, ItemFn, Lit, Meta, MetaNameValue, NestedMeta, FnArg, Pat};
+use quote::{format_ident, quote};
+use syn::{
+    parse_macro_input, AttributeArgs, FnArg, ItemFn, Lit, Meta, MetaNameValue, NestedMeta, Pat,
+};
 
 /// Attribute used to mark functions as implementing a runtime builtin.
 ///
@@ -14,7 +16,7 @@ use syn::{parse_macro_input, AttributeArgs, ItemFn, Lit, Meta, MetaNameValue, Ne
 /// }
 /// ```
 ///
-/// This registers the function with the `rustmat-builtins` inventory 
+/// This registers the function with the `rustmat-builtins` inventory
 /// so the runtime can discover it at start-up.
 #[proc_macro_attribute]
 pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -39,7 +41,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let func: ItemFn = parse_macro_input!(input as ItemFn);
     let ident = &func.sig.ident;
-    
+
     // Extract param idents and types
     let mut param_idents = Vec::new();
     let mut param_types = Vec::new();

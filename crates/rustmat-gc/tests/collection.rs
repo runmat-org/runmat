@@ -57,8 +57,8 @@ fn test_collection_with_live_objects() {
 
         // Allocate some objects without keeping references (potential garbage)
         for i in 0..10 {
-            let _ptr = gc_allocate(Value::String(format!("temp_{i}")))
-                .expect("allocation should succeed");
+            let _ptr =
+                gc_allocate(Value::String(format!("temp_{i}"))).expect("allocation should succeed");
             // These objects become garbage when _ptr goes out of scope
         }
 

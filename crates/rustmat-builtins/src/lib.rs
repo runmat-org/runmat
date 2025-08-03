@@ -1,5 +1,5 @@
-use std::convert::TryFrom;
 pub use inventory;
+use std::convert::TryFrom;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -21,11 +21,16 @@ pub struct Matrix {
 impl Matrix {
     pub fn new(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
         if data.len() != rows * cols {
-            return Err(format!("Matrix data length {} doesn't match dimensions {}x{}", data.len(), rows, cols));
+            return Err(format!(
+                "Matrix data length {} doesn't match dimensions {}x{}",
+                data.len(),
+                rows,
+                cols
+            ));
         }
         Ok(Matrix { data, rows, cols })
     }
-    
+
     pub fn zeros(rows: usize, cols: usize) -> Self {
         Matrix {
             data: vec![0.0; rows * cols],
@@ -33,7 +38,7 @@ impl Matrix {
             cols,
         }
     }
-    
+
     pub fn ones(rows: usize, cols: usize) -> Self {
         Matrix {
             data: vec![1.0; rows * cols],
@@ -41,17 +46,23 @@ impl Matrix {
             cols,
         }
     }
-    
+
     pub fn get(&self, row: usize, col: usize) -> Result<f64, String> {
         if row >= self.rows || col >= self.cols {
-            return Err(format!("Index ({}, {}) out of bounds for {}x{} matrix", row, col, self.rows, self.cols));
+            return Err(format!(
+                "Index ({}, {}) out of bounds for {}x{} matrix",
+                row, col, self.rows, self.cols
+            ));
         }
         Ok(self.data[row * self.cols + col])
     }
-    
+
     pub fn set(&mut self, row: usize, col: usize, value: f64) -> Result<(), String> {
         if row >= self.rows || col >= self.cols {
-            return Err(format!("Index ({}, {}) out of bounds for {}x{} matrix", row, col, self.rows, self.cols));
+            return Err(format!(
+                "Index ({}, {}) out of bounds for {}x{} matrix",
+                row, col, self.rows, self.cols
+            ));
         }
         self.data[row * self.cols + col] = value;
         Ok(())

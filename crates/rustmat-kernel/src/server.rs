@@ -1,18 +1,17 @@
 //! Jupyter kernel server implementation
-//! 
+//!
 //! Manages ZMQ sockets and handles the complete Jupyter messaging protocol
 //! with async execution and proper error handling.
 
-use tokio::sync::{broadcast, mpsc};
-use std::sync::Arc;
-use tokio::task::JoinHandle;
 use crate::{
-    KernelConfig, KernelInfo, ConnectionInfo, ExecutionEngine,
-    protocol::{JupyterMessage, MessageType, ExecuteRequest, ExecuteReply, ExecutionState},
-    execution::{ExecutionStatus, ExecutionStats},
-    Result,
+    execution::{ExecutionStats, ExecutionStatus},
+    protocol::{ExecuteReply, ExecuteRequest, ExecutionState, JupyterMessage, MessageType},
+    ConnectionInfo, ExecutionEngine, KernelConfig, KernelInfo, Result,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc};
+use tokio::task::JoinHandle;
 
 /// Main kernel server managing all communication channels
 pub struct KernelServer {
@@ -42,7 +41,7 @@ impl KernelServer {
         let engine = Arc::new(tokio::sync::Mutex::new(ExecutionEngine::new()));
         let (status_tx, _) = broadcast::channel(16);
         let (shutdown_tx, _) = mpsc::channel(1);
-        
+
         Self {
             config,
             engine,
@@ -55,35 +54,37 @@ impl KernelServer {
     /// Start the kernel server
     pub async fn start(&mut self) -> Result<()> {
         log::info!("Starting RustMat kernel server");
-        
+
         // Validate connection info
         self.config.connection.validate()?;
-        
+
         // Create ZMQ context
         let ctx = zmq::Context::new();
-        
+
         // Create and bind sockets
         let shell_socket = ctx.socket(zmq::ROUTER)?;
         shell_socket.bind(&self.config.connection.shell_url())?;
-        
+
         let iopub_socket = ctx.socket(zmq::PUB)?;
         iopub_socket.bind(&self.config.connection.iopub_url())?;
-        
+
         let stdin_socket = ctx.socket(zmq::ROUTER)?;
         stdin_socket.bind(&self.config.connection.stdin_url())?;
-        
+
         let control_socket = ctx.socket(zmq::ROUTER)?;
         control_socket.bind(&self.config.connection.control_url())?;
-        
+
         let heartbeat_socket = ctx.socket(zmq::REP)?;
         heartbeat_socket.bind(&self.config.connection.heartbeat_url())?;
-        
-        log::info!("Kernel bound to ports: shell={}, iopub={}, stdin={}, control={}, hb={}", 
-                  self.config.connection.shell_port,
-                  self.config.connection.iopub_port,
-                  self.config.connection.stdin_port,
-                  self.config.connection.control_port,
-                  self.config.connection.hb_port);
+
+        log::info!(
+            "Kernel bound to ports: shell={}, iopub={}, stdin={}, control={}, hb={}",
+            self.config.connection.shell_port,
+            self.config.connection.iopub_port,
+            self.config.connection.stdin_port,
+            self.config.connection.control_port,
+            self.config.connection.hb_port
+        );
 
         // Create message router
         let _router = Arc::new(MessageRouter {
@@ -97,28 +98,28 @@ impl KernelServer {
 
         // Kernel is now idle and ready
         let _ = self.status_tx.send(ExecutionState::Idle);
-        
+
         log::info!("RustMat kernel is ready for connections");
-        
+
         Ok(())
     }
 
     /// Stop the kernel server
     pub async fn stop(&mut self) -> Result<()> {
         log::info!("Stopping kernel server");
-        
+
         // Send shutdown signal
         if (self.shutdown_tx.send(()).await).is_err() {
             log::warn!("Failed to send shutdown signal");
         }
-        
+
         // Wait for all tasks to complete
         for task in self.tasks.drain(..) {
             if let Err(e) = task.await {
                 log::error!("Task failed during shutdown: {e:?}");
             }
         }
-        
+
         log::info!("Kernel server stopped");
         Ok(())
     }
@@ -145,18 +146,10 @@ impl MessageRouter {
     /// Route an incoming message to the appropriate handler
     async fn route_message(&self, msg: &JupyterMessage) -> Result<Option<JupyterMessage>> {
         match msg.header.msg_type {
-            MessageType::KernelInfoRequest => {
-                Ok(Some(self.handle_kernel_info_request(msg).await?))
-            }
-            MessageType::ExecuteRequest => {
-                Ok(Some(self.handle_execute_request(msg).await?))
-            }
-            MessageType::ShutdownRequest => {
-                Ok(Some(self.handle_shutdown_request(msg).await?))
-            }
-            MessageType::InterruptRequest => {
-                Ok(Some(self.handle_interrupt_request(msg).await?))
-            }
+            MessageType::KernelInfoRequest => Ok(Some(self.handle_kernel_info_request(msg).await?)),
+            MessageType::ExecuteRequest => Ok(Some(self.handle_execute_request(msg).await?)),
+            MessageType::ShutdownRequest => Ok(Some(self.handle_shutdown_request(msg).await?)),
+            MessageType::InterruptRequest => Ok(Some(self.handle_interrupt_request(msg).await?)),
             _ => {
                 log::warn!("Unhandled message type: {:?}", msg.header.msg_type);
                 Ok(None)
@@ -168,21 +161,25 @@ impl MessageRouter {
     async fn handle_kernel_info_request(&self, msg: &JupyterMessage) -> Result<JupyterMessage> {
         let kernel_info = KernelInfo::default();
         let content = serde_json::to_value(&kernel_info)?;
-        Ok(JupyterMessage::reply(msg, MessageType::KernelInfoReply, content))
+        Ok(JupyterMessage::reply(
+            msg,
+            MessageType::KernelInfoReply,
+            content,
+        ))
     }
 
     /// Handle execute request
     async fn handle_execute_request(&self, msg: &JupyterMessage) -> Result<JupyterMessage> {
         // Parse execute request
         let execute_req: ExecuteRequest = serde_json::from_value(msg.content.clone())?;
-        
+
         // Update status to busy
         let _ = self.status_tx.send(ExecutionState::Busy);
-        
+
         // Execute the code
         let mut engine = self.engine.lock().await;
         let exec_result = engine.execute(&execute_req.code)?;
-        
+
         // Create execute reply
         let status = match exec_result.status {
             ExecutionStatus::Success => crate::protocol::ExecutionStatus::Ok,
@@ -202,7 +199,11 @@ impl MessageRouter {
         let _ = self.status_tx.send(ExecutionState::Idle);
 
         let content = serde_json::to_value(&reply)?;
-        Ok(JupyterMessage::reply(msg, MessageType::ExecuteReply, content))
+        Ok(JupyterMessage::reply(
+            msg,
+            MessageType::ExecuteReply,
+            content,
+        ))
     }
 
     /// Handle shutdown request
@@ -210,7 +211,11 @@ impl MessageRouter {
         let shutdown_reply = serde_json::json!({
             "restart": false
         });
-        Ok(JupyterMessage::reply(msg, MessageType::ShutdownReply, shutdown_reply))
+        Ok(JupyterMessage::reply(
+            msg,
+            MessageType::ShutdownReply,
+            shutdown_reply,
+        ))
     }
 
     /// Handle interrupt request
@@ -218,7 +223,11 @@ impl MessageRouter {
         let interrupt_reply = serde_json::json!({
             "status": "ok"
         });
-        Ok(JupyterMessage::reply(msg, MessageType::InterruptReply, interrupt_reply))
+        Ok(JupyterMessage::reply(
+            msg,
+            MessageType::InterruptReply,
+            interrupt_reply,
+        ))
     }
 }
 
@@ -237,7 +246,7 @@ mod tests {
     async fn test_message_router_kernel_info() {
         let engine = Arc::new(tokio::sync::Mutex::new(ExecutionEngine::new()));
         let (status_tx, _) = broadcast::channel(16);
-        
+
         let router = MessageRouter {
             engine,
             session_id: "test".to_string(),
@@ -259,7 +268,7 @@ mod tests {
     async fn test_message_router_execute() {
         let engine = Arc::new(tokio::sync::Mutex::new(ExecutionEngine::new()));
         let (status_tx, _) = broadcast::channel(16);
-        
+
         let router = MessageRouter {
             engine,
             session_id: "test".to_string(),
@@ -280,7 +289,7 @@ mod tests {
 
         let reply = router.handle_execute_request(&request).await.unwrap();
         assert_eq!(reply.header.msg_type, MessageType::ExecuteReply);
-        
+
         let reply_content: ExecuteReply = serde_json::from_value(reply.content).unwrap();
         assert_eq!(reply_content.execution_count, 1);
     }
@@ -292,4 +301,4 @@ mod tests {
         assert_eq!(info.language_info.name, "matlab");
         assert_eq!(info.protocol_version, "5.3");
     }
-} 
+}

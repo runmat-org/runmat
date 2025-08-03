@@ -1,7 +1,7 @@
 use rustmat_kernel::{
-    KernelConfig, KernelServer, ConnectionInfo, ExecutionEngine,
-    protocol::{JupyterMessage, MessageType, ExecuteRequest},
     execution::ExecutionStatus,
+    protocol::{ExecuteRequest, JupyterMessage, MessageType},
+    ConnectionInfo, ExecutionEngine, KernelConfig, KernelServer,
 };
 use serde_json;
 use std::collections::HashMap;
@@ -11,11 +11,11 @@ use tempfile::NamedTempFile;
 fn test_connection_info_roundtrip() {
     let mut conn = ConnectionInfo::default();
     conn.assign_ports().unwrap();
-    
+
     // Test file I/O
     let temp_file = NamedTempFile::new().unwrap();
     conn.write_to_file(temp_file.path()).unwrap();
-    
+
     let loaded = ConnectionInfo::from_file(temp_file.path()).unwrap();
     assert_eq!(conn.key, loaded.key);
     assert_eq!(conn.shell_port, loaded.shell_port);
@@ -39,7 +39,7 @@ fn test_jupyter_message_protocol() {
     // Test message serialization
     let json = message.to_json().unwrap();
     let parsed = JupyterMessage::from_json(&json).unwrap();
-    
+
     assert_eq!(message.header.msg_type, parsed.header.msg_type);
     assert_eq!(message.header.session, parsed.header.session);
     assert_eq!(message.content, parsed.content);
@@ -48,17 +48,17 @@ fn test_jupyter_message_protocol() {
 #[test]
 fn test_execution_engine_integration() {
     let mut engine = ExecutionEngine::new();
-    
+
     // Test successful execution
     let result = engine.execute("a = 1; b = 2; c = a + b").unwrap();
     assert_eq!(result.status, ExecutionStatus::Success);
     assert_eq!(engine.execution_count(), 1);
-    
+
     // Test parse error
     let result = engine.execute("invalid syntax here").unwrap();
     assert_eq!(result.status, ExecutionStatus::Error);
     assert_eq!(engine.execution_count(), 2);
-    
+
     // Test runtime error
     let result = engine.execute("x = unknown_variable").unwrap();
     assert_eq!(result.status, ExecutionStatus::Error);
@@ -69,10 +69,10 @@ fn test_execution_engine_integration() {
 fn test_kernel_server_lifecycle() {
     let mut config = KernelConfig::default();
     config.connection.assign_ports().unwrap();
-    
+
     let server = KernelServer::new(config);
     let kernel_info = server.kernel_info();
-    
+
     assert_eq!(kernel_info.implementation, "rustmat");
     assert_eq!(kernel_info.language_info.name, "matlab");
     assert_eq!(kernel_info.protocol_version, "5.3");
@@ -81,21 +81,26 @@ fn test_kernel_server_lifecycle() {
 #[tokio::test]
 async fn test_execution_engine_async() {
     let mut engine = ExecutionEngine::new();
-    
+
     // Test multiple sequential executions (each independent for now)
     let codes = vec![
         "x = 1",
-        "y = 2", 
-        "z = 1 + 2",  // Use literal values since x,y don't persist
-        "result = 3 * 2",  // Use literal values
+        "y = 2",
+        "z = 1 + 2",      // Use literal values since x,y don't persist
+        "result = 3 * 2", // Use literal values
     ];
-    
+
     for (i, code) in codes.iter().enumerate() {
         let result = engine.execute(code).unwrap();
-        assert_eq!(result.status, ExecutionStatus::Success, "Failed for code: {}", code);
+        assert_eq!(
+            result.status,
+            ExecutionStatus::Success,
+            "Failed for code: {}",
+            code
+        );
         assert_eq!(engine.execution_count(), (i + 1) as u64);
     }
-    
+
     let stats = engine.stats();
     assert_eq!(stats.execution_count, 4);
     assert!(stats.timeout_seconds.is_some());
@@ -104,7 +109,7 @@ async fn test_execution_engine_async() {
 #[test]
 fn test_matlab_syntax_execution() {
     let mut engine = ExecutionEngine::new();
-    
+
     // Test syntax that currently works with the interpreter
     let test_cases = vec![
         ("x = 1", ExecutionStatus::Success),
@@ -113,10 +118,13 @@ fn test_matlab_syntax_execution() {
         ("a = 2 - 1", ExecutionStatus::Success),
         ("b = 8 / 4", ExecutionStatus::Success),
         // Control flow using arithmetic conditions (like the interpreter tests)
-        ("if 1-1; result = 0; else; result = 1; end", ExecutionStatus::Success),
+        (
+            "if 1-1; result = 0; else; result = 1; end",
+            ExecutionStatus::Success,
+        ),
         ("for i = 1:3; sum = i; end", ExecutionStatus::Success),
     ];
-    
+
     for (code, expected_status) in test_cases {
         let result = engine.execute(code).unwrap();
         assert_eq!(result.status, expected_status, "Failed for code: {}", code);
@@ -126,31 +134,35 @@ fn test_matlab_syntax_execution() {
 #[test]
 fn test_unsupported_syntax_errors() {
     let mut engine = ExecutionEngine::new();
-    
+
     // Test syntax that should currently fail (as expected)
     let test_cases = vec![
-        ("if x > 0; y = 1; end", ExecutionStatus::Error),  // Greater than not implemented yet
+        ("if x > 0; y = 1; end", ExecutionStatus::Error), // Greater than not implemented yet
         ("result = matrix(1)", ExecutionStatus::Error),   // Indexing not supported yet
-        ("x = 1:2:5", ExecutionStatus::Error),           // Range with step not supported
+        ("x = 1:2:5", ExecutionStatus::Error),            // Range with step not supported
     ];
-    
+
     for (code, expected_status) in test_cases {
         let result = engine.execute(code).unwrap();
-        assert_eq!(result.status, expected_status, "Failed for code: {} (should have failed)", code);
+        assert_eq!(
+            result.status, expected_status,
+            "Failed for code: {} (should have failed)",
+            code
+        );
     }
 }
 
 #[test]
 fn test_matrix_syntax_support() {
     let mut engine = ExecutionEngine::new();
-    
+
     // Test that matrix syntax is properly supported
     let test_cases = vec![
         ("matrix = [1, 2, 3]", ExecutionStatus::Success),
-        ("zeros_mat = [0, 0]", ExecutionStatus::Success), 
+        ("zeros_mat = [0, 0]", ExecutionStatus::Success),
         ("single = [42]", ExecutionStatus::Success),
     ];
-    
+
     for (code, expected_status) in test_cases {
         let result = engine.execute(code).unwrap();
         assert_eq!(result.status, expected_status, "Failed for code: {}", code);
@@ -160,17 +172,17 @@ fn test_matrix_syntax_support() {
 #[test]
 fn test_error_handling_details() {
     let mut engine = ExecutionEngine::new();
-    
+
     // Test parse error details
     let result = engine.execute("x = 1 +").unwrap();
     assert_eq!(result.status, ExecutionStatus::Error);
     assert!(result.error.is_some());
-    
+
     let error = result.error.unwrap();
     assert_eq!(error.error_type, "ParseError");
     assert!(!error.message.is_empty());
     assert!(!error.traceback.is_empty());
-    
+
     // Test undefined variable error
     let result = engine.execute("y = undefined_var").unwrap();
     assert_eq!(result.status, ExecutionStatus::Error);
@@ -180,18 +192,18 @@ fn test_error_handling_details() {
 #[test]
 fn test_connection_validation() {
     let mut conn = ConnectionInfo::default();
-    
+
     // Should fail with unassigned ports
     assert!(conn.validate().is_err());
-    
+
     // Should pass after port assignment
     conn.assign_ports().unwrap();
     conn.validate().unwrap();
-    
+
     // Should fail with empty key
     conn.key.clear();
     assert!(conn.validate().is_err());
-    
+
     // Should fail with empty IP
     conn.key = "test-key".to_string();
     conn.ip.clear();
@@ -201,7 +213,7 @@ fn test_connection_validation() {
 #[test]
 fn test_kernel_config_defaults() {
     let config = KernelConfig::default();
-    
+
     assert_eq!(config.connection.ip, "127.0.0.1");
     assert_eq!(config.connection.transport, "tcp");
     assert_eq!(config.connection.signature_scheme, "hmac-sha256");
@@ -209,4 +221,4 @@ fn test_kernel_config_defaults() {
     assert!(!config.debug);
     assert!(config.execution_timeout.is_some());
     assert_eq!(config.execution_timeout.unwrap(), 300);
-} 
+}

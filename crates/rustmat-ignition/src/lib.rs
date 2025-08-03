@@ -1,7 +1,7 @@
 use rustmat_builtins::Value;
+use rustmat_gc::{gc_register_root, gc_unregister_root, RootId, StackRoot, VariableArrayRoot};
+use rustmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
 use rustmat_runtime::call_builtin;
-use rustmat_hir::{HirProgram, HirStmt, HirExpr, HirExprKind};
-use rustmat_gc::{gc_register_root, gc_unregister_root, StackRoot, VariableArrayRoot, RootId};
 use std::convert::TryInto;
 
 #[derive(Debug, Clone)]
@@ -58,12 +58,18 @@ struct InterpretContext {
 
 impl InterpretContext {
     fn new(stack: &Vec<Value>, vars: &Vec<Value>) -> Result<Self, String> {
-        let stack_root = Box::new(unsafe { StackRoot::new(stack as *const Vec<Value>, "interpreter_stack".to_string()) });
-        let vars_root = Box::new(unsafe { VariableArrayRoot::new(vars as *const Vec<Value>, "interpreter_vars".to_string()) });
-        
-        let stack_root_id = gc_register_root(stack_root).map_err(|e| format!("Failed to register stack root: {e:?}"))?;
-        let vars_root_id = gc_register_root(vars_root).map_err(|e| format!("Failed to register vars root: {e:?}"))?;
-        
+        let stack_root = Box::new(unsafe {
+            StackRoot::new(stack as *const Vec<Value>, "interpreter_stack".to_string())
+        });
+        let vars_root = Box::new(unsafe {
+            VariableArrayRoot::new(vars as *const Vec<Value>, "interpreter_vars".to_string())
+        });
+
+        let stack_root_id = gc_register_root(stack_root)
+            .map_err(|e| format!("Failed to register stack root: {e:?}"))?;
+        let vars_root_id = gc_register_root(vars_root)
+            .map_err(|e| format!("Failed to register vars root: {e:?}"))?;
+
         Ok(InterpretContext {
             stack_root_id: Some(stack_root_id),
             vars_root_id: Some(vars_root_id),
@@ -385,14 +391,14 @@ impl Compiler {
             HirExprKind::Matrix(matrix_data) => {
                 let rows = matrix_data.len();
                 let cols = if rows > 0 { matrix_data[0].len() } else { 0 };
-                
+
                 // Compile all matrix elements onto the stack in row-major order
                 for row in matrix_data {
                     for element in row {
                         self.compile_expr(element)?;
                     }
                 }
-                
+
                 self.emit(Instr::CreateMatrix(rows, cols));
             }
             HirExprKind::Index(..) | HirExprKind::Colon => {
@@ -484,16 +490,16 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
             Instr::CreateMatrix(rows, cols) => {
                 let total_elements = rows * cols;
                 let mut data = Vec::with_capacity(total_elements);
-                
+
                 // Pop elements from stack in reverse order (since stack is LIFO)
                 for _ in 0..total_elements {
                     let val: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                     data.push(val);
                 }
-                
+
                 // Reverse to get row-major order
                 data.reverse();
-                
+
                 let matrix = rustmat_builtins::Matrix::new(data, rows, cols)
                     .map_err(|e| format!("Matrix creation error: {e}"))?;
                 stack.push(Value::Matrix(matrix));
@@ -504,11 +510,10 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
             Instr::Return => {
                 break; // Halt execution immediately
             }
-
         }
         pc += 1;
     }
-    
+
     Ok(vars)
 }
 
@@ -535,4 +540,3 @@ pub fn execute(program: &HirProgram) -> Result<Vec<Value>, String> {
     let bc = compile(program)?;
     interpret(&bc)
 }
-

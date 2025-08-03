@@ -1,9 +1,9 @@
-use rustmat_builtins::{builtins, Value, BuiltinFn};
+use rustmat_builtins::{builtins, BuiltinFn, Value};
 use rustmat_macros::runtime_builtin;
 
-pub mod matrix;
 pub mod comparison;
 pub mod indexing;
+pub mod matrix;
 
 #[cfg(feature = "blas-lapack")]
 pub mod blas;
@@ -15,9 +15,9 @@ pub mod lapack;
 #[link(name = "Accelerate", kind = "framework")]
 extern "C" {}
 
-pub use matrix::*;
 pub use comparison::*;
 pub use indexing::*;
+pub use matrix::*;
 
 #[cfg(feature = "blas-lapack")]
 pub use blas::*;
@@ -84,4 +84,4 @@ fn log_builtin(x: f64) -> Result<f64, String> {
     } else {
         Ok(x.ln())
     }
-} 
+}

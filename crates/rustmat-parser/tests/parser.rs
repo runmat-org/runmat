@@ -353,10 +353,10 @@ fn parse_array_indexing() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::FuncCall("A".into(), vec![
-                Expr::Number("1".into()),
-                Expr::Number("2".into()),
-            ]))]
+            body: vec![Stmt::ExprStmt(Expr::FuncCall(
+                "A".into(),
+                vec![Expr::Number("1".into()), Expr::Number("2".into()),]
+            ))]
         }
     );
 }

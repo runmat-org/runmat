@@ -75,9 +75,12 @@ pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
 }
 
 /// Lower AST to HIR with existing variable context for REPL
-pub fn lower_with_context(prog: &AstProgram, existing_vars: &HashMap<String, usize>) -> Result<(HirProgram, HashMap<String, usize>), String> {
+pub fn lower_with_context(
+    prog: &AstProgram,
+    existing_vars: &HashMap<String, usize>,
+) -> Result<(HirProgram, HashMap<String, usize>), String> {
     let mut ctx = Ctx::new();
-    
+
     // Pre-populate the context with existing variables
     for (name, var_id) in existing_vars {
         ctx.scopes[0].bindings.insert(name.clone(), VarId(*var_id));
@@ -90,15 +93,15 @@ pub fn lower_with_context(prog: &AstProgram, existing_vars: &HashMap<String, usi
             ctx.next_var = var_id + 1;
         }
     }
-    
+
     let body = ctx.lower_stmts(&prog.body)?;
-    
+
     // Extract all variable bindings (both existing and newly defined)
     let mut all_vars = HashMap::new();
     for (name, var_id) in &ctx.scopes[0].bindings {
         all_vars.insert(name.clone(), var_id.0);
     }
-    
+
     Ok((HirProgram { body }, all_vars))
 }
 
@@ -287,7 +290,8 @@ impl Ctx {
                 )
             }
             FuncCall(name, args) => {
-                let arg_exprs: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();
+                let arg_exprs: Result<Vec<_>, _> =
+                    args.iter().map(|a| self.lower_expr(a)).collect();
                 let arg_exprs = arg_exprs?;
                 // For now, assume all function calls return scalars - this could be improved with type analysis
                 (HirExprKind::FuncCall(name.clone(), arg_exprs), Type::Scalar)
@@ -305,7 +309,8 @@ impl Ctx {
             }
             Index(expr, indices) => {
                 let base = self.lower_expr(expr)?;
-                let idx_exprs: Result<Vec<_>, _> = indices.iter().map(|i| self.lower_expr(i)).collect();
+                let idx_exprs: Result<Vec<_>, _> =
+                    indices.iter().map(|i| self.lower_expr(i)).collect();
                 let idx_exprs = idx_exprs?;
                 let ty = base.ty; // Indexing preserves base type for now
                 (HirExprKind::Index(Box::new(base), idx_exprs), ty)
@@ -315,7 +320,11 @@ impl Ctx {
                 let end_hir = self.lower_expr(end)?;
                 let step_hir = step.as_ref().map(|s| self.lower_expr(s)).transpose()?;
                 (
-                    HirExprKind::Range(Box::new(start_hir), step_hir.map(Box::new), Box::new(end_hir)),
+                    HirExprKind::Range(
+                        Box::new(start_hir),
+                        step_hir.map(Box::new),
+                        Box::new(end_hir),
+                    ),
                     Type::Matrix,
                 )
             }

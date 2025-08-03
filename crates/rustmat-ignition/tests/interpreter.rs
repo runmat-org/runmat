@@ -1,11 +1,11 @@
-use rustmat_ignition::execute;
-use rustmat_hir::lower;
-use rustmat_parser::parse;
-use std::convert::TryInto;
 use rustmat_builtins::Value;
+use rustmat_hir::lower;
+use rustmat_ignition::execute;
+use rustmat_ignition::interpret;
 use rustmat_ignition::Bytecode;
 use rustmat_ignition::Instr;
-use rustmat_ignition::interpret;
+use rustmat_parser::parse;
+use std::convert::TryInto;
 
 #[test]
 fn arithmetic_and_assignment() {
@@ -86,7 +86,8 @@ fn nested_loops_break_only_inner() {
 
 #[test]
 fn nested_loops_continue_only_inner() {
-    let ast = parse("x=0; for i=1:2; for j=1:3; x=x+1; if j-2; continue; end; x=x+10; end; end").unwrap();
+    let ast =
+        parse("x=0; for i=1:2; for j=1:3; x=x+1; if j-2; continue; end; x=x+10; end; end").unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let x: f64 = (&vars[0]).try_into().unwrap();
@@ -182,7 +183,7 @@ fn matrix_operations_basic() {
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
     assert!(result.is_ok());
-    
+
     // Matrix should contain the actual values, not just zeros
     let vars = result.unwrap();
     if let Value::Matrix(matrix) = &vars[0] {
@@ -201,7 +202,7 @@ fn matrix_2d_compilation() {
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
     assert!(result.is_ok());
-    
+
     let vars = result.unwrap();
     if let Value::Matrix(matrix) = &vars[0] {
         assert_eq!(matrix.rows, 2);
@@ -224,24 +225,24 @@ fn verify_jit_test_control_flow() {
     let bytecode = Bytecode {
         instructions: vec![
             Instr::LoadConst(2.0),
-            Instr::StoreVar(0),         // x = 2
+            Instr::StoreVar(0), // x = 2
             Instr::LoadVar(0),
             Instr::LoadConst(5.0),
-            Instr::Less,                // x < 5? -> true for x=2
-            Instr::JumpIfFalse(9),      // if false, jump to else
+            Instr::Less,           // x < 5? -> true for x=2
+            Instr::JumpIfFalse(9), // if false, jump to else
             // True branch
-            Instr::LoadConst(100.0),    // result = 100
+            Instr::LoadConst(100.0), // result = 100
             Instr::StoreVar(1),
-            Instr::Jump(11),            // jump over else
-            // False branch  
-            Instr::LoadConst(200.0),    // result = 200
+            Instr::Jump(11), // jump over else
+            // False branch
+            Instr::LoadConst(200.0), // result = 200
             Instr::StoreVar(1),
             // End
             Instr::Return,
         ],
         var_count: 2,
     };
-    
+
     let result = interpret(&bytecode).unwrap();
     assert_eq!(result[0], Value::Num(2.0));
     assert_eq!(result[1], Value::Num(100.0));
@@ -253,30 +254,30 @@ fn verify_jit_test_nested_control_flow() {
     let bytecode = Bytecode {
         instructions: vec![
             Instr::LoadConst(3.0),
-            Instr::StoreVar(0),         // x = 3
+            Instr::StoreVar(0), // x = 3
             Instr::LoadVar(0),
             Instr::LoadConst(5.0),
-            Instr::Less,                // x < 5? -> true
-            Instr::JumpIfFalse(14),     // if false, jump to outer else (LoadConst(0.0))
+            Instr::Less,            // x < 5? -> true
+            Instr::JumpIfFalse(14), // if false, jump to outer else (LoadConst(0.0))
             // Outer true branch
             Instr::LoadVar(0),
             Instr::LoadConst(2.0),
-            Instr::Greater,             // x > 2? -> true
-            Instr::JumpIfFalse(12),     // if false, jump to inner else (LoadConst(24.0))
+            Instr::Greater,         // x > 2? -> true
+            Instr::JumpIfFalse(12), // if false, jump to inner else (LoadConst(24.0))
             // Inner true branch
-            Instr::LoadConst(42.0),     // result = 42
-            Instr::Jump(15),            // jump to end
+            Instr::LoadConst(42.0), // result = 42
+            Instr::Jump(15),        // jump to end
             // Inner false branch
-            Instr::LoadConst(24.0),     // result = 24
-            Instr::Jump(15),            // jump to end
+            Instr::LoadConst(24.0), // result = 24
+            Instr::Jump(15),        // jump to end
             // Outer false branch
-            Instr::LoadConst(0.0),      // result = 0
+            Instr::LoadConst(0.0), // result = 0
             // End
             Instr::StoreVar(1),
         ],
         var_count: 2,
     };
-    
+
     let result = interpret(&bytecode).unwrap();
     assert_eq!(result[0], Value::Num(3.0));
     assert_eq!(result[1], Value::Num(42.0));
@@ -287,38 +288,42 @@ fn test_turbine_control_flow_pattern() {
     // Test the exact same bytecode pattern that's failing in turbine
     let bytecode = Bytecode {
         instructions: vec![
-            Instr::LoadConst(2.0),      // 0
-            Instr::StoreVar(0),         // 1: x = 2
-            Instr::LoadVar(0),          // 2
-            Instr::LoadConst(5.0),      // 3
-            Instr::Less,                // 4: x < 5? -> true for x=2
-            Instr::JumpIfFalse(9),      // 5: if false, jump to else
+            Instr::LoadConst(2.0), // 0
+            Instr::StoreVar(0),    // 1: x = 2
+            Instr::LoadVar(0),     // 2
+            Instr::LoadConst(5.0), // 3
+            Instr::Less,           // 4: x < 5? -> true for x=2
+            Instr::JumpIfFalse(9), // 5: if false, jump to else
             // True branch
-            Instr::LoadConst(100.0),    // 6: result = 100
-            Instr::StoreVar(1),         // 7
-            Instr::Jump(11),            // 8: jump over else
-            // False branch  
-            Instr::LoadConst(200.0),    // 9: result = 200
-            Instr::StoreVar(1),         // 10
+            Instr::LoadConst(100.0), // 6: result = 100
+            Instr::StoreVar(1),      // 7
+            Instr::Jump(11),         // 8: jump over else
+            // False branch
+            Instr::LoadConst(200.0), // 9: result = 200
+            Instr::StoreVar(1),      // 10
             // End
-            Instr::Return,              // 11
+            Instr::Return, // 11
         ],
         var_count: 2,
     };
-    
+
     let result = interpret(&bytecode);
-    assert!(result.is_ok(), "Interpreter should handle this control flow: {:?}", result);
-    
+    assert!(
+        result.is_ok(),
+        "Interpreter should handle this control flow: {:?}",
+        result
+    );
+
     let vars = result.unwrap();
     assert_eq!(vars.len(), 2);
-    
+
     // x should be 2.0
     if let Value::Num(x) = &vars[0] {
         assert_eq!(*x, 2.0);
     } else {
         panic!("Variable 0 should be Num(2.0), got {:?}", vars[0]);
     }
-    
+
     // result should be 100.0 (true branch executed since 2 < 5)
     if let Value::Num(result) = &vars[1] {
         assert_eq!(*result, 100.0);

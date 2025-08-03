@@ -1,11 +1,11 @@
 //! Jupyter kernel connection management
-//! 
+//!
 //! Handles connection file parsing and ZMQ socket configuration compatible
 //! with the Jupyter protocol.
 
+use crate::{KernelError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use crate::{KernelError, Result};
 
 /// Connection information for Jupyter kernel communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,11 +37,11 @@ impl Default for ConnectionInfo {
             transport: "tcp".to_string(),
             signature_scheme: "hmac-sha256".to_string(),
             key: uuid::Uuid::new_v4().to_string(),
-            shell_port: 0,    // Let OS assign
-            iopub_port: 0,    // Let OS assign
-            stdin_port: 0,    // Let OS assign
-            control_port: 0,  // Let OS assign
-            hb_port: 0,       // Let OS assign
+            shell_port: 0,   // Let OS assign
+            iopub_port: 0,   // Let OS assign
+            stdin_port: 0,   // Let OS assign
+            control_port: 0, // Let OS assign
+            hb_port: 0,      // Let OS assign
         }
     }
 }
@@ -51,7 +51,7 @@ impl ConnectionInfo {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| KernelError::Connection(format!("Failed to read connection file: {e}")))?;
-        
+
         Self::from_json(&content)
     }
 
@@ -63,8 +63,7 @@ impl ConnectionInfo {
 
     /// Serialize connection info to JSON
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string_pretty(self)
-            .map_err(KernelError::Json)
+        serde_json::to_string_pretty(self).map_err(KernelError::Json)
     }
 
     /// Write connection info to a file
@@ -107,11 +106,15 @@ impl ConnectionInfo {
     /// Validate that all required fields are present and valid
     pub fn validate(&self) -> Result<()> {
         if self.ip.is_empty() {
-            return Err(KernelError::Connection("IP address cannot be empty".to_string()));
+            return Err(KernelError::Connection(
+                "IP address cannot be empty".to_string(),
+            ));
         }
-        
+
         if self.transport.is_empty() {
-            return Err(KernelError::Connection("Transport cannot be empty".to_string()));
+            return Err(KernelError::Connection(
+                "Transport cannot be empty".to_string(),
+            ));
         }
 
         if self.key.is_empty() {
@@ -129,7 +132,9 @@ impl ConnectionInfo {
 
         for (name, port) in ports {
             if port == 0 {
-                return Err(KernelError::Connection(format!("{name} port must be assigned")));
+                return Err(KernelError::Connection(format!(
+                    "{name} port must be assigned"
+                )));
             }
         }
 
@@ -142,9 +147,11 @@ impl ConnectionInfo {
 
         // Helper to find an available port
         fn find_available_port() -> Result<u16> {
-            let listener = TcpListener::bind("127.0.0.1:0")
-                .map_err(|e| KernelError::Connection(format!("Failed to find available port: {e}")))?;
-            Ok(listener.local_addr()
+            let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| {
+                KernelError::Connection(format!("Failed to find available port: {e}"))
+            })?;
+            Ok(listener
+                .local_addr()
                 .map_err(|e| KernelError::Connection(format!("Failed to get port: {e}")))?
                 .port())
         }
@@ -234,7 +241,7 @@ mod tests {
     #[test]
     fn test_validation() {
         let mut conn = ConnectionInfo::default();
-        
+
         // Should fail with unassigned ports
         assert!(conn.validate().is_err());
 
@@ -246,4 +253,4 @@ mod tests {
         conn.key.clear();
         assert!(conn.validate().is_err());
     }
-} 
+}

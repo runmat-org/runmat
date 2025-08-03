@@ -1,14 +1,14 @@
-use rustmat_builtins::{builtins, Value, Matrix};
+use rustmat_builtins::{builtins, Matrix, Value};
 use rustmat_macros::runtime_builtin;
 
 #[runtime_builtin(name = "add")]
-fn add(x: i32, y: i32) -> Result<i32,String> {
-    Ok(x+y)
+fn add(x: i32, y: i32) -> Result<i32, String> {
+    Ok(x + y)
 }
 
 #[runtime_builtin(name = "sub")]
-fn sub(x: i32, y: i32) -> Result<i32,String> {
-    Ok(x-y)
+fn sub(x: i32, y: i32) -> Result<i32, String> {
+    Ok(x - y)
 }
 
 #[runtime_builtin(name = "matrix_sum")]
@@ -37,13 +37,13 @@ fn test_value_conversions() {
     let num_val = Value::Num(3.15);
     let bool_val = Value::Bool(true);
     let str_val = Value::String("hello".to_string());
-    
+
     // Test From implementations
     assert_eq!(Value::from(42), int_val);
     assert_eq!(Value::from(3.15), num_val);
     assert_eq!(Value::from(true), bool_val);
     assert_eq!(Value::from("hello"), str_val);
-    
+
     // Test TryFrom implementations
     use std::convert::TryInto;
     assert_eq!((&int_val).try_into(), Ok(42i32));
@@ -58,21 +58,21 @@ fn test_matrix_operations() {
     assert_eq!(matrix.rows, 2);
     assert_eq!(matrix.cols, 3);
     assert_eq!(matrix.data.len(), 6);
-    
+
     // Test setting and getting values
     matrix.set(1, 2, 5.0).unwrap();
     assert_eq!(matrix.get(1, 2).unwrap(), 5.0);
-    
+
     // Test bounds checking
     assert!(matrix.get(2, 0).is_err());
     assert!(matrix.set(0, 3, 1.0).is_err());
-    
+
     // Test matrix creation
     let data = vec![1.0, 2.0, 3.0, 4.0];
     let matrix2 = Matrix::new(data, 2, 2).unwrap();
     assert_eq!(matrix2.get(0, 1).unwrap(), 2.0);
     assert_eq!(matrix2.get(1, 1).unwrap(), 4.0);
-    
+
     // Test invalid dimensions
     assert!(Matrix::new(vec![1.0, 2.0], 2, 2).is_err());
 }
@@ -84,7 +84,7 @@ fn test_cell_arrays() {
         Value::String("test".to_string()),
         Value::Bool(false),
     ]);
-    
+
     if let Value::Cell(contents) = cell {
         assert_eq!(contents.len(), 3);
         assert_eq!(contents[0], Value::Int(1));

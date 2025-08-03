@@ -1,5 +1,5 @@
 //! Jupyter messaging protocol implementation
-//! 
+//!
 //! Implements the Jupyter kernel protocol v5.3 for communication between
 //! the kernel and Jupyter frontends.
 
@@ -25,13 +25,13 @@ pub enum MessageType {
     IsCompleteReply,
     KernelInfoRequest,
     KernelInfoReply,
-    
+
     // Control channel
     ShutdownRequest,
     ShutdownReply,
     InterruptRequest,
     InterruptReply,
-    
+
     // IOPub channel
     Status,
     Stream,
@@ -39,7 +39,7 @@ pub enum MessageType {
     ExecuteInput,
     ExecuteResult,
     Error,
-    
+
     // Stdin channel
     InputRequest,
     InputReply,
@@ -105,11 +105,7 @@ impl JupyterMessage {
     }
 
     /// Create a reply message to a parent
-    pub fn reply(
-        parent: &JupyterMessage,
-        msg_type: MessageType,
-        content: JsonValue,
-    ) -> Self {
+    pub fn reply(parent: &JupyterMessage, msg_type: MessageType, content: JsonValue) -> Self {
         Self {
             header: MessageHeader::new(msg_type, &parent.header.session),
             parent_header: Some(parent.header.clone()),
@@ -274,7 +270,7 @@ mod tests {
     fn test_message_creation() {
         let content = serde_json::json!({"code": "x = 1 + 2"});
         let msg = JupyterMessage::new(MessageType::ExecuteRequest, "test-session", content);
-        
+
         assert_eq!(msg.header.msg_type, MessageType::ExecuteRequest);
         assert_eq!(msg.header.session, "test-session");
         assert!(!msg.header.msg_id.is_empty());
@@ -285,10 +281,10 @@ mod tests {
     fn test_reply_message() {
         let request_content = serde_json::json!({"code": "x = 1"});
         let request = JupyterMessage::new(MessageType::ExecuteRequest, "test", request_content);
-        
+
         let reply_content = serde_json::json!({"status": "ok"});
         let reply = JupyterMessage::reply(&request, MessageType::ExecuteReply, reply_content);
-        
+
         assert_eq!(reply.header.msg_type, MessageType::ExecuteReply);
         assert_eq!(reply.header.session, "test");
         assert!(reply.parent_header.is_some());
@@ -308,7 +304,7 @@ mod tests {
 
         let json = serde_json::to_string(&execute_req).unwrap();
         let parsed: ExecuteRequest = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(execute_req.code, parsed.code);
         assert_eq!(execute_req.silent, parsed.silent);
     }
@@ -319,11 +315,11 @@ mod tests {
             "code": "x = magic(3)",
             "silent": false
         });
-        
+
         let original = JupyterMessage::new(MessageType::ExecuteRequest, "test", content);
         let json = original.to_json().unwrap();
         let parsed = JupyterMessage::from_json(&json).unwrap();
-        
+
         assert_eq!(original.header.msg_type, parsed.header.msg_type);
         assert_eq!(original.header.session, parsed.header.session);
         assert_eq!(original.content, parsed.content);
@@ -334,10 +330,10 @@ mod tests {
         let status = Status {
             execution_state: ExecutionState::Busy,
         };
-        
+
         let content = serde_json::to_value(&status).unwrap();
         let msg = JupyterMessage::new(MessageType::Status, "test", content);
-        
+
         assert_eq!(msg.header.msg_type, MessageType::Status);
     }
-} 
+}

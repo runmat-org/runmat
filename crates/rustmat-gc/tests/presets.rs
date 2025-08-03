@@ -87,7 +87,7 @@ fn test_debug_preset() {
 fn test_config_validation() {
     gc_test_context(|| {
         // Test invalid configurations
-        // Invalid number of generations  
+        // Invalid number of generations
         let mut config = GcConfig {
             num_generations: 1,
             ..Default::default()
@@ -390,7 +390,7 @@ fn test_target_utilization() {
 fn test_min_max_heap_size() {
     gc_test_context(|| {
         let config = GcConfig {
-            min_heap_size: 16 * 1024 * 1024, // 16MB
+            min_heap_size: 16 * 1024 * 1024,  // 16MB
             max_heap_size: 256 * 1024 * 1024, // 256MB
             ..Default::default()
         };

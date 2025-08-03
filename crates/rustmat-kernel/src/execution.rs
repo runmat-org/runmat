@@ -1,13 +1,13 @@
 //! Execution engine for MATLAB code within the Jupyter kernel
-//! 
+//!
 //! Integrates with the rustmat-ignition interpreter to provide safe,
 //! isolated execution of MATLAB code with proper error handling.
 
+use crate::Result;
+use rustmat_builtins::Value;
 use rustmat_hir::lower;
 use rustmat_ignition::execute;
 use rustmat_parser::parse;
-use rustmat_builtins::Value;
-use crate::Result;
 use std::time::{Duration, Instant};
 
 /// Execution engine managing MATLAB code execution state
@@ -159,25 +159,27 @@ impl ExecutionEngine {
                     error: None,
                 })
             }
-            Err(exec_error) => {
-                Ok(ExecutionResult {
-                    status: ExecutionStatus::Error,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    result: None,
-                    execution_time_ms,
-                    error: Some(ExecutionError {
-                        error_type: "RuntimeError".to_string(),
-                        message: exec_error,
-                        traceback: vec!["Error during code execution".to_string()],
-                    }),
-                })
-            }
+            Err(exec_error) => Ok(ExecutionResult {
+                status: ExecutionStatus::Error,
+                stdout: String::new(),
+                stderr: String::new(),
+                result: None,
+                execution_time_ms,
+                error: Some(ExecutionError {
+                    error_type: "RuntimeError".to_string(),
+                    message: exec_error,
+                    traceback: vec!["Error during code execution".to_string()],
+                }),
+            }),
         }
     }
 
     /// Execute code with a specific timeout
-    pub fn execute_with_timeout(&mut self, code: &str, timeout: Duration) -> Result<ExecutionResult> {
+    pub fn execute_with_timeout(
+        &mut self,
+        code: &str,
+        timeout: Duration,
+    ) -> Result<ExecutionResult> {
         let original_timeout = self.timeout;
         self.timeout = Some(timeout);
         let result = self.execute(code);
@@ -242,7 +244,7 @@ mod tests {
     fn test_simple_execution() {
         let mut engine = ExecutionEngine::new();
         let result = engine.execute("x = 1 + 2").unwrap();
-        
+
         assert_eq!(result.status, ExecutionStatus::Success);
         assert_eq!(engine.execution_count(), 1);
         // Just verify that execution_time_ms field exists and is accessible
@@ -254,10 +256,10 @@ mod tests {
     fn test_parse_error_handling() {
         let mut engine = ExecutionEngine::new();
         let result = engine.execute("x = 1 +").unwrap();
-        
+
         assert_eq!(result.status, ExecutionStatus::Error);
         assert!(result.error.is_some());
-        
+
         let error = result.error.unwrap();
         assert_eq!(error.error_type, "ParseError");
         assert!(!error.message.is_empty());
@@ -267,10 +269,10 @@ mod tests {
     fn test_runtime_error_handling() {
         let mut engine = ExecutionEngine::new();
         let result = engine.execute("x = undefined_var").unwrap();
-        
+
         assert_eq!(result.status, ExecutionStatus::Error);
         assert!(result.error.is_some());
-        
+
         let error = result.error.unwrap();
         assert!(error.error_type == "RuntimeError" || error.error_type == "CompileError");
     }
@@ -278,13 +280,13 @@ mod tests {
     #[test]
     fn test_execution_count_increment() {
         let mut engine = ExecutionEngine::new();
-        
+
         engine.execute("x = 1").unwrap();
         assert_eq!(engine.execution_count(), 1);
-        
+
         engine.execute("y = 2").unwrap();
         assert_eq!(engine.execution_count(), 2);
-        
+
         // Even failed executions increment the counter
         engine.execute("invalid syntax").unwrap();
         assert_eq!(engine.execution_count(), 3);
@@ -295,7 +297,7 @@ mod tests {
         let mut engine = ExecutionEngine::new();
         engine.execute("x = 1").unwrap();
         assert_eq!(engine.execution_count(), 1);
-        
+
         engine.reset();
         assert_eq!(engine.execution_count(), 0);
     }
@@ -304,10 +306,10 @@ mod tests {
     fn test_debug_mode() {
         let mut engine = ExecutionEngine::new();
         assert!(!engine.debug);
-        
+
         engine.set_debug(true);
         assert!(engine.debug);
-        
+
         engine.set_debug(false);
         assert!(!engine.debug);
     }
@@ -317,10 +319,10 @@ mod tests {
         let mut engine = ExecutionEngine::new();
         engine.set_debug(true);
         engine.execute("x = 1").unwrap();
-        
+
         let stats = engine.stats();
         assert_eq!(stats.execution_count, 1);
         assert!(stats.debug_enabled);
         assert!(stats.timeout_seconds.is_some());
     }
-} 
+}

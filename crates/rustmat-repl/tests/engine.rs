@@ -1,5 +1,5 @@
-use rustmat_repl::ReplEngine;
 use rustmat_gc::{gc_test_context, GcConfig};
+use rustmat_repl::ReplEngine;
 
 #[test]
 fn test_repl_engine_creation() {
@@ -39,11 +39,11 @@ fn test_simple_arithmetic_execution() {
         let mut engine = ReplEngine::new().unwrap();
         let result = engine.execute("x = 1 + 2");
         assert!(result.is_ok());
-        
+
         let execution_result = result.unwrap();
         assert!(execution_result.error.is_none());
         // Execution time is always valid (u64 type)
-        
+
         let stats = engine.stats();
         assert_eq!(stats.total_executions, 1);
     });
@@ -53,17 +53,17 @@ fn test_simple_arithmetic_execution() {
 fn test_matrix_operations() {
     gc_test_context(|| {
         let mut engine = ReplEngine::new().unwrap();
-        
+
         // Test vector creation
         let result = engine.execute("y = [1, 2, 3]");
         assert!(result.is_ok());
         assert!(result.unwrap().error.is_none());
-        
+
         // Test matrix creation
         let result = engine.execute("z = [1, 2; 3, 4]");
         assert!(result.is_ok());
         assert!(result.unwrap().error.is_none());
-        
+
         let stats = engine.stats();
         assert_eq!(stats.total_executions, 2);
     });
@@ -73,14 +73,14 @@ fn test_matrix_operations() {
 fn test_execution_statistics_tracking() {
     gc_test_context(|| {
         let mut engine = ReplEngine::new().unwrap();
-        
+
         // Execute multiple statements (testing individual execution)
         let inputs = ["x = 1", "y = 2", "z = 3"];
         for input in &inputs {
             let result = engine.execute(input);
             assert!(result.is_ok(), "Failed to execute: {}", input);
         }
-        
+
         let stats = engine.stats();
         assert_eq!(stats.total_executions, inputs.len());
         assert!(stats.average_execution_time_ms >= 0.0);
@@ -94,7 +94,7 @@ fn test_verbose_mode() {
         let mut engine = ReplEngine::with_options(true, true).unwrap();
         let result = engine.execute("x = 42");
         assert!(result.is_ok());
-        
+
         let execution_result = result.unwrap();
         assert!(execution_result.error.is_none());
     });
@@ -122,7 +122,7 @@ fn test_invalid_syntax_handling() {
 fn test_execution_with_control_flow() {
     gc_test_context(|| {
         let mut engine = ReplEngine::new().unwrap();
-        
+
         // Test if statement - control flow may not be fully implemented yet
         let result = engine.execute("if 1 > 0; x = 5; end");
         if result.is_ok() {
@@ -131,8 +131,8 @@ fn test_execution_with_control_flow() {
             // Control flow might not be implemented yet - that's OK
             assert!(!result.unwrap_err().to_string().is_empty());
         }
-        
-        // Test for loop - may not be implemented yet  
+
+        // Test for loop - may not be implemented yet
         let result = engine.execute("for i = 1:3; y = i; end");
         if result.is_ok() {
             assert!(result.unwrap().error.is_none());
@@ -159,7 +159,9 @@ fn test_gc_stats_retrieval() {
         let engine = ReplEngine::new().unwrap();
         let stats = engine.gc_stats();
         // Should be able to get stats without error
-        let _allocations = stats.total_allocations.load(std::sync::atomic::Ordering::Relaxed);
+        let _allocations = stats
+            .total_allocations
+            .load(std::sync::atomic::Ordering::Relaxed);
     });
 }
 
@@ -176,11 +178,11 @@ fn test_system_info_display() {
 fn test_stats_reset() {
     gc_test_context(|| {
         let mut engine = ReplEngine::new().unwrap();
-        
+
         // Execute something to generate stats
         let _ = engine.execute("x = 1");
         assert!(engine.stats().total_executions > 0);
-        
+
         // Reset stats
         engine.reset_stats();
         assert_eq!(engine.stats().total_executions, 0);
@@ -193,14 +195,14 @@ fn test_stats_reset() {
 fn test_multiple_executions_performance_tracking() {
     gc_test_context(|| {
         let mut engine = ReplEngine::new().unwrap();
-        
+
         // Execute the same operation multiple times to potentially trigger JIT
         for i in 1..=20 {
             let input = format!("x{} = {} + {}", i, i, i);
             let result = engine.execute(&input);
             assert!(result.is_ok());
         }
-        
+
         let stats = engine.stats();
         assert_eq!(stats.total_executions, 20);
         // At least some executions should have happened
@@ -241,7 +243,7 @@ fn test_complex_expression_execution() {
         let mut engine = ReplEngine::new().unwrap();
         let result = engine.execute("result = (1 + 2) * 3 - 4 / 2");
         assert!(result.is_ok());
-        
+
         let execution_result = result.unwrap();
         assert!(execution_result.error.is_none());
         // Execution time can be 0 for very fast operations
@@ -252,11 +254,11 @@ fn test_complex_expression_execution() {
 fn test_concurrent_safety() {
     use std::sync::Arc;
     use std::thread;
-    
+
     gc_test_context(|| {
         let engine = Arc::new(std::sync::Mutex::new(ReplEngine::new().unwrap()));
         let mut handles = vec![];
-        
+
         // Spawn multiple threads executing different operations
         for i in 0..5 {
             let engine_clone = Arc::clone(&engine);
@@ -267,7 +269,7 @@ fn test_concurrent_safety() {
             });
             handles.push(handle);
         }
-        
+
         // Wait for all threads to complete
         for handle in handles {
             let result = handle.join().unwrap();
@@ -281,7 +283,7 @@ fn test_execution_result_structure() {
     gc_test_context(|| {
         let mut engine = ReplEngine::new().unwrap();
         let result = engine.execute("x = 42").unwrap();
-        
+
         // Check ExecutionResult structure
         // Execution time can be 0 for very fast operations
         assert!(result.error.is_none());

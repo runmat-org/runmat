@@ -1,5 +1,5 @@
 //! Matrix operations for MATLAB-compatible arithmetic
-//! 
+//!
 //! Implements element-wise and matrix operations following MATLAB semantics.
 
 use rustmat_builtins::Matrix;
@@ -8,44 +8,54 @@ use rustmat_macros::runtime_builtin;
 /// Matrix addition: C = A + B
 pub fn matrix_add(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
     if a.rows != b.rows || a.cols != b.cols {
-        return Err(format!("Matrix dimensions must agree: {}x{} + {}x{}", 
-                          a.rows, a.cols, b.rows, b.cols));
+        return Err(format!(
+            "Matrix dimensions must agree: {}x{} + {}x{}",
+            a.rows, a.cols, b.rows, b.cols
+        ));
     }
-    
-    let data: Vec<f64> = a.data.iter()
+
+    let data: Vec<f64> = a
+        .data
+        .iter()
         .zip(b.data.iter())
         .map(|(x, y)| x + y)
         .collect();
-    
+
     Matrix::new(data, a.rows, a.cols)
 }
 
 /// Matrix subtraction: C = A - B
 pub fn matrix_sub(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
     if a.rows != b.rows || a.cols != b.cols {
-        return Err(format!("Matrix dimensions must agree: {}x{} - {}x{}", 
-                          a.rows, a.cols, b.rows, b.cols));
+        return Err(format!(
+            "Matrix dimensions must agree: {}x{} - {}x{}",
+            a.rows, a.cols, b.rows, b.cols
+        ));
     }
-    
-    let data: Vec<f64> = a.data.iter()
+
+    let data: Vec<f64> = a
+        .data
+        .iter()
         .zip(b.data.iter())
         .map(|(x, y)| x - y)
         .collect();
-    
+
     Matrix::new(data, a.rows, a.cols)
 }
 
 /// Matrix multiplication: C = A * B
 pub fn matrix_mul(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
     if a.cols != b.rows {
-        return Err(format!("Inner matrix dimensions must agree: {}x{} * {}x{}", 
-                          a.rows, a.cols, b.rows, b.cols));
+        return Err(format!(
+            "Inner matrix dimensions must agree: {}x{} * {}x{}",
+            a.rows, a.cols, b.rows, b.cols
+        ));
     }
-    
+
     let rows = a.rows;
     let cols = b.cols;
     let mut data = vec![0.0; rows * cols];
-    
+
     for i in 0..rows {
         for j in 0..cols {
             let mut sum = 0.0;
@@ -55,7 +65,7 @@ pub fn matrix_mul(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
             data[i * cols + j] = sum;
         }
     }
-    
+
     Matrix::new(data, rows, cols)
 }
 
@@ -113,4 +123,4 @@ fn matrix_eye_builtin(n: i32) -> Result<Matrix, String> {
 #[runtime_builtin(name = "matrix_transpose")]
 fn matrix_transpose_builtin(a: Matrix) -> Result<Matrix, String> {
     Ok(matrix_transpose(&a))
-} 
+}

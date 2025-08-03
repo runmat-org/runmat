@@ -28,9 +28,7 @@ fn test_massive_allocation_cycle() {
 
         // Force a collection
         let collected = gc_collect_major().expect("collection should succeed");
-        println!(
-            "Cycle {cycle}: allocated 1000 objects, collected {collected}"
-        );
+        println!("Cycle {cycle}: allocated 1000 objects, collected {collected}");
 
         // Clear references (making objects eligible for collection)
         objects.clear();
@@ -175,9 +173,7 @@ fn test_gc_statistics_accuracy() {
         .load(Ordering::Relaxed);
 
     assert_eq!(final_collections - initial_collections, 1);
-    println!(
-        "Statistics test: allocated {allocation_count}, collected {collected}"
-    );
+    println!("Statistics test: allocated {allocation_count}, collected {collected}");
 }
 
 #[test]
@@ -227,9 +223,7 @@ fn test_gc_under_memory_pressure() {
         }
     }
 
-    println!(
-        "Memory pressure test completed with {collection_count} collections"
-    );
+    println!("Memory pressure test completed with {collection_count} collections");
     assert!(
         collection_count > 0,
         "Should have triggered at least one collection"
@@ -273,8 +267,8 @@ fn test_gc_configuration_changes() {
 
     // Allocate under relaxed settings
     for i in 0..100 {
-        let _ = gc_allocate(Value::String(format!("relaxed_{i}")))
-            .expect("allocation should succeed");
+        let _ =
+            gc_allocate(Value::String(format!("relaxed_{i}"))).expect("allocation should succeed");
     }
 
     let final_stats = gc_stats();

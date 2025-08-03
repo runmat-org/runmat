@@ -1,5 +1,5 @@
 //! RustMat Jupyter Kernel
-//! 
+//!
 //! A high-performance, V8-inspired Jupyter kernel for MATLAB/Octave code.
 //! Implements the Jupyter messaging protocol over ZMQ with async execution.
 
@@ -7,13 +7,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod connection;
-pub mod protocol;
 pub mod execution;
+pub mod protocol;
 pub mod server;
 
 pub use connection::ConnectionInfo;
 pub use execution::ExecutionEngine;
-pub use protocol::{JupyterMessage, MessageType, ExecuteRequest, ExecuteReply};
+pub use protocol::{ExecuteReply, ExecuteRequest, JupyterMessage, MessageType};
 pub use server::KernelServer;
 
 /// Kernel configuration and runtime state
@@ -82,12 +82,10 @@ impl Default for KernelInfo {
                 codemirror_mode: "octave".to_string(),
             },
             banner: "RustMat - High-performance MATLAB/Octave runtime".to_string(),
-            help_links: vec![
-                HelpLink {
-                    text: "RustMat Documentation".to_string(),
-                    url: "https://github.com/rustmat/rustmat".to_string(),
-                },
-            ],
+            help_links: vec![HelpLink {
+                text: "RustMat Documentation".to_string(),
+                url: "https://github.com/rustmat/rustmat".to_string(),
+            }],
         }
     }
 }
@@ -107,4 +105,4 @@ pub enum KernelError {
     Connection(String),
 }
 
-pub type Result<T> = std::result::Result<T, KernelError>; 
+pub type Result<T> = std::result::Result<T, KernelError>;

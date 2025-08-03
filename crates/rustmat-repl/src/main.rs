@@ -1,17 +1,15 @@
-use std::io::{self, Write};
-use rustmat_repl::ReplEngine;
-use rustmat_gc::gc_test_context;
 use anyhow::Result;
 use log::info;
+use rustmat_gc::gc_test_context;
+use rustmat_repl::ReplEngine;
+use std::io::{self, Write};
 
 fn main() -> Result<()> {
     // Initialize logging
     env_logger::init();
 
     // Initialize the REPL engine with GC test context for safety
-    let mut engine = gc_test_context(|| {
-        ReplEngine::new()
-    })?;
+    let mut engine = gc_test_context(|| ReplEngine::new())?;
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -36,7 +34,7 @@ fn main() -> Result<()> {
         }
 
         let input = line.trim();
-        
+
         // Handle special commands
         match input {
             "exit" | "quit" => {
@@ -54,8 +52,10 @@ fn main() -> Result<()> {
             ".stats" => {
                 let stats = engine.stats();
                 println!("Execution Statistics:");
-                println!("  Total: {}, JIT: {}, Interpreter: {}", 
-                    stats.total_executions, stats.jit_compiled, stats.interpreter_fallback);
+                println!(
+                    "  Total: {}, JIT: {}, Interpreter: {}",
+                    stats.total_executions, stats.jit_compiled, stats.interpreter_fallback
+                );
                 println!("  Average time: {:.2}ms", stats.average_execution_time_ms);
                 continue;
             }
@@ -89,9 +89,15 @@ fn main() -> Result<()> {
                 } else if let Some(value) = result.value {
                     println!("ans = {value:?}");
                     if result.execution_time_ms > 100 {
-                        println!("  (executed in {}ms{})", 
+                        println!(
+                            "  (executed in {}ms{})",
                             result.execution_time_ms,
-                            if result.used_jit { " via JIT" } else { " via interpreter" });
+                            if result.used_jit {
+                                " via JIT"
+                            } else {
+                                " via interpreter"
+                            }
+                        );
                     }
                 } else {
                     // No output (e.g., assignment statements)
