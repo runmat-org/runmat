@@ -1,5 +1,5 @@
 //! RustMat - High-performance MATLAB/Octave runtime
-//! 
+//!
 //! A modern, V8-inspired MATLAB runtime with Jupyter kernel support,
 //! JIT compilation, generational garbage collection, and excellent developer ergonomics.
 
@@ -7,12 +7,15 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use env_logger::Env;
 use log::{debug, error, info};
-use rustmat_gc::{gc_allocate, gc_collect_major, gc_collect_minor, gc_configure, gc_get_config, gc_stats, GcConfig};
 use rustmat_builtins::Value;
+use rustmat_gc::{
+    gc_allocate, gc_collect_major, gc_collect_minor, gc_configure, gc_get_config, gc_stats,
+    GcConfig,
+};
 use rustmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
 use rustmat_repl::ReplEngine;
-use rustmat_snapshot::{SnapshotBuilder, SnapshotLoader, SnapshotConfig};
 use rustmat_snapshot::presets::SnapshotPreset;
+use rustmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -153,7 +156,7 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-    
+
     /// Start Jupyter kernel
     Kernel {
         /// Kernel IP address
@@ -310,7 +313,7 @@ enum CompressionAlg {
 enum LogLevel {
     Error,
     Warn,
-    Info, 
+    Info,
     Debug,
     Trace,
 }
@@ -470,7 +473,7 @@ fn configure_gc(cli: &Cli) -> Result<()> {
 async fn execute_command(command: Commands, cli: &Cli) -> Result<()> {
     match command {
         Commands::Repl { verbose } => execute_repl_with_config_and_verbose(cli, verbose).await,
-        Commands::Kernel { 
+        Commands::Kernel {
             ip,
             key,
             transport,
@@ -533,8 +536,9 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
     );
 
     // Create enhanced REPL engine with optional snapshot loading
-    let mut engine = ReplEngine::with_snapshot(enable_jit, verbose || cli.verbose, cli.snapshot.as_ref())
-        .context("Failed to create REPL engine")?;
+    let mut engine =
+        ReplEngine::with_snapshot(enable_jit, verbose || cli.verbose, cli.snapshot.as_ref())
+            .context("Failed to create REPL engine")?;
 
     info!("RustMat REPL ready");
 
@@ -570,7 +574,7 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
     loop {
         print!("rustmat> ");
         io::stdout().flush().unwrap();
-        
+
         input.clear();
         match io::stdin().read_line(&mut input) {
             Ok(_) => {
@@ -608,7 +612,7 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
                 // Execute the input using the enhanced engine
                 match engine.execute(line) {
                     Ok(result) => {
-                                if let Some(error) = result.error {
+                        if let Some(error) = result.error {
                             eprintln!("Error: {error}");
                         } else if let Some(value) = result.value {
                             println!("ans = {value:?}");
@@ -692,7 +696,7 @@ async fn execute_kernel(
     };
 
     let mut server = KernelServer::new(config);
-    
+
     info!("Starting kernel server...");
     server
         .start()
@@ -728,13 +732,13 @@ async fn execute_kernel_with_connection(connection_file: PathBuf, timeout: u64) 
     };
 
     let mut server = KernelServer::new(config);
-    
+
     server
         .start()
         .await
         .context("Failed to start kernel server")?;
 
-    // Keep running until interrupted  
+    // Keep running until interrupted
     tokio::signal::ctrl_c()
         .await
         .context("Failed to listen for ctrl-c")?;
@@ -804,9 +808,9 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                 }
                 Err(e) => {
                     error!("Minor GC failed: {e}");
-                std::process::exit(1);
+                    std::process::exit(1);
+                }
             }
-        }
         }
         GcCommand::Major => {
             let start = std::time::Instant::now();
@@ -817,28 +821,51 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                 }
                 Err(e) => {
                     error!("Major GC failed: {e}");
-            std::process::exit(1);
-        }
-    }
+                    std::process::exit(1);
+                }
+            }
         }
         GcCommand::Config => {
             println!("Current GC Configuration:");
             let config = gc_get_config();
-            println!("  Young Generation Size: {} MB", config.young_generation_size / 1024 / 1024);
-            println!("  Minor GC Threshold: {} objects", config.minor_gc_threshold);
-            println!("  Major GC Threshold: {} objects", config.major_gc_threshold);
+            println!(
+                "  Young Generation Size: {} MB",
+                config.young_generation_size / 1024 / 1024
+            );
+            println!(
+                "  Minor GC Threshold: {} objects",
+                config.minor_gc_threshold
+            );
+            println!(
+                "  Major GC Threshold: {} objects",
+                config.major_gc_threshold
+            );
             println!("  Max GC Threads: {}", config.max_gc_threads);
-            println!("  Collection Statistics: {}", if config.collect_statistics { "enabled" } else { "disabled" });
-            println!("  Verbose Logging: {}", if config.verbose_logging { "enabled" } else { "disabled" });
+            println!(
+                "  Collection Statistics: {}",
+                if config.collect_statistics {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            );
+            println!(
+                "  Verbose Logging: {}",
+                if config.verbose_logging {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            );
         }
         GcCommand::Stress { allocations } => {
             info!("Starting GC stress test with {allocations} allocations");
-            
+
             let start_time = std::time::Instant::now();
             let initial_stats = gc_stats();
-            
+
             println!("Running GC stress test with {allocations} allocations...");
-            
+
             // Perform stress test
             let mut _objects = Vec::new();
             for i in 0..allocations {
@@ -846,7 +873,7 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                 match gc_allocate(value) {
                     Ok(ptr) => {
                         _objects.push(ptr);
-                        
+
                         // Trigger periodic collections to stress the GC
                         if i % 1000 == 0 && i > 0 {
                             let _ = gc_collect_minor();
@@ -860,28 +887,46 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                         break;
                     }
                 }
-                
+
                 // Progress reporting
                 if i % (allocations / 10).max(1) == 0 {
                     println!("  Progress: {i}/{allocations} allocations");
                 }
             }
-            
+
             let duration = start_time.elapsed();
             let final_stats = gc_stats();
-            
+
             // Report results
             println!("GC Stress Test Results:");
             println!("  Duration: {duration:?}");
             println!("  Allocations completed: {}", _objects.len());
-            println!("  Allocation rate: {:.2} allocs/sec", _objects.len() as f64 / duration.as_secs_f64());
-            println!("  Total collections: {}", 
-                final_stats.minor_collections.load(std::sync::atomic::Ordering::Relaxed) - 
-                initial_stats.minor_collections.load(std::sync::atomic::Ordering::Relaxed) +
-                final_stats.major_collections.load(std::sync::atomic::Ordering::Relaxed) - 
-                initial_stats.major_collections.load(std::sync::atomic::Ordering::Relaxed));
-            println!("  Final memory: {} bytes", final_stats.current_memory_usage.load(std::sync::atomic::Ordering::Relaxed));
-            
+            println!(
+                "  Allocation rate: {:.2} allocs/sec",
+                _objects.len() as f64 / duration.as_secs_f64()
+            );
+            println!(
+                "  Total collections: {}",
+                final_stats
+                    .minor_collections
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    - initial_stats
+                        .minor_collections
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                    + final_stats
+                        .major_collections
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                    - initial_stats
+                        .major_collections
+                        .load(std::sync::atomic::Ordering::Relaxed)
+            );
+            println!(
+                "  Final memory: {} bytes",
+                final_stats
+                    .current_memory_usage
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
+
             // Force a final cleanup
             match gc_collect_major() {
                 Ok(collected) => println!("  Final collection freed {collected} objects"),
@@ -898,8 +943,8 @@ async fn execute_benchmark(file: PathBuf, iterations: u32, jit: bool, _cli: &Cli
     let content = fs::read_to_string(&file)
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
 
-    let mut engine =
-        ReplEngine::with_snapshot(jit, false, _cli.snapshot.as_ref()).context("Failed to create execution engine")?;
+    let mut engine = ReplEngine::with_snapshot(jit, false, _cli.snapshot.as_ref())
+        .context("Failed to create execution engine")?;
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions = 0;
@@ -960,17 +1005,21 @@ impl From<CompressionAlg> for rustmat_snapshot::CompressionAlgorithm {
 
 async fn execute_snapshot_command(snapshot_command: SnapshotCommand) -> Result<()> {
     match snapshot_command {
-        SnapshotCommand::Create { output, optimization, compression } => {
+        SnapshotCommand::Create {
+            output,
+            optimization,
+            compression,
+        } => {
             info!("Creating snapshot: {output:?}");
-            
+
             let mut config = SnapshotConfig::default();
-            
+
             // Set compression if specified
             if let Some(comp) = compression {
                 config.compression_enabled = !matches!(comp, CompressionAlg::None);
                 config.compression_algorithm = comp.into();
             }
-            
+
             // Note: optimization level affects JIT hints in the data, not the builder directly
             let _optimization_level = match optimization {
                 OptLevel::None => rustmat_snapshot::OptimizationLevel::None,
@@ -978,21 +1027,23 @@ async fn execute_snapshot_command(snapshot_command: SnapshotCommand) -> Result<(
                 OptLevel::Speed => rustmat_snapshot::OptimizationLevel::Aggressive,
                 OptLevel::Aggressive => rustmat_snapshot::OptimizationLevel::MaxPerformance,
             };
-            
+
             let builder = SnapshotBuilder::new(config);
-            
-            builder.build_and_save(&output)
+
+            builder
+                .build_and_save(&output)
                 .with_context(|| format!("Failed to build and save snapshot to {output:?}"))?;
-                
+
             println!("Snapshot created successfully: {output:?}");
         }
         SnapshotCommand::Info { snapshot } => {
             info!("Loading snapshot info: {snapshot:?}");
-            
+
             let mut loader = SnapshotLoader::new(SnapshotConfig::default());
-            let (loaded, stats) = loader.load(&snapshot)
+            let (loaded, stats) = loader
+                .load(&snapshot)
                 .with_context(|| format!("Failed to load snapshot from {snapshot:?}"))?;
-                
+
             println!("Snapshot Information:");
             println!("  File: {snapshot:?}");
             println!("  Version: {}", loaded.metadata.rustmat_version);
@@ -1000,11 +1051,23 @@ async fn execute_snapshot_command(snapshot_command: SnapshotCommand) -> Result<(
             println!("  Tool Version: {}", loaded.metadata.tool_version);
             println!("  Build Config: {:?}", loaded.metadata.build_config);
             println!("  Builtin Functions: {}", loaded.builtins.functions.len());
-            println!("  HIR Cache Functions: {}", loaded.hir_cache.functions.len());
+            println!(
+                "  HIR Cache Functions: {}",
+                loaded.hir_cache.functions.len()
+            );
             println!("  HIR Cache Patterns: {}", loaded.hir_cache.patterns.len());
-            println!("  Bytecode Cache (stdlib): {}", loaded.bytecode_cache.stdlib_bytecode.len());
-            println!("  Bytecode Cache (sequences): {}", loaded.bytecode_cache.operation_sequences.len());
-            println!("  Bytecode Cache (hotspots): {}", loaded.bytecode_cache.hotspots.len());
+            println!(
+                "  Bytecode Cache (stdlib): {}",
+                loaded.bytecode_cache.stdlib_bytecode.len()
+            );
+            println!(
+                "  Bytecode Cache (sequences): {}",
+                loaded.bytecode_cache.operation_sequences.len()
+            );
+            println!(
+                "  Bytecode Cache (hotspots): {}",
+                loaded.bytecode_cache.hotspots.len()
+            );
             println!("  GC Presets: {}", loaded.gc_presets.presets.len());
             println!("  Load Time: {:?}", stats.load_time);
             println!("  Total Size: {} bytes", stats.total_size);
@@ -1014,30 +1077,75 @@ async fn execute_snapshot_command(snapshot_command: SnapshotCommand) -> Result<(
         SnapshotCommand::Presets => {
             println!("Available Snapshot Presets:");
             println!();
-            
+
             let presets = vec![
-                ("development", SnapshotPreset::Development, "Fast development iteration"),
-                ("production", SnapshotPreset::Production, "Production deployment"),
-                ("high-performance", SnapshotPreset::HighPerformance, "High-performance computing"),
-                ("low-memory", SnapshotPreset::LowMemory, "Memory-constrained environments"),
-                ("network-optimized", SnapshotPreset::NetworkOptimized, "Network-optimized (minimal size)"),
-                ("debug", SnapshotPreset::Debug, "Debug-friendly (maximum validation)"),
+                (
+                    "development",
+                    SnapshotPreset::Development,
+                    "Fast development iteration",
+                ),
+                (
+                    "production",
+                    SnapshotPreset::Production,
+                    "Production deployment",
+                ),
+                (
+                    "high-performance",
+                    SnapshotPreset::HighPerformance,
+                    "High-performance computing",
+                ),
+                (
+                    "low-memory",
+                    SnapshotPreset::LowMemory,
+                    "Memory-constrained environments",
+                ),
+                (
+                    "network-optimized",
+                    SnapshotPreset::NetworkOptimized,
+                    "Network-optimized (minimal size)",
+                ),
+                (
+                    "debug",
+                    SnapshotPreset::Debug,
+                    "Debug-friendly (maximum validation)",
+                ),
             ];
-            
+
             for (name, preset, description) in presets {
                 let config = preset.config();
                 println!("  {name}");
                 println!("    Description: {description}");
                 println!("    Compression: {:?}", config.compression_algorithm);
-                println!("    Validation: {}", if config.validation_enabled { "enabled" } else { "disabled" });
-                println!("    Memory Mapping: {}", if config.memory_mapping_enabled { "enabled" } else { "disabled" });
-                println!("    Parallel Loading: {}", if config.parallel_loading { "enabled" } else { "disabled" });
+                println!(
+                    "    Validation: {}",
+                    if config.validation_enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+                println!(
+                    "    Memory Mapping: {}",
+                    if config.memory_mapping_enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+                println!(
+                    "    Parallel Loading: {}",
+                    if config.parallel_loading {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
                 println!();
             }
         }
         SnapshotCommand::Validate { snapshot } => {
             info!("Validating snapshot: {snapshot:?}");
-            
+
             let mut loader = SnapshotLoader::new(SnapshotConfig::default());
             match loader.load(&snapshot) {
                 Ok((_, stats)) => {
@@ -1061,7 +1169,7 @@ async fn execute_snapshot_command(snapshot_command: SnapshotCommand) -> Result<(
 
 fn show_version(detailed: bool) {
     println!("RustMat v{}", env!("CARGO_PKG_VERSION"));
-    
+
     if detailed {
         println!(
             "Built with Rust {}",
@@ -1098,7 +1206,7 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     println!("RustMat System Information");
     println!("==========================");
     println!();
-    
+
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
     println!(
         "Rust Version: {}",
@@ -1132,7 +1240,7 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     }
     println!("  GC Statistics: {}", cli.gc_stats);
     println!();
-    
+
     println!("Environment:");
     println!("  RUSTMAT_DEBUG: {:?}", std::env::var("RUSTMAT_DEBUG").ok());
     println!(
@@ -1209,4 +1317,4 @@ fn show_repl_help() {
     println!("  • Use '.gc' to monitor memory usage and collection");
     println!();
     println!("Press Enter after each statement to execute.");
-} 
+}

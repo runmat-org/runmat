@@ -65,8 +65,8 @@ pub struct ExecutionError {
 impl ExecutionEngine {
     /// Create a new execution engine
     pub fn new() -> Self {
-        let repl_engine = ReplEngine::with_options(true, false)
-            .expect("Failed to create ReplEngine");
+        let repl_engine =
+            ReplEngine::with_options(true, false).expect("Failed to create ReplEngine");
         Self {
             execution_count: 0,
             timeout: Some(Duration::from_secs(300)), // 5 minutes default
@@ -77,8 +77,8 @@ impl ExecutionEngine {
 
     /// Create a new execution engine with custom timeout
     pub fn with_timeout(timeout: Option<Duration>) -> Self {
-        let repl_engine = ReplEngine::with_options(true, false)
-            .expect("Failed to create ReplEngine");
+        let repl_engine =
+            ReplEngine::with_options(true, false).expect("Failed to create ReplEngine");
         Self {
             execution_count: 0,
             timeout,
@@ -93,9 +93,16 @@ impl ExecutionEngine {
     }
 
     /// Create a new execution engine with snapshot support
-    pub fn with_snapshot<P: AsRef<Path>>(enable_jit: bool, debug: bool, timeout: Option<Duration>, snapshot_path: Option<P>) -> Result<Self> {
-        let repl_engine = ReplEngine::with_snapshot(enable_jit, debug, snapshot_path)
-            .map_err(|e| crate::KernelError::Internal(format!("Failed to create ReplEngine: {e}")))?;
+    pub fn with_snapshot<P: AsRef<Path>>(
+        enable_jit: bool,
+        debug: bool,
+        timeout: Option<Duration>,
+        snapshot_path: Option<P>,
+    ) -> Result<Self> {
+        let repl_engine =
+            ReplEngine::with_snapshot(enable_jit, debug, snapshot_path).map_err(|e| {
+                crate::KernelError::Internal(format!("Failed to create ReplEngine: {e}"))
+            })?;
         Ok(Self {
             execution_count: 0,
             timeout,
@@ -127,7 +134,7 @@ impl ExecutionEngine {
         match self.repl_engine.execute(code) {
             Ok(repl_result) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
-                
+
                 if let Some(error_msg) = repl_result.error {
                     // Determine error type based on error message content
                     let error_type = if error_msg.contains("parse") || error_msg.contains("Parse") {
@@ -139,7 +146,7 @@ impl ExecutionEngine {
                     } else {
                         "ExecutionError"
                     };
-                    
+
                     Ok(ExecutionResult {
                         status: ExecutionStatus::Error,
                         stdout: String::new(), // TODO: Capture actual stdout
@@ -155,7 +162,7 @@ impl ExecutionEngine {
                 } else {
                     Ok(ExecutionResult {
                         status: ExecutionStatus::Success,
-                        stdout: String::new(), // TODO: Capture actual stdout  
+                        stdout: String::new(), // TODO: Capture actual stdout
                         stderr: String::new(), // TODO: Capture actual stderr
                         result: repl_result.value,
                         execution_time_ms,
@@ -166,7 +173,7 @@ impl ExecutionEngine {
             Err(e) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
                 let error_msg = e.to_string();
-                
+
                 // Determine error type based on error message content
                 let error_type = if error_msg.contains("parse") || error_msg.contains("Parse") {
                     "ParseError"
@@ -177,7 +184,7 @@ impl ExecutionEngine {
                 } else {
                     "ExecutionError"
                 };
-                
+
                 Ok(ExecutionResult {
                     status: ExecutionStatus::Error,
                     stdout: String::new(),

@@ -60,16 +60,27 @@ impl ReplEngine {
     }
 
     /// Create a new REPL engine with snapshot loading
-    pub fn with_snapshot<P: AsRef<Path>>(enable_jit: bool, verbose: bool, snapshot_path: Option<P>) -> Result<Self> {
+    pub fn with_snapshot<P: AsRef<Path>>(
+        enable_jit: bool,
+        verbose: bool,
+        snapshot_path: Option<P>,
+    ) -> Result<Self> {
         // Load snapshot if provided
         let snapshot = if let Some(path) = snapshot_path {
             match Self::load_snapshot(path.as_ref()) {
                 Ok(snapshot) => {
-                    info!("Snapshot loaded successfully from {}", path.as_ref().display());
+                    info!(
+                        "Snapshot loaded successfully from {}",
+                        path.as_ref().display()
+                    );
                     Some(Arc::new(snapshot))
                 }
                 Err(e) => {
-                    warn!("Failed to load snapshot from {}: {}, continuing without snapshot", path.as_ref().display(), e);
+                    warn!(
+                        "Failed to load snapshot from {}: {}, continuing without snapshot",
+                        path.as_ref().display(),
+                        e
+                    );
                     None
                 }
             }
@@ -107,7 +118,8 @@ impl ReplEngine {
     /// Load a snapshot from disk
     fn load_snapshot(path: &Path) -> Result<Snapshot> {
         let mut loader = SnapshotLoader::new(SnapshotConfig::default());
-        let (snapshot, _stats) = loader.load(path)
+        let (snapshot, _stats) = loader
+            .load(path)
             .map_err(|e| anyhow::anyhow!("Failed to load snapshot: {}", e))?;
         Ok(snapshot)
     }

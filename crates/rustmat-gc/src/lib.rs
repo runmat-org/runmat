@@ -119,17 +119,17 @@ impl GcObject {
     fn is_marked(&self) -> bool {
         self.marked.load(Ordering::Acquire)
     }
-    
+
     /// Get the unique ID of this object
     pub fn id(&self) -> usize {
         self.id
     }
-    
+
     /// Get the generation this object belongs to
     pub fn generation(&self) -> u8 {
         self.generation
     }
-    
+
     /// Get a reference to the value stored in this object
     pub fn value(&self) -> &Value {
         &self.value
@@ -196,11 +196,14 @@ impl HighPerformanceGC {
 
         // Create the managed object
         let gc_obj = Arc::new(GcObject::new(id, value, 0));
-        
+
         // Log object creation for debugging (uses the id and generation methods)
-        log::debug!("Allocated object id={} generation={} value_type={:?}", 
-                   gc_obj.id(), gc_obj.generation(), 
-                   std::mem::discriminant(gc_obj.value()));
+        log::debug!(
+            "Allocated object id={} generation={} value_type={:?}",
+            gc_obj.id(),
+            gc_obj.generation(),
+            std::mem::discriminant(gc_obj.value())
+        );
 
         // Store in main objects table and get a stable pointer
         let value_ptr = {
@@ -364,7 +367,7 @@ impl HighPerformanceGC {
         }
         None
     }
-    
+
     /// Check if a Value matches a GcObject's data
     fn value_matches_object(&self, value: &Value, gc_object: &GcObject) -> bool {
         // Since GcObject stores the Value directly, we can just compare them
@@ -737,26 +740,26 @@ mod tests {
         // Clean up
         gc_remove_root(protected).expect("root removal failed");
     }
-    
+
     #[test]
     fn test_gc_object_metadata() {
         let _ = gc_reset_for_test();
-        
+
         // Create a GcObject directly to test its methods
         let value = Value::Num(42.0);
         let gc_obj = GcObject::new(123, value.clone(), 1);
-        
+
         // Test the methods that were added
         assert_eq!(gc_obj.id(), 123);
         assert_eq!(gc_obj.generation(), 1);
         assert_eq!(gc_obj.value(), &value);
-        
+
         // Test marking functionality
         assert!(!gc_obj.is_marked());
         assert!(gc_obj.mark()); // First mark should return true (was unmarked)
         assert!(gc_obj.is_marked());
         assert!(!gc_obj.mark()); // Second mark should return false (already marked)
-        
+
         gc_obj.unmark();
         assert!(!gc_obj.is_marked());
     }

@@ -11,22 +11,22 @@ use std::time::Duration;
 pub enum SnapshotPreset {
     /// Fast development iteration
     Development,
-    
+
     /// Production deployment
     Production,
-    
+
     /// High-performance computing
     HighPerformance,
-    
+
     /// Memory-constrained environments
     LowMemory,
-    
+
     /// Network-optimized (minimal size)
     NetworkOptimized,
-    
+
     /// Debug-friendly (maximum validation)
     Debug,
-    
+
     /// Custom configuration
     Custom(SnapshotConfig),
 }
@@ -44,7 +44,7 @@ impl SnapshotPreset {
             SnapshotPreset::Custom(config) => config.clone(),
         }
     }
-    
+
     /// Development preset - fast build, minimal compression
     fn development_config() -> SnapshotConfig {
         SnapshotConfig {
@@ -54,12 +54,12 @@ impl SnapshotPreset {
             validation_enabled: true,
             memory_mapping_enabled: true,
             parallel_loading: true,
-            progress_reporting: true, // Helpful during development
+            progress_reporting: true,         // Helpful during development
             max_cache_size: 64 * 1024 * 1024, // 64MB
             cache_eviction_policy: crate::CacheEvictionPolicy::LeastRecentlyUsed,
         }
     }
-    
+
     /// Production preset - balanced performance and size
     fn production_config() -> SnapshotConfig {
         SnapshotConfig {
@@ -69,18 +69,18 @@ impl SnapshotPreset {
             validation_enabled: true,
             memory_mapping_enabled: true,
             parallel_loading: true,
-            progress_reporting: false, // No progress in production
+            progress_reporting: false,         // No progress in production
             max_cache_size: 128 * 1024 * 1024, // 128MB
             cache_eviction_policy: crate::CacheEvictionPolicy::Adaptive,
         }
     }
-    
+
     /// High-performance preset - optimized for speed
     fn high_performance_config() -> SnapshotConfig {
         SnapshotConfig {
             compression_enabled: true,
             compression_algorithm: CompressionAlgorithm::Lz4,
-            compression_level: 1, // Fastest decompression
+            compression_level: 1,      // Fastest decompression
             validation_enabled: false, // Skip validation for speed
             memory_mapping_enabled: true,
             parallel_loading: true,
@@ -89,7 +89,7 @@ impl SnapshotPreset {
             cache_eviction_policy: crate::CacheEvictionPolicy::LeastRecentlyUsed,
         }
     }
-    
+
     /// Low-memory preset - minimal memory usage
     fn low_memory_config() -> SnapshotConfig {
         SnapshotConfig {
@@ -98,13 +98,13 @@ impl SnapshotPreset {
             compression_level: 9, // Maximum compression
             validation_enabled: true,
             memory_mapping_enabled: false, // Avoid memory mapping
-            parallel_loading: false, // Reduce memory overhead
+            parallel_loading: false,       // Reduce memory overhead
             progress_reporting: false,
             max_cache_size: 16 * 1024 * 1024, // 16MB - minimal cache
             cache_eviction_policy: crate::CacheEvictionPolicy::TimeToLive(Duration::from_secs(60)),
         }
     }
-    
+
     /// Network-optimized preset - smallest possible size
     fn network_optimized_config() -> SnapshotConfig {
         SnapshotConfig {
@@ -119,7 +119,7 @@ impl SnapshotPreset {
             cache_eviction_policy: crate::CacheEvictionPolicy::LeastFrequentlyUsed,
         }
     }
-    
+
     /// Debug preset - maximum validation and reporting
     fn debug_config() -> SnapshotConfig {
         SnapshotConfig {
@@ -128,13 +128,13 @@ impl SnapshotPreset {
             compression_level: 0,
             validation_enabled: true,
             memory_mapping_enabled: false, // Easier to debug without mmap
-            parallel_loading: false, // Sequential for easier debugging
-            progress_reporting: true, // Detailed progress
+            parallel_loading: false,       // Sequential for easier debugging
+            progress_reporting: true,      // Detailed progress
             max_cache_size: 128 * 1024 * 1024, // 128MB
             cache_eviction_policy: crate::CacheEvictionPolicy::LeastRecentlyUsed,
         }
     }
-    
+
     /// Get all available presets
     pub fn all_presets() -> Vec<SnapshotPreset> {
         vec![
@@ -146,20 +146,22 @@ impl SnapshotPreset {
             SnapshotPreset::Debug,
         ]
     }
-    
+
     /// Get preset by name
     pub fn from_name(name: &str) -> Option<SnapshotPreset> {
         match name.to_lowercase().as_str() {
             "development" | "dev" => Some(SnapshotPreset::Development),
             "production" | "prod" => Some(SnapshotPreset::Production),
-            "high-performance" | "highperf" | "performance" => Some(SnapshotPreset::HighPerformance),
+            "high-performance" | "highperf" | "performance" => {
+                Some(SnapshotPreset::HighPerformance)
+            }
             "low-memory" | "lowmem" | "minimal" => Some(SnapshotPreset::LowMemory),
             "network-optimized" | "network" | "small" => Some(SnapshotPreset::NetworkOptimized),
             "debug" => Some(SnapshotPreset::Debug),
             _ => None,
         }
     }
-    
+
     /// Get preset name
     pub fn name(&self) -> &'static str {
         match self {
@@ -172,7 +174,7 @@ impl SnapshotPreset {
             SnapshotPreset::Custom(_) => "Custom",
         }
     }
-    
+
     /// Get preset description
     pub fn description(&self) -> &'static str {
         match self {
@@ -191,15 +193,11 @@ impl SnapshotPreset {
             SnapshotPreset::NetworkOptimized => {
                 "Smallest possible file size for network distribution"
             }
-            SnapshotPreset::Debug => {
-                "Maximum validation and debugging information, no compression"
-            }
-            SnapshotPreset::Custom(_) => {
-                "Custom configuration with user-specified settings"
-            }
+            SnapshotPreset::Debug => "Maximum validation and debugging information, no compression",
+            SnapshotPreset::Custom(_) => "Custom configuration with user-specified settings",
         }
     }
-    
+
     /// Get expected characteristics
     pub fn characteristics(&self) -> PresetCharacteristics {
         match self {
@@ -387,7 +385,7 @@ impl std::fmt::Display for ValidationLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_preset_from_name() {
         assert!(matches!(
@@ -404,55 +402,55 @@ mod tests {
         ));
         assert!(SnapshotPreset::from_name("invalid").is_none());
     }
-    
+
     #[test]
     fn test_preset_names() {
         assert_eq!(SnapshotPreset::Development.name(), "Development");
         assert_eq!(SnapshotPreset::Production.name(), "Production");
         assert_eq!(SnapshotPreset::Debug.name(), "Debug");
     }
-    
+
     #[test]
     fn test_preset_configs() {
         let dev_config = SnapshotPreset::Development.config();
         assert!(dev_config.progress_reporting);
         assert_eq!(dev_config.compression_level, 1);
-        
+
         let prod_config = SnapshotPreset::Production.config();
         assert!(!prod_config.progress_reporting);
         assert_eq!(prod_config.compression_level, 6);
-        
+
         let debug_config = SnapshotPreset::Debug.config();
         assert!(!debug_config.compression_enabled);
         assert!(debug_config.validation_enabled);
     }
-    
+
     #[test]
     fn test_preset_characteristics() {
         let high_perf = SnapshotPreset::HighPerformance;
         let chars = high_perf.characteristics();
-        
+
         assert_eq!(chars.load_time, LoadTime::VeryFast);
         assert_eq!(chars.memory_usage, MemoryUsage::High);
         assert_eq!(chars.validation_level, ValidationLevel::Minimal);
-        
+
         let low_mem = SnapshotPreset::LowMemory;
         let chars = low_mem.characteristics();
-        
+
         assert_eq!(chars.memory_usage, MemoryUsage::VeryLow);
         assert_eq!(chars.file_size, FileSize::VerySmall);
     }
-    
+
     #[test]
     fn test_all_presets() {
         let presets = SnapshotPreset::all_presets();
         assert_eq!(presets.len(), 6);
-        
+
         // Ensure all presets have unique names
         let names: std::collections::HashSet<_> = presets.iter().map(|p| p.name()).collect();
         assert_eq!(names.len(), 6);
     }
-    
+
     #[test]
     fn test_characteristic_ordering() {
         assert!(BuildTime::VeryFast < BuildTime::Fast);

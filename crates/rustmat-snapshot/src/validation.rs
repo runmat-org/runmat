@@ -14,7 +14,7 @@ use crate::{Snapshot, SnapshotResult};
 pub struct SnapshotValidator {
     /// Validation configuration
     config: ValidationConfig,
-    
+
     /// Validation statistics
     stats: ValidationStats,
 }
@@ -24,19 +24,19 @@ pub struct SnapshotValidator {
 pub struct ValidationConfig {
     /// Enable format validation
     pub format_validation: bool,
-    
+
     /// Enable integrity checking
     pub integrity_checking: bool,
-    
+
     /// Enable compatibility checking
     pub compatibility_checking: bool,
-    
+
     /// Enable performance validation
     pub performance_validation: bool,
-    
+
     /// Maximum validation time
     pub max_validation_time: Duration,
-    
+
     /// Strict mode (fail on warnings)
     pub strict_mode: bool,
 }
@@ -46,16 +46,16 @@ pub struct ValidationConfig {
 pub struct ValidationStats {
     /// Checks performed
     pub checks_performed: HashMap<String, u64>,
-    
+
     /// Validation time by check type
     pub check_times: HashMap<String, Duration>,
-    
+
     /// Total validation time
     pub total_time: Duration,
-    
+
     /// Errors found
     pub errors: Vec<ValidationError>,
-    
+
     /// Warnings found
     pub warnings: Vec<ValidationWarning>,
 }
@@ -110,19 +110,19 @@ pub enum ErrorSeverity {
 pub struct ValidationResult {
     /// Overall validation success
     pub is_valid: bool,
-    
+
     /// Validation score (0-100)
     pub score: u8,
-    
+
     /// Errors found
     pub errors: Vec<ValidationError>,
-    
+
     /// Warnings found
     pub warnings: Vec<ValidationWarning>,
-    
+
     /// Performance metrics
     pub metrics: ValidationMetrics,
-    
+
     /// Recommendations
     pub recommendations: Vec<String>,
 }
@@ -136,14 +136,12 @@ pub struct ValidationMetrics {
     pub memory_used: usize,
 }
 
-
-
 impl SnapshotValidator {
     /// Create a new snapshot validator
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Create validator with custom configuration
     pub fn with_config(config: ValidationConfig) -> Self {
         Self {
@@ -151,83 +149,77 @@ impl SnapshotValidator {
             stats: ValidationStats::default(),
         }
     }
-    
+
     /// Validate snapshot format
     pub fn validate_format(&mut self, format: &SnapshotFormat) -> SnapshotResult<ValidationResult> {
         let start = Instant::now();
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
-        
+
         // Validate header
         self.validate_header(&format.header, &mut errors, &mut warnings)?;
-        
+
         // Validate data section
         self.validate_data_section(format, &mut errors, &mut warnings)?;
-        
+
         // Validate checksum if present
         if format.header.checksum_info.is_some() {
             self.validate_checksum(format, &mut errors, &mut warnings)?;
         }
-        
+
         let validation_time = start.elapsed();
         self.update_stats("format_validation", validation_time);
-        
-        Ok(self.create_validation_result(
-            errors,
-            warnings,
-            validation_time,
-            "format_validation",
-        ))
+
+        Ok(self.create_validation_result(errors, warnings, validation_time, "format_validation"))
     }
-    
+
     /// Validate snapshot content
     pub fn validate_content(&mut self, snapshot: &Snapshot) -> SnapshotResult<ValidationResult> {
         let start = Instant::now();
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
-        
+
         // Validate builtin registry
         self.validate_builtin_registry(&snapshot.builtins, &mut errors, &mut warnings)?;
-        
+
         // Validate HIR cache
         self.validate_hir_cache(&snapshot.hir_cache, &mut errors, &mut warnings)?;
-        
+
         // Validate bytecode cache
         self.validate_bytecode_cache(&snapshot.bytecode_cache, &mut errors, &mut warnings)?;
-        
+
         // Validate GC presets
         self.validate_gc_presets(&snapshot.gc_presets, &mut errors, &mut warnings)?;
-        
+
         // Validate optimization hints
         self.validate_optimization_hints(&snapshot.optimization_hints, &mut errors, &mut warnings)?;
-        
+
         let validation_time = start.elapsed();
         self.update_stats("content_validation", validation_time);
-        
-        Ok(self.create_validation_result(
-            errors,
-            warnings,
-            validation_time,
-            "content_validation",
-        ))
+
+        Ok(self.create_validation_result(errors, warnings, validation_time, "content_validation"))
     }
-    
+
     /// Validate compatibility with current environment
-    pub fn validate_compatibility(&mut self, snapshot: &Snapshot) -> SnapshotResult<ValidationResult> {
+    pub fn validate_compatibility(
+        &mut self,
+        snapshot: &Snapshot,
+    ) -> SnapshotResult<ValidationResult> {
         let start = Instant::now();
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
-        
+
         // Check version compatibility
         if !snapshot.metadata.is_compatible() {
             errors.push(ValidationError {
                 error_type: ValidationErrorType::CompatibilityError,
-                message: "Snapshot version is not compatible with current RustMat version".to_string(),
+                message: "Snapshot version is not compatible with current RustMat version"
+                    .to_string(),
                 location: Some("metadata.rustmat_version".to_string()),
                 severity: ErrorSeverity::High,
             });
         }
-        
+
         // Check platform compatibility
         if !SnapshotHeader::new(snapshot.metadata.clone()).is_platform_compatible() {
             warnings.push(ValidationWarning {
@@ -236,13 +228,13 @@ impl SnapshotValidator {
                 recommendation: Some("Performance may be suboptimal".to_string()),
             });
         }
-        
+
         // Check feature compatibility
         self.validate_feature_compatibility(&snapshot.metadata, &mut errors, &mut warnings)?;
-        
+
         let validation_time = start.elapsed();
         self.update_stats("compatibility_validation", validation_time);
-        
+
         Ok(self.create_validation_result(
             errors,
             warnings,
@@ -250,7 +242,7 @@ impl SnapshotValidator {
             "compatibility_validation",
         ))
     }
-    
+
     /// Validate header structure
     fn validate_header(
         &self,
@@ -267,7 +259,7 @@ impl SnapshotValidator {
                 severity: ErrorSeverity::Critical,
             });
         }
-        
+
         // Validate version
         if header.version > SNAPSHOT_VERSION {
             errors.push(ValidationError {
@@ -280,7 +272,7 @@ impl SnapshotValidator {
                 severity: ErrorSeverity::High,
             });
         }
-        
+
         // Validate data section info
         if header.data_info.uncompressed_size == 0 {
             errors.push(ValidationError {
@@ -290,10 +282,10 @@ impl SnapshotValidator {
                 severity: ErrorSeverity::Medium,
             });
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate data section
     fn validate_data_section(
         &self,
@@ -310,9 +302,10 @@ impl SnapshotValidator {
                 severity: ErrorSeverity::High,
             });
         }
-        
+
         // Check compression ratio
-        let compression_ratio = format.data.len() as f64 / format.header.data_info.uncompressed_size as f64;
+        let compression_ratio =
+            format.data.len() as f64 / format.header.data_info.uncompressed_size as f64;
         if compression_ratio > 1.0 {
             warnings.push(ValidationWarning {
                 warning_type: ValidationWarningType::PerformanceWarning,
@@ -320,10 +313,10 @@ impl SnapshotValidator {
                 recommendation: Some("Consider disabling compression for this data".to_string()),
             });
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate checksum
     fn validate_checksum(
         &self,
@@ -352,10 +345,10 @@ impl SnapshotValidator {
                 });
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate builtin registry
     fn validate_builtin_registry(
         &self,
@@ -372,7 +365,7 @@ impl SnapshotValidator {
                 severity: ErrorSeverity::Medium,
             });
         }
-        
+
         // Check for essential builtins
         let essential_builtins = ["abs", "sin", "cos", "sqrt", "max", "min"];
         for builtin in &essential_builtins {
@@ -380,11 +373,13 @@ impl SnapshotValidator {
                 warnings.push(ValidationWarning {
                     warning_type: ValidationWarningType::ConfigurationWarning,
                     message: format!("Essential builtin '{builtin}' not found"),
-                    recommendation: Some("Ensure all standard library components are included".to_string()),
+                    recommendation: Some(
+                        "Ensure all standard library components are included".to_string(),
+                    ),
                 });
             }
         }
-        
+
         // Validate function metadata
         for (index, function) in registry.functions.iter().enumerate() {
             if let Some(&expected_index) = registry.name_index.get(&function.name) {
@@ -398,10 +393,10 @@ impl SnapshotValidator {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate HIR cache
     fn validate_hir_cache(
         &self,
@@ -414,10 +409,12 @@ impl SnapshotValidator {
             warnings.push(ValidationWarning {
                 warning_type: ValidationWarningType::PerformanceWarning,
                 message: "HIR cache is empty".to_string(),
-                recommendation: Some("Consider caching common standard library functions".to_string()),
+                recommendation: Some(
+                    "Consider caching common standard library functions".to_string(),
+                ),
             });
         }
-        
+
         // Check pattern effectiveness
         if cache.patterns.is_empty() {
             warnings.push(ValidationWarning {
@@ -426,10 +423,10 @@ impl SnapshotValidator {
                 recommendation: Some("Consider caching common expression patterns".to_string()),
             });
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate bytecode cache
     fn validate_bytecode_cache(
         &self,
@@ -445,19 +442,21 @@ impl SnapshotValidator {
                 recommendation: Some("Consider precompiling standard library bytecode".to_string()),
             });
         }
-        
+
         // Check hotspot identification
         if cache.hotspots.is_empty() {
             warnings.push(ValidationWarning {
                 warning_type: ValidationWarningType::PerformanceWarning,
                 message: "No hotspot bytecode identified".to_string(),
-                recommendation: Some("Consider profiling to identify optimization candidates".to_string()),
+                recommendation: Some(
+                    "Consider profiling to identify optimization candidates".to_string(),
+                ),
             });
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate GC presets
     fn validate_gc_presets(
         &self,
@@ -474,21 +473,23 @@ impl SnapshotValidator {
                 severity: ErrorSeverity::Medium,
             });
         }
-        
+
         // Check performance profiles
         for preset_name in presets.presets.keys() {
             if !presets.performance_profiles.contains_key(preset_name) {
                 warnings.push(ValidationWarning {
                     warning_type: ValidationWarningType::ConfigurationWarning,
                     message: format!("No performance profile for preset '{preset_name}'"),
-                    recommendation: Some("Add performance characteristics for better optimization".to_string()),
+                    recommendation: Some(
+                        "Add performance characteristics for better optimization".to_string(),
+                    ),
                 });
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate optimization hints
     fn validate_optimization_hints(
         &self,
@@ -501,10 +502,12 @@ impl SnapshotValidator {
             warnings.push(ValidationWarning {
                 warning_type: ValidationWarningType::PerformanceWarning,
                 message: "No JIT optimization hints provided".to_string(),
-                recommendation: Some("Consider analyzing code for JIT optimization opportunities".to_string()),
+                recommendation: Some(
+                    "Consider analyzing code for JIT optimization opportunities".to_string(),
+                ),
             });
         }
-        
+
         if hints.memory_hints.is_empty() {
             warnings.push(ValidationWarning {
                 warning_type: ValidationWarningType::PerformanceWarning,
@@ -512,10 +515,10 @@ impl SnapshotValidator {
                 recommendation: Some("Consider memory layout optimizations".to_string()),
             });
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate feature compatibility
     fn validate_feature_compatibility(
         &self,
@@ -524,7 +527,7 @@ impl SnapshotValidator {
         warnings: &mut Vec<ValidationWarning>,
     ) -> SnapshotResult<()> {
         let current_features = SnapshotMetadata::current().feature_flags;
-        
+
         // Check for missing features
         for feature in &metadata.feature_flags {
             if !current_features.contains(feature) {
@@ -535,28 +538,36 @@ impl SnapshotValidator {
                 });
             }
         }
-        
+
         // Check for additional features
         for feature in &current_features {
             if !metadata.feature_flags.contains(feature) {
                 warnings.push(ValidationWarning {
                     warning_type: ValidationWarningType::CompatibilityWarning,
                     message: format!("Current environment has feature '{feature}' not in snapshot"),
-                    recommendation: Some("Consider rebuilding snapshot with current features".to_string()),
+                    recommendation: Some(
+                        "Consider rebuilding snapshot with current features".to_string(),
+                    ),
                 });
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Update validation statistics
     fn update_stats(&mut self, check_type: &str, duration: Duration) {
-        *self.stats.checks_performed.entry(check_type.to_string()).or_insert(0) += 1;
-        self.stats.check_times.insert(check_type.to_string(), duration);
+        *self
+            .stats
+            .checks_performed
+            .entry(check_type.to_string())
+            .or_insert(0) += 1;
+        self.stats
+            .check_times
+            .insert(check_type.to_string(), duration);
         self.stats.total_time += duration;
     }
-    
+
     /// Create validation result
     fn create_validation_result(
         &self,
@@ -565,13 +576,16 @@ impl SnapshotValidator {
         validation_time: Duration,
         _check_type: &str,
     ) -> ValidationResult {
-        let is_valid = errors.is_empty() || (!self.config.strict_mode && 
-            errors.iter().all(|e| matches!(e.severity, ErrorSeverity::Low)));
-        
+        let is_valid = errors.is_empty()
+            || (!self.config.strict_mode
+                && errors
+                    .iter()
+                    .all(|e| matches!(e.severity, ErrorSeverity::Low)));
+
         let score = self.calculate_validation_score(&errors, &warnings);
-        
+
         let recommendations = self.generate_recommendations(&errors, &warnings);
-        
+
         ValidationResult {
             is_valid,
             score,
@@ -586,7 +600,7 @@ impl SnapshotValidator {
             recommendations,
         }
     }
-    
+
     /// Calculate validation score
     fn calculate_validation_score(
         &self,
@@ -594,7 +608,7 @@ impl SnapshotValidator {
         warnings: &[ValidationWarning],
     ) -> u8 {
         let mut score = 100u8;
-        
+
         for error in errors {
             let penalty = match error.severity {
                 ErrorSeverity::Critical => 50,
@@ -604,13 +618,13 @@ impl SnapshotValidator {
             };
             score = score.saturating_sub(penalty);
         }
-        
+
         // Warnings reduce score by 2 each
         score = score.saturating_sub((warnings.len() as u8) * 2);
-        
+
         score
     }
-    
+
     /// Generate recommendations based on errors and warnings
     fn generate_recommendations(
         &self,
@@ -618,27 +632,36 @@ impl SnapshotValidator {
         warnings: &[ValidationWarning],
     ) -> Vec<String> {
         let mut recommendations = Vec::new();
-        
-        if errors.iter().any(|e| matches!(e.error_type, ValidationErrorType::IntegrityError)) {
+
+        if errors
+            .iter()
+            .any(|e| matches!(e.error_type, ValidationErrorType::IntegrityError))
+        {
             recommendations.push("Regenerate snapshot to fix integrity issues".to_string());
         }
-        
-        if errors.iter().any(|e| matches!(e.error_type, ValidationErrorType::CompatibilityError)) {
+
+        if errors
+            .iter()
+            .any(|e| matches!(e.error_type, ValidationErrorType::CompatibilityError))
+        {
             recommendations.push("Update RustMat version or regenerate snapshot".to_string());
         }
-        
-        if warnings.iter().any(|w| matches!(w.warning_type, ValidationWarningType::PerformanceWarning)) {
+
+        if warnings
+            .iter()
+            .any(|w| matches!(w.warning_type, ValidationWarningType::PerformanceWarning))
+        {
             recommendations.push("Consider optimizing snapshot for better performance".to_string());
         }
-        
+
         recommendations
     }
-    
+
     /// Get validation statistics
     pub fn stats(&self) -> &ValidationStats {
         &self.stats
     }
-    
+
     /// Reset validation statistics
     pub fn reset_stats(&mut self) {
         self.stats = ValidationStats::default();
@@ -663,7 +686,7 @@ impl ValidationResult {
     pub fn is_ok(&self) -> bool {
         self.is_valid
     }
-    
+
     /// Get critical errors
     pub fn critical_errors(&self) -> Vec<&ValidationError> {
         self.errors
@@ -671,7 +694,7 @@ impl ValidationResult {
             .filter(|e| matches!(e.severity, ErrorSeverity::Critical))
             .collect()
     }
-    
+
     /// Get performance warnings
     pub fn performance_warnings(&self) -> Vec<&ValidationWarning> {
         self.warnings
@@ -685,14 +708,13 @@ impl ValidationResult {
 mod tests {
     use super::*;
 
-    
     #[test]
     fn test_validator_creation() {
         let validator = SnapshotValidator::new();
         assert!(validator.config.format_validation);
         assert!(validator.config.integrity_checking);
     }
-    
+
     #[test]
     fn test_validation_config() {
         let config = ValidationConfig::default();
@@ -700,14 +722,14 @@ mod tests {
         assert!(!config.strict_mode);
         assert!(config.max_validation_time > Duration::ZERO);
     }
-    
+
     #[test]
     fn test_validation_score_calculation() {
         let validator = SnapshotValidator::new();
-        
+
         // No errors or warnings = perfect score
         assert_eq!(validator.calculate_validation_score(&[], &[]), 100);
-        
+
         // Critical error
         let critical_error = ValidationError {
             error_type: ValidationErrorType::IntegrityError,
@@ -715,8 +737,11 @@ mod tests {
             location: None,
             severity: ErrorSeverity::Critical,
         };
-        assert_eq!(validator.calculate_validation_score(&[critical_error], &[]), 50);
-        
+        assert_eq!(
+            validator.calculate_validation_score(&[critical_error], &[]),
+            50
+        );
+
         // Warning
         let warning = ValidationWarning {
             warning_type: ValidationWarningType::PerformanceWarning,
@@ -725,40 +750,46 @@ mod tests {
         };
         assert_eq!(validator.calculate_validation_score(&[], &[warning]), 98);
     }
-    
+
     #[test]
     fn test_header_validation() {
         let validator = SnapshotValidator::new();
         let metadata = SnapshotMetadata::current();
         let mut header = SnapshotHeader::new(metadata);
-        
+
         // Set up proper data info to avoid validation errors
         header.data_info.uncompressed_size = 1024;
         header.data_info.compressed_size = 512;
         header.data_info.data_offset = 256;
-        
+
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
-        
-        validator.validate_header(&header, &mut errors, &mut warnings).unwrap();
+
+        validator
+            .validate_header(&header, &mut errors, &mut warnings)
+            .unwrap();
         if !errors.is_empty() {
             eprintln!("Validation errors: {:?}", errors);
         }
         assert!(errors.is_empty());
     }
-    
+
     #[test]
     fn test_invalid_magic_detection() {
         let validator = SnapshotValidator::new();
         let metadata = SnapshotMetadata::current();
         let mut header = SnapshotHeader::new(metadata);
         header.magic = [0; 8]; // Invalid magic
-        
+
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
-        
-        validator.validate_header(&header, &mut errors, &mut warnings).unwrap();
+
+        validator
+            .validate_header(&header, &mut errors, &mut warnings)
+            .unwrap();
         assert!(!errors.is_empty());
-        assert!(errors.iter().any(|e| matches!(e.error_type, ValidationErrorType::FormatError)));
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e.error_type, ValidationErrorType::FormatError)));
     }
 }

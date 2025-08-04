@@ -164,10 +164,12 @@ fn test_gc_statistics_accuracy() {
 
     // Check that statistics are accurate (at least the expected number of allocations)
     // Note: Other tests may run concurrently and add more allocations
-    assert!(final_allocations - initial_allocations >= allocation_count, 
-        "Expected at least {} allocations, but got {}", 
-        allocation_count, 
-        final_allocations - initial_allocations);
+    assert!(
+        final_allocations - initial_allocations >= allocation_count,
+        "Expected at least {} allocations, but got {}",
+        allocation_count,
+        final_allocations - initial_allocations
+    );
 
     // Force collection and check collection stats
     let initial_collections = after_alloc_stats.minor_collections.load(Ordering::Relaxed);

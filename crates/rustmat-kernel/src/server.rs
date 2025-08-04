@@ -6,7 +6,7 @@
 use crate::{
     execution::{ExecutionStats, ExecutionStatus},
     protocol::{ExecuteReply, ExecuteRequest, ExecutionState, JupyterMessage, MessageType},
-    ConnectionInfo, ExecutionEngine, KernelConfig, KernelInfo, KernelError, Result,
+    ConnectionInfo, ExecutionEngine, KernelConfig, KernelError, KernelInfo, Result,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -94,10 +94,13 @@ impl KernelServer {
             self.config.session_id.clone(),
             self.status_tx.clone(),
         ));
-        
+
         // Log router initialization
-        log::info!("Message router initialized for session: {}", router.session_id());
-        
+        log::info!(
+            "Message router initialized for session: {}",
+            router.session_id()
+        );
+
         // Store router for the server to use
         self.router = Some(Arc::clone(&router));
 
@@ -147,27 +150,30 @@ impl KernelServer {
         let engine = self.engine.lock().await;
         Ok(engine.stats())
     }
-    
+
     /// Handle a Jupyter message using the router
     pub async fn handle_message(&self, message: &JupyterMessage) -> Result<Option<JupyterMessage>> {
         if let Some(ref router) = self.router {
             router.route_message(message).await
         } else {
-            Err(crate::KernelError::Internal("Message router not initialized".to_string()))
+            Err(crate::KernelError::Internal(
+                "Message router not initialized".to_string(),
+            ))
         }
     }
-    
+
     /// Get the current session ID from the router
     pub fn session_id(&self) -> Option<&str> {
         self.router.as_ref().map(|r| r.session_id())
     }
-    
+
     /// Send a status update
     pub async fn send_status(&self, status: ExecutionState) -> Result<()> {
         if let Some(ref router) = self.router {
             router.send_status(status).await
         } else {
-            self.status_tx.send(status)
+            self.status_tx
+                .send(status)
                 .map_err(|e| crate::KernelError::Internal(format!("Failed to send status: {e}")))?;
             Ok(())
         }
@@ -176,33 +182,36 @@ impl KernelServer {
 
 impl MessageRouter {
     /// Create a new message router
-    pub fn new(engine: Arc<tokio::sync::Mutex<ExecutionEngine>>, session_id: String, status_tx: broadcast::Sender<ExecutionState>) -> Self {
+    pub fn new(
+        engine: Arc<tokio::sync::Mutex<ExecutionEngine>>,
+        session_id: String,
+        status_tx: broadcast::Sender<ExecutionState>,
+    ) -> Self {
         Self {
             engine,
             session_id,
             status_tx,
         }
     }
-    
+
     /// Get the session ID
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
-    
 
-    
     /// Send status update
     pub async fn send_status(&self, status: ExecutionState) -> Result<()> {
-        self.status_tx.send(status)
+        self.status_tx
+            .send(status)
             .map_err(|e| KernelError::Internal(format!("Failed to send status: {e}")))?;
         Ok(())
     }
-    
+
     /// Route an incoming message to the appropriate handler
     pub async fn route_message(&self, msg: &JupyterMessage) -> Result<Option<JupyterMessage>> {
         // Update status to busy
         let _ = self.send_status(ExecutionState::Busy).await;
-        
+
         let result = match msg.header.msg_type {
             MessageType::KernelInfoRequest => Ok(Some(self.handle_kernel_info_request(msg).await?)),
             MessageType::ExecuteRequest => Ok(Some(self.handle_execute_request(msg).await?)),
@@ -213,10 +222,10 @@ impl MessageRouter {
                 Ok(None)
             }
         };
-        
+
         // Update status back to idle
         let _ = self.send_status(ExecutionState::Idle).await;
-        
+
         result
     }
 
@@ -310,11 +319,7 @@ mod tests {
         let engine = Arc::new(tokio::sync::Mutex::new(ExecutionEngine::new()));
         let (status_tx, _) = broadcast::channel(16);
 
-        let router = MessageRouter::new(
-            engine,
-            "test".to_string(),
-            status_tx,
-        );
+        let router = MessageRouter::new(engine, "test".to_string(), status_tx);
 
         let request = JupyterMessage::new(
             MessageType::KernelInfoRequest,
@@ -332,11 +337,7 @@ mod tests {
         let engine = Arc::new(tokio::sync::Mutex::new(ExecutionEngine::new()));
         let (status_tx, _) = broadcast::channel(16);
 
-        let router = MessageRouter::new(
-            engine,
-            "test".to_string(),
-            status_tx,
-        );
+        let router = MessageRouter::new(engine, "test".to_string(), status_tx);
 
         let execute_req = ExecuteRequest {
             code: "x = 1 + 2".to_string(),
@@ -364,6 +365,4 @@ mod tests {
         assert_eq!(info.language_info.name, "matlab");
         assert_eq!(info.protocol_version, "5.3");
     }
-    
-
 }
