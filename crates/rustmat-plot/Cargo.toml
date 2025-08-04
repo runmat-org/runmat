@@ -4,6 +4,7 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
+# Legacy static plotting support
 plotters = { version = "0.3", default-features = false, features = [
     "svg_backend",
     "bitmap_backend",
@@ -11,10 +12,56 @@ plotters = { version = "0.3", default-features = false, features = [
     "line_series",
     "point_series"
 ] }
+
+# Interactive GPU-accelerated plotting
+wgpu = "0.19.1"
+winit = { version = "0.29.11", optional = true }
+egui = { version = "0.27.2", optional = true }
+egui-wgpu = { version = "0.27.2", optional = true }
+egui-winit = { version = "0.27.2", optional = true }
+lyon = "1.0"
+bytemuck = { version = "1.0", features = ["derive"] }
+
+# Math and geometry
+glam = "0.24"
+nalgebra = "0.32"
+
+# Async runtime for WGPU
+pollster = "0.3"
+futures = "0.3"
+
+# Data processing
+rayon = "1.0"
+
+# Runtime environment detection
+atty = "0.2"
+log = "0.4"
+
+# Jupyter integration (optional)
+eframe = { version = "0.27.2", optional = true, features = ["glow"] }
+
+# Serialization and config
 serde = { workspace = true }
 serde_yaml = "0.9"
+
+# RustMat integration
 inventory = { workspace = true }
+rustmat-builtins = { workspace = true }
+rustmat-macros = { workspace = true }
+
+[features]
+default = ["static", "gui"]
+static = []  # Static image export (always enabled)
+gui = ["winit", "egui", "egui-wgpu", "egui-winit", "eframe"]  # Interactive GUI
+jupyter = ["eframe"]  # Jupyter widget support
+web = []  # WebGL backend for web/jupyter
 
 [dev-dependencies]
 tempfile = "3"
 serial_test = "2"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+env_logger = "0.10"
+
+[[example]]
+name = "interactive_demo"
+required-features = ["gui"]

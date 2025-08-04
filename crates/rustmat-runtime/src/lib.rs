@@ -4,6 +4,7 @@ use rustmat_macros::runtime_builtin;
 pub mod comparison;
 pub mod indexing;
 pub mod matrix;
+pub mod plotting;
 
 #[cfg(feature = "blas-lapack")]
 pub mod blas;
@@ -18,6 +19,7 @@ extern "C" {}
 pub use comparison::*;
 pub use indexing::*;
 pub use matrix::*;
+// Note: plotting functions are registered automatically via runtime_builtin macro
 
 #[cfg(feature = "blas-lapack")]
 pub use blas::*;

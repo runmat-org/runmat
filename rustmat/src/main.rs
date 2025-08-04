@@ -1,5 +1,5 @@
 //! RustMat - High-performance MATLAB/Octave runtime
-//!
+//! 
 //! A modern, V8-inspired MATLAB runtime with Jupyter kernel support,
 //! JIT compilation, generational garbage collection, and excellent developer ergonomics.
 
@@ -7,9 +7,12 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use env_logger::Env;
 use log::{debug, error, info};
+
+mod config;
+use config::{ConfigLoader, RustMatConfig, PlotMode, PlotBackend};
 use rustmat_builtins::Value;
 use rustmat_gc::{
-    gc_allocate, gc_collect_major, gc_collect_minor, gc_configure, gc_get_config, gc_stats,
+    gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats,
     GcConfig,
 };
 use rustmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
@@ -140,6 +143,27 @@ struct Cli {
     #[arg(long, env = "RUSTMAT_SNAPSHOT_PATH")]
     snapshot: Option<PathBuf>,
 
+    // Plotting Options
+    /// Plotting mode
+    #[arg(long, value_enum, env = "RUSTMAT_PLOT_MODE")]
+    plot_mode: Option<PlotMode>,
+
+    /// Force headless plotting mode
+    #[arg(long, env = "RUSTMAT_PLOT_HEADLESS", value_parser = parse_bool_env)]
+    plot_headless: bool,
+
+    /// Plotting backend
+    #[arg(long, value_enum, env = "RUSTMAT_PLOT_BACKEND")]
+    plot_backend: Option<PlotBackend>,
+
+    /// Configuration file path (.rustmat.yaml, .rustmat.json, etc.)
+    #[arg(long, env = "RUSTMAT_CONFIG")]
+    config_file: Option<PathBuf>,
+
+    /// Generate sample configuration file
+    #[arg(long)]
+    generate_config: bool,
+
     /// Command to execute
     #[command(subcommand)]
     command: Option<Commands>,
@@ -156,7 +180,7 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-
+    
     /// Start Jupyter kernel
     Kernel {
         /// Kernel IP address
@@ -251,6 +275,27 @@ enum Commands {
         #[command(subcommand)]
         snapshot_command: SnapshotCommand,
     },
+
+    /// Interactive plotting window (requires GUI features)
+    Plot {
+        /// Plot mode override
+        #[arg(long, value_enum)]
+        mode: Option<PlotMode>,
+        
+        /// Window width
+        #[arg(long)]
+        width: Option<u32>,
+        
+        /// Window height
+        #[arg(long)]
+        height: Option<u32>,
+    },
+
+    /// Configuration management
+    Config {
+        #[command(subcommand)]
+        config_command: ConfigCommand,
+    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -299,6 +344,25 @@ enum SnapshotCommand {
     },
 }
 
+#[derive(Subcommand, Clone)]
+enum ConfigCommand {
+    /// Show current configuration
+    Show,
+    /// Generate sample configuration file
+    Generate {
+        /// Output file path
+        #[arg(short, long, default_value = ".rustmat.yaml")]
+        output: PathBuf,
+    },
+    /// Validate configuration file
+    Validate {
+        /// Config file to validate
+        config_file: PathBuf,
+    },
+    /// Show configuration file locations
+    Paths,
+}
+
 #[derive(Clone, Debug, ValueEnum)]
 enum CompressionAlg {
     /// No compression
@@ -313,7 +377,7 @@ enum CompressionAlg {
 enum LogLevel {
     Error,
     Warn,
-    Info,
+    Info, 
     Debug,
     Trace,
 }
@@ -399,11 +463,28 @@ fn parse_log_level_env(s: &str) -> Result<LogLevel, String> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize logging
-    let log_level = if cli.debug {
+    // Handle config generation first
+    if cli.generate_config {
+        let sample_config = ConfigLoader::generate_sample_config();
+        println!("{}", sample_config);
+        return Ok(());
+    }
+
+    // Load configuration with CLI overrides
+    let mut config = load_configuration(&cli)?;
+    apply_cli_overrides(&mut config, &cli);
+
+    // Initialize logging based on final config
+    let log_level = if config.logging.debug || cli.debug {
         log::LevelFilter::Debug
     } else {
-        cli.log_level.clone().into()
+        match config.logging.level {
+            config::LogLevel::Error => log::LevelFilter::Error,
+            config::LogLevel::Warn => log::LevelFilter::Warn,
+            config::LogLevel::Info => log::LevelFilter::Info,
+            config::LogLevel::Debug => log::LevelFilter::Debug,
+            config::LogLevel::Trace => log::LevelFilter::Trace,
+        }
     };
 
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
@@ -411,19 +492,20 @@ async fn main() -> Result<()> {
         .init();
 
     info!("RustMat v{} starting", env!("CARGO_PKG_VERSION"));
+    debug!("Configuration loaded: {:?}", config);
 
     // Configure Garbage Collector
-    configure_gc(&cli)?;
+    configure_gc_from_config(&config)?;
 
     // Handle command or script execution
     let command = cli.command.clone();
     let script = cli.script.clone();
     match (command, script) {
-        (Some(command), None) => execute_command(command, &cli).await,
-        (None, Some(script)) => execute_script(script, &cli).await,
+        (Some(command), None) => execute_command(command, &cli, &config).await,
+        (None, Some(script)) => execute_script(script, &cli, &config).await,
         (None, None) => {
             // Default to REPL
-            execute_repl_with_config(&cli).await
+            execute_repl(&config).await
         }
         (Some(_), Some(_)) => {
             error!("Cannot specify both command and script file");
@@ -432,48 +514,132 @@ async fn main() -> Result<()> {
     }
 }
 
-fn configure_gc(cli: &Cli) -> Result<()> {
-    let mut config = if let Some(preset) = &cli.gc_preset {
-        preset.clone().into()
+/// Load configuration from files and environment
+fn load_configuration(cli: &Cli) -> Result<RustMatConfig> {
+    // If a specific config file is provided, try to load it
+    if let Some(config_file) = &cli.config_file {
+        if config_file.exists() {
+            info!("Loading configuration from: {}", config_file.display());
+            return ConfigLoader::load_from_file(config_file);
+        } else {
+            error!("Specified config file does not exist: {}", config_file.display());
+            std::process::exit(1);
+        }
+    }
+    
+    // Otherwise, use the standard loader
+    ConfigLoader::load()
+}
+
+/// Apply CLI argument overrides to configuration
+fn apply_cli_overrides(config: &mut RustMatConfig, cli: &Cli) {
+    // JIT settings
+    if cli.no_jit {
+        config.jit.enabled = false;
+    }
+    config.jit.threshold = cli.jit_threshold;
+    config.jit.optimization_level = match cli.jit_opt_level {
+        OptLevel::None => config::JitOptLevel::None,
+        OptLevel::Size => config::JitOptLevel::Size,
+        OptLevel::Speed => config::JitOptLevel::Speed,
+        OptLevel::Aggressive => config::JitOptLevel::Aggressive,
+    };
+    
+    // Runtime settings
+    config.runtime.timeout = cli.timeout;
+    config.runtime.verbose = cli.verbose;
+    if let Some(snapshot) = &cli.snapshot {
+        config.runtime.snapshot_path = Some(snapshot.clone());
+    }
+    
+    // GC settings
+    if let Some(preset) = &cli.gc_preset {
+        config.gc.preset = Some(match preset {
+            GcPreset::LowLatency => config::GcPreset::LowLatency,
+            GcPreset::HighThroughput => config::GcPreset::HighThroughput,
+            GcPreset::LowMemory => config::GcPreset::LowMemory,
+            GcPreset::Debug => config::GcPreset::Debug,
+        });
+    }
+    if let Some(young_size) = cli.gc_young_size {
+        config.gc.young_size_mb = Some(young_size);
+    }
+    if let Some(threads) = cli.gc_threads {
+        config.gc.threads = Some(threads);
+    }
+    config.gc.collect_stats = cli.gc_stats;
+    
+    // Plotting settings
+    if let Some(plot_mode) = &cli.plot_mode {
+        config.plotting.mode = *plot_mode;
+    }
+    if cli.plot_headless {
+        config.plotting.force_headless = true;
+    }
+    if let Some(backend) = &cli.plot_backend {
+        config.plotting.backend = *backend;
+    }
+    
+    // Logging settings
+    config.logging.debug = cli.debug;
+    config.logging.level = match cli.log_level {
+        LogLevel::Error => config::LogLevel::Error,
+        LogLevel::Warn => config::LogLevel::Warn,
+        LogLevel::Info => config::LogLevel::Info,
+        LogLevel::Debug => config::LogLevel::Debug,
+        LogLevel::Trace => config::LogLevel::Trace,
+    };
+}
+
+/// Configure GC from the loaded configuration
+fn configure_gc_from_config(config: &RustMatConfig) -> Result<()> {
+    let mut gc_config = if let Some(preset) = &config.gc.preset {
+        (*preset).into()
     } else {
-        GcConfig::default()
+        rustmat_gc::GcConfig::default()
     };
 
-    // Apply custom GC settings
-    if let Some(young_size) = cli.gc_young_size {
-        config.young_generation_size = young_size * 1024 * 1024; // Convert MB to bytes
+    // Apply custom GC settings from config
+    if let Some(young_size) = config.gc.young_size_mb {
+        gc_config.young_generation_size = young_size * 1024 * 1024; // Convert MB to bytes
     }
 
-    if let Some(threads) = cli.gc_threads {
-        config.max_gc_threads = threads;
+    if let Some(threads) = config.gc.threads {
+        gc_config.max_gc_threads = threads;
     }
 
-    config.collect_statistics = cli.gc_stats;
-    config.verbose_logging = cli.debug || cli.verbose;
+    gc_config.collect_statistics = config.gc.collect_stats;
+    gc_config.verbose_logging = config.logging.debug || config.runtime.verbose;
 
     info!(
         "Configuring GC with preset: {:?}",
-        cli.gc_preset
-            .as_ref()
+        config.gc.preset
             .map(|p| format!("{p:?}"))
             .unwrap_or_else(|| "default".to_string())
     );
     debug!(
         "GC Configuration: young_gen={}MB, threads={}, stats={}",
-        config.young_generation_size / 1024 / 1024,
-        config.max_gc_threads,
-        config.collect_statistics
+        gc_config.young_generation_size / 1024 / 1024,
+        gc_config.max_gc_threads,
+        gc_config.collect_statistics
     );
 
-    gc_configure(config).context("Failed to configure garbage collector")?;
+    rustmat_gc::gc_configure(gc_config).context("Failed to configure garbage collector")?;
 
     Ok(())
 }
 
-async fn execute_command(command: Commands, cli: &Cli) -> Result<()> {
+
+
+async fn execute_command(command: Commands, cli: &Cli, config: &RustMatConfig) -> Result<()> {
     match command {
-        Commands::Repl { verbose } => execute_repl_with_config_and_verbose(cli, verbose).await,
-        Commands::Kernel {
+        Commands::Repl { verbose } => {
+            // Create a temporary config with the verbose override
+            let mut repl_config = config.clone();
+            repl_config.runtime.verbose = verbose || config.runtime.verbose;
+            execute_repl(&repl_config).await
+        },
+        Commands::Kernel { 
             ip,
             key,
             transport,
@@ -503,7 +669,7 @@ async fn execute_command(command: Commands, cli: &Cli) -> Result<()> {
         Commands::KernelConnection { connection_file } => {
             execute_kernel_with_connection(connection_file, cli.timeout).await
         }
-        Commands::Run { file, args } => execute_script_with_args(file, args, cli).await,
+        Commands::Run { file, args } => execute_script_with_args(file, args, cli, config).await,
         Commands::Version { detailed } => {
             show_version(detailed);
             Ok(())
@@ -516,20 +682,18 @@ async fn execute_command(command: Commands, cli: &Cli) -> Result<()> {
             jit,
         } => execute_benchmark(file, iterations, jit, cli).await,
         Commands::Snapshot { snapshot_command } => execute_snapshot_command(snapshot_command).await,
+        Commands::Plot { mode, width, height } => execute_plot_command(mode, width, height, config).await,
+        Commands::Config { config_command } => execute_config_command(config_command, config).await,
     }
 }
 
-async fn execute_repl_with_config(cli: &Cli) -> Result<()> {
-    execute_repl_with_config_and_verbose(cli, cli.verbose).await
-}
-
-async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Result<()> {
+async fn execute_repl(config: &RustMatConfig) -> Result<()> {
     info!("Starting RustMat REPL");
-    if verbose || cli.verbose {
+    if config.runtime.verbose {
         info!("Verbose mode enabled");
     }
 
-    let enable_jit = !cli.no_jit;
+    let enable_jit = config.jit.enabled;
     info!(
         "JIT compiler: {}",
         if enable_jit { "enabled" } else { "disabled" }
@@ -537,7 +701,7 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
 
     // Create enhanced REPL engine with optional snapshot loading
     let mut engine =
-        ReplEngine::with_snapshot(enable_jit, verbose || cli.verbose, cli.snapshot.as_ref())
+        ReplEngine::with_snapshot(enable_jit, config.runtime.verbose, config.runtime.snapshot_path.as_ref())
             .context("Failed to create REPL engine")?;
 
     info!("RustMat REPL ready");
@@ -550,15 +714,14 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
     if enable_jit {
         println!(
             "JIT compiler: enabled (Cranelift optimization level: {:?})",
-            cli.jit_opt_level
+            config.jit.optimization_level
         );
     } else {
         println!("JIT compiler: disabled (interpreter mode)");
     }
     println!(
         "Garbage collector: {:?}",
-        cli.gc_preset
-            .as_ref()
+        config.gc.preset
             .map(|p| format!("{p:?}"))
             .unwrap_or_else(|| "default".to_string())
     );
@@ -574,7 +737,7 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
     loop {
         print!("rustmat> ");
         io::stdout().flush().unwrap();
-
+        
         input.clear();
         match io::stdin().read_line(&mut input) {
             Ok(_) => {
@@ -612,11 +775,11 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
                 // Execute the input using the enhanced engine
                 match engine.execute(line) {
                     Ok(result) => {
-                        if let Some(error) = result.error {
+                                if let Some(error) = result.error {
                             eprintln!("Error: {error}");
                         } else if let Some(value) = result.value {
                             println!("ans = {value:?}");
-                            if verbose && result.execution_time_ms > 10 {
+                            if config.runtime.verbose && result.execution_time_ms > 10 {
                                 println!(
                                     "  ({}ms {})",
                                     result.execution_time_ms,
@@ -696,7 +859,7 @@ async fn execute_kernel(
     };
 
     let mut server = KernelServer::new(config);
-
+    
     info!("Starting kernel server...");
     server
         .start()
@@ -732,13 +895,13 @@ async fn execute_kernel_with_connection(connection_file: PathBuf, timeout: u64) 
     };
 
     let mut server = KernelServer::new(config);
-
+    
     server
         .start()
         .await
         .context("Failed to start kernel server")?;
 
-    // Keep running until interrupted
+    // Keep running until interrupted  
     tokio::signal::ctrl_c()
         .await
         .context("Failed to listen for ctrl-c")?;
@@ -751,18 +914,18 @@ async fn execute_kernel_with_connection(connection_file: PathBuf, timeout: u64) 
     Ok(())
 }
 
-async fn execute_script(script: PathBuf, cli: &Cli) -> Result<()> {
-    execute_script_with_args(script, vec![], cli).await
+async fn execute_script(script: PathBuf, cli: &Cli, config: &RustMatConfig) -> Result<()> {
+    execute_script_with_args(script, vec![], cli, config).await
 }
 
-async fn execute_script_with_args(script: PathBuf, _args: Vec<String>, cli: &Cli) -> Result<()> {
+async fn execute_script_with_args(script: PathBuf, _args: Vec<String>, _cli: &Cli, config: &RustMatConfig) -> Result<()> {
     info!("Executing script: {script:?}");
 
     let content = fs::read_to_string(&script)
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
-    let enable_jit = !cli.no_jit;
-    let mut engine = ReplEngine::with_snapshot(enable_jit, cli.verbose, cli.snapshot.as_ref())
+    let enable_jit = config.jit.enabled;
+    let mut engine = ReplEngine::with_snapshot(enable_jit, config.runtime.verbose, config.runtime.snapshot_path.as_ref())
         .context("Failed to create execution engine")?;
 
     let start_time = std::time::Instant::now();
@@ -808,9 +971,9 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                 }
                 Err(e) => {
                     error!("Minor GC failed: {e}");
-                    std::process::exit(1);
-                }
+                std::process::exit(1);
             }
+        }
         }
         GcCommand::Major => {
             let start = std::time::Instant::now();
@@ -821,9 +984,9 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                 }
                 Err(e) => {
                     error!("Major GC failed: {e}");
-                    std::process::exit(1);
-                }
-            }
+            std::process::exit(1);
+        }
+    }
         }
         GcCommand::Config => {
             println!("Current GC Configuration:");
@@ -990,6 +1153,196 @@ async fn execute_benchmark(file: PathBuf, iterations: u32, jit: bool, _cli: &Cli
     );
 
     Ok(())
+}
+
+/// Execute the plot command (interactive plotting window)
+async fn execute_plot_command(
+    mode: Option<PlotMode>,
+    width: Option<u32>,
+    height: Option<u32>,
+    config: &RustMatConfig,
+) -> Result<()> {
+    info!("Starting interactive plotting window");
+    
+    // Determine the plotting mode
+    let plot_mode = mode.unwrap_or(config.plotting.mode);
+    
+    match plot_mode {
+        PlotMode::Auto => {
+            // Auto-detect environment for plotting
+            if config.plotting.force_headless || !is_gui_available() {
+                info!("Auto-detected headless environment");
+                execute_headless_plot().await
+            } else {
+                info!("Auto-detected GUI environment");
+                execute_gui_plot(width, height, config).await
+            }
+        }
+        PlotMode::Gui => {
+            execute_gui_plot(width, height, config).await
+        }
+        PlotMode::Headless => {
+            execute_headless_plot().await
+        }
+        PlotMode::Jupyter => {
+            info!("Jupyter plotting mode not yet implemented");
+            println!("Jupyter plotting mode will be available in future releases.");
+            Ok(())
+        }
+    }
+}
+
+/// Execute GUI plotting
+async fn execute_gui_plot(_width: Option<u32>, _height: Option<u32>, _config: &RustMatConfig) -> Result<()> {
+    info!("Initializing GUI plotting window");
+    
+    // Use rustmat-plot's interactive plotting
+    match rustmat_plot::interactive_plot().await {
+        Ok(()) => {
+            info!("GUI plotting window closed successfully");
+            Ok(())
+        }
+        Err(e) => {
+            error!("GUI plotting failed: {}", e);
+            Err(anyhow::anyhow!("GUI plotting failed: {}", e))
+        }
+    }
+}
+
+/// Execute headless plotting (generates static images)
+async fn execute_headless_plot() -> Result<()> {
+    info!("Generating sample static plots");
+    
+    // Generate some sample plots to demonstrate headless functionality
+    let sample_data_x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+    let sample_data_y = vec![1.0, 4.0, 2.0, 8.0, 3.0];
+    
+    let options = rustmat_plot::PlotOptions::default();
+    
+    match rustmat_plot::plot_line(&sample_data_x, &sample_data_y, "sample_plot.png", options) {
+        Ok(()) => {
+            println!("Sample plot generated: sample_plot.png");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to generate plot: {}", e);
+            Err(anyhow::anyhow!("Plot generation failed: {}", e))
+        }
+    }
+}
+
+/// Check if GUI is available
+fn is_gui_available() -> bool {
+    // Simple heuristic: check if we're in a TTY and not in a known headless environment
+    use std::env;
+    
+    // Check for headless environment indicators
+    if env::var("CI").is_ok() || 
+       env::var("GITHUB_ACTIONS").is_ok() ||
+       env::var("HEADLESS").is_ok() ||
+       env::var("NO_GUI").is_ok() {
+        return false;
+    }
+    
+    // Check if running in SSH without X11 forwarding
+    if env::var("SSH_CLIENT").is_ok() && env::var("DISPLAY").is_err() {
+        return false;
+    }
+    
+    // Use atty to check if stdout is a TTY
+    atty::is(atty::Stream::Stdout)
+}
+
+/// Execute config command
+async fn execute_config_command(config_command: ConfigCommand, config: &RustMatConfig) -> Result<()> {
+    match config_command {
+        ConfigCommand::Show => {
+            println!("Current RustMat Configuration:");
+            println!("==============================");
+            
+            let yaml = serde_yaml::to_string(config)
+                .context("Failed to serialize configuration")?;
+            println!("{}", yaml);
+        }
+        ConfigCommand::Generate { output } => {
+            let sample_config = RustMatConfig::default();
+            ConfigLoader::save_to_file(&sample_config, &output)
+                .with_context(|| format!("Failed to write config to {}", output.display()))?;
+            
+            println!("Sample configuration generated: {}", output.display());
+            println!("Edit this file to customize your RustMat settings.");
+        }
+        ConfigCommand::Validate { config_file } => {
+            match ConfigLoader::load_from_file(&config_file) {
+                Ok(_) => {
+                    println!("Configuration file is valid: {}", config_file.display());
+                }
+                Err(e) => {
+                    error!("Configuration validation failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        ConfigCommand::Paths => {
+            println!("RustMat Configuration File Locations:");
+            println!("====================================");
+            println!();
+            
+            if let Ok(config_path) = std::env::var("RUSTMAT_CONFIG") {
+                println!("Environment override: {}", config_path);
+            }
+            
+            println!("Current directory:");
+            if let Ok(current_dir) = std::env::current_dir() {
+                for name in &[".rustmat.yaml", ".rustmat.yml", ".rustmat.json", ".rustmat.toml"] {
+                    let path = current_dir.join(name);
+                    let exists = if path.exists() { " (exists)" } else { "" };
+                    println!("  {}{}", path.display(), exists);
+                }
+            }
+            
+            println!();
+            println!("Home directory:");
+            if let Some(home_dir) = dirs::home_dir() {
+                for name in &[".rustmat.yaml", ".rustmat.yml", ".rustmat.json"] {
+                    let path = home_dir.join(name);
+                    let exists = if path.exists() { " (exists)" } else { "" };
+                    println!("  {}{}", path.display(), exists);
+                }
+                
+                let config_dir = home_dir.join(".config/rustmat");
+                for name in &["config.yaml", "config.yml", "config.json"] {
+                    let path = config_dir.join(name);
+                    let exists = if path.exists() { " (exists)" } else { "" };
+                    println!("  {}{}", path.display(), exists);
+                }
+            }
+            
+            #[cfg(unix)]
+            {
+                println!();
+                println!("System-wide:");
+                for name in &["/etc/rustmat/config.yaml", "/etc/rustmat/config.yml", "/etc/rustmat/config.json"] {
+                    let path = std::path::Path::new(name);
+                    let exists = if path.exists() { " (exists)" } else { "" };
+                    println!("  {}{}", path.display(), exists);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// Conversion implementations
+impl From<config::GcPreset> for rustmat_gc::GcConfig {
+    fn from(preset: config::GcPreset) -> Self {
+        match preset {
+            config::GcPreset::LowLatency => rustmat_gc::GcConfig::low_latency(),
+            config::GcPreset::HighThroughput => rustmat_gc::GcConfig::high_throughput(),
+            config::GcPreset::LowMemory => rustmat_gc::GcConfig::low_memory(),
+            config::GcPreset::Debug => rustmat_gc::GcConfig::debug(),
+        }
+    }
 }
 
 impl From<CompressionAlg> for rustmat_snapshot::CompressionAlgorithm {
@@ -1169,7 +1522,7 @@ async fn execute_snapshot_command(snapshot_command: SnapshotCommand) -> Result<(
 
 fn show_version(detailed: bool) {
     println!("RustMat v{}", env!("CARGO_PKG_VERSION"));
-
+    
     if detailed {
         println!(
             "Built with Rust {}",
@@ -1206,7 +1559,7 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     println!("RustMat System Information");
     println!("==========================");
     println!();
-
+    
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
     println!(
         "Rust Version: {}",
@@ -1240,7 +1593,7 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     }
     println!("  GC Statistics: {}", cli.gc_stats);
     println!();
-
+    
     println!("Environment:");
     println!("  RUSTMAT_DEBUG: {:?}", std::env::var("RUSTMAT_DEBUG").ok());
     println!(
@@ -1317,4 +1670,5 @@ fn show_repl_help() {
     println!("  • Use '.gc' to monitor memory usage and collection");
     println!();
     println!("Press Enter after each statement to execute.");
-}
+} 
+
