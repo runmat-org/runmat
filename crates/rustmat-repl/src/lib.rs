@@ -6,8 +6,11 @@ use rustmat_hir::lower_with_context;
 use rustmat_ignition::compile;
 use rustmat_lexer::tokenize;
 use rustmat_parser::parse;
+use rustmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use rustmat_turbine::TurbineEngine;
 use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Enhanced REPL execution engine that integrates all RustMat components
@@ -24,6 +27,8 @@ pub struct ReplEngine {
     variable_array: Vec<Value>,
     /// Mapping from variable names to VarId indices
     variable_names: HashMap<String, usize>,
+    /// Loaded snapshot for standard library preloading
+    snapshot: Option<Arc<Snapshot>>,
 }
 
 #[derive(Debug, Default)]
@@ -51,6 +56,27 @@ impl ReplEngine {
 
     /// Create a new REPL engine with specific options
     pub fn with_options(enable_jit: bool, verbose: bool) -> Result<Self> {
+        Self::with_snapshot(enable_jit, verbose, None::<&str>)
+    }
+
+    /// Create a new REPL engine with snapshot loading
+    pub fn with_snapshot<P: AsRef<Path>>(enable_jit: bool, verbose: bool, snapshot_path: Option<P>) -> Result<Self> {
+        // Load snapshot if provided
+        let snapshot = if let Some(path) = snapshot_path {
+            match Self::load_snapshot(path.as_ref()) {
+                Ok(snapshot) => {
+                    info!("Snapshot loaded successfully from {}", path.as_ref().display());
+                    Some(Arc::new(snapshot))
+                }
+                Err(e) => {
+                    warn!("Failed to load snapshot from {}: {}, continuing without snapshot", path.as_ref().display(), e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let jit_engine = if enable_jit {
             match TurbineEngine::new() {
                 Ok(engine) => {
@@ -74,7 +100,33 @@ impl ReplEngine {
             variables: HashMap::new(),
             variable_array: Vec::new(),
             variable_names: HashMap::new(),
+            snapshot,
         })
+    }
+
+    /// Load a snapshot from disk
+    fn load_snapshot(path: &Path) -> Result<Snapshot> {
+        let mut loader = SnapshotLoader::new(SnapshotConfig::default());
+        let (snapshot, _stats) = loader.load(path)
+            .map_err(|e| anyhow::anyhow!("Failed to load snapshot: {}", e))?;
+        Ok(snapshot)
+    }
+
+    /// Get snapshot information
+    pub fn snapshot_info(&self) -> Option<String> {
+        self.snapshot.as_ref().map(|snapshot| {
+            format!(
+                "Snapshot loaded: {} builtins, {} HIR functions, {} bytecode entries",
+                snapshot.builtins.functions.len(),
+                snapshot.hir_cache.functions.len(),
+                snapshot.bytecode_cache.stdlib_bytecode.len()
+            )
+        })
+    }
+
+    /// Check if a snapshot is loaded
+    pub fn has_snapshot(&self) -> bool {
+        self.snapshot.is_some()
     }
 
     /// Execute MATLAB/Octave code

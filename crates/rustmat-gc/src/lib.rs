@@ -89,14 +89,12 @@ impl GcHandle {
 #[derive(Debug)]
 struct GcObject {
     /// Unique ID for this object
-    #[allow(dead_code)]
     id: usize,
     /// The actual value
     value: Value,
     /// Mark bit for collection
     marked: AtomicBool,
     /// Generation this object belongs to
-    #[allow(dead_code)]
     generation: u8,
 }
 
@@ -120,6 +118,21 @@ impl GcObject {
 
     fn is_marked(&self) -> bool {
         self.marked.load(Ordering::Acquire)
+    }
+    
+    /// Get the unique ID of this object
+    pub fn id(&self) -> usize {
+        self.id
+    }
+    
+    /// Get the generation this object belongs to
+    pub fn generation(&self) -> u8 {
+        self.generation
+    }
+    
+    /// Get a reference to the value stored in this object
+    pub fn value(&self) -> &Value {
+        &self.value
     }
 }
 
@@ -183,6 +196,11 @@ impl HighPerformanceGC {
 
         // Create the managed object
         let gc_obj = Arc::new(GcObject::new(id, value, 0));
+        
+        // Log object creation for debugging (uses the id and generation methods)
+        log::debug!("Allocated object id={} generation={} value_type={:?}", 
+                   gc_obj.id(), gc_obj.generation(), 
+                   std::mem::discriminant(gc_obj.value()));
 
         // Store in main objects table and get a stable pointer
         let value_ptr = {
@@ -332,11 +350,25 @@ impl HighPerformanceGC {
         marked
     }
 
-    /// Find the GcObject that contains a specific Value (simplified for now)
-    fn find_object_for_value(&self, _value: &Value) -> Option<Arc<GcObject>> {
-        // For now, we don't support finding objects by value reference
-        // In a full implementation, we'd need to track this relationship
+    /// Find the GcObject that contains a specific Value
+    fn find_object_for_value(&self, value: &Value) -> Option<Arc<GcObject>> {
+        // Search through all generations for an object containing this value
+        for generation_map in &self.generations {
+            let generation_map = generation_map.read();
+            for (_handle_id, gc_object) in generation_map.iter() {
+                // Check if this GC object's data matches the value
+                if self.value_matches_object(value, gc_object) {
+                    return Some(Arc::clone(gc_object));
+                }
+            }
+        }
         None
+    }
+    
+    /// Check if a Value matches a GcObject's data
+    fn value_matches_object(&self, value: &Value, gc_object: &GcObject) -> bool {
+        // Since GcObject stores the Value directly, we can just compare them
+        &gc_object.value == value
     }
 
     /// Perform major collection (all generations)
@@ -457,6 +489,11 @@ impl HighPerformanceGC {
         *self.config.write() = config;
         Ok(())
     }
+
+    /// Get the current GC configuration
+    pub fn get_config(&self) -> GcConfig {
+        self.config.read().clone()
+    }
 }
 
 // Safety: All shared data is protected by proper synchronization
@@ -499,6 +536,10 @@ pub fn gc_stats() -> GcStats {
 
 pub fn gc_configure(config: GcConfig) -> Result<()> {
     GC.configure(config)
+}
+
+pub fn gc_get_config() -> GcConfig {
+    GC.get_config()
 }
 
 /// Simplified root registration for backwards compatibility
@@ -695,5 +736,28 @@ mod tests {
 
         // Clean up
         gc_remove_root(protected).expect("root removal failed");
+    }
+    
+    #[test]
+    fn test_gc_object_metadata() {
+        let _ = gc_reset_for_test();
+        
+        // Create a GcObject directly to test its methods
+        let value = Value::Num(42.0);
+        let gc_obj = GcObject::new(123, value.clone(), 1);
+        
+        // Test the methods that were added
+        assert_eq!(gc_obj.id(), 123);
+        assert_eq!(gc_obj.generation(), 1);
+        assert_eq!(gc_obj.value(), &value);
+        
+        // Test marking functionality
+        assert!(!gc_obj.is_marked());
+        assert!(gc_obj.mark()); // First mark should return true (was unmarked)
+        assert!(gc_obj.is_marked());
+        assert!(!gc_obj.mark()); // Second mark should return false (already marked)
+        
+        gc_obj.unmark();
+        assert!(!gc_obj.is_marked());
     }
 }

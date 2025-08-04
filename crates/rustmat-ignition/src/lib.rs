@@ -2,9 +2,10 @@ use rustmat_builtins::Value;
 use rustmat_gc::{gc_register_root, gc_unregister_root, RootId, StackRoot, VariableArrayRoot};
 use rustmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
 use rustmat_runtime::call_builtin;
+use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instr {
     LoadConst(f64),
     LoadVar(usize),
@@ -29,7 +30,7 @@ pub enum Instr {
     Return,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytecode {
     pub instructions: Vec<Instr>,
     pub var_count: usize,

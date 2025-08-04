@@ -1,9 +1,10 @@
 use rustmat_parser::{
     self as parser, BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Type {
     Scalar,
     Matrix,
@@ -11,16 +12,16 @@ pub enum Type {
     Unknown,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct VarId(pub usize);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirExpr {
     pub kind: HirExprKind,
     pub ty: Type,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number(String),
     Var(VarId),
@@ -33,7 +34,7 @@ pub enum HirExprKind {
     FuncCall(String, Vec<HirExpr>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirStmt {
     ExprStmt(HirExpr),
     Assign(VarId, HirExpr),
@@ -63,7 +64,7 @@ pub enum HirStmt {
     },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirProgram {
     pub body: Vec<HirStmt>,
 }

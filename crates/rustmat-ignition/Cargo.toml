@@ -10,6 +10,7 @@ rustmat-lexer = { workspace = true }
 rustmat-parser = { workspace = true }
 rustmat-hir = { workspace = true }
 rustmat-gc = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 rustmat-lexer = { workspace = true }

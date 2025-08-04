@@ -1,16 +1,15 @@
 //! Execution engine for MATLAB code within the Jupyter kernel
 //!
-//! Integrates with the rustmat-ignition interpreter to provide safe,
-//! isolated execution of MATLAB code with proper error handling.
+//! Provides a kernel-specific wrapper around the ReplEngine to adapt
+//! its interface for Jupyter protocol requirements.
 
 use crate::Result;
 use rustmat_builtins::Value;
-use rustmat_hir::lower;
-use rustmat_ignition::execute;
-use rustmat_parser::parse;
+use rustmat_repl::ReplEngine;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
-/// Execution engine managing MATLAB code execution state
+/// Execution engine managing MATLAB code execution state for the Jupyter kernel
 pub struct ExecutionEngine {
     /// Current execution counter
     execution_count: u64,
@@ -18,6 +17,8 @@ pub struct ExecutionEngine {
     timeout: Option<Duration>,
     /// Whether debug mode is enabled
     debug: bool,
+    /// Underlying REPL engine that does the actual execution
+    repl_engine: ReplEngine,
 }
 
 /// Result of code execution
@@ -64,20 +65,43 @@ pub struct ExecutionError {
 impl ExecutionEngine {
     /// Create a new execution engine
     pub fn new() -> Self {
+        let repl_engine = ReplEngine::with_options(true, false)
+            .expect("Failed to create ReplEngine");
         Self {
             execution_count: 0,
             timeout: Some(Duration::from_secs(300)), // 5 minutes default
             debug: false,
+            repl_engine,
         }
     }
 
     /// Create a new execution engine with custom timeout
     pub fn with_timeout(timeout: Option<Duration>) -> Self {
+        let repl_engine = ReplEngine::with_options(true, false)
+            .expect("Failed to create ReplEngine");
         Self {
             execution_count: 0,
             timeout,
             debug: false,
+            repl_engine,
         }
+    }
+
+    /// Create a new execution engine with specific options
+    pub fn with_options(enable_jit: bool, debug: bool, timeout: Option<Duration>) -> Result<Self> {
+        Self::with_snapshot(enable_jit, debug, timeout, None::<&str>)
+    }
+
+    /// Create a new execution engine with snapshot support
+    pub fn with_snapshot<P: AsRef<Path>>(enable_jit: bool, debug: bool, timeout: Option<Duration>, snapshot_path: Option<P>) -> Result<Self> {
+        let repl_engine = ReplEngine::with_snapshot(enable_jit, debug, snapshot_path)
+            .map_err(|e| crate::KernelError::Internal(format!("Failed to create ReplEngine: {e}")))?;
+        Ok(Self {
+            execution_count: 0,
+            timeout,
+            debug,
+            repl_engine,
+        })
     }
 
     /// Enable or disable debug mode
@@ -99,78 +123,74 @@ impl ExecutionEngine {
             log::debug!("Executing code ({}): {}", self.execution_count, code);
         }
 
-        // Parse the code
-        let ast = match parse(code) {
-            Ok(ast) => ast,
-            Err(parse_error) => {
-                return Ok(ExecutionResult {
-                    status: ExecutionStatus::Error,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    result: None,
-                    execution_time_ms: start_time.elapsed().as_millis() as u64,
-                    error: Some(ExecutionError {
-                        error_type: "ParseError".to_string(),
-                        message: parse_error,
-                        traceback: vec!["Parse error in input code".to_string()],
-                    }),
-                });
-            }
-        };
-
-        // Lower to HIR
-        let hir = match lower(&ast) {
-            Ok(hir) => hir,
-            Err(hir_error) => {
-                return Ok(ExecutionResult {
-                    status: ExecutionStatus::Error,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    result: None,
-                    execution_time_ms: start_time.elapsed().as_millis() as u64,
-                    error: Some(ExecutionError {
-                        error_type: "CompileError".to_string(),
-                        message: hir_error,
-                        traceback: vec!["Error in semantic analysis".to_string()],
-                    }),
-                });
-            }
-        };
-
-        // Execute with the interpreter
-        let interpreter_result = execute(&hir);
-        let execution_time_ms = start_time.elapsed().as_millis() as u64;
-
-        match interpreter_result {
-            Ok(variables) => {
-                // For now, we'll return the last variable as the result
-                let result = if !variables.is_empty() {
-                    Some(variables.into_iter().last().unwrap())
+        // Execute using the underlying ReplEngine
+        match self.repl_engine.execute(code) {
+            Ok(repl_result) => {
+                let execution_time_ms = start_time.elapsed().as_millis() as u64;
+                
+                if let Some(error_msg) = repl_result.error {
+                    // Determine error type based on error message content
+                    let error_type = if error_msg.contains("parse") || error_msg.contains("Parse") {
+                        "ParseError"
+                    } else if error_msg.contains("undefined") || error_msg.contains("variable") {
+                        "RuntimeError"
+                    } else if error_msg.contains("lower") || error_msg.contains("HIR") {
+                        "CompileError"
+                    } else {
+                        "ExecutionError"
+                    };
+                    
+                    Ok(ExecutionResult {
+                        status: ExecutionStatus::Error,
+                        stdout: String::new(), // TODO: Capture actual stdout
+                        stderr: String::new(), // TODO: Capture actual stderr
+                        result: None,
+                        execution_time_ms,
+                        error: Some(ExecutionError {
+                            error_type: error_type.to_string(),
+                            message: error_msg,
+                            traceback: vec!["Error during code execution".to_string()],
+                        }),
+                    })
                 } else {
-                    None
+                    Ok(ExecutionResult {
+                        status: ExecutionStatus::Success,
+                        stdout: String::new(), // TODO: Capture actual stdout  
+                        stderr: String::new(), // TODO: Capture actual stderr
+                        result: repl_result.value,
+                        execution_time_ms,
+                        error: None,
+                    })
+                }
+            }
+            Err(e) => {
+                let execution_time_ms = start_time.elapsed().as_millis() as u64;
+                let error_msg = e.to_string();
+                
+                // Determine error type based on error message content
+                let error_type = if error_msg.contains("parse") || error_msg.contains("Parse") {
+                    "ParseError"
+                } else if error_msg.contains("undefined") || error_msg.contains("variable") {
+                    "RuntimeError"
+                } else if error_msg.contains("lower") || error_msg.contains("HIR") {
+                    "CompileError"
+                } else {
+                    "ExecutionError"
                 };
-
+                
                 Ok(ExecutionResult {
-                    status: ExecutionStatus::Success,
-                    stdout: String::new(), // TODO: Capture actual stdout
-                    stderr: String::new(), // TODO: Capture actual stderr
-                    result,
+                    status: ExecutionStatus::Error,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    result: None,
                     execution_time_ms,
-                    error: None,
+                    error: Some(ExecutionError {
+                        error_type: error_type.to_string(),
+                        message: error_msg,
+                        traceback: vec!["Error during code execution".to_string()],
+                    }),
                 })
             }
-            Err(exec_error) => Ok(ExecutionResult {
-                status: ExecutionStatus::Error,
-                stdout: String::new(),
-                stderr: String::new(),
-                result: None,
-                execution_time_ms,
-                error: Some(ExecutionError {
-                    error_type: "RuntimeError".to_string(),
-                    message: exec_error,
-                    traceback: vec!["Error during code execution".to_string()],
-                }),
-            }),
         }
     }
 
@@ -197,11 +217,26 @@ impl ExecutionEngine {
 
     /// Get engine statistics
     pub fn stats(&self) -> ExecutionStats {
+        let repl_stats = self.repl_engine.stats();
         ExecutionStats {
             execution_count: self.execution_count,
             timeout_seconds: self.timeout.map(|d| d.as_secs()),
             debug_enabled: self.debug,
+            repl_total_executions: repl_stats.total_executions,
+            repl_jit_compiled: repl_stats.jit_compiled,
+            repl_interpreter_fallback: repl_stats.interpreter_fallback,
+            repl_average_time_ms: repl_stats.average_execution_time_ms,
         }
+    }
+
+    /// Get snapshot information
+    pub fn snapshot_info(&self) -> Option<String> {
+        self.repl_engine.snapshot_info()
+    }
+
+    /// Check if a snapshot is loaded
+    pub fn has_snapshot(&self) -> bool {
+        self.repl_engine.has_snapshot()
     }
 }
 
@@ -214,12 +249,20 @@ impl Default for ExecutionEngine {
 /// Execution engine statistics
 #[derive(Debug, Clone)]
 pub struct ExecutionStats {
-    /// Total number of executions performed
+    /// Total number of executions performed by the kernel
     pub execution_count: u64,
     /// Configured timeout in seconds (if any)
     pub timeout_seconds: Option<u64>,
     /// Whether debug mode is enabled
     pub debug_enabled: bool,
+    /// Total executions performed by the underlying REPL engine
+    pub repl_total_executions: usize,
+    /// Number of JIT compiled executions
+    pub repl_jit_compiled: usize,
+    /// Number of interpreter fallback executions
+    pub repl_interpreter_fallback: usize,
+    /// Average execution time in milliseconds
+    pub repl_average_time_ms: f64,
 }
 
 #[cfg(test)]

@@ -925,7 +925,7 @@ impl TurbineEngine {
                     // Call the runtime dispatcher
                     match rustmat_runtime::call_builtin(name, &args) {
                         Ok(result) => stack.push(result),
-                        Err(e) => return Err(format!("Builtin function '{}' failed: {}", name, e)),
+                        Err(e) => return Err(format!("Builtin function '{name}' failed: {e}")),
                     }
                 }
                 Instr::CreateMatrix(rows, cols) => {
@@ -943,7 +943,7 @@ impl TurbineEngine {
                     // Create matrix using the runtime
                     match rustmat_builtins::Matrix::new(elements, *rows, *cols) {
                         Ok(matrix) => stack.push(Value::Matrix(matrix)),
-                        Err(e) => return Err(format!("Matrix creation failed: {}", e)),
+                        Err(e) => return Err(format!("Matrix creation failed: {e}")),
                     }
                 }
             }

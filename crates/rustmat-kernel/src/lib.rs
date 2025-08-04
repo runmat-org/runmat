@@ -103,6 +103,8 @@ pub enum KernelError {
     Protocol(String),
     #[error("Connection error: {0}")]
     Connection(String),
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

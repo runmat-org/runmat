@@ -184,7 +184,7 @@ impl BytecodeCompiler {
             builder_context: FunctionBuilderContext::new(),
         }
     }
-
+    
     /// Compile a sequence of bytecode instructions to Cranelift IR
     /// Function signature: fn(*mut Value, usize) -> i32
     pub fn compile_instructions(
@@ -194,15 +194,15 @@ impl BytecodeCompiler {
         _var_count: usize,
     ) -> Result<()> {
         let mut builder = FunctionBuilder::new(func, &mut self.builder_context);
-
+        
         let entry_block = builder.create_block();
         builder.append_block_params_for_function_params(entry_block);
         builder.switch_to_block(entry_block);
-
+        
         // Function parameters
         let vars_ptr = builder.block_params(entry_block)[0]; // *mut f64 (not Value!)
         let _vars_len = builder.block_params(entry_block)[1]; // usize
-
+        
         // Initialize stack (no need for Cranelift variables since we use direct memory access)
         let mut stack = StackSimulator::new();
 
@@ -378,10 +378,9 @@ impl BytecodeCompiler {
                         if let Some(target_basic_block) = cfg.blocks.get(target) {
                             builder.ins().jump(target_basic_block.block, &[]);
                         } else {
-                            return Err(TurbineError::ModuleError(format!(
-                                "Invalid jump target: {}",
-                                target
-                            )));
+                                                return Err(TurbineError::ModuleError(format!(
+                        "Invalid jump target: {target}"
+                    )));
                         }
                         block_terminated = true;
                     }
@@ -397,8 +396,7 @@ impl BytecodeCompiler {
                             .get(target)
                             .ok_or_else(|| {
                                 TurbineError::ModuleError(format!(
-                                    "Invalid jump target: {}",
-                                    target
+                                    "Invalid jump target: {target}"
                                 ))
                             })?
                             .block;
@@ -410,8 +408,7 @@ impl BytecodeCompiler {
                             .get(&fallthrough_pc)
                             .ok_or_else(|| {
                                 TurbineError::ModuleError(format!(
-                                    "No fallthrough block at PC: {}",
-                                    fallthrough_pc
+                                    "No fallthrough block at PC: {fallthrough_pc}"
                                 ))
                             })?
                             .block;
@@ -456,7 +453,7 @@ impl BytecodeCompiler {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Legacy method kept for compatibility  
     fn compile_remaining_from_with_blocks(
         builder: &mut FunctionBuilder,
         stack: &mut StackSimulator,
@@ -482,7 +479,7 @@ impl BytecodeCompiler {
 
                     // Load f64 from memory
                     let val = builder.ins().load(types::F64, MemFlags::new(), var_addr, 0);
-                    stack.push(val);
+                        stack.push(val);
                 }
                 Instr::StoreVar(idx) => {
                     let val = stack.pop()?;
@@ -562,19 +559,19 @@ impl BytecodeCompiler {
                         args.push(stack.pop()?);
                     }
                     args.reverse();
-
+                    
                     let result = Self::call_runtime_builtin_static(builder, name, &args);
                     stack.push(result);
                 }
                 Instr::CreateMatrix(rows, cols) => {
                     let total_elements = rows * cols;
                     let mut elements = Vec::new();
-
+                    
                     for _ in 0..total_elements {
                         elements.push(stack.pop()?);
                     }
                     elements.reverse();
-
+                    
                     let result =
                         Self::call_runtime_create_matrix_static(builder, *rows, *cols, &elements);
                     stack.push(result);
@@ -895,21 +892,83 @@ impl BytecodeCompiler {
 
     fn call_runtime_create_matrix_static(
         builder: &mut FunctionBuilder,
-        _rows: usize,
-        _cols: usize,
+        rows: usize,
+        cols: usize,
         elements: &[Value],
     ) -> Value {
-        // Simplified matrix creation - for now just return the first element
-        // In a full implementation, this would create a proper matrix object
-        // and call the runtime matrix constructor
-
-        if !elements.is_empty() {
-            // Return the first element as a simple approximation
-            elements[0]
-        } else {
-            // Return 0.0 if no elements
-            builder.ins().f64const(0.0)
+        // Create proper matrix object by allocating memory and storing matrix data
+        
+        let element_count = rows * cols;
+        
+        // For JIT compilation, we'll create a matrix by:
+        // 1. Allocating stack space for the matrix data
+        // 2. Storing elements in row-major order
+        // 3. Returning a pointer to the matrix structure
+        
+        // Calculate required space: matrix header (24 bytes) + data (8 * elements)
+        let matrix_size = 24 + (element_count * 8);
+        
+        // Create stack slot for matrix
+        let matrix_slot = builder.create_sized_stack_slot(cranelift::prelude::StackSlotData::new(
+            cranelift::prelude::StackSlotKind::ExplicitSlot,
+            matrix_size as u32,
+            3, // 8-byte alignment (2^3)
+        ));
+        
+        let matrix_ptr = builder.ins().stack_addr(cranelift::prelude::types::I64, matrix_slot, 0);
+        
+        // Store matrix metadata
+        let rows_val = builder.ins().iconst(cranelift::prelude::types::I64, rows as i64);
+        let cols_val = builder.ins().iconst(cranelift::prelude::types::I64, cols as i64);
+        let element_count_val = builder.ins().iconst(cranelift::prelude::types::I64, element_count as i64);
+        
+        // Matrix header layout: [rows: i64, cols: i64, element_count: i64, data: [f64; element_count]]
+        builder.ins().store(
+            cranelift::prelude::MemFlags::trusted(),
+            rows_val,
+            matrix_ptr,
+            0,
+        );
+        
+        builder.ins().store(
+            cranelift::prelude::MemFlags::trusted(),
+            cols_val,
+            matrix_ptr,
+            8,
+        );
+        
+        builder.ins().store(
+            cranelift::prelude::MemFlags::trusted(),
+            element_count_val,
+            matrix_ptr,
+            16,
+        );
+        
+        // Store matrix elements starting at offset 24
+        for (i, &element_value) in elements.iter().enumerate().take(element_count) {
+            let offset = 24 + (i * 8);
+            builder.ins().store(
+                cranelift::prelude::MemFlags::trusted(),
+                element_value,
+                matrix_ptr,
+                offset as i32,
+            );
         }
+        
+        // Fill remaining elements with zeros if elements.len() < element_count
+        for i in elements.len()..element_count {
+            let offset = 24 + (i * 8);
+            let zero = builder.ins().f64const(0.0);
+            builder.ins().store(
+                cranelift::prelude::MemFlags::trusted(),
+                zero,
+                matrix_ptr,
+                offset as i32,
+            );
+        }
+        
+        // Return pointer to the matrix structure
+        matrix_ptr
     }
 }
 
@@ -948,4 +1007,4 @@ impl Default for CompilerConfig {
             enable_overflow_checks: true,
         }
     }
-}
+} 

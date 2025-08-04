@@ -5,6 +5,7 @@ use rustmat_gc::*;
 
 #[test]
 fn test_basic_allocation() {
+    let _ = gc_reset_for_test();
     let value = Value::Num(42.0);
     let ptr = gc_allocate(value).expect("allocation should succeed");
 
@@ -14,6 +15,7 @@ fn test_basic_allocation() {
 
 #[test]
 fn test_multiple_allocations() {
+    let _ = gc_reset_for_test();
     let values = vec![
         Value::Num(1.0),
         Value::Int(2),
@@ -37,6 +39,7 @@ fn test_multiple_allocations() {
 
 #[test]
 fn test_matrix_allocation() {
+    let _ = gc_reset_for_test();
     use rustmat_builtins::Matrix;
 
     let matrix =
@@ -56,6 +59,7 @@ fn test_matrix_allocation() {
 
 #[test]
 fn test_cell_allocation() {
+    let _ = gc_reset_for_test();
     let cell_contents = vec![
         Value::Num(1.0),
         Value::String("nested".to_string()),

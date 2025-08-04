@@ -1,7 +1,8 @@
 use logos::Logos;
 use rustmat_lexer::Token;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Number(String),
     Ident(String),
@@ -14,7 +15,7 @@ pub enum Expr {
     FuncCall(String, Vec<Expr>),
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub enum BinOp {
     Add,
     Sub,
@@ -25,7 +26,7 @@ pub enum BinOp {
     Colon,
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub enum UnOp {
     Plus,
     Minus,

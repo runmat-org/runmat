@@ -17,6 +17,8 @@ rustmat-ignition = { workspace = true }
 rustmat-parser = { workspace = true }
 rustmat-builtins = { workspace = true }
 rustmat-runtime = { workspace = true }
+rustmat-repl = { workspace = true }
+rustmat-snapshot = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }

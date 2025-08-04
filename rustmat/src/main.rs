@@ -1,5 +1,5 @@
 //! RustMat - High-performance MATLAB/Octave runtime
-//!
+//! 
 //! A modern, V8-inspired MATLAB runtime with Jupyter kernel support,
 //! JIT compilation, generational garbage collection, and excellent developer ergonomics.
 
@@ -7,9 +7,12 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use env_logger::Env;
 use log::{debug, error, info};
-use rustmat_gc::{gc_collect_major, gc_collect_minor, gc_configure, gc_stats, GcConfig};
+use rustmat_gc::{gc_allocate, gc_collect_major, gc_collect_minor, gc_configure, gc_get_config, gc_stats, GcConfig};
+use rustmat_builtins::Value;
 use rustmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
 use rustmat_repl::ReplEngine;
+use rustmat_snapshot::{SnapshotBuilder, SnapshotLoader, SnapshotConfig};
+use rustmat_snapshot::presets::SnapshotPreset;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -58,6 +61,7 @@ Environment Variables:
   RUSTMAT_KERNEL_KEY=<key>     Kernel authentication key
   RUSTMAT_TIMEOUT=300          Execution timeout in seconds
   RUSTMAT_CONFIG=<path>        Path to configuration file
+  RUSTMAT_SNAPSHOT_PATH=<path> Snapshot file to preload standard library
   
   Garbage Collector:
   RUSTMAT_GC_PRESET=<preset>   GC preset (low-latency, high-throughput, low-memory, debug)
@@ -129,6 +133,10 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Snapshot file to preload standard library
+    #[arg(long, env = "RUSTMAT_SNAPSHOT_PATH")]
+    snapshot: Option<PathBuf>,
+
     /// Command to execute
     #[command(subcommand)]
     command: Option<Commands>,
@@ -145,7 +153,7 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-
+    
     /// Start Jupyter kernel
     Kernel {
         /// Kernel IP address
@@ -234,6 +242,12 @@ enum Commands {
         #[arg(long)]
         jit: bool,
     },
+
+    /// Snapshot management
+    Snapshot {
+        #[command(subcommand)]
+        snapshot_command: SnapshotCommand,
+    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -254,11 +268,49 @@ enum GcCommand {
     },
 }
 
+#[derive(Subcommand, Clone)]
+enum SnapshotCommand {
+    /// Create a new snapshot
+    Create {
+        /// Output snapshot file
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Optimization level
+        #[arg(short = 'O', long, value_enum, default_value = "speed")]
+        optimization: OptLevel,
+        /// Compression algorithm
+        #[arg(short, long, value_enum)]
+        compression: Option<CompressionAlg>,
+    },
+    /// Load and inspect a snapshot
+    Info {
+        /// Snapshot file to inspect
+        snapshot: PathBuf,
+    },
+    /// List available presets
+    Presets,
+    /// Validate a snapshot file
+    Validate {
+        /// Snapshot file to validate
+        snapshot: PathBuf,
+    },
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum CompressionAlg {
+    /// No compression
+    None,
+    /// LZ4 compression (fast)
+    Lz4,
+    /// Zstd compression (balanced)
+    Zstd,
+}
+
 #[derive(Clone, ValueEnum)]
 enum LogLevel {
     Error,
     Warn,
-    Info,
+    Info, 
     Debug,
     Trace,
 }
@@ -418,7 +470,7 @@ fn configure_gc(cli: &Cli) -> Result<()> {
 async fn execute_command(command: Commands, cli: &Cli) -> Result<()> {
     match command {
         Commands::Repl { verbose } => execute_repl_with_config_and_verbose(cli, verbose).await,
-        Commands::Kernel {
+        Commands::Kernel { 
             ip,
             key,
             transport,
@@ -460,6 +512,7 @@ async fn execute_command(command: Commands, cli: &Cli) -> Result<()> {
             iterations,
             jit,
         } => execute_benchmark(file, iterations, jit, cli).await,
+        Commands::Snapshot { snapshot_command } => execute_snapshot_command(snapshot_command).await,
     }
 }
 
@@ -479,8 +532,8 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
         if enable_jit { "enabled" } else { "disabled" }
     );
 
-    // Create enhanced REPL engine
-    let mut engine = ReplEngine::with_options(enable_jit, verbose || cli.verbose)
+    // Create enhanced REPL engine with optional snapshot loading
+    let mut engine = ReplEngine::with_snapshot(enable_jit, verbose || cli.verbose, cli.snapshot.as_ref())
         .context("Failed to create REPL engine")?;
 
     info!("RustMat REPL ready");
@@ -505,6 +558,11 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
             .map(|p| format!("{p:?}"))
             .unwrap_or_else(|| "default".to_string())
     );
+    if let Some(snapshot_info) = engine.snapshot_info() {
+        println!("{snapshot_info}");
+    } else {
+        println!("No snapshot loaded - standard library will be compiled on demand");
+    }
     println!("Type 'help' for help, 'exit' to quit, '.info' for system information");
     println!();
 
@@ -512,7 +570,7 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
     loop {
         print!("rustmat> ");
         io::stdout().flush().unwrap();
-
+        
         input.clear();
         match io::stdin().read_line(&mut input) {
             Ok(_) => {
@@ -550,7 +608,7 @@ async fn execute_repl_with_config_and_verbose(cli: &Cli, verbose: bool) -> Resul
                 // Execute the input using the enhanced engine
                 match engine.execute(line) {
                     Ok(result) => {
-                        if let Some(error) = result.error {
+                                if let Some(error) = result.error {
                             eprintln!("Error: {error}");
                         } else if let Some(value) = result.value {
                             println!("ans = {value:?}");
@@ -634,7 +692,7 @@ async fn execute_kernel(
     };
 
     let mut server = KernelServer::new(config);
-
+    
     info!("Starting kernel server...");
     server
         .start()
@@ -670,13 +728,13 @@ async fn execute_kernel_with_connection(connection_file: PathBuf, timeout: u64) 
     };
 
     let mut server = KernelServer::new(config);
-
+    
     server
         .start()
         .await
         .context("Failed to start kernel server")?;
 
-    // Keep running until interrupted
+    // Keep running until interrupted  
     tokio::signal::ctrl_c()
         .await
         .context("Failed to listen for ctrl-c")?;
@@ -700,7 +758,7 @@ async fn execute_script_with_args(script: PathBuf, _args: Vec<String>, cli: &Cli
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
     let enable_jit = !cli.no_jit;
-    let mut engine = ReplEngine::with_options(enable_jit, cli.verbose)
+    let mut engine = ReplEngine::with_snapshot(enable_jit, cli.verbose, cli.snapshot.as_ref())
         .context("Failed to create execution engine")?;
 
     let start_time = std::time::Instant::now();
@@ -746,9 +804,9 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                 }
                 Err(e) => {
                     error!("Minor GC failed: {e}");
-                    std::process::exit(1);
-                }
+                std::process::exit(1);
             }
+        }
         }
         GcCommand::Major => {
             let start = std::time::Instant::now();
@@ -759,19 +817,76 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                 }
                 Err(e) => {
                     error!("Major GC failed: {e}");
-                    std::process::exit(1);
-                }
-            }
+            std::process::exit(1);
+        }
+    }
         }
         GcCommand::Config => {
             println!("Current GC Configuration:");
-            // TODO: Add method to get current config from GC
-            println!("  (Configuration introspection not yet implemented)");
+            let config = gc_get_config();
+            println!("  Young Generation Size: {} MB", config.young_generation_size / 1024 / 1024);
+            println!("  Minor GC Threshold: {} objects", config.minor_gc_threshold);
+            println!("  Major GC Threshold: {} objects", config.major_gc_threshold);
+            println!("  Max GC Threads: {}", config.max_gc_threads);
+            println!("  Collection Statistics: {}", if config.collect_statistics { "enabled" } else { "disabled" });
+            println!("  Verbose Logging: {}", if config.verbose_logging { "enabled" } else { "disabled" });
         }
         GcCommand::Stress { allocations } => {
             info!("Starting GC stress test with {allocations} allocations");
-            // TODO: Implement GC stress test
-            println!("GC stress test not yet implemented");
+            
+            let start_time = std::time::Instant::now();
+            let initial_stats = gc_stats();
+            
+            println!("Running GC stress test with {allocations} allocations...");
+            
+            // Perform stress test
+            let mut _objects = Vec::new();
+            for i in 0..allocations {
+                let value = Value::Num(i as f64);
+                match gc_allocate(value) {
+                    Ok(ptr) => {
+                        _objects.push(ptr);
+                        
+                        // Trigger periodic collections to stress the GC
+                        if i % 1000 == 0 && i > 0 {
+                            let _ = gc_collect_minor();
+                        }
+                        if i % 5000 == 0 && i > 0 {
+                            let _ = gc_collect_major();
+                        }
+                    }
+                    Err(e) => {
+                        error!("Allocation failed at iteration {i}: {e}");
+                        break;
+                    }
+                }
+                
+                // Progress reporting
+                if i % (allocations / 10).max(1) == 0 {
+                    println!("  Progress: {i}/{allocations} allocations");
+                }
+            }
+            
+            let duration = start_time.elapsed();
+            let final_stats = gc_stats();
+            
+            // Report results
+            println!("GC Stress Test Results:");
+            println!("  Duration: {duration:?}");
+            println!("  Allocations completed: {}", _objects.len());
+            println!("  Allocation rate: {:.2} allocs/sec", _objects.len() as f64 / duration.as_secs_f64());
+            println!("  Total collections: {}", 
+                final_stats.minor_collections.load(std::sync::atomic::Ordering::Relaxed) - 
+                initial_stats.minor_collections.load(std::sync::atomic::Ordering::Relaxed) +
+                final_stats.major_collections.load(std::sync::atomic::Ordering::Relaxed) - 
+                initial_stats.major_collections.load(std::sync::atomic::Ordering::Relaxed));
+            println!("  Final memory: {} bytes", final_stats.current_memory_usage.load(std::sync::atomic::Ordering::Relaxed));
+            
+            // Force a final cleanup
+            match gc_collect_major() {
+                Ok(collected) => println!("  Final collection freed {collected} objects"),
+                Err(e) => error!("Final collection failed: {e}"),
+            }
         }
     }
     Ok(())
@@ -784,7 +899,7 @@ async fn execute_benchmark(file: PathBuf, iterations: u32, jit: bool, _cli: &Cli
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
 
     let mut engine =
-        ReplEngine::with_options(jit, false).context("Failed to create execution engine")?;
+        ReplEngine::with_snapshot(jit, false, _cli.snapshot.as_ref()).context("Failed to create execution engine")?;
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions = 0;
@@ -832,9 +947,121 @@ async fn execute_benchmark(file: PathBuf, iterations: u32, jit: bool, _cli: &Cli
     Ok(())
 }
 
+impl From<CompressionAlg> for rustmat_snapshot::CompressionAlgorithm {
+    fn from(alg: CompressionAlg) -> Self {
+        use rustmat_snapshot::CompressionAlgorithm;
+        match alg {
+            CompressionAlg::None => CompressionAlgorithm::None,
+            CompressionAlg::Lz4 => CompressionAlgorithm::Lz4,
+            CompressionAlg::Zstd => CompressionAlgorithm::Zstd,
+        }
+    }
+}
+
+async fn execute_snapshot_command(snapshot_command: SnapshotCommand) -> Result<()> {
+    match snapshot_command {
+        SnapshotCommand::Create { output, optimization, compression } => {
+            info!("Creating snapshot: {output:?}");
+            
+            let mut config = SnapshotConfig::default();
+            
+            // Set compression if specified
+            if let Some(comp) = compression {
+                config.compression_enabled = !matches!(comp, CompressionAlg::None);
+                config.compression_algorithm = comp.into();
+            }
+            
+            // Note: optimization level affects JIT hints in the data, not the builder directly
+            let _optimization_level = match optimization {
+                OptLevel::None => rustmat_snapshot::OptimizationLevel::None,
+                OptLevel::Size => rustmat_snapshot::OptimizationLevel::Basic,
+                OptLevel::Speed => rustmat_snapshot::OptimizationLevel::Aggressive,
+                OptLevel::Aggressive => rustmat_snapshot::OptimizationLevel::MaxPerformance,
+            };
+            
+            let builder = SnapshotBuilder::new(config);
+            
+            builder.build_and_save(&output)
+                .with_context(|| format!("Failed to build and save snapshot to {output:?}"))?;
+                
+            println!("Snapshot created successfully: {output:?}");
+        }
+        SnapshotCommand::Info { snapshot } => {
+            info!("Loading snapshot info: {snapshot:?}");
+            
+            let mut loader = SnapshotLoader::new(SnapshotConfig::default());
+            let (loaded, stats) = loader.load(&snapshot)
+                .with_context(|| format!("Failed to load snapshot from {snapshot:?}"))?;
+                
+            println!("Snapshot Information:");
+            println!("  File: {snapshot:?}");
+            println!("  Version: {}", loaded.metadata.rustmat_version);
+            println!("  Created: {:?}", loaded.metadata.created_at);
+            println!("  Tool Version: {}", loaded.metadata.tool_version);
+            println!("  Build Config: {:?}", loaded.metadata.build_config);
+            println!("  Builtin Functions: {}", loaded.builtins.functions.len());
+            println!("  HIR Cache Functions: {}", loaded.hir_cache.functions.len());
+            println!("  HIR Cache Patterns: {}", loaded.hir_cache.patterns.len());
+            println!("  Bytecode Cache (stdlib): {}", loaded.bytecode_cache.stdlib_bytecode.len());
+            println!("  Bytecode Cache (sequences): {}", loaded.bytecode_cache.operation_sequences.len());
+            println!("  Bytecode Cache (hotspots): {}", loaded.bytecode_cache.hotspots.len());
+            println!("  GC Presets: {}", loaded.gc_presets.presets.len());
+            println!("  Load Time: {:?}", stats.load_time);
+            println!("  Total Size: {} bytes", stats.total_size);
+            println!("  Compressed Size: {} bytes", stats.compressed_size);
+            println!("  Compression Ratio: {:.2}x", stats.compression_ratio);
+        }
+        SnapshotCommand::Presets => {
+            println!("Available Snapshot Presets:");
+            println!();
+            
+            let presets = vec![
+                ("development", SnapshotPreset::Development, "Fast development iteration"),
+                ("production", SnapshotPreset::Production, "Production deployment"),
+                ("high-performance", SnapshotPreset::HighPerformance, "High-performance computing"),
+                ("low-memory", SnapshotPreset::LowMemory, "Memory-constrained environments"),
+                ("network-optimized", SnapshotPreset::NetworkOptimized, "Network-optimized (minimal size)"),
+                ("debug", SnapshotPreset::Debug, "Debug-friendly (maximum validation)"),
+            ];
+            
+            for (name, preset, description) in presets {
+                let config = preset.config();
+                println!("  {name}");
+                println!("    Description: {description}");
+                println!("    Compression: {:?}", config.compression_algorithm);
+                println!("    Validation: {}", if config.validation_enabled { "enabled" } else { "disabled" });
+                println!("    Memory Mapping: {}", if config.memory_mapping_enabled { "enabled" } else { "disabled" });
+                println!("    Parallel Loading: {}", if config.parallel_loading { "enabled" } else { "disabled" });
+                println!();
+            }
+        }
+        SnapshotCommand::Validate { snapshot } => {
+            info!("Validating snapshot: {snapshot:?}");
+            
+            let mut loader = SnapshotLoader::new(SnapshotConfig::default());
+            match loader.load(&snapshot) {
+                Ok((_, stats)) => {
+                    println!("Snapshot validation passed: {snapshot:?}");
+                    println!("  Load time: {:?}", stats.load_time);
+                    println!("  File size: {} bytes", stats.total_size);
+                    if stats.compressed_size > 0 {
+                        println!("  Compressed size: {} bytes", stats.compressed_size);
+                        println!("  Compression ratio: {:.2}x", stats.compression_ratio);
+                    }
+                }
+                Err(e) => {
+                    error!("Snapshot validation failed: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn show_version(detailed: bool) {
     println!("RustMat v{}", env!("CARGO_PKG_VERSION"));
-
+    
     if detailed {
         println!(
             "Built with Rust {}",
@@ -871,7 +1098,7 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     println!("RustMat System Information");
     println!("==========================");
     println!();
-
+    
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
     println!(
         "Rust Version: {}",
@@ -905,7 +1132,7 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     }
     println!("  GC Statistics: {}", cli.gc_stats);
     println!();
-
+    
     println!("Environment:");
     println!("  RUSTMAT_DEBUG: {:?}", std::env::var("RUSTMAT_DEBUG").ok());
     println!(
@@ -940,6 +1167,10 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     println!("  gc stats             Show GC statistics");
     println!("  gc major             Force major GC collection");
     println!("  benchmark <file>     Benchmark script execution");
+    println!("  snapshot create      Create standard library snapshot");
+    println!("  snapshot info        Inspect snapshot file");
+    println!("  snapshot presets     List available presets");
+    println!("  snapshot validate    Validate snapshot file");
     println!("  version              Show version information");
     println!("  info                 Show this system information");
 
@@ -978,4 +1209,4 @@ fn show_repl_help() {
     println!("  • Use '.gc' to monitor memory usage and collection");
     println!();
     println!("Press Enter after each statement to execute.");
-}
+} 

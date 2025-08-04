@@ -3,10 +3,11 @@
 //! Provides configuration options for tuning GC behavior for different
 //! workloads and memory constraints.
 
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Configuration for the garbage collector
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GcConfig {
     /// Number of generations (minimum 2)
     pub num_generations: usize,

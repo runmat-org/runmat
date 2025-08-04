@@ -12,6 +12,7 @@ rustmat-runtime = { workspace = true }
 rustmat-turbine = { workspace = true }
 rustmat-gc = { workspace = true }
 rustmat-builtins = { workspace = true }
+rustmat-snapshot = { workspace = true }
 rustyline = "14.0"
 anyhow = "1.0"
 log = "0.4"

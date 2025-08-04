@@ -9,7 +9,7 @@ fn main() -> Result<()> {
     env_logger::init();
 
     // Initialize the REPL engine with GC test context for safety
-    let mut engine = gc_test_context(|| ReplEngine::new())?;
+    let mut engine = gc_test_context(ReplEngine::new)?;
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
