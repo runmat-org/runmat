@@ -8,7 +8,7 @@ pub mod scatter;
 pub mod surface;
 pub mod volume;
 
-pub use line::*;
-pub use scatter::*;
+pub use line::{LinePlot, LineStyle};
+pub use scatter::{ScatterPlot, MarkerStyle};
 pub use surface::*;
 pub use volume::*;
