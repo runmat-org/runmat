@@ -19,11 +19,10 @@ fn test_uniform_buffer_layout() {
     let bytes: &[u8] = bytemuck::bytes_of(&uniforms);
     assert_eq!(bytes.len(), std::mem::size_of::<Uniforms>());
     
-    // Verify expected size - 2 Mat4 (32 bytes each) + 3x3 normal matrix (36 bytes) + padding
+    // Verify expected size - 2 Mat4 (64 bytes each) + 4x3 normal matrix (48 bytes)
     // Should be aligned to 16 bytes for GPU usage
     let expected_size = std::mem::size_of::<[[f32; 4]; 4]>() * 2 + // view_proj + model matrices
-                       std::mem::size_of::<[[f32; 3]; 3]>() +       // normal matrix
-                       std::mem::size_of::<f32>();                  // padding
+                       std::mem::size_of::<[[f32; 4]; 3]>();       // normal matrix (4x3 for alignment)
     assert_eq!(std::mem::size_of::<Uniforms>(), expected_size);
 }
 
@@ -44,9 +43,9 @@ fn test_uniform_matrix_updates() {
     // Verify normal matrix is computed correctly (inverse transpose of upper 3x3)
     let normal_mat = model.inverse().transpose();
     let expected_normal = [
-        [normal_mat.x_axis.x, normal_mat.x_axis.y, normal_mat.x_axis.z],
-        [normal_mat.y_axis.x, normal_mat.y_axis.y, normal_mat.y_axis.z],
-        [normal_mat.z_axis.x, normal_mat.z_axis.y, normal_mat.z_axis.z],
+        [normal_mat.x_axis.x, normal_mat.x_axis.y, normal_mat.x_axis.z, 0.0],
+        [normal_mat.y_axis.x, normal_mat.y_axis.y, normal_mat.y_axis.z, 0.0],
+        [normal_mat.z_axis.x, normal_mat.z_axis.y, normal_mat.z_axis.z, 0.0],
     ];
     assert_eq!(uniforms.normal_matrix, expected_normal);
 }

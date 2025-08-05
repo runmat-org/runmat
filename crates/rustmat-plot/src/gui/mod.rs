@@ -8,6 +8,8 @@ pub mod window;
 #[cfg(feature = "gui")]
 pub mod window_impl;
 #[cfg(feature = "gui")]
+pub mod plot_overlay;
+#[cfg(feature = "gui")]
 pub mod controls;
 #[cfg(feature = "gui")]
 pub mod widgets;
@@ -19,6 +21,8 @@ pub mod native_window; // Cross-platform native window management
 
 #[cfg(feature = "gui")]
 pub use window::*;
+#[cfg(feature = "gui")]
+pub use plot_overlay::PlotOverlay;
 #[cfg(feature = "gui")]
 pub use controls::PlotControls;
 

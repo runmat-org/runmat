@@ -71,6 +71,17 @@ pub struct Uniforms {
     pub normal_matrix: [[f32; 4]; 3], // Use 4x3 for proper alignment instead of 3x3
 }
 
+/// Optimized uniform buffer for direct coordinate transformation rendering
+/// Enables precise viewport-constrained data visualization
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct DirectUniforms {
+    pub data_min: [f32; 2],      // (x_min, y_min) in data space
+    pub data_max: [f32; 2],      // (x_max, y_max) in data space
+    pub viewport_min: [f32; 2],  // NDC coordinates of viewport bottom-left
+    pub viewport_max: [f32; 2],  // NDC coordinates of viewport top-right
+}
+
 impl Uniforms {
     pub fn new() -> Self {
         Self {
@@ -96,6 +107,22 @@ impl Uniforms {
     }
 }
 
+impl DirectUniforms {
+    pub fn new(
+        data_min: [f32; 2],
+        data_max: [f32; 2], 
+        viewport_min: [f32; 2],
+        viewport_max: [f32; 2],
+    ) -> Self {
+        Self {
+            data_min,
+            data_max,
+            viewport_min,
+            viewport_max,
+        }
+    }
+}
+
 /// Rendering pipeline types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineType {
@@ -111,18 +138,27 @@ pub struct WgpuRenderer {
     pub queue: Arc<wgpu::Queue>,
     pub surface_config: wgpu::SurfaceConfiguration,
     
-    // Rendering pipelines
+    // Rendering pipelines (traditional camera-based)
     point_pipeline: Option<wgpu::RenderPipeline>,
     line_pipeline: Option<wgpu::RenderPipeline>,
     triangle_pipeline: Option<wgpu::RenderPipeline>,
     
-    // Uniform resources
+    // Direct rendering pipelines (optimized coordinate transformation)
+    pub direct_line_pipeline: Option<wgpu::RenderPipeline>,
+    
+    // Uniform resources (traditional)
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
     
+    // Direct uniform resources (optimized coordinate transformation)
+    direct_uniform_buffer: wgpu::Buffer,
+    pub direct_uniform_bind_group: wgpu::BindGroup,
+    direct_uniform_bind_group_layout: wgpu::BindGroupLayout,
+    
     // Current uniforms
     uniforms: Uniforms,
+    direct_uniforms: DirectUniforms,
 }
 
 impl WgpuRenderer {
@@ -165,6 +201,44 @@ impl WgpuRenderer {
             label: Some("uniform_bind_group"),
         });
         
+        // Create direct rendering uniform buffer
+        let direct_uniforms = DirectUniforms::new(
+            [0.0, 0.0], // data_min
+            [1.0, 1.0], // data_max  
+            [-1.0, -1.0], // viewport_min (full NDC)
+            [1.0, 1.0],   // viewport_max (full NDC)
+        );
+        let direct_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Direct Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[direct_uniforms]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        
+        // Create direct bind group layout for uniforms
+        let direct_uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: Some("direct_uniform_bind_group_layout"),
+        });
+        
+        // Create direct bind group
+        let direct_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &direct_uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: direct_uniform_buffer.as_entire_binding(),
+            }],
+            label: Some("direct_uniform_bind_group"),
+        });
+        
         Self {
             device,
             queue,
@@ -172,10 +246,15 @@ impl WgpuRenderer {
             point_pipeline: None,
             line_pipeline: None,
             triangle_pipeline: None,
+            direct_line_pipeline: None,
             uniform_buffer,
             uniform_bind_group,
             uniform_bind_group_layout,
+            direct_uniform_buffer,
+            direct_uniform_bind_group,
+            direct_uniform_bind_group_layout,
             uniforms,
+            direct_uniforms,
         }
     }
     
@@ -347,6 +426,55 @@ impl WgpuRenderer {
         })
     }
     
+    /// Create optimized direct rendering pipeline for precise viewport mapping
+    fn create_direct_line_pipeline(&self) -> wgpu::RenderPipeline {
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Direct Line Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/vertex/line_direct.wgsl").into()),
+        });
+        
+        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Direct Line Pipeline Layout"),
+            bind_group_layouts: &[&self.direct_uniform_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Direct Line Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.surface_config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None, // Disable depth testing for 2D line plots
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        })
+    }
+    
     /// Create triangle rendering pipeline
     fn create_triangle_pipeline(&self) -> wgpu::RenderPipeline {
         let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -386,7 +514,13 @@ impl WgpuRenderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None, // Disable depth testing for 2D triangle plots
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -459,6 +593,29 @@ impl WgpuRenderer {
             }
         }
     }
+    
+    /// Ensure direct line pipeline exists
+    pub fn ensure_direct_line_pipeline(&mut self) {
+        if self.direct_line_pipeline.is_none() {
+            self.direct_line_pipeline = Some(self.create_direct_line_pipeline());
+        }
+    }
+    
+    /// Update transformation uniforms for direct viewport rendering
+    pub fn update_direct_uniforms(
+        &mut self,
+        data_min: [f32; 2],
+        data_max: [f32; 2],
+        viewport_min: [f32; 2],
+        viewport_max: [f32; 2],
+    ) {
+        self.direct_uniforms = DirectUniforms::new(data_min, data_max, viewport_min, viewport_max);
+        self.queue.write_buffer(
+            &self.direct_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.direct_uniforms]),
+        );
+    }
 }
 
 /// Utility functions for creating common vertex patterns
@@ -490,68 +647,26 @@ pub mod vertex_utils {
             .collect()
     }
     
-    /// Create vertices for a parametric line plot using thick triangulated lines
+    /// Create vertices for a parametric line plot
     pub fn create_line_plot(x_data: &[f64], y_data: &[f64], color: Vec4) -> Vec<Vertex> {
         let mut vertices = Vec::new();
-        let line_width = 0.3; // VERY thick line in world coordinates for debugging
+        
+
         
         for i in 1..x_data.len() {
             let start = Vec3::new(x_data[i-1] as f32, y_data[i-1] as f32, 0.0);
             let end = Vec3::new(x_data[i] as f32, y_data[i] as f32, 0.0);
-            
-            // Create thick line as a rectangle (2 triangles)
-            let direction = (end - start).normalize();
-            let perpendicular = Vec3::new(-direction.y, direction.x, 0.0) * line_width;
-            
-            // Four corners of the rectangle
-            let p1 = start + perpendicular;
-            let p2 = start - perpendicular;
-            let p3 = end + perpendicular;
-            let p4 = end - perpendicular;
-            
-            // First triangle: p1 -> p2 -> p3
-            vertices.push(Vertex::new(p1, color));
-            vertices.push(Vertex::new(p2, color));
-            vertices.push(Vertex::new(p3, color));
-            
-            // Second triangle: p2 -> p4 -> p3
-            vertices.push(Vertex::new(p2, color));
-            vertices.push(Vertex::new(p4, color));
-            vertices.push(Vertex::new(p3, color));
+            vertices.extend(create_line(start, end, color));
         }
-        
-        // Line plot vertices generated successfully
         
         vertices
     }
     
-    /// Create vertices for a scatter plot using triangulated squares  
+    /// Create vertices for a scatter plot
     pub fn create_scatter_plot(x_data: &[f64], y_data: &[f64], color: Vec4) -> Vec<Vertex> {
-        let mut vertices = Vec::new();
-        let point_size = 0.5; // Even larger point size for visibility
-        
-        for (&x, &y) in x_data.iter().zip(y_data.iter()) {
-            let center = Vec3::new(x as f32, y as f32, 0.0);
-            let half_size = point_size / 2.0;
-            
-            // Create square as two triangles
-            let p1 = center + Vec3::new(-half_size, -half_size, 0.0); // Bottom-left
-            let p2 = center + Vec3::new(half_size, -half_size, 0.0);  // Bottom-right  
-            let p3 = center + Vec3::new(half_size, half_size, 0.0);   // Top-right
-            let p4 = center + Vec3::new(-half_size, half_size, 0.0);  // Top-left
-            
-            // First triangle: p1 -> p2 -> p3
-            vertices.push(Vertex::new(p1, color));
-            vertices.push(Vertex::new(p2, color));
-            vertices.push(Vertex::new(p3, color));
-            
-            // Second triangle: p1 -> p3 -> p4
-            vertices.push(Vertex::new(p1, color));
-            vertices.push(Vertex::new(p3, color));
-            vertices.push(Vertex::new(p4, color));
-        }
-        
-        // Scatter plot vertices generated successfully
-        vertices
+        x_data.iter()
+            .zip(y_data.iter())
+            .map(|(&x, &y)| Vertex::new(Vec3::new(x as f32, y as f32, 0.0), color))
+            .collect()
     }
 }

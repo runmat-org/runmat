@@ -120,6 +120,11 @@ impl Camera {
         self.projection_matrix * self.view_matrix
     }
     
+    /// Mark the camera matrices as dirty (call after manually modifying projection)
+    pub fn mark_dirty(&mut self) {
+        self.view_proj_dirty = true;
+    }
+    
     /// Get the view matrix
     pub fn view_matrix(&mut self) -> Mat4 {
         if self.view_proj_dirty {

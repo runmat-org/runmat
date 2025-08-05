@@ -1,363 +1,170 @@
-# RustMat Plot - World-Class Interactive GUI Plotting Library
+# RustMat Plot
 
-A high-performance, interactive plotting library for RustMat with comprehensive 2D/3D capabilities, designed for both desktop GUI applications and seamless Jupyter integration.
+RustMat Plot is a **world-class interactive plotting library for Rust**, designed to provide comprehensive 2D/3D plotting with a MATLAB-compatible API. It is built from the ground up for performance, featuring a GPU-accelerated rendering pipeline using `wgpu`, a modern theming system, and seamless integration with Jupyter notebooks.
 
-## 🎯 Vision
+As a core component of the [RustMat project](../..//docs/ARCHITECTURE.md), it serves as the powerful handle-graphics engine for all visualization tasks.
 
-Create a plotting library that rivals and surpasses MATLAB's plotting capabilities while providing:
-- **Interactive GUI** with real-time manipulation
-- **Jupyter Integration** with rich, interactive outputs
-- **High Performance** handling millions of data points
-- **Complete Feature Parity** with MATLAB plotting functions
-- **Modern Architecture** built on Rust's performance and safety
+## Key Features
 
-## 🏗️ Architecture
+- **GPU-Accelerated Rendering**: High-performance plotting powered by `wgpu` for fast, smooth, and interactive visualizations.
+- **Comprehensive 2D Plots**: Support for line plots, scatter plots, bar charts, and histograms with extensive styling options.
+- **Advanced 3D Visualization**: Create stunning 3D surface plots and point clouds with configurable colormaps and shading.
+- **Interactive GUI**: A feature-rich interactive window built with `winit` and `egui`, offering smooth camera controls, zooming, panning, and UI overlays.
+- **Multi-Plot Figures**: Combine multiple plot types in a single figure with automatic bounds computation, legends, and grid lines.
+- **MATLAB Compatibility**: A familiar, MATLAB-style API for quickly creating plots (e.g., `plot()`, `surf()`, `scatter3()`).
+- **Jupyter Notebook Integration**: Display plots directly in Jupyter notebooks as static images or interactive HTML widgets.
+- **Modern Theming System**: A professional and configurable styling system with beautiful presets like `ModernDark`.
 
-### Core Components
+## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        RustMat Plot Library                     │
-├─────────────────────────────────────────────────────────────────┤
-│  Frontend Adapters                                             │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │   WGPU GUI      │  │  Jupyter Kernel │  │   Static Export │ │
-│  │   (Interactive) │  │  (Notebooks)    │  │   (PNG/SVG/PDF) │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-├─────────────────────────────────────────────────────────────────┤
-│  Rendering Engine                                              │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │   WGPU Backend  │  │   WebGL Export  │  │  Plotters Backend│ │
-│  │   (GPU Accel)   │  │   (Jupyter)     │  │   (Static)      │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-├─────────────────────────────────────────────────────────────────┤
-│  Scene Graph & Interaction                                     │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │  Scene Manager  │  │  Event Handler  │  │  Camera System  │ │
-│  │  (3D Objects)   │  │  (Mouse/Touch)  │  │  (Navigation)   │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-├─────────────────────────────────────────────────────────────────┤
-│  Plot Objects & Geometry                                       │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │   Line Plots    │  │   Surfaces      │  │   Point Clouds  │ │
-│  │   Scatter       │  │   Meshes        │  │   Volume Data   │ │
-│  │   Bar Charts    │  │   Contours      │  │   Annotations   │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-├─────────────────────────────────────────────────────────────────┤
-│  Data Processing & Optimization                                │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │   LOD System    │  │   Culling       │  │   GPU Buffers   │ │
-│  │   (Level Detail)│  │   (Frustum)     │  │   (Vertex Data) │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-```
+The `rustmat-plot` crate is designed with a layered architecture to separate concerns, providing both high-level simplicity and low-level control.
 
-### Technology Stack
+-   **`src/core` - The Rendering Engine**: This is the heart of the library.
+    -   `WgpuRenderer` abstracts over `wgpu` to manage render pipelines, shaders, and GPU buffers.
+    -   `Scene` provides a scene graph to manage renderable objects, their transformations, and visibility.
+    -   `Camera` implements both orthographic (2D) and perspective (3D) cameras with interactive navigation controls.
+    -   `PlotRenderer` is a unified pipeline that handles rendering for both interactive windows and static exports, ensuring consistent output.
 
-#### Core Rendering
-- **WGPU**: Cross-platform GPU acceleration (Vulkan/Metal/DX12/WebGL)
-- **Lyon**: High-quality 2D vector graphics tessellation
-- **Mesh Generation**: Custom algorithms for 3D surfaces and volumes
+-   **`src/plots` - High-Level Plot Types**: This module defines the user-facing API for creating plots.
+    -   `Figure` is the main container for a visualization, managing multiple overlaid plots.
+    -   Structs like `LinePlot`, `ScatterPlot`, `SurfacePlot`, etc., encapsulate the data and styling for a specific plot type. They are responsible for generating `RenderData` (vertices, indices) to be consumed by the core renderer.
 
-#### GUI Framework
-- **Egui**: Immediate mode GUI for controls and panels
-- **Winit**: Cross-platform windowing and events
-- **Custom Widgets**: Specialized plot interaction controls
+-   **`src/gui` - Interactive Windowing**: This module provides the interactive GUI.
+    -   `PlotWindow` is the main entry point, creating a `winit` window and managing the event loop.
+    -   `PlotOverlay` uses `egui` to draw UI elements (axes, grids, titles, controls) on top of the `wgpu` canvas.
+    -   `thread_manager` and `native_window` contain robust, cross-platform logic to handle GUI operations, especially the main-thread requirements on macOS.
 
-#### Jupyter Integration
-- **WebGL**: Browser-compatible rendering via WGPU's WebGL backend
-- **JavaScript Bridge**: Communication between Rust kernel and browser
-- **Interactive Widgets**: Jupyter widget protocol implementation
+-   **`src/styling` - Theming & Appearance**: This module controls the visual style.
+    -   `PlotThemeConfig` allows for complete customization of colors, fonts, and layout via RustMat's central configuration system (e.g., `.rustmat.yaml`).
+    -   `ModernDarkTheme` provides a professional, out-of-the-box dark theme that is more beautiful than MATLAB's default.
 
-#### Data Processing
-- **Rayon**: Parallel processing for large datasets
-- **SIMD**: Vectorized operations for performance
-- **Memory Mapping**: Efficient handling of massive point clouds
+## Crate Layout
 
-## 📊 Feature Roadmap
-
-### Phase 1: Foundation ✅ COMPLETED
-- [x] Basic 2D plotting (line, scatter, bar, histogram)
-- [x] WGPU rendering backend with GPU acceleration
-- [x] Scene graph architecture with hierarchical objects
-- [x] Camera system (pan, zoom, rotate) for 2D/3D navigation
-- [x] WGSL shaders for points, lines, and triangles
-- [x] Core architecture with feature-gated modules
-- [x] Backward compatibility maintained
-
-### Phase 2: Interactive GUI & Advanced 2D ✅ COMPLETED
-- [x] Interactive GUI foundation with egui integration
-- [x] Real-time plot manipulation framework
-- [x] Multiple plot overlay system (Figure)
-- [x] Custom colormaps and styling (Jet, Viridis, Plasma, Hot, Cool, etc.)
-- [x] Legend and bounds management
-- [x] MATLAB-compatible styling API
-- [x] Comprehensive 2D plot validation and testing
-
-### Phase 3: 3D Foundation ✅ COMPLETED
-- [x] 3D coordinate system with perspective/orthographic projection
-- [x] Surface plots (mesh, wireframe) with gradient-based normals
-- [x] 3D scatter plots (point clouds) with color mapping
-- [x] Multiple colormaps and transparency support
-- [x] Lighting and shading models (flat, smooth, faceted)
-- [x] 3D navigation foundation with camera controls
-- [x] MATLAB compatibility (`surf`, `mesh`, `scatter3`)
-
-### Phase 4: Jupyter Integration ✅ COMPLETED
-- [x] Jupyter backend with multiple output formats
-- [x] PNG, SVG, HTML widget, Base64, Plotly JSON support
-- [x] Interactive controls framework
-- [x] Environment detection and auto-configuration
-- [x] WebGL rendering foundation for notebooks
-- [x] Export to various formats with quality settings
-
-### Phase 5: Performance & Testing ✅ COMPLETED
-- [x] Comprehensive testing suite (95 tests passing)
-- [x] Memory optimization and efficient vertex caching
-- [x] Performance benchmarks and statistics tracking
-- [x] Error handling and data validation
-- [x] GPU buffer management and pipeline optimization
-- [x] Production-ready with zero dead code
-
-### Phase 6: Advanced Features (Future Extensions)
-- [ ] Volume rendering and isosurfaces
-- [ ] Animation and time series support
-- [ ] Advanced LOD systems for massive datasets
-- [ ] GPU compute shaders for data processing
-- [ ] VR/AR support preparation
-- [ ] Advanced lighting (PBR) and effects
-
-## 🎮 Interactive Features
-
-### Desktop GUI
-- **Real-time Manipulation**: Drag to rotate, scroll to zoom, right-click for context menus
-- **Data Brushing**: Select and highlight data points across linked plots
-- **Animation Controls**: Play/pause/scrub through time series data
-- **Style Editor**: Real-time appearance customization
-- **Export Options**: High-quality output to multiple formats
-
-### Jupyter Integration
-- **Interactive Widgets**: Sliders, dropdowns, and controls embedded in notebooks
-- **Bidirectional Communication**: Updates from GUI reflect in kernel variables
-- **Collaborative Views**: Multiple users can interact with the same plot
-- **Progressive Loading**: Stream large datasets incrementally
-- **Plot Composition**: Combine multiple plots with linked interactions
-
-## 🚀 Performance Targets
-
-### Data Scale
-- **2D Plots**: 10M+ points with 60fps interaction
-- **3D Scatter**: 1M+ points with real-time rotation
-- **Point Clouds**: 100M+ points with LOD rendering
-- **Surfaces**: 1M+ triangles with smooth navigation
-- **Memory**: < 10GB for billion-point datasets
-
-### Responsiveness
-- **Startup**: < 100ms to first frame
-- **Interaction**: < 16ms response to user input
-- **Streaming**: < 1s to display incoming data updates
-- **Export**: < 5s for publication-quality output
-
-## 🧪 Testing Strategy
-
-### Unit Tests
-- Rendering pipeline components
-- Scene graph operations
-- Data processing algorithms
-- Mathematical transformations
-
-### Integration Tests
-- End-to-end plotting workflows
-- Jupyter kernel communication
-- Cross-platform compatibility
-- Memory leak detection
-
-### Performance Tests
-- Benchmark suites for various data sizes
-- Regression testing for performance
-- Memory usage profiling
-- GPU utilization analysis
-
-### Visual Tests
-- Reference image comparisons
-- Pixel-perfect output validation
-- Cross-platform rendering consistency
-- Animation frame testing
-
-## 🎨 MATLAB Feature Parity
-
-### 2D Plotting Functions
-- [x] `plot`, `scatter`, `bar`, `histogram` with full MATLAB compatibility
-- [x] Color mapping and styling with complete colormap library
-- [x] Multiple plot overlays with Figure management
-- [ ] `contour`, `contourf`, `imshow`, `imagesc`
-- [ ] `errorbar`, `fill`, `area`, `stairs`
-- [ ] `loglog`, `semilogx`, `semilogy`
-- [ ] `polarplot`, `compass`, `feather`
-- [ ] `streamslice`, `quiver`
-
-### 3D Plotting Functions ✅ FOUNDATION COMPLETE
-- [x] `scatter3` - Point clouds with color mapping and variable sizes
-- [x] `surf` - Surface plots with wireframe, colormaps, and transparency
-- [x] `mesh` - Wireframe surface plots with MATLAB-compatible API
-- [x] 3D coordinate system with perspective/orthographic projection
-- [x] Gradient-based normal computation and lighting models
-- [ ] `plot3`, `bar3`, `stem3`, `waterfall`, `ribbon`
-- [ ] `contour3`, `slice`, `isosurface`
-- [ ] `quiver3`, `streamline`, `streamtube`
-- [ ] `patch`, `trisurf`, `tetramesh`
-
-### Specialized Plots
-- [ ] `boxplot`, `violin`, `swarmchart`
-- [ ] `heatmap`, `clustermap`, `dendrogram`
-- [ ] `pareto`, `qqplot`, `normplot`
-- [ ] `roseplot`, `windrose`
-
-### Customization ✅ FOUNDATION COMPLETE
-- [x] Complete colormap library (Jet, Viridis, Plasma, Hot, Cool, Gray, custom)
-- [x] Legend and colorbar management with Figure system
-- [x] Plot styling (colors, transparency, line styles, markers)
-- [x] MATLAB-compatible API design and function signatures
-- [ ] Text and annotation system
-- [ ] Axis customization and formatting
-- [ ] Figure layout and positioning
-
-## 🔧 API Design
-
-### High-Level API (MATLAB-Compatible)
-```rust
-use rustmat_plot::*;
-
-// Simple plotting
-let fig = figure();
-plot(&x, &y).title("My Plot").show();
-
-// 3D surface
-surf(&X, &Y, &Z).colormap(ColorMap::Jet).interactive(true);
-
-// Subplots
-let fig = figure().layout(2, 2);
-fig.subplot(1, 1).scatter(&x1, &y1);
-fig.subplot(1, 2).bar(&labels, &values);
-```
-
-### Low-Level API (Performance-Critical)
-```rust
-use rustmat_plot::core::*;
-
-// Direct GPU buffer management
-let mut renderer = WgpuRenderer::new();
-let vertices = renderer.create_vertex_buffer(&point_data);
-let pipeline = renderer.create_pipeline(ShaderType::Points);
-renderer.render_frame(&camera, &[vertices]);
-```
-
-### Jupyter API
-```rust
-// Automatic notebook integration
-#[jupyter_widget]
-fn interactive_plot(data: &DataFrame) -> Plot {
-    Plot::new()
-        .scatter(&data["x"], &data["y"])
-        .controls(true)
-        .streaming(true)
-}
-```
-
-## 📦 Crate Structure
+The crate is organized to clearly separate rendering, plot logic, and UI.
 
 ```
 rustmat-plot/
-├── src/
-│   ├── lib.rs                  # Public API and re-exports
-│   ├── core/                   # Core rendering and scene management
-│   │   ├── renderer.rs         # WGPU rendering backend
-│   │   ├── scene.rs            # Scene graph implementation
-│   │   ├── camera.rs           # Camera and navigation
-│   │   └── interaction.rs      # Event handling
-│   ├── plots/                  # Plot type implementations
-│   │   ├── line.rs             # Line plots
-│   │   ├── scatter.rs          # Scatter plots
-│   │   ├── surface.rs          # 3D surfaces
-│   │   └── volume.rs           # Volume rendering
-│   ├── gui/                    # GUI components
-│   │   ├── window.rs           # Main window management
-│   │   ├── controls.rs         # Interactive controls
-│   │   └── widgets.rs          # Custom plot widgets
-│   ├── jupyter/                # Jupyter integration
-│   │   ├── kernel.rs           # Kernel communication
-│   │   ├── widget.rs           # Widget protocol
-│   │   └── webgl.rs            # WebGL backend
-│   ├── data/                   # Data processing
-│   │   ├── buffers.rs          # GPU buffer management
-│   │   ├── geometry.rs         # Mesh generation
-│   │   └── lod.rs              # Level-of-detail
-│   └── export/                 # Export functionality
-│       ├── image.rs            # PNG/JPEG export
-│       ├── vector.rs           # SVG/PDF export
-│       └── web.rs              # HTML export
-├── examples/                   # Example applications
-├── benches/                    # Performance benchmarks
-├── tests/                      # Integration tests
-└── shaders/                    # GPU shaders
-    ├── vertex/
-    ├── fragment/
-    └── compute/
+├── Cargo.toml          # Dependencies and feature flags (gui, jupyter)
+├── README.md           # This file
+├── examples/           # Runnable examples (interactive_demo.rs, etc.)
+├── shaders/            # WGSL shaders for GPU rendering pipelines
+└── src/
+    ├── core/           # Low-level rendering engine (WGPU, scene, camera)
+    ├── data/           # Data processing, LOD, buffer management (TODO)
+    ├── export/         # Static export to PNG, SVG, HTML (TODO)
+    ├── gui/            # Interactive GUI window, controls, and UI overlays
+    ├── jupyter/        # Jupyter Notebook integration
+    ├── lib.rs          # Main library entry point and public API
+    ├── plots/          # High-level plot types (LinePlot, SurfacePlot, etc.)
+    ├── simple_plots.rs # Legacy static plotting with `plotters`
+    └── styling/        # Theming, colors, and layout configuration
 ```
 
-## 🎉 Current Status
+## Usage Examples
 
-### ✅ WORLD-CLASS PLOTTING SYSTEM COMPLETE! 
+### 1. Simple Line Plot
 
-**🏆 MISSION ACCOMPLISHED - 95 TESTS PASSING** ✅
+Create a figure, add a line plot, and prepare it for rendering.
 
-**📊 Test Breakdown:**
-- **Unit Tests (66)**: Core plot types, styling, validation, MATLAB compatibility
-- **Core Tests (7)**: WGPU rendering pipeline, vertex management, GPU buffers  
-- **Integration Tests (11)**: End-to-end plotting, 3D visualization, Jupyter integration
-- **Renderer Tests (11)**: Low-level GPU rendering, shader pipelines, performance
+```rust
+use rustmat_plot::plots::{Figure, LinePlot, LineStyle};
+use glam::Vec4;
 
-The complete world-class interactive plotting library is now fully implemented and production-ready:
+let x: Vec<f64> = (0..=100).map(|i| i as f64 * 0.1).collect();
+let y: Vec<f64> = x.iter().map(|&x| x.sin()).collect();
 
-**🎯 Core Achievement:**
-- **2D & 3D Plotting**: Complete implementation with line plots, scatter, bar charts, histograms, surface plots, and point clouds
-- **MATLAB Compatibility**: Drop-in replacements for `plot()`, `surf()`, `mesh()`, `scatter3()` with identical APIs
-- **GPU Acceleration**: Full WGPU rendering pipeline with vertex management and efficient draw calls
-- **Jupyter Integration**: Multiple output formats (PNG, SVG, HTML widgets) with interactive capabilities
+let mut figure = Figure::new()
+    .with_title("Sine Wave")
+    .with_labels("X-axis", "Y-axis")
+    .with_grid(true);
 
-**📊 Technical Excellence:**
-- **95 Tests Passing**: Comprehensive coverage across unit tests (66), core tests (7), integration tests (11), renderer tests (11)
-- **Zero Dead Code**: No `#[allow(dead_code)]` suppressions - all code actively used and tested
-- **Production Quality**: Robust error handling, memory optimization, performance benchmarks
-- **Advanced Features**: Multiple colormaps, transparency, lighting, wireframe modes, legends
+let line_plot = LinePlot::new(x, y)?
+    .with_style(Vec4::new(0.35, 0.78, 0.48, 1.0), 2.0, LineStyle::Solid)
+    .with_label("sin(x)");
 
-**🔧 System Verification:**
-```bash
-# Complete system compiles successfully
-cargo test -p rustmat-plot --all-targets  ✅
-# → running 95 tests... test result: ok. 95 passed; 0 failed
-
-# 3D surface plotting works
-use rustmat_plot::plots::surface::matlab_compat::*;
-let surface = surf(x, y, z).with_colormap(ColorMap::Viridis);  ✅
-
-# Point cloud visualization
-use rustmat_plot::plots::point_cloud::matlab_compat::*;
-let cloud = scatter3(x, y, z).with_values(data);  ✅
-
-# Jupyter integration ready
-let backend = JupyterBackend::new();
-backend.display_line_plot(&plot);  ✅
+figure.add_line_plot(line_plot);
 ```
 
-### 🚀 Production Status
+### 2. Multi-Plot Figure
 
-**✅ COMPLETE SYSTEM READY FOR DEPLOYMENT**
+Overlay multiple plot types in a single figure for comprehensive visualizations.
 
-1. **✅ World-Class**: Comprehensive 2D/3D plotting with MATLAB feature parity
-2. **✅ Production-Ready**: 95 tests passing, zero warnings, enterprise-grade reliability  
-3. **✅ High-Performance**: GPU-accelerated rendering with optimized data structures
-4. **✅ Interactive**: Full Jupyter support with multiple output formats
-5. **✅ Extensible**: Modular architecture ready for advanced features
+```rust
+use rustmat_plot::plots::{Figure, LinePlot, ScatterPlot, BarChart, MarkerStyle};
+use glam::Vec4;
 
-**The world-class interactive plotting library for RustMat is complete!** 🎉
+let mut figure = Figure::new().with_title("Sales Data Analysis");
+
+// Add a bar chart for monthly sales
+let sales_bars = BarChart::new(
+    vec!["Jan".to_string(), "Feb".to_string(), "Mar".to_string()],
+    vec![120.0, 135.0, 155.0]
+)?.with_label("Monthly Sales");
+
+// Add a line plot for the sales trend
+let trend_line = LinePlot::new(vec![0.0, 1.0, 2.0], vec![120.0, 135.0, 155.0])?
+    .with_label("Sales Trend");
+
+// Add a scatter plot for KPI targets
+let kpi_points = ScatterPlot::new(vec![0.0, 1.0, 2.0], vec![125.0, 130.0, 160.0])?
+    .with_style(Vec4::new(1.0, 0.3, 0.3, 1.0), 8.0, MarkerStyle::Star)
+    .with_label("KPI Targets");
+
+figure.add_bar_chart(sales_bars);
+figure.add_line_plot(trend_line);
+figure.add_scatter_plot(kpi_points);
+```
+
+### 3. 3D Surface Plot
+
+Create a 3D surface plot from a mathematical function.
+
+```rust
+use rustmat_plot::plots::{SurfacePlot, ColorMap, ShadingMode};
+
+let surface = SurfacePlot::from_function(
+    (-3.0, 3.0),
+    (-3.0, 3.0),
+    (50, 50),
+    |x, y| (-(x*x + y*y)).exp() * 2.0 - 1.0 // Gaussian
+).unwrap()
+    .with_colormap(ColorMap::Viridis)
+    .with_shading(ShadingMode::Smooth);
+
+let mut figure = Figure::new().with_title("3D Gaussian Surface");
+// Figure currently only supports 2D plots, but 3D integration is planned.
+```
+
+### 4. Interactive Plotting
+
+Launch a GPU-accelerated interactive window to display a figure.
+
+```rust
+// This requires the "gui" feature
+// Add to Cargo.toml: rustmat-plot = { version = "...", features = ["gui"] }
+
+#[cfg(feature = "gui")]
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // ... create your figure as in the examples above ...
+    let mut figure = Figure::new().with_title("Interactive Demo");
+    // ... add plots to figure ...
+
+    // Launch the interactive window
+    rustmat_plot::show_interactive_with_figure(&figure).await?;
+    Ok(())
+}
+```
+
+## Roadmap & TODOs
+
+`rustmat-plot` is under active development. While the core architecture is robust, several areas are planned for future enhancement:
+
+-   **Unified Static Export**: Replace the legacy `plotters`-based backend in `simple_plots.rs` with a unified headless rendering mode using the `wgpu` engine. This will ensure that exported PNGs and SVGs are pixel-perfect matches of the interactive plots.
+-   **Complete Export Modules**: Fully implement the `src/export` modules for high-quality vector (SVG, PDF) and web (HTML, interactive widgets) outputs.
+-   **Advanced Data Handling**: Implement the `src/data` modules for optimized GPU buffer management, level-of-detail (LOD) for large datasets, and advanced geometry processing.
+-   **Volume Rendering**: Implement the `VolumePlot` type for 3D volumetric data visualization.
+-   **Jupyter WebGL Widget**: Complete the WebGL-based interactive widget for Jupyter to provide a fully interactive experience within notebooks, matching the native GUI.
+-   **Expanded Theming**: Add more built-in themes and expand the customizability of the styling system.
+-   **3D in Figures**: Fully integrate 3D plots like `SurfacePlot` into the `Figure` system for multi-plot 3D scenes.
+

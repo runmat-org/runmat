@@ -7,11 +7,11 @@
 pub mod renderer;
 pub mod scene;
 pub mod camera;
-// pub mod camera_controller; // Temporarily disabled due to API mismatch
 pub mod interaction;
+pub mod plot_renderer;
 
 pub use renderer::*;
 pub use scene::*;
-pub use camera::{Camera, ProjectionType};
-// pub use camera_controller::{CameraController, CameraConstraints, InteractionMode};
+pub use camera::{Camera, CameraController, ProjectionType, MouseButton};
 pub use interaction::{PlotEvent, KeyCode, EventHandler};
+pub use plot_renderer::{PlotRenderer, PlotRenderConfig, RenderResult, plot_utils};

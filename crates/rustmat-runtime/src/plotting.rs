@@ -144,15 +144,13 @@ fn plot_builtin(x: Matrix, y: Matrix) -> Result<String, String> {
         return Err("X and Y data must have the same length".to_string());
     }
     
-    // Create plot with user data
-    
-    // Create the line plot with the user's data
+    // Create a line plot
     let line_plot = LinePlot::new(x_data.clone(), y_data.clone())
         .map_err(|e| format!("Failed to create line plot: {}", e))?
         .with_label("Data")
         .with_style(
-            glam::Vec4::new(0.35, 0.78, 0.47, 1.0), // Modern green (matches theme)
-            3.0, // Good visible thickness
+            glam::Vec4::new(0.0, 0.4, 0.8, 1.0), // Blue
+            3.0,
             LineStyle::Solid
         );
     

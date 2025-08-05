@@ -238,7 +238,7 @@ pub fn plot_line(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> R
         .map_err(|e| format!("Failed to create line plot: {}", e))?
         .with_label("Data")
         .with_style(
-            glam::Vec4::new(0.0, 0.4, 0.8, 1.0), // Blue
+            glam::Vec4::new(1.0, 0.0, 1.0, 1.0), // Bright magenta for debugging
             2.0,
             plots::LineStyle::Solid
         );
@@ -382,7 +382,7 @@ pub async fn show_interactive_with_figure(figure: &plots::Figure) -> Result<(), 
     let mut window = PlotWindow::new(config).await?;
     
     // Add the actual figure data instead of test plot
-    window.add_figure(figure);
+    window.set_figure(figure.clone());
     
     // Run the event loop
     window.run().await?;

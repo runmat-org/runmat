@@ -40,6 +40,11 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // For 2D plotting, return pure colors without lighting
-    return input.color;
+    // Basic lighting calculation
+    let light_dir = normalize(vec3<f32>(1.0, 1.0, 1.0));
+    let ambient = 0.3;
+    let diffuse = max(0.0, dot(input.normal, light_dir));
+    let lighting = ambient + diffuse * 0.7;
+    
+    return vec4<f32>(input.color.rgb * lighting, input.color.a);
 }

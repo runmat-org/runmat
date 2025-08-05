@@ -3,6 +3,8 @@
 #[cfg(feature = "gui")]
 use super::{PlotWindow, WindowConfig};
 #[cfg(feature = "gui")]
+use super::plot_overlay::{OverlayConfig, OverlayMetrics};
+#[cfg(feature = "gui")]
 use std::sync::Arc;
 #[cfg(feature = "gui")]
 use winit::{
@@ -14,12 +16,9 @@ use winit::{
 #[cfg(feature = "gui")]
 use egui_winit::State as EguiState;
 #[cfg(feature = "gui")]
-use crate::core::{WgpuRenderer, Camera, Scene, PipelineType};
+use crate::core::PipelineType;
 #[cfg(feature = "gui")]
 use glam::{Vec2, Vec3, Vec4, Mat4};
-#[cfg(feature = "gui")]
-use wgpu::util::DeviceExt;
-
 #[cfg(feature = "gui")]
 impl<'window> PlotWindow<'window> {
     /// Create a new interactive plot window
@@ -102,26 +101,9 @@ impl<'window> PlotWindow<'window> {
         
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
         
-        // Create renderer
-        let renderer = WgpuRenderer::new(device.clone(), queue.clone(), surface_config).await;
-        
-        // Create camera and scene
-        let mut camera = Camera::new();
-        
-        // Configure camera for 2D plotting with orthographic projection
-        camera.projection = crate::core::camera::ProjectionType::Orthographic {
-            left: -5.0,
-            right: 5.0,
-            bottom: -5.0,
-            top: 5.0,
-            near: 0.1,
-            far: 100.0,
-        };
-        camera.position = Vec3::new(0.0, 0.0, 5.0);
-        camera.target = Vec3::new(0.0, 0.0, 0.0);
-        camera.up = Vec3::new(0.0, 1.0, 0.0);
-        
-        let scene = Scene::new();
+        // Create unified plot renderer
+        let plot_renderer = crate::core::PlotRenderer::new(device.clone(), queue.clone(), surface_config).await?;
+        let plot_overlay = crate::gui::PlotOverlay::new();
         
         // Setup egui with modern dark theme
         let egui_ctx = egui::Context::default();
@@ -148,12 +130,11 @@ impl<'window> PlotWindow<'window> {
         Ok(Self {
             window,
             event_loop: Some(event_loop),
-            renderer,
+            plot_renderer,
+            plot_overlay,
             surface,
             depth_texture,
             depth_view,
-            camera,
-            scene,
             egui_ctx,
             egui_state,
             egui_renderer,
@@ -211,135 +192,20 @@ impl<'window> PlotWindow<'window> {
             current_lod: 0,
         };
         
-        self.scene.add_node(node);
+        self.plot_renderer.scene.add_node(node);
         
         // Fit camera to show the plot
         let bounds_min = Vec3::new(-1.0, -1.5, -1.0);
         let bounds_max = Vec3::new(10.0, 1.5, 1.0);
-        self.camera.fit_bounds(bounds_min, bounds_max);
+        self.plot_renderer.camera.fit_bounds(bounds_min, bounds_max);
     }
     
-    /// Add a complete figure with all its plots to the scene
-    pub fn add_figure(&mut self, figure: &crate::plots::Figure) {
-        use crate::core::vertex_utils;
-        use crate::plots::figure::PlotElement;
-        
-        let mut all_points = Vec::new();
-        let mut node_id = 0;
-        
-        // Process each plot in the figure
-        for (i, plot_element) in figure.plots().enumerate() {
-            let (vertices, name, color, pipeline_type) = match plot_element {
-                PlotElement::Line(line_plot) => {
-                    let x_data: Vec<f64> = line_plot.x_data.iter().map(|&x| x as f64).collect();
-                    let y_data: Vec<f64> = line_plot.y_data.iter().map(|&y| y as f64).collect();
-                    
-                    // Add points for bounds calculation
-                    all_points.extend(
-                        x_data.iter().zip(y_data.iter())
-                            .map(|(&x, &y)| Vec3::new(x as f32, y as f32, 0.0))
-                    );
-                    
-                    let vertices = vertex_utils::create_line_plot(&x_data, &y_data, line_plot.color);
-                    (vertices, format!("Line Plot {}", i + 1), line_plot.color, PipelineType::Triangles)
-                },
-                PlotElement::Scatter(scatter_plot) => {
-                    let x_data: Vec<f64> = scatter_plot.x_data.iter().map(|&x| x as f64).collect();
-                    let y_data: Vec<f64> = scatter_plot.y_data.iter().map(|&y| y as f64).collect();
-                    
-                    // Add points for bounds calculation
-                    all_points.extend(
-                        x_data.iter().zip(y_data.iter())
-                            .map(|(&x, &y)| Vec3::new(x as f32, y as f32, 0.0))
-                    );
-                    
-                    let vertices = vertex_utils::create_scatter_plot(&x_data, &y_data, scatter_plot.color);
-                    (vertices, format!("Scatter Plot {}", i + 1), scatter_plot.color, PipelineType::Triangles)
-                },
-                PlotElement::Bar(bar_chart) => {
-                    // Convert bar chart to line representation for now
-                    let x_data: Vec<f64> = (0..bar_chart.values.len()).map(|i| i as f64).collect();
-                    let y_data: Vec<f64> = bar_chart.values.iter().map(|&v| v as f64).collect();
-                    
-                    // Add points for bounds calculation
-                    all_points.extend(
-                        x_data.iter().zip(y_data.iter())
-                            .map(|(&x, &y)| Vec3::new(x as f32, y as f32, 0.0))
-                    );
-                    
-                    let vertices = vertex_utils::create_line_plot(&x_data, &y_data, bar_chart.color);
-                    (vertices, format!("Bar Chart {}", i + 1), bar_chart.color, PipelineType::Lines)
-                },
-                PlotElement::Histogram(histogram) => {
-                    // Convert histogram to line representation  
-                    let x_data: Vec<f64> = histogram.bin_edges.iter().take(histogram.bin_counts.len()).map(|&x| x as f64).collect();
-                    let y_data: Vec<f64> = histogram.bin_counts.iter().map(|&c| c as f64).collect();
-                    
-                    // Add points for bounds calculation
-                    all_points.extend(
-                        x_data.iter().zip(y_data.iter())
-                            .map(|(&x, &y)| Vec3::new(x as f32, y as f32, 0.0))
-                    );
-                    
-                    let vertices = vertex_utils::create_line_plot(&x_data, &y_data, histogram.color);
-                    (vertices, format!("Histogram {}", i + 1), histogram.color, PipelineType::Lines)
-                },
-            };
-            
-            // Create render data
-            let mut render_data = crate::core::RenderData {
-                pipeline_type,
-                vertices: vertices.clone(),
-                indices: None,
-                material: crate::core::Material::default(),
-                draw_calls: vec![crate::core::DrawCall {
-                    vertex_offset: 0,
-                    vertex_count: vertices.len(),
-                    index_offset: None,
-                    index_count: None,
-                    instance_count: 1,
-                }],
-            };
-            
-            // Set material color
-            render_data.material.albedo = color;
-            
-            // Create scene node
-            let node = crate::core::SceneNode {
-                id: node_id,
-                name,
-                transform: Mat4::IDENTITY,
-                visible: true,
-                cast_shadows: false,
-                receive_shadows: false,
-                parent: None,
-                children: Vec::new(),
-                render_data: Some(render_data),
-                bounds: crate::core::BoundingBox::from_points(&all_points),
-                lod_levels: Vec::new(),
-                current_lod: 0,
-            };
-            
-            self.scene.add_node(node);
-            node_id += 1;
-        }
-        
-        // Fit camera to show all plots
-        if !all_points.is_empty() {
-            let bounds = crate::core::BoundingBox::from_points(&all_points);
-                    self.camera.fit_bounds(bounds.min, bounds.max);
-        }
-        
-        println!("Added figure with {} plots to scene", figure.len());
-    }
+
 
     /// Set the figure to display in this window (clears existing content)
     pub fn set_figure(&mut self, figure: crate::plots::Figure) {
-        // Clear the current scene
-        self.scene = crate::core::Scene::new();
-        
-        // Add the new figure
-        self.add_figure(&figure);
+        // Use the unified plot renderer
+        self.plot_renderer.set_figure(figure);
     }
     
     /// Run the interactive plot window event loop
@@ -417,7 +283,10 @@ impl<'window> PlotWindow<'window> {
                 },
                 
                 winit::event::Event::AboutToWait => {
+                    // Request redraw only when interaction occurs - prevents infinite loop
+                    if repaint {
                     window.request_redraw();
+                    }
                 },
                 
                 _ => {}
@@ -429,13 +298,17 @@ impl<'window> PlotWindow<'window> {
     
     /// Handle window resize
     fn resize(&mut self, width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return; // Skip invalid sizes that could cause crashes
+        }
+        
         self.config.width = width;
         self.config.height = height;
         
-        // Recreate surface configuration
+        // Recreate surface configuration with error handling
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: self.renderer.surface_config.format,
+            format: self.plot_renderer.wgpu_renderer.surface_config.format,
             width,
             height,
             present_mode: if self.config.vsync { 
@@ -447,10 +320,13 @@ impl<'window> PlotWindow<'window> {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        self.surface.configure(&self.renderer.device, &surface_config);
+        
+        // Update renderer's surface config
+        self.plot_renderer.wgpu_renderer.surface_config = surface_config.clone();
+        self.surface.configure(&self.plot_renderer.wgpu_renderer.device, &surface_config);
         
         // Recreate depth texture
-        self.depth_texture = self.renderer.device.create_texture(&wgpu::TextureDescriptor {
+        self.depth_texture = self.plot_renderer.wgpu_renderer.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Depth Texture"),
             size: wgpu::Extent3d {
                 width,
@@ -468,7 +344,7 @@ impl<'window> PlotWindow<'window> {
         self.depth_view = self.depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
         
         // Update camera aspect ratio
-        self.camera.update_aspect_ratio(width as f32 / height as f32);
+        self.plot_renderer.camera.update_aspect_ratio(width as f32 / height as f32);
     }
     
     /// Render a frame
@@ -480,259 +356,64 @@ impl<'window> PlotWindow<'window> {
         // Camera updates will be handled by simple interaction code
         
         // Create command encoder
-        let mut encoder = self.renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut encoder = self.plot_renderer.wgpu_renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Render Encoder"),
         });
-        
-        // Collect all render data and create vertex buffers first (outside render pass)
-        let mut render_items = Vec::new();
-        
-        for node in self.scene.get_visible_nodes() {
-            if let Some(render_data) = &node.render_data {
-                if !render_data.vertices.is_empty() {
-                    // Ensure pipeline exists for this render data
-                    self.renderer.ensure_pipeline(render_data.pipeline_type);
-                    
-                    // Create vertex buffer for this node
-                    let vertex_buffer = self.renderer.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Plot Vertex Buffer"),
-                        contents: bytemuck::cast_slice(&render_data.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                    
-                    render_items.push((render_data, vertex_buffer));
-                }
-            }
-        }
-
-        
-        // Update camera uniforms before rendering  
-        let view_matrix = self.camera.view_matrix();
-        let proj_matrix = self.camera.projection_matrix();
-        let view_proj_matrix = proj_matrix * view_matrix;
-        
-        // Matrix computation complete
-        
-        self.renderer.update_uniforms(view_proj_matrix, Mat4::IDENTITY);
-        
-        // Render the scene using our world-class WGPU renderer
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: 0.08,  // Modern dark theme background
-                    g: 0.09,
-                    b: 0.11,
-                    a: 1.0,
-                }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None, // Disabled depth testing for debugging
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
-
-            // Now render all items with proper bind group setup
-            for (render_data, vertex_buffer) in &render_items {
-                // Get the appropriate pipeline for this render data (pipeline ensured above)
-                let pipeline = self.renderer.get_pipeline(render_data.pipeline_type);
-                render_pass.set_pipeline(pipeline);
-
-                // Set the uniform bind group (required by shaders)
-                render_pass.set_bind_group(0, self.renderer.get_uniform_bind_group(), &[]);
-
-                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-
-                // Render the vertices
-                for draw_call in &render_data.draw_calls {
-                    render_pass.draw(
-                        draw_call.vertex_offset as u32..(draw_call.vertex_offset + draw_call.vertex_count) as u32,
-                        0..draw_call.instance_count as u32,
-                    );
-                }
-            }
-        }
         
         // Render egui
         let raw_input = self.egui_state.take_egui_input(&self.window);
         
         // Get UI data before borrowing
-        let scene_stats = self.scene.statistics();
-        let camera_pos = self.camera.position;
+        let scene_stats = self.plot_renderer.scene.statistics();
+        let _camera_pos = self.plot_renderer.camera.position;
+        
+        // Track the plot area for WGPU rendering
+        #[allow(unused_assignments)]
+        let mut plot_area: Option<egui::Rect> = None;
         
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            // Make the egui context fully transparent to show WGPU content behind
-            let mut visuals = ctx.style().visuals.clone();
-            visuals.window_fill = egui::Color32::TRANSPARENT;
-            visuals.panel_fill = egui::Color32::TRANSPARENT;
-            ctx.set_visuals(visuals);
-            // Modern professional plot controls panel
-            egui::SidePanel::left("plot_controls")
-                .resizable(true)
-                .default_width(280.0)
-                .min_width(200.0)
-                .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(8.0);
-                        ui.heading("📊 RustMat Plot");
-                        ui.add_space(4.0);
-                        ui.label("Interactive Visualization");
-                        ui.add_space(12.0);
-                    });
-                    
-                    ui.separator();
-                    ui.add_space(8.0);
-                    
-                    // Camera section with modern styling
-                    ui.collapsing("🎥 Camera Controls", |ui| {
-                        ui.add_space(4.0);
-                        ui.label("Position:");
-                        ui.monospace(format!("X: {:.2}", camera_pos.x));
-                        ui.monospace(format!("Y: {:.2}", camera_pos.y));
-                        ui.monospace(format!("Z: {:.2}", camera_pos.z));
-                        
-                        ui.add_space(8.0);
-                        ui.label("Controls:");
-                        ui.label("• Mouse scroll: Zoom");
-                        ui.label("• Mouse drag: Pan");
-                        ui.label("• Right click: Rotate");
-                    });
-                    
-                    ui.add_space(8.0);
-                    
-                    // Scene information
-                    ui.collapsing("📈 Scene Info", |ui| {
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.label("Plot objects:");
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.strong(format!("{}", scene_stats.total_nodes));
-                            });
-                        });
-                        
-                        ui.horizontal(|ui| {
-                            ui.label("Vertices:");
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.strong(format!("{}", scene_stats.total_vertices));
-                            });
-                        });
-                        
-                        ui.horizontal(|ui| {
-                            ui.label("Triangles:");
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.strong(format!("{}", scene_stats.total_triangles));
-                            });
-                        });
-                    });
-                    
-                    ui.add_space(8.0);
-                    
-                    // Rendering performance
-                    ui.collapsing("⚡ Performance", |ui| {
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.label("Renderer:");
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.strong("WGPU Metal");
-                            });
-                        });
-                        
-                        ui.horizontal(|ui| {
-                            ui.label("GPU:");
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.strong("Apple M2 Max");
-                            });
-                        });
-                        
-                        ui.horizontal(|ui| {
-                            ui.label("Status:");
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(89, 200, 120), // Green accent
-                                    "● Active"
-                                );
-                            });
-                        });
-                    });
-                    
-                    ui.add_space(8.0);
-                    
-                    // Theme selector
-                    ui.collapsing("🎨 Appearance", |ui| {
-                        ui.add_space(4.0);
-                        ui.label("Theme: Modern Dark");
-                        ui.add_space(4.0);
-                        
-                        ui.horizontal(|ui| {
-                            ui.label("Background:");
-                            ui.color_edit_button_srgba(
-                                &mut egui::Color32::from_rgba_unmultiplied(20, 23, 27, 255)
-                            );
-                        });
-                        
-                        ui.horizontal(|ui| {
-                            ui.label("Accent:");
-                            ui.color_edit_button_srgba(
-                                &mut egui::Color32::from_rgba_unmultiplied(89, 200, 120, 255)
-                            );
-                        });
-                    });
-                    
-                    // Footer with version info
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(8.0);
-                        ui.small("RustMat Plot v0.1.0");
-                        ui.small("World-class plotting for Rust");
-                    });
-                });
-                
-            // Main plot area - transparent to show WGPU rendering underneath
-            egui::CentralPanel::default()
-                .frame(egui::Frame::none()) // Remove frame/background
-                .show(ctx, |ui| {
-                    // Make the UI transparent to show WGPU content
-                    if scene_stats.total_nodes == 0 {
-                        // Only show instructions if no data
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(100.0);
-                            ui.heading("🎯 Ready for Data");
-                            ui.add_space(8.0);
-                            ui.label("Your beautiful plots will appear here");
-                            ui.add_space(4.0);
-                            ui.small("Try: plot([1,2,3], [1,4,9])");
-                        });
-                    } else {
-                        // For active plots, show minimal overlay
-                        ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
-                            ui.horizontal(|ui| {
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.small("⚡");
-                                    ui.small("GPU-accelerated rendering active");
-                                });
-                            });
-                        });
-                        
-                        // Rest of the area is transparent for WGPU rendering
-                        ui.allocate_space(ui.available_size()); // Claim the space but draw nothing
-                    }
-                });
+            // Use PlotOverlay for unified UI rendering - no more duplicate sidebar code!
+            let mut overlay_config = OverlayConfig::default();
+            // RE-ENABLE GRID to compare coordinate systems
+            overlay_config.show_grid = true;
+            overlay_config.show_axes = true;
+            let overlay_metrics = OverlayMetrics {
+                vertex_count: scene_stats.total_vertices,
+                triangle_count: scene_stats.total_triangles,
+                render_time_ms: 0.0, // TODO: Add timing
+                fps: 60.0, // TODO: Calculate actual FPS
+            };
+            
+            let frame_info = self.plot_overlay.render(ctx, &self.plot_renderer, &overlay_config, overlay_metrics);
+            plot_area = frame_info.plot_area;
+            
+
+
         });
+        
+        // Calculate data bounds for viewport transformation
+        let data_bounds = self.plot_renderer.calculate_data_bounds();
+        
+        // Now we have the plot area, update camera and WGPU rendering accordingly
+        if let Some(plot_rect) = plot_area {
+            // Update camera aspect ratio to match the plot area
+            let plot_width = plot_rect.width();
+            let plot_height = plot_rect.height();
+            if plot_width > 0.0 && plot_height > 0.0 {
+                self.plot_renderer.camera.update_aspect_ratio(plot_width / plot_height);
+                
+
+            }
+        }
         
         self.egui_state.handle_platform_output(&self.window, full_output.platform_output);
         
         let tris = self.egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
         for (id, image_delta) in &full_output.textures_delta.set {
-            self.egui_renderer.update_texture(&self.renderer.device, &self.renderer.queue, *id, image_delta);
+            self.egui_renderer.update_texture(&self.plot_renderer.wgpu_renderer.device, &self.plot_renderer.wgpu_renderer.queue, *id, image_delta);
         }
         
-        self.egui_renderer.update_buffers(&self.renderer.device, &self.renderer.queue, &mut encoder, &tris, &egui_wgpu::ScreenDescriptor {
+        self.egui_renderer.update_buffers(&self.plot_renderer.wgpu_renderer.device, &self.plot_renderer.wgpu_renderer.queue, &mut encoder, &tris, &egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point: self.window.scale_factor() as f32,
         });
@@ -757,6 +438,37 @@ impl<'window> PlotWindow<'window> {
                 size_in_pixels: [self.config.width, self.config.height],
                 pixels_per_point: self.window.scale_factor() as f32,
             });
+        
+        // End the egui render pass to avoid borrowing conflicts
+        drop(render_pass);
+        
+        // Render WGPU plot data on top of egui content using the unified renderer
+        if let Some(plot_rect) = plot_area {
+            let scale_factor = self.window.scale_factor() as f32;
+
+            let viewport = (
+                plot_rect.min.x * scale_factor,
+                plot_rect.min.y * scale_factor,
+                plot_rect.width() * scale_factor,
+                plot_rect.height() * scale_factor,
+            );
+            
+
+            
+
+            
+            // Execute optimized direct viewport rendering
+            if let Some(bounds) = data_bounds {
+                let _ = self.plot_renderer.render_direct_to_viewport(
+                    &mut encoder,
+                    &view,
+                    viewport,
+                    bounds,
+                    false,  // Don't clear background, preserve egui content
+                    None,   // No custom background color
+                );
+            }
+        }
         }
         
         for id in &full_output.textures_delta.free {
@@ -764,22 +476,37 @@ impl<'window> PlotWindow<'window> {
         }
         
         // Submit commands
-        self.renderer.queue.submit(std::iter::once(encoder.finish()));
+        self.plot_renderer.wgpu_renderer.queue.submit(std::iter::once(encoder.finish()));
         output.present();
         
         Ok(())
     }
     
     /// Handle mouse input
-    fn handle_mouse_input(&mut self, _button: winit::event::MouseButton, _state: winit::event::ElementState) {
-        // Simple mouse interaction - to be implemented later
-        // For now, just track that mouse interaction is happening
+    fn handle_mouse_input(&mut self, button: winit::event::MouseButton, state: winit::event::ElementState) {
+        use winit::event::{MouseButton, ElementState};
+        
+        match (button, state) {
+            (MouseButton::Left, ElementState::Pressed) => {
+                self.is_mouse_over_plot = true; // For panning
+            }
+            (MouseButton::Left, ElementState::Released) => {
+                self.is_mouse_over_plot = false;
+            }
+            _ => {}
+        }
     }
     
     /// Handle mouse movement
     fn handle_mouse_move(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
-        self.mouse_position = glam::Vec2::new(position.x as f32, position.y as f32);
-        // Simple camera interaction to be implemented later
+        let new_position = glam::Vec2::new(position.x as f32, position.y as f32);
+        let delta = new_position - self.mouse_position;
+        self.mouse_position = new_position;
+        
+        // Pan when left mouse button is held down
+        if self.is_mouse_over_plot && delta.length() > 0.0 {
+            self.plot_renderer.camera.pan(-delta * 0.01); // Negative for natural feel
+        }
     }
     
     /// Handle mouse scroll
@@ -789,9 +516,20 @@ impl<'window> PlotWindow<'window> {
             winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 100.0,
         };
         
-        // Simple zoom: move camera closer/farther based on scroll
-        let zoom_speed = 0.1;
-        let forward = (self.camera.target - self.camera.position).normalize();
-        self.camera.position += forward * scroll_delta * zoom_speed;
+        // Zoom in/out by scaling the orthographic projection
+        if let crate::core::camera::ProjectionType::Orthographic { 
+            ref mut left, ref mut right, ref mut bottom, ref mut top, .. 
+        } = self.plot_renderer.camera.projection {
+            let zoom_factor = 1.0 + scroll_delta * 0.1;
+            let center_x = (*left + *right) / 2.0;
+            let center_y = (*bottom + *top) / 2.0;
+            let width = (*right - *left) / zoom_factor;
+            let height = (*top - *bottom) / zoom_factor;
+            
+            *left = center_x - width / 2.0;
+            *right = center_x + width / 2.0;
+            *bottom = center_y - height / 2.0;
+            *top = center_y + height / 2.0;
+        }
     }
 }
