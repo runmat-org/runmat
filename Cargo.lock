@@ -4293,12 +4293,14 @@ version = "0.0.1"
 dependencies = [
  "accelerate-src",
  "blas",
+ "glam",
  "inventory",
  "lapack",
  "openblas-src",
  "rustmat-builtins",
  "rustmat-macros",
  "rustmat-plot",
+ "tokio",
 ]
 
 [[package]]

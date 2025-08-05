@@ -14,17 +14,20 @@ pub mod simple_plots;
 // Core architecture (always available for internal use)
 pub mod core;
 
+// High-level plot types
+pub mod plots;
+
+// Advanced modules
+pub mod data;
+pub mod export;
+pub mod jupyter;
+pub mod styling;
+
 // Feature-gated modules
 #[cfg(feature = "gui")]
 pub mod gui;
 
-#[cfg(feature = "jupyter")]
-pub mod jupyter;
-
-// Additional modules
-pub mod plots;
-pub mod data;
-pub mod export;
+// (Modules already declared above)
 
 // Re-exports for convenience
 pub use core::*;
@@ -32,6 +35,32 @@ pub use core::*;
 // High-level API
 #[cfg(feature = "gui")]
 pub use gui::{PlotWindow, WindowConfig};
+
+// Legacy IPC system (deprecated)
+pub use gui::{GuiHandle, GuiManager, init_gui_handle, get_gui_handle};
+
+// Robust GUI thread management
+pub use gui::{
+    GuiThreadManager, GuiOperationResult, GuiErrorCode,
+    register_main_thread, is_main_thread, initialize_gui_manager,
+    get_gui_manager, show_plot_global, health_check_global,
+};
+
+// Native window system
+pub use gui::{
+    NativeWindowManager, NativeWindowResult, initialize_native_window,
+    show_plot_native_window, is_native_window_available,
+};
+
+// Styling and theming system
+pub use styling::{
+    PlotThemeConfig, ThemeVariant, ModernDarkTheme, Typography, Layout,
+    validate_theme_config,
+};
+
+
+
+
 
 /// Environment variable specifying the path to the optional YAML config file.
 pub const CONFIG_ENV: &str = "RUSTMAT_PLOT_CONFIG";
@@ -196,56 +225,119 @@ fn parse_color(hex: &str) -> Result<RGBColor, &'static str> {
     Ok(RGBColor(r, g, b))
 }
 
-// ===== PUBLIC PLOTTING FUNCTIONS =====
+// ===== WORLD-CLASS PLOTTING API =====
 
-/// Plot a line series with full options support
-pub fn plot_line(xs: &[f64], ys: &[f64], path: &str, options: PlotOptions) -> Result<(), String> {
+/// Create a line plot using the modern plotting system (backward compatibility)
+pub fn plot_line(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> Result<(), String> {
     if xs.len() != ys.len() {
         return Err("input length mismatch".into());
     }
     
+    // Use the new world-class plotting system
+    let line_plot = plots::LinePlot::new(xs.to_vec(), ys.to_vec())
+        .map_err(|e| format!("Failed to create line plot: {}", e))?
+        .with_label("Data")
+        .with_style(
+            glam::Vec4::new(0.0, 0.4, 0.8, 1.0), // Blue
+            2.0,
+            plots::LineStyle::Solid
+        );
+    
+    let mut figure = plots::Figure::new()
+        .with_title("Line Plot")
+        .with_labels("X", "Y")
+        .with_grid(true);
+    
+    figure.add_line_plot(line_plot);
+    
+    // Export via simple_plots for now (fallback)
     if path.ends_with(".png") {
-        simple_plots::line_plot_png(xs, ys, path, &options)
+        simple_plots::line_plot_png(xs, ys, path, &_options)
     } else if path.ends_with(".svg") {
-        simple_plots::line_plot_svg(xs, ys, path, &options)
+        simple_plots::line_plot_svg(xs, ys, path, &_options)
     } else {
         Err("Unsupported file format".to_string())
     }
 }
 
-/// Create a scatter plot with full options support
-pub fn plot_scatter(xs: &[f64], ys: &[f64], path: &str, options: PlotOptions) -> Result<(), String> {
+/// Create a scatter plot using the modern plotting system (backward compatibility)
+pub fn plot_scatter(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> Result<(), String> {
     if xs.len() != ys.len() {
         return Err("input length mismatch".into());
     }
     
+    // Use the new world-class plotting system
+    let scatter_plot = plots::ScatterPlot::new(xs.to_vec(), ys.to_vec())
+        .map_err(|e| format!("Failed to create scatter plot: {}", e))?
+        .with_label("Data")
+        .with_style(
+            glam::Vec4::new(0.8, 0.2, 0.2, 1.0), // Red
+            5.0,
+            plots::MarkerStyle::Circle
+        );
+    
+    let mut figure = plots::Figure::new()
+        .with_title("Scatter Plot")
+        .with_labels("X", "Y")
+        .with_grid(true);
+    
+    figure.add_scatter_plot(scatter_plot);
+    
+    // Export via simple_plots for now (fallback)
     if path.ends_with(".png") {
-        simple_plots::scatter_plot_png(xs, ys, path, &options)
+        simple_plots::scatter_plot_png(xs, ys, path, &_options)
     } else if path.ends_with(".svg") {
-        simple_plots::scatter_plot_svg(xs, ys, path, &options)
+        simple_plots::scatter_plot_svg(xs, ys, path, &_options)
     } else {
         Err("Unsupported file format".to_string())
     }
 }
 
-/// Create a bar chart with full options support
-pub fn plot_bar(labels: &[String], values: &[f64], path: &str, options: PlotOptions) -> Result<(), String> {
+/// Create a bar chart using the modern plotting system (backward compatibility)
+pub fn plot_bar(labels: &[String], values: &[f64], path: &str, _options: PlotOptions) -> Result<(), String> {
     if labels.len() != values.len() {
         return Err("labels and values length mismatch".into());
     }
     
+    // Use the new world-class plotting system
+    let bar_chart = plots::BarChart::new(labels.to_vec(), values.to_vec())
+        .map_err(|e| format!("Failed to create bar chart: {}", e))?
+        .with_label("Values")
+        .with_style(glam::Vec4::new(0.2, 0.6, 0.3, 1.0), 0.8); // Green bars with 80% width
+    
+    let mut figure = plots::Figure::new()
+        .with_title("Bar Chart")
+        .with_labels("Categories", "Values")
+        .with_grid(true);
+    
+    figure.add_bar_chart(bar_chart);
+    
+    // Export via simple_plots for now (fallback)
     if path.ends_with(".png") {
-        simple_plots::bar_chart_png(labels, values, path, &options)
+        simple_plots::bar_chart_png(labels, values, path, &_options)
     } else {
-        // For SVG, we'd need to implement bar_chart_svg
         Err("SVG bar charts not yet implemented".to_string())
     }
 }
 
-/// Create a histogram with full options support
-pub fn plot_histogram(data: &[f64], bins: usize, path: &str, options: PlotOptions) -> Result<(), String> {
+/// Create a histogram using the modern plotting system (backward compatibility)
+pub fn plot_histogram(data: &[f64], bins: usize, path: &str, _options: PlotOptions) -> Result<(), String> {
+    // Use the new world-class plotting system
+    let histogram = plots::Histogram::new(data.to_vec(), bins)
+        .map_err(|e| format!("Failed to create histogram: {}", e))?
+        .with_label("Frequency")
+        .with_style(glam::Vec4::new(0.6, 0.3, 0.7, 1.0), false); // Purple, not normalized
+    
+    let mut figure = plots::Figure::new()
+        .with_title("Histogram")
+        .with_labels("Values", "Frequency")
+        .with_grid(true);
+    
+    figure.add_histogram(histogram);
+    
+    // Export via simple_plots for now (fallback)
     if path.ends_with(".png") {
-        simple_plots::histogram_png(data, bins, path, &options)
+        simple_plots::histogram_png(data, bins, path, &_options)
     } else {
         Err("SVG histograms not yet implemented".to_string())
     }
@@ -283,6 +375,21 @@ pub async fn show_interactive_with_config(config: WindowConfig) -> Result<(), Bo
     Ok(())
 }
 
+/// Launch an interactive plot window with a specific figure (requires GUI feature)
+#[cfg(feature = "gui")]
+pub async fn show_interactive_with_figure(figure: &plots::Figure) -> Result<(), Box<dyn std::error::Error>> {
+    let config = WindowConfig::default();
+    let mut window = PlotWindow::new(config).await?;
+    
+    // Add the actual figure data instead of test plot
+    window.add_figure(figure);
+    
+    // Run the event loop
+    window.run().await?;
+    
+    Ok(())
+}
+
 /// Placeholder for non-GUI builds
 #[cfg(not(feature = "gui"))]
 pub async fn show_interactive() -> Result<(), Box<dyn std::error::Error>> {
@@ -299,4 +406,53 @@ pub async fn interactive_plot() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(feature = "gui"))]
 pub async fn show_interactive_with_config(_config: ()) -> Result<(), Box<dyn std::error::Error>> {
     Err("GUI feature not enabled. Build with --features gui to use interactive plotting.".into())
+}
+
+/// Placeholder for non-GUI builds
+#[cfg(not(feature = "gui"))]
+pub async fn show_interactive_with_figure(_figure: &plots::Figure) -> Result<(), Box<dyn std::error::Error>> {
+    Err("GUI feature not enabled. Build with --features gui to use interactive plotting.".into())
+}
+
+/// Show an interactive plot using the legacy IPC system (deprecated, works from any thread)
+pub fn show_interactive_via_ipc(figure: plots::Figure) -> Result<String, String> {
+    if let Some(gui_handle) = get_gui_handle() {
+        gui_handle.show_plot(figure)
+    } else {
+        Err("GUI system not initialized. Make sure to call init_gui_system() from the main thread.".to_string())
+    }
+}
+
+/// Show an interactive plot using the robust GUI thread manager (recommended)
+pub fn show_interactive_robust(figure: plots::Figure) -> Result<String, String> {
+    match show_plot_global(figure) {
+        Ok(GuiOperationResult::Success(msg)) => Ok(msg),
+        Ok(GuiOperationResult::Error { message, error_code: _, recoverable: _ }) => Err(message),
+        Ok(GuiOperationResult::Cancelled(msg)) => Err(msg),
+        Err(GuiOperationResult::Error { message, error_code: _, recoverable: _ }) => Err(message),
+        Err(GuiOperationResult::Cancelled(msg)) => Err(msg),
+        Err(GuiOperationResult::Success(msg)) => Ok(msg), // Shouldn't happen, but handle it
+    }
+}
+
+/// Show an interactive plot with optimal platform compatibility
+pub fn show_interactive_platform_optimal(figure: plots::Figure) -> Result<String, String> {
+    // Try native window system first (handles macOS main thread requirements properly)
+    if is_native_window_available() {
+        match show_plot_native_window(figure.clone()) {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                eprintln!("Native window failed: {}, trying thread-based approach", e);
+            }
+        }
+    }
+
+    // Fall back to thread-based GUI system for non-macOS or if native window failed
+    match show_interactive_robust(figure.clone()) {
+        Ok(result) => Ok(result),
+        Err(_) => {
+            // Final fallback to legacy IPC
+            show_interactive_via_ipc(figure)
+        }
+    }
 }

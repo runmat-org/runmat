@@ -182,6 +182,22 @@ impl BoundingBox {
         point.y >= self.min.y && point.y <= self.max.y &&
         point.z >= self.min.z && point.z <= self.max.z
     }
+    
+    /// Create a union of two bounding boxes
+    pub fn union(&self, other: &BoundingBox) -> BoundingBox {
+        BoundingBox {
+            min: Vec3::new(
+                self.min.x.min(other.min.x),
+                self.min.y.min(other.min.y),
+                self.min.z.min(other.min.z),
+            ),
+            max: Vec3::new(
+                self.max.x.max(other.max.x),
+                self.max.y.max(other.max.y),
+                self.max.z.max(other.max.z),
+            ),
+        }
+    }
 }
 
 /// Scene graph managing hierarchical plot objects

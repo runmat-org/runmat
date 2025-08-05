@@ -8,6 +8,8 @@ inventory = { workspace = true }
 rustmat-builtins = { workspace = true }
 rustmat-macros = { workspace = true }
 rustmat-plot = { workspace = true }
+glam = "0.24"
+tokio = { workspace = true }
 
 # BLAS/LAPACK bindings for high-performance linear algebra (optional)
 blas = { version = "0.22", optional = true }
@@ -23,7 +25,9 @@ accelerate-src = { version = "0.3", optional = true }
 openblas-src = { version = "0.10", features = ["cblas", "lapacke"], optional = true }
 
 [features]
-default = []
+default = ["gui"]
+# GUI plotting support
+gui = ["rustmat-plot/gui"]
 # High-performance BLAS/LAPACK support using platform-native libraries
 # macOS: Uses Apple's Accelerate framework (WORKS on both Intel and Apple Silicon!)
 # Other platforms: Uses OpenBLAS

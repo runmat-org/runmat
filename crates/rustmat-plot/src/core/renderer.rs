@@ -68,8 +68,7 @@ impl Vertex {
 pub struct Uniforms {
     pub view_proj: [[f32; 4]; 4],
     pub model: [[f32; 4]; 4],
-    pub normal_matrix: [[f32; 3]; 3],
-    pub _padding: f32,
+    pub normal_matrix: [[f32; 4]; 3], // Use 4x3 for proper alignment instead of 3x3
 }
 
 impl Uniforms {
@@ -77,8 +76,7 @@ impl Uniforms {
         Self {
             view_proj: Mat4::IDENTITY.to_cols_array_2d(),
             model: Mat4::IDENTITY.to_cols_array_2d(),
-            normal_matrix: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            _padding: 0.0,
+            normal_matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
         }
     }
     
@@ -88,12 +86,12 @@ impl Uniforms {
     
     pub fn update_model(&mut self, model: Mat4) {
         self.model = model.to_cols_array_2d();
-        // Update normal matrix (upper 3x3 of inverse transpose)
+        // Update normal matrix (upper 3x3 of inverse transpose) with proper alignment
         let normal_mat = model.inverse().transpose();
         self.normal_matrix = [
-            [normal_mat.x_axis.x, normal_mat.x_axis.y, normal_mat.x_axis.z],
-            [normal_mat.y_axis.x, normal_mat.y_axis.y, normal_mat.y_axis.z],
-            [normal_mat.z_axis.x, normal_mat.z_axis.y, normal_mat.z_axis.z],
+            [normal_mat.x_axis.x, normal_mat.x_axis.y, normal_mat.x_axis.z, 0.0],
+            [normal_mat.y_axis.x, normal_mat.y_axis.y, normal_mat.y_axis.z, 0.0],
+            [normal_mat.z_axis.x, normal_mat.z_axis.y, normal_mat.z_axis.z, 0.0],
         ];
     }
 }
@@ -211,6 +209,11 @@ impl WgpuRenderer {
         );
     }
     
+    /// Get the uniform bind group for rendering
+    pub fn get_uniform_bind_group(&self) -> &wgpu::BindGroup {
+        &self.uniform_bind_group
+    }
+    
     /// Ensure pipeline exists for the specified type
     pub fn ensure_pipeline(&mut self, pipeline_type: PipelineType) {
         match pipeline_type {
@@ -285,13 +288,7 @@ impl WgpuRenderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
+            depth_stencil: None, // Disable depth testing for 2D point plots
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -340,13 +337,7 @@ impl WgpuRenderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
+            depth_stencil: None, // Disable depth testing for 2D line plots
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -395,13 +386,7 @@ impl WgpuRenderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
+            depth_stencil: None, // Disable depth testing for 2D triangle plots
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -505,24 +490,68 @@ pub mod vertex_utils {
             .collect()
     }
     
-    /// Create vertices for a parametric line plot
+    /// Create vertices for a parametric line plot using thick triangulated lines
     pub fn create_line_plot(x_data: &[f64], y_data: &[f64], color: Vec4) -> Vec<Vertex> {
         let mut vertices = Vec::new();
+        let line_width = 0.3; // VERY thick line in world coordinates for debugging
         
         for i in 1..x_data.len() {
             let start = Vec3::new(x_data[i-1] as f32, y_data[i-1] as f32, 0.0);
             let end = Vec3::new(x_data[i] as f32, y_data[i] as f32, 0.0);
-            vertices.extend(create_line(start, end, color));
+            
+            // Create thick line as a rectangle (2 triangles)
+            let direction = (end - start).normalize();
+            let perpendicular = Vec3::new(-direction.y, direction.x, 0.0) * line_width;
+            
+            // Four corners of the rectangle
+            let p1 = start + perpendicular;
+            let p2 = start - perpendicular;
+            let p3 = end + perpendicular;
+            let p4 = end - perpendicular;
+            
+            // First triangle: p1 -> p2 -> p3
+            vertices.push(Vertex::new(p1, color));
+            vertices.push(Vertex::new(p2, color));
+            vertices.push(Vertex::new(p3, color));
+            
+            // Second triangle: p2 -> p4 -> p3
+            vertices.push(Vertex::new(p2, color));
+            vertices.push(Vertex::new(p4, color));
+            vertices.push(Vertex::new(p3, color));
         }
+        
+        // Line plot vertices generated successfully
         
         vertices
     }
     
-    /// Create vertices for a scatter plot
+    /// Create vertices for a scatter plot using triangulated squares  
     pub fn create_scatter_plot(x_data: &[f64], y_data: &[f64], color: Vec4) -> Vec<Vertex> {
-        x_data.iter()
-            .zip(y_data.iter())
-            .map(|(&x, &y)| Vertex::new(Vec3::new(x as f32, y as f32, 0.0), color))
-            .collect()
+        let mut vertices = Vec::new();
+        let point_size = 0.5; // Even larger point size for visibility
+        
+        for (&x, &y) in x_data.iter().zip(y_data.iter()) {
+            let center = Vec3::new(x as f32, y as f32, 0.0);
+            let half_size = point_size / 2.0;
+            
+            // Create square as two triangles
+            let p1 = center + Vec3::new(-half_size, -half_size, 0.0); // Bottom-left
+            let p2 = center + Vec3::new(half_size, -half_size, 0.0);  // Bottom-right  
+            let p3 = center + Vec3::new(half_size, half_size, 0.0);   // Top-right
+            let p4 = center + Vec3::new(-half_size, half_size, 0.0);  // Top-left
+            
+            // First triangle: p1 -> p2 -> p3
+            vertices.push(Vertex::new(p1, color));
+            vertices.push(Vertex::new(p2, color));
+            vertices.push(Vertex::new(p3, color));
+            
+            // Second triangle: p1 -> p3 -> p4
+            vertices.push(Vertex::new(p1, color));
+            vertices.push(Vertex::new(p3, color));
+            vertices.push(Vertex::new(p4, color));
+        }
+        
+        // Scatter plot vertices generated successfully
+        vertices
     }
 }

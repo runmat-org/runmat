@@ -201,7 +201,7 @@ impl LinePlot {
     }
     
     /// Estimate memory usage in bytes
-    fn estimated_memory_usage(&self) -> usize {
+    pub fn estimated_memory_usage(&self) -> usize {
         std::mem::size_of::<f64>() * (self.x_data.len() + self.y_data.len()) +
         self.vertices.as_ref().map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
     }

@@ -42,5 +42,10 @@ rustmat-builtins = { path = "../crates/rustmat-builtins" }
 rustmat-snapshot = { path = "../crates/rustmat-snapshot" }
 rustmat-plot = { path = "../crates/rustmat-plot" }
 
+[features]
+# GUI plotting features (enabled by default)
+default = ["gui"]
+gui = ["rustmat-plot/gui"]
+
 [dev-dependencies]
 tempfile = "3.12" 

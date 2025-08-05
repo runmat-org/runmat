@@ -3,7 +3,7 @@
 struct Uniforms {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
-    normal_matrix: mat3x3<f32>,
+    normal_matrix: mat3x4<f32>,
 }
 
 @group(0) @binding(0)

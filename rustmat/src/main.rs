@@ -497,6 +497,51 @@ async fn main() -> Result<()> {
     // Configure Garbage Collector
     configure_gc_from_config(&config)?;
 
+    // Initialize GUI system if needed
+    let _gui_initialized = if config.plotting.mode == PlotMode::Gui || 
+                            (config.plotting.mode == PlotMode::Auto && !config.plotting.force_headless) {
+        info!("Initializing GUI plotting system");
+        
+        // Register this thread as the main thread for GUI operations
+        rustmat_plot::register_main_thread();
+        
+        // Initialize native window system (handles macOS main thread requirements)
+        match rustmat_plot::initialize_native_window() {
+            Ok(()) => {
+                info!("Native window system initialized successfully");
+            }
+            Err(e) => {
+                info!("Native window initialization failed: {}, using thread manager", e);
+            }
+        }
+        
+        // Initialize GUI thread manager for cross-platform compatibility
+        match rustmat_plot::initialize_gui_manager() {
+            Ok(()) => {
+                info!("GUI thread manager initialized successfully");
+
+                // Perform a health check to ensure the system is working
+                match rustmat_plot::health_check_global() {
+                    Ok(result) => {
+                        info!("GUI system health check: {}", result);
+                        true
+                    }
+                    Err(e) => {
+                        error!("GUI system health check failed: {}", e);
+                        // Continue anyway, might work when actually needed
+                        true
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to initialize GUI thread manager: {}", e);
+                false
+            }
+        }
+    } else {
+        false
+    };
+
     // Handle command or script execution
     let command = cli.command.clone();
     let script = cli.script.clone();
@@ -572,9 +617,18 @@ fn apply_cli_overrides(config: &mut RustMatConfig, cli: &Cli) {
     // Plotting settings
     if let Some(plot_mode) = &cli.plot_mode {
         config.plotting.mode = *plot_mode;
+        // Also set environment variable so runtime can see it
+        let env_value = match plot_mode {
+            PlotMode::Auto => "auto",
+            PlotMode::Gui => "gui", 
+            PlotMode::Headless => "headless",
+            PlotMode::Jupyter => "jupyter",
+        };
+        std::env::set_var("RUSTMAT_PLOT_MODE", env_value);
     }
     if cli.plot_headless {
         config.plotting.force_headless = true;
+        std::env::set_var("RUSTMAT_PLOT_MODE", "headless");
     }
     if let Some(backend) = &cli.plot_backend {
         config.plotting.backend = *backend;
@@ -734,12 +788,23 @@ async fn execute_repl(config: &RustMatConfig) -> Result<()> {
     println!();
 
     let mut input = String::new();
+    let is_interactive = atty::is(atty::Stream::Stdin);
+    
     loop {
-        print!("rustmat> ");
-        io::stdout().flush().unwrap();
+        if is_interactive {
+            print!("rustmat> ");
+            io::stdout().flush().unwrap();
+        }
         
         input.clear();
         match io::stdin().read_line(&mut input) {
+            Ok(0) => {
+                // EOF reached (e.g., pipe closed)
+                if !is_interactive {
+                    break;
+                }
+                continue;
+            }
             Ok(_) => {
                 let line = input.trim();
                 if line == "exit" || line == "quit" {

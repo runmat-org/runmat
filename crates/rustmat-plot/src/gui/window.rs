@@ -3,8 +3,6 @@
 //! Provides the main application window with integrated plot viewport
 //! and control panels using winit and egui.
 
-
-
 /// Configuration for the plot window
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -29,15 +27,26 @@ impl Default for WindowConfig {
     }
 }
 
-/// Interactive plot window - simplified for now
+/// Interactive plot window with full WGPU rendering
 #[cfg(feature = "gui")]
 pub struct PlotWindow<'window> {
-    config: WindowConfig,
-    _lifetime: std::marker::PhantomData<&'window ()>,
+    pub window: std::sync::Arc<winit::window::Window>,
+    pub event_loop: Option<winit::event_loop::EventLoop<()>>,
+    pub renderer: crate::core::WgpuRenderer,
+    pub surface: wgpu::Surface<'window>,
+    pub depth_texture: wgpu::Texture,
+    pub depth_view: wgpu::TextureView,
+    pub camera: crate::core::Camera,
+    pub scene: crate::core::Scene,
+    pub egui_ctx: egui::Context,
+    pub egui_state: egui_winit::State,
+    pub egui_renderer: egui_wgpu::Renderer,
+    pub config: WindowConfig,
+    pub mouse_position: glam::Vec2,
+    pub is_mouse_over_plot: bool,
 }
 
-#[cfg(feature = "gui")]
-mod window_impl;
+// The implementation is in window_impl.rs in the same directory
 
 // Stub implementation for non-GUI builds
 #[cfg(not(feature = "gui"))]

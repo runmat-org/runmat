@@ -147,7 +147,7 @@ fn benchmark_compression_algorithms(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new(format!("{}_{}", data_name, algo_name), data.len()),
                 &(data, config),
-                |b, (data, config)| {
+                |b, (_data, config)| {
                     b.iter(|| {
                         gc_test_context(|| {
                             let temp_dir = tempdir().unwrap();

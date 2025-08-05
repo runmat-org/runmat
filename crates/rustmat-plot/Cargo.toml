@@ -29,6 +29,7 @@ nalgebra = "0.32"
 # Async runtime for WGPU
 pollster = "0.3"
 futures = "0.3"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
 # Data processing
 rayon = "1.0"
@@ -43,6 +44,8 @@ eframe = { version = "0.27.2", optional = true, features = ["glow"] }
 # Serialization and config
 serde = { workspace = true }
 serde_yaml = "0.9"
+
+
 
 # RustMat integration
 inventory = { workspace = true }
@@ -65,3 +68,5 @@ env_logger = "0.10"
 [[example]]
 name = "interactive_demo"
 required-features = ["gui"]
+
+

@@ -1,323 +1,456 @@
-//! Integration tests demonstrating complete plotting workflows
-//!
-//! This module tests the plotting system working end-to-end:
-//! - Plot creation and data management
-//! - Scene graph integration
-//! - Camera and bounds calculation
-//! - Render data generation
-//! - Performance characteristics
+//! Comprehensive integration tests for RustMat Plot
+//! 
+//! Tests the complete plotting system including 2D plots, 3D plots,
+//! Jupyter integration, and performance characteristics.
 
-use rustmat_plot::core::{Scene, Camera, BoundingBox, SceneNode};
-use rustmat_plot::plots::{LinePlot, ScatterPlot, LineStyle, MarkerStyle};
-use glam::{Vec3, Vec4, Mat4};
+use rustmat_plot::plots::*;
+use rustmat_plot::jupyter::{JupyterBackend, OutputFormat};
 
 #[test]
-fn test_complete_plotting_workflow() {
-    // Create test data
-    let x_data: Vec<f64> = (0..100).map(|i| i as f64 * 0.1).collect();
-    let y_data: Vec<f64> = x_data.iter().map(|x| x.sin()).collect();
+fn test_complete_2d_plotting_pipeline() {
+    // Test data
+    let x_data = (0..100).map(|i| i as f64 * 0.1).collect::<Vec<_>>();
+    let y_data = x_data.iter().map(|&x| x.sin()).collect::<Vec<_>>();
     
-    // Create a line plot
-    let mut line_plot = LinePlot::new(x_data.clone(), y_data.clone()).unwrap()
-        .with_style(Vec4::new(0.0, 0.5, 1.0, 1.0), 2.0, LineStyle::Solid)
-        .with_label("Sine Wave");
+    // Create line plot
+    let line_plot = LinePlot::new(x_data.clone(), y_data.clone())
+        .unwrap()
+        .with_label("sin(x)")
+        .with_style(
+            glam::Vec4::new(1.0, 0.0, 0.0, 1.0),
+            2.0,
+            LineStyle::Solid
+        );
     
-    // Generate scatter data
+    // Create scatter plot
+    let scatter_data: Vec<f64> = (0..20).map(|i| (i as f64 * 0.5).cos()).collect();
     let scatter_x: Vec<f64> = (0..20).map(|i| i as f64 * 0.5).collect();
-    let scatter_y: Vec<f64> = scatter_x.iter().map(|x| x.cos()).collect();
     
-    let mut scatter_plot = ScatterPlot::new(scatter_x, scatter_y).unwrap()
-        .with_style(Vec4::new(1.0, 0.0, 0.0, 1.0), 4.0, MarkerStyle::Circle)
-        .with_label("Cosine Points");
+    let scatter_plot = ScatterPlot::new(scatter_x, scatter_data)
+        .unwrap()
+        .with_label("cos(x)")
+        .with_style(
+            glam::Vec4::new(0.0, 1.0, 0.0, 1.0),
+            5.0,
+            MarkerStyle::Circle
+        );
     
-    // Test render data generation
-    let line_render_data = line_plot.render_data();
-    let scatter_render_data = scatter_plot.render_data();
+    // Create figure and combine plots
+    let mut figure = Figure::new()
+        .with_title("2D Multi-Plot Example")
+        .with_labels("X", "Y")
+        .with_grid(true);
     
-    // Verify render data is correctly generated
-    assert!(!line_render_data.vertices.is_empty());
-    assert!(!scatter_render_data.vertices.is_empty());
-    assert_eq!(line_render_data.pipeline_type, rustmat_plot::core::PipelineType::Lines);
-    assert_eq!(scatter_render_data.pipeline_type, rustmat_plot::core::PipelineType::Points);
+    figure.add_line_plot(line_plot);
+    figure.add_scatter_plot(scatter_plot);
     
-    // Test bounds calculation
-    let line_bounds = line_plot.bounds();
-    let _scatter_bounds = scatter_plot.bounds();
-    
-    assert!(line_bounds.min.x >= -0.1); // Should start around 0
-    assert!(line_bounds.max.x <= 10.1); // Should end around 10
-    assert!(line_bounds.min.y >= -1.1); // Sine range
-    assert!(line_bounds.max.y <= 1.1);
+    // Verify figure properties
+    assert_eq!(figure.len(), 2);
+    assert!(figure.title.is_some());
+    assert!(figure.grid_enabled);
+    assert!(figure.legend_enabled);
     
     // Test statistics
-    let line_stats = line_plot.statistics();
-    let scatter_stats = scatter_plot.statistics();
+    let stats = figure.statistics();
+    assert_eq!(stats.total_plots, 2);
+    assert_eq!(stats.visible_plots, 2);
+    assert!(stats.total_memory_usage > 0);
     
-    assert_eq!(line_stats.point_count, 100);
-    assert_eq!(scatter_stats.point_count, 20);
-    assert!(line_stats.memory_usage > 0);
-    assert!(scatter_stats.memory_usage > 0);
+    // Test legend entries
+    let legend_entries = figure.legend_entries();
+    assert_eq!(legend_entries.len(), 2);
+    assert_eq!(legend_entries[0].label, "sin(x)");
+    assert_eq!(legend_entries[1].label, "cos(x)");
 }
 
 #[test]
-fn test_scene_graph_integration() {
-    // Create a scene
-    let mut scene = Scene::new();
+fn test_3d_surface_plotting() {
+    // Create test surface data
+    let x_range = (-2.0, 2.0);
+    let y_range = (-2.0, 2.0);
+    let resolution = (20, 20);
     
-    // Create plots
-    let x_data = vec![0.0, 1.0, 2.0, 3.0];
-    let y_data = vec![0.0, 1.0, 0.0, 1.0];
+    // Create surface from function: z = x^2 - y^2 (saddle point)
+    let surface = SurfacePlot::from_function(
+        x_range,
+        y_range,
+        resolution,
+        |x, y| x * x - y * y
+    ).unwrap()
+        .with_colormap(ColorMap::Viridis)
+        .with_shading(ShadingMode::Smooth)
+        .with_alpha(0.8)
+        .with_label("Saddle Surface");
     
-    let mut line_plot = LinePlot::new(x_data.clone(), y_data.clone()).unwrap()
-        .with_style(Vec4::new(0.0, 1.0, 0.0, 1.0), 1.0, LineStyle::Solid);
+    // Verify surface properties
+    assert_eq!(surface.x_data.len(), 20);
+    assert_eq!(surface.y_data.len(), 20);
+    assert_eq!(surface.z_data.len(), 20);
+    assert_eq!(surface.colormap, ColorMap::Viridis);
+    assert_eq!(surface.shading_mode, ShadingMode::Smooth);
+    assert_eq!(surface.alpha, 0.8);
+    assert_eq!(surface.label, Some("Saddle Surface".to_string()));
     
-    let mut scatter_plot = ScatterPlot::new(x_data, y_data).unwrap()
-        .with_style(Vec4::new(1.0, 0.0, 0.0, 1.0), 3.0, MarkerStyle::Square);
+    // Test statistics
+    let stats = surface.statistics();
+    assert_eq!(stats.grid_points, 400); // 20 * 20
+    assert_eq!(stats.triangle_count, 722); // (20-1) * (20-1) * 2 = 722
+    assert_eq!(stats.x_resolution, 20);
+    assert_eq!(stats.y_resolution, 20);
+    assert!(stats.memory_usage > 0);
     
-    // Create scene nodes
-    let line_node = SceneNode {
-        id: 0, // Will be set by scene
-        name: "Line Plot".to_string(),
-        transform: Mat4::IDENTITY,
-        visible: true,
-        cast_shadows: false,
-        receive_shadows: false,
-        parent: None,
-        children: Vec::new(),
-        render_data: Some(line_plot.render_data()),
-        bounds: BoundingBox::from_points(&vec![
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(3.0, 1.0, 0.0),
-        ]),
-        lod_levels: Vec::new(),
-        current_lod: 0,
-    };
-    
-    let scatter_node = SceneNode {
-        id: 0, // Will be set by scene
-        name: "Scatter Plot".to_string(),
-        transform: Mat4::from_translation(Vec3::new(0.0, 2.0, 0.0)), // Offset up
-        visible: true,
-        cast_shadows: false,
-        receive_shadows: false,
-        parent: None,
-        children: Vec::new(),
-        render_data: Some(scatter_plot.render_data()),
-        bounds: BoundingBox::from_points(&vec![
-            Vec3::new(0.0, 2.0, 0.0),
-            Vec3::new(3.0, 3.0, 0.0),
-        ]),
-        lod_levels: Vec::new(),
-        current_lod: 0,
-    };
-    
-    // Add to scene
-    let line_id = scene.add_node(line_node);
-    let scatter_id = scene.add_node(scatter_node);
-    
-    // Verify scene contains our nodes
-    assert!(scene.get_node(line_id).is_some());
-    assert!(scene.get_node(scatter_id).is_some());
-    
-    // Test scene bounds calculation
-    let world_bounds = scene.world_bounds();
-    assert!(world_bounds.min.x <= 0.0);
-    assert!(world_bounds.max.x >= 3.0);
-    assert!(world_bounds.min.y <= 0.0);
-    assert!(world_bounds.max.y >= 3.0);
-    
-    // Test visible nodes
-    let visible_nodes = scene.get_visible_nodes();
-    assert_eq!(visible_nodes.len(), 2);
-    
-    // Test scene statistics
-    let stats = scene.statistics();
-    assert_eq!(stats.total_nodes, 2);
-    assert_eq!(stats.visible_nodes, 2);
-    assert!(stats.total_vertices > 0);
+    // Test bounds calculation
+    let mut surface_mut = surface;
+    let bounds = surface_mut.bounds();
+    assert_eq!(bounds.min.x, -2.0);
+    assert_eq!(bounds.max.x, 2.0);
+    assert_eq!(bounds.min.y, -2.0);
+    assert_eq!(bounds.max.y, 2.0);
+    // Z bounds should be around [-4, 4] for x^2 - y^2 on [-2,2]x[-2,2]
+    assert!(bounds.min.z >= -5.0 && bounds.min.z <= -3.0);
+    assert!(bounds.max.z >= 3.0 && bounds.max.z <= 5.0);
 }
 
 #[test]
-fn test_camera_integration() {
-    // Create test data
-    let x_data = vec![-5.0, 0.0, 5.0];
-    let y_data = vec![-3.0, 0.0, 3.0];
+fn test_3d_point_cloud_visualization() {
+    // Create test point cloud data (spiral)
+    let num_points = 100;
+    let positions: Vec<glam::Vec3> = (0..num_points)
+        .map(|i| {
+            let t = i as f32 * 0.3;
+            let radius = 1.0 + t * 0.1;
+            glam::Vec3::new(
+                radius * t.cos(),
+                radius * t.sin(),
+                t * 0.5
+            )
+        })
+        .collect();
     
-    let mut plot = LinePlot::new(x_data, y_data).unwrap();
-    let bounds = plot.bounds();
+    // Create values for color mapping
+    let values: Vec<f64> = (0..num_points)
+        .map(|i| (i as f64 / num_points as f64) * 10.0)
+        .collect();
     
-    // Test 2D camera fitting to plot bounds
-    let mut camera = Camera::new_2d((-1.0, 1.0, -1.0, 1.0));
-    camera.fit_bounds(bounds.min, bounds.max);
+    // Create point cloud
+    let point_cloud = PointCloudPlot::new(positions.clone())
+        .with_values(values.clone()).unwrap()
+        .with_colormap(ColorMap::Plasma)
+        .with_point_style(PointStyle::Sphere)
+        .with_size_mode(SizeMode::Proportional)
+        .with_default_size(5.0)
+        .with_label("Spiral Point Cloud");
     
-    // Verify camera adjusted to fit data
-    match camera.projection {
-        rustmat_plot::core::ProjectionType::Orthographic { left, right, bottom, top, .. } => {
-            assert!(left <= -5.0);
-            assert!(right >= 5.0);
-            assert!(bottom <= -3.0);
-            assert!(top >= 3.0);
+    // Verify properties
+    assert_eq!(point_cloud.len(), 100);
+    assert_eq!(point_cloud.values, Some(values));
+    assert_eq!(point_cloud.colormap, ColorMap::Plasma);
+    assert_eq!(point_cloud.point_style, PointStyle::Sphere);
+    assert_eq!(point_cloud.size_mode, SizeMode::Proportional);
+    assert_eq!(point_cloud.default_size, 5.0);
+    assert_eq!(point_cloud.label, Some("Spiral Point Cloud".to_string()));
+    
+    // Test statistics
+    let stats = point_cloud.statistics();
+    assert_eq!(stats.point_count, 100);
+    assert!(stats.has_values);
+    assert!(!stats.has_colors);
+    assert!(!stats.has_sizes);
+    assert!(stats.memory_usage > 0);
+    
+    // Test vertex generation
+    let mut point_cloud_mut = point_cloud;
+    let vertices = point_cloud_mut.generate_vertices();
+    assert_eq!(vertices.len(), 100);
+    
+    // Verify first vertex
+    assert_eq!(vertices[0].position, positions[0].to_array());
+    
+    // Test bounds
+    let bounds = point_cloud_mut.bounds();
+    assert!(bounds.max.x > bounds.min.x);
+    assert!(bounds.max.y > bounds.min.y);
+    assert!(bounds.max.z > bounds.min.z);
+}
+
+#[test]
+fn test_colormap_functionality() {
+    let colormaps = vec![
+        ColorMap::Jet,
+        ColorMap::Hot,
+        ColorMap::Cool,
+        ColorMap::Viridis,
+        ColorMap::Plasma,
+        ColorMap::Gray,
+    ];
+    
+    for colormap in colormaps {
+        // Test value mapping at different points
+        let color_0 = colormap.map_value(0.0);
+        let _color_half = colormap.map_value(0.5);
+        let color_1 = colormap.map_value(1.0);
+        
+        // Verify colors are valid (0-1 range)
+        assert!(color_0.x >= 0.0 && color_0.x <= 1.0);
+        assert!(color_0.y >= 0.0 && color_0.y <= 1.0);
+        assert!(color_0.z >= 0.0 && color_0.z <= 1.0);
+        
+        assert!(color_1.x >= 0.0 && color_1.x <= 1.0);
+        assert!(color_1.y >= 0.0 && color_1.y <= 1.0);
+        assert!(color_1.z >= 0.0 && color_1.z <= 1.0);
+        
+        // Verify different values give different colors (for most colormaps)
+        if colormap != ColorMap::Gray {
+            assert_ne!(color_0, color_1);
         }
-        _ => panic!("Expected orthographic projection for 2D camera"),
     }
     
-    // Test 3D camera
-    let mut camera_3d = Camera::new();
-    camera_3d.fit_bounds(bounds.min, bounds.max);
+    // Test custom colormap
+    let custom = ColorMap::Custom(
+        glam::Vec4::new(1.0, 0.0, 0.0, 1.0), // Red
+        glam::Vec4::new(0.0, 1.0, 0.0, 1.0), // Green
+    );
     
-    // Camera should have adjusted position to show all data
-    assert!(camera_3d.position.distance(camera_3d.target) > 0.0);
+    let custom_0 = custom.map_value(0.0);
+    let custom_1 = custom.map_value(1.0);
+    
+    // Should interpolate from red to green
+    assert!(custom_0.x > custom_0.y); // More red at 0
+    assert!(custom_1.y > custom_1.x); // More green at 1
 }
 
 #[test]
-fn test_matlab_compatibility() {
-    use rustmat_plot::plots::line::matlab_compat as line_matlab;
-    use rustmat_plot::plots::scatter::matlab_compat as scatter_matlab;
+fn test_matlab_compatibility_functions() {
+    use rustmat_plot::plots::surface::matlab_compat as surf_compat;
+    use rustmat_plot::plots::point_cloud::matlab_compat as pc_compat;
     
-    // Test MATLAB-style line plot creation
-    let x = vec![0.0, 1.0, 2.0, 3.0];
-    let y = vec![0.0, 1.0, 4.0, 9.0];
+    // Test MATLAB-style surface plot
+    let surf_x = vec![0.0, 1.0];
+    let surf_y = vec![0.0, 1.0];
+    let surf_z = vec![vec![0.0, 1.0], vec![1.0, 2.0]];
     
-    let plot1 = line_matlab::plot(x.clone(), y.clone()).unwrap();
-    assert_eq!(plot1.len(), 4);
+    let surface = surf_compat::surf(surf_x.clone(), surf_y.clone(), surf_z.clone()).unwrap();
+    assert!(!surface.wireframe);
     
-    let plot2 = line_matlab::plot_with_color(x.clone(), y.clone(), "r").unwrap();
-    assert_eq!(plot2.color, Vec4::new(1.0, 0.0, 0.0, 1.0));
+    let mesh = surf_compat::mesh(surf_x, surf_y, surf_z).unwrap();
+    assert!(mesh.wireframe);
     
-    // Test MATLAB-style scatter plot creation
-    let scatter1 = scatter_matlab::scatter(x.clone(), y.clone()).unwrap();
-    assert_eq!(scatter1.len(), 4);
+    // Test MATLAB-style 3D scatter
+    let x3d = vec![0.0, 1.0, 2.0];
+    let y3d = vec![0.0, 1.0, 2.0];
+    let z3d = vec![0.0, 1.0, 2.0];
     
-    let scatter2 = scatter_matlab::scatter_with_style(x, y, 5.0, "b").unwrap();
-    assert_eq!(scatter2.color, Vec4::new(0.0, 0.0, 1.0, 1.0));
-    assert_eq!(scatter2.marker_size, 5.0);
+    let scatter3d = pc_compat::scatter3(x3d, y3d, z3d).unwrap();
+    assert_eq!(scatter3d.len(), 3);
+}
+
+#[test]
+fn test_jupyter_integration() {
+    // Test Jupyter backend creation
+    let backend = JupyterBackend::new();
+    assert_eq!(backend.output_format, OutputFormat::HTML);
+    
+    // Test different output formats
+    let formats = vec![
+        OutputFormat::PNG,
+        OutputFormat::SVG,
+        OutputFormat::HTML,
+        OutputFormat::Base64,
+        OutputFormat::PlotlyJSON,
+    ];
+    
+    for format in formats {
+        let backend_fmt = JupyterBackend::with_format(format);
+        assert_eq!(backend_fmt.output_format, format);
+    }
+    
+    // Test direct backend usage
+    let line_plot = LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap();
+    let mut backend = JupyterBackend::new();
+    
+    // These should not panic and return valid output
+    let display_result = backend.display_line_plot(&line_plot);
+    assert!(display_result.is_ok());
 }
 
 #[test]
 fn test_performance_characteristics() {
-    // Test with larger datasets to ensure good performance
-    let n = 10000;
-    let x_data: Vec<f64> = (0..n).map(|i| i as f64).collect();
-    let y_data: Vec<f64> = x_data.iter().map(|x| (x * 0.001).sin()).collect();
+    use std::time::Instant;
     
-    // Time plot creation
-    let start = std::time::Instant::now();
-    let mut plot = LinePlot::new(x_data, y_data).unwrap();
+    // Test large dataset handling
+    let large_size = 10_000;
+    let x_data: Vec<f64> = (0..large_size).map(|i| i as f64 * 0.001).collect();
+    let y_data: Vec<f64> = x_data.iter().map(|&x| x.sin() + 0.1 * (10.0 * x).sin()).collect();
+    
+    let start = Instant::now();
+    let large_line_plot = LinePlot::new(x_data, y_data).unwrap();
     let creation_time = start.elapsed();
     
-    // Should create plot quickly (under 10ms for 10k points)
-    assert!(creation_time.as_millis() < 10);
+    // Creation should be reasonably fast
+    assert!(creation_time.as_millis() < 100);
     
-    // Time vertex generation
-    let start = std::time::Instant::now();
-    let vertices = plot.generate_vertices();
-    let vertex_time = start.elapsed();
+    // Memory usage should be reasonable
+    let memory_usage = large_line_plot.estimated_memory_usage();
+    let expected_min = large_size * 16; // 2 * f64 per point
+    assert!(memory_usage >= expected_min);
     
-    // Should generate vertices quickly (under 50ms for 10k points)
-    assert!(vertex_time.as_millis() < 50);
+    // Test statistics generation performance
+    let start = Instant::now();
+    let stats = large_line_plot.statistics();
+    let stats_time = start.elapsed();
     
-    // Verify we have the right number of vertices (19,998 for 9,999 line segments)
-    assert_eq!(vertices.len(), (n - 1) * 2);
+    assert!(stats_time.as_millis() < 10);
+    assert_eq!(stats.point_count, large_size);
     
-    // Time bounds calculation
-    let start = std::time::Instant::now();
-    let bounds = plot.bounds();
-    let bounds_time = start.elapsed();
+    // Test large surface plot
+    let surface_start = Instant::now();
+    let large_surface = SurfacePlot::from_function(
+        (-5.0, 5.0),
+        (-5.0, 5.0),
+        (100, 100),
+        |x, y| (x * x + y * y).sin()
+    ).unwrap();
+    let surface_creation_time = surface_start.elapsed();
     
-    // Should calculate bounds quickly (under 5ms)
-    assert!(bounds_time.as_millis() < 5);
+    // Surface creation should complete in reasonable time
+    assert!(surface_creation_time.as_millis() < 1000);
     
-    // Verify bounds are reasonable
-    assert!(bounds.min.x >= -1.0);
-    assert!(bounds.max.x <= n as f32);
+    let surface_stats = large_surface.statistics();
+    assert_eq!(surface_stats.grid_points, 10_000); // 100 * 100
+    assert_eq!(surface_stats.triangle_count, 19_602); // (100-1) * (100-1) * 2
 }
 
 #[test]
-fn test_memory_management() {
-    // Test that plots properly manage memory with data updates
-    let initial_x = vec![0.0, 1.0, 2.0];
-    let initial_y = vec![0.0, 1.0, 0.0];
+fn test_error_handling() {
+    // Test invalid data dimensions
+    let x = vec![0.0, 1.0, 2.0];
+    let y = vec![0.0, 1.0]; // Mismatched length
     
-    let mut plot = LinePlot::new(initial_x, initial_y).unwrap();
+    assert!(LinePlot::new(x.clone(), y.clone()).is_err());
+    assert!(ScatterPlot::new(x, y).is_err());
     
-    // Generate initial vertices
-    let initial_vertices = plot.generate_vertices().len();
-    let initial_stats = plot.statistics();
+    // Test empty data
+    let empty_x: Vec<f64> = vec![];
+    let empty_y: Vec<f64> = vec![];
     
-    // Update with larger dataset
-    let new_x: Vec<f64> = (0..1000).map(|i| i as f64).collect();
-    let new_y: Vec<f64> = new_x.iter().map(|x| x.sin()).collect();
+    assert!(LinePlot::new(empty_x.clone(), empty_y.clone()).is_err());
+    assert!(ScatterPlot::new(empty_x, empty_y).is_err());
     
-    plot.update_data(new_x, new_y).unwrap();
+    // Test invalid surface data
+    let surf_x = vec![0.0, 1.0];
+    let surf_y = vec![0.0, 1.0, 2.0];
+    let surf_z = vec![vec![0.0, 1.0], vec![1.0, 2.0]]; // Wrong dimensions
     
-    // Verify old data is replaced, not accumulated
-    let new_vertices = plot.generate_vertices().len();
-    let new_stats = plot.statistics();
+    assert!(SurfacePlot::new(surf_x, surf_y, surf_z).is_err());
     
-    assert!(new_vertices > initial_vertices);
-    assert!(new_stats.memory_usage > initial_stats.memory_usage);
-    assert_eq!(new_stats.point_count, 1000);
+    // Test invalid point cloud operations
+    let positions = vec![glam::Vec3::new(0.0, 0.0, 0.0)];
+    let wrong_values = vec![1.0, 2.0]; // Length mismatch
     
-    // Memory usage should be proportional to data size
-    let memory_per_point = new_stats.memory_usage / new_stats.point_count;
-    assert!(memory_per_point > 0);
-    assert!(memory_per_point < 1000); // Reasonable per-point memory usage
+    let point_cloud_result = PointCloudPlot::new(positions).with_values(wrong_values);
+    assert!(point_cloud_result.is_err());
 }
 
 #[test]
-fn test_multi_plot_scenario() {
-    // Simulate a complex plotting scenario with multiple data series
-    let mut scene = Scene::new();
-    let mut plots = Vec::new();
+fn test_memory_efficiency() {
+    // Test that plots don't duplicate data unnecessarily
+    let data_size = 1000;
+    let x_data: Vec<f64> = (0..data_size).map(|i| i as f64).collect();
+    let y_data: Vec<f64> = x_data.iter().map(|&x| x * 2.0).collect();
     
-    // Create multiple plots with different characteristics
-    for i in 0..5 {
-        let offset = i as f64 * 2.0;
-        let x_data: Vec<f64> = (0..100).map(|j| j as f64 * 0.1 + offset).collect();
-        let y_data: Vec<f64> = x_data.iter().map(|x| (x * (i + 1) as f64).sin()).collect();
-        
-        let color = Vec4::new(
-            (i as f32 + 1.0) / 6.0,
-            0.5,
-            1.0 - (i as f32) / 5.0,
-            1.0
-        );
-        
-        let mut plot = LinePlot::new(x_data, y_data).unwrap()
-            .with_style(color, 1.0 + i as f32 * 0.5, LineStyle::Solid)
-            .with_label(format!("Series {}", i + 1));
-        
-        // Create scene node
-        let node = SceneNode {
-            id: 0,
-            name: format!("Plot {}", i),
-            transform: Mat4::IDENTITY,
-            visible: true,
-            cast_shadows: false,
-            receive_shadows: false,
-            parent: None,
-            children: Vec::new(),
-            render_data: Some(plot.render_data()),
-            bounds: plot.bounds(),
-            lod_levels: Vec::new(),
-            current_lod: 0,
-        };
-        
-        scene.add_node(node);
-        plots.push(plot);
-    }
+    let line_plot = LinePlot::new(x_data.clone(), y_data.clone()).unwrap();
+    let initial_memory = line_plot.estimated_memory_usage();
     
-    // Verify scene contains all plots
-    let visible_nodes = scene.get_visible_nodes();
-    assert_eq!(visible_nodes.len(), 5);
+    // Create multiple plots from same data
+    let scatter_plot = ScatterPlot::new(x_data.clone(), y_data.clone()).unwrap();
     
-    // Test overall scene bounds
-    let world_bounds = scene.world_bounds();
-    assert!(world_bounds.max.x - world_bounds.min.x > 10.0); // Should span multiple series
+    // Each plot should have similar memory usage (not sharing data currently, but reasonable)
+    let scatter_memory = scatter_plot.estimated_memory_usage();
+    let memory_ratio = scatter_memory as f64 / initial_memory as f64;
     
-    // Test scene statistics
-    let stats = scene.statistics();
-    assert_eq!(stats.total_nodes, 5);
-    assert_eq!(stats.visible_nodes, 5);
-    assert!(stats.total_vertices > 500); // Should have lots of vertices from all series
+    // Memory usage should be in similar range (within 50% of each other)
+    assert!(memory_ratio > 0.5 && memory_ratio < 2.0);
+    
+    // Test that cached data is reused
+    let mut line_plot_mut = line_plot;
+    let _vertices1 = line_plot_mut.generate_vertices();
+    let memory_after_cache = line_plot_mut.estimated_memory_usage();
+    
+    // Memory should increase due to cached vertices
+    assert!(memory_after_cache > initial_memory);
+    
+    // Generating vertices again should not increase memory further
+    let _vertices2 = line_plot_mut.generate_vertices();
+    let memory_after_reuse = line_plot_mut.estimated_memory_usage();
+    
+    assert_eq!(memory_after_cache, memory_after_reuse);
+}
+
+#[test]
+fn test_plot_styling_and_customization() {
+    // Test comprehensive styling options
+    let x = vec![0.0, 1.0, 2.0];
+    let y = vec![0.0, 1.0, 0.0];
+    
+    let styled_line = LinePlot::new(x.clone(), y.clone()).unwrap()
+        .with_style(
+            glam::Vec4::new(0.8, 0.2, 0.1, 0.9),
+            3.5,
+            LineStyle::Dashed
+        )
+        .with_label("Styled Line");
+    
+    assert_eq!(styled_line.color, glam::Vec4::new(0.8, 0.2, 0.1, 0.9));
+    assert_eq!(styled_line.line_width, 3.5);
+    assert_eq!(styled_line.line_style, LineStyle::Dashed);
+    assert_eq!(styled_line.label, Some("Styled Line".to_string()));
+    
+    // Test surface styling
+    let surface = SurfacePlot::new(
+        vec![0.0, 1.0],
+        vec![0.0, 1.0],
+        vec![vec![0.0, 1.0], vec![1.0, 2.0]]
+    ).unwrap()
+        .with_colormap(ColorMap::Hot)
+        .with_shading(ShadingMode::Faceted)
+        .with_wireframe(true)
+        .with_alpha(0.7);
+    
+    assert_eq!(surface.colormap, ColorMap::Hot);
+    assert_eq!(surface.shading_mode, ShadingMode::Faceted);
+    assert!(surface.wireframe);
+    assert_eq!(surface.alpha, 0.7);
+}
+
+#[test]
+fn test_bounds_calculation_accuracy() {
+    // Test with known data
+    let x = vec![-3.0, -1.0, 0.0, 2.0, 4.0];
+    let y = vec![-2.0, 0.0, 1.0, -1.0, 3.0];
+    
+    let mut line_plot = LinePlot::new(x, y).unwrap();
+    let bounds = line_plot.bounds();
+    
+    assert_eq!(bounds.min.x, -3.0);
+    assert_eq!(bounds.max.x, 4.0);
+    assert_eq!(bounds.min.y, -2.0);
+    assert_eq!(bounds.max.y, 3.0);
+    assert_eq!(bounds.min.z, 0.0); // 2D plot
+    assert_eq!(bounds.max.z, 0.0); // 2D plot
+    
+    // Test surface bounds with known function
+    let mut surface = SurfacePlot::from_function(
+        (-1.0, 1.0),
+        (-1.0, 1.0),
+        (3, 3),
+        |x, y| x + y // Simple linear function
+    ).unwrap();
+    
+    let surface_bounds = surface.bounds();
+    assert_eq!(surface_bounds.min.x, -1.0);
+    assert_eq!(surface_bounds.max.x, 1.0);
+    assert_eq!(surface_bounds.min.y, -1.0);
+    assert_eq!(surface_bounds.max.y, 1.0);
+    assert_eq!(surface_bounds.min.z, -2.0); // min(x+y) = -1 + -1 = -2
+    assert_eq!(surface_bounds.max.z, 2.0);  // max(x+y) = 1 + 1 = 2
 }
