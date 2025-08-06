@@ -24,6 +24,11 @@ pub enum BinOp {
     Pow,
     LeftDiv,
     Colon,
+    // Element-wise operations
+    ElemMul,  // .*
+    ElemDiv,  // ./
+    ElemPow,  // .^
+    ElemLeftDiv, // .\
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
@@ -176,9 +181,12 @@ impl Parser {
         let mut node = self.parse_unary()?;
         loop {
             let op = match self.peek_token() {
-                Some(Token::Star) | Some(Token::DotStar) => BinOp::Mul,
-                Some(Token::Slash) | Some(Token::DotSlash) => BinOp::Div,
-                Some(Token::Backslash) | Some(Token::DotBackslash) => BinOp::LeftDiv,
+                Some(Token::Star) => BinOp::Mul,
+                Some(Token::DotStar) => BinOp::ElemMul,
+                Some(Token::Slash) => BinOp::Div,
+                Some(Token::DotSlash) => BinOp::ElemDiv,
+                Some(Token::Backslash) => BinOp::LeftDiv,
+                Some(Token::DotBackslash) => BinOp::ElemLeftDiv,
                 _ => break,
             };
             self.pos += 1; // consume op
@@ -190,10 +198,15 @@ impl Parser {
 
     fn parse_pow(&mut self) -> Result<Expr, String> {
         let node = self.parse_postfix()?;
-        if matches!(self.peek_token(), Some(Token::Caret | Token::DotCaret)) {
+        if let Some(token) = self.peek_token() {
+            let op = match token {
+                Token::Caret => BinOp::Pow,
+                Token::DotCaret => BinOp::ElemPow,
+                _ => return Ok(node),
+            };
             self.pos += 1; // consume
             let rhs = self.parse_pow()?; // right associative
-            Ok(Expr::Binary(Box::new(node), BinOp::Pow, Box::new(rhs)))
+            Ok(Expr::Binary(Box::new(node), op, Box::new(rhs)))
         } else {
             Ok(node)
         }
@@ -203,7 +216,7 @@ impl Parser {
         let mut expr = self.parse_primary()?;
         loop {
             if self.consume(&Token::LParen) {
-                // Function call
+                // Parse as function call initially - semantic analysis will resolve ambiguity
                 let func_name = match expr {
                     Expr::Ident(name) => name,
                     _ => return Err("expected function name before '('".into()),

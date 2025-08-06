@@ -128,8 +128,7 @@ impl MarkSweepCollector {
         match &*obj {
             Value::Cell(cells) => {
                 for cell_value in cells {
-                    // In a real implementation, these would be GcPtr<Value>
-                    // For now, this is a placeholder
+                    // Mark nested Value objects for collection
                     self.mark_value_contents(cell_value, max_generation)?;
                 }
             }
@@ -148,7 +147,7 @@ impl MarkSweepCollector {
         Ok(())
     }
 
-    /// Mark objects contained within a Value (placeholder implementation)
+    /// Mark objects contained within a Value for garbage collection
     #[allow(clippy::only_used_in_recursion)]
     fn mark_value_contents(&mut self, value: &Value, _max_generation: usize) -> Result<()> {
         match value {

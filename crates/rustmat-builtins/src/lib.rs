@@ -201,8 +201,26 @@ impl std::fmt::Debug for Builtin {
     }
 }
 
+/// A constant value that can be accessed as a variable
+#[derive(Clone)]
+pub struct Constant {
+    pub name: &'static str,
+    pub value: Value,
+}
+
+impl std::fmt::Debug for Constant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Constant {{ name: {:?}, value: {:?} }}", self.name, self.value)
+    }
+}
+
 inventory::collect!(Builtin);
+inventory::collect!(Constant);
 
 pub fn builtins() -> Vec<&'static Builtin> {
     inventory::iter::<Builtin>().collect()
+}
+
+pub fn constants() -> Vec<&'static Constant> {
+    inventory::iter::<Constant>().collect()
 }

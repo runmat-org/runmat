@@ -4168,6 +4168,7 @@ dependencies = [
 name = "rustmat-hir"
 version = "1.0.0"
 dependencies = [
+ "rustmat-builtins",
  "rustmat-lexer",
  "rustmat-parser",
  "serde",

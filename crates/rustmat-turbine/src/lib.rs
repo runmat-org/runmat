@@ -242,6 +242,103 @@ pub extern "C" fn rustmat_value_neg(a_ptr: *const Value) -> *mut Value {
     }
 }
 
+/// Element-wise multiplication
+#[no_mangle]
+pub extern "C" fn rustmat_value_elementwise_mul(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+
+        match rustmat_runtime::elementwise_mul(a, b) {
+            Ok(result) => match gc_allocate(result) {
+                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            Err(e) => {
+                error!("Element-wise multiplication error: {}", e);
+                std::ptr::null_mut()
+            }
+        }
+    }
+}
+
+/// Element-wise division
+#[no_mangle]
+pub extern "C" fn rustmat_value_elementwise_div(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+
+        match rustmat_runtime::elementwise_div(a, b) {
+            Ok(result) => match gc_allocate(result) {
+                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            Err(e) => {
+                error!("Element-wise division error: {}", e);
+                std::ptr::null_mut()
+            }
+        }
+    }
+}
+
+/// Element-wise power
+#[no_mangle]
+pub extern "C" fn rustmat_value_elementwise_pow(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+
+        match rustmat_runtime::elementwise_pow(a, b) {
+            Ok(result) => match gc_allocate(result) {
+                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            Err(e) => {
+                error!("Element-wise power error: {}", e);
+                std::ptr::null_mut()
+            }
+        }
+    }
+}
+
+/// Element-wise left division
+#[no_mangle]
+pub extern "C" fn rustmat_value_elementwise_leftdiv(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+    if a_ptr.is_null() || b_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    unsafe {
+        let a = &*a_ptr;
+        let b = &*b_ptr;
+
+        // Left division is b \ a which is equivalent to a / b
+        match rustmat_runtime::elementwise_div(b, a) {
+            Ok(result) => match gc_allocate(result) {
+                Ok(gc_ptr) => gc_ptr.as_raw_mut(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            Err(e) => {
+                error!("Element-wise left division error: {}", e);
+                std::ptr::null_mut()
+            }
+        }
+    }
+}
+
 /// Compare two Value objects: less than
 #[no_mangle]
 pub extern "C" fn rustmat_value_lt(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
@@ -833,6 +930,34 @@ impl TurbineEngine {
                         .map_err(|e: String| e)?;
                     stack.push(Value::Num(-a));
                 }
+                Instr::ElemMul => {
+                    let b = stack.pop().ok_or("stack underflow".to_string())?;
+                    let a = stack.pop().ok_or("stack underflow".to_string())?;
+                    let result = rustmat_runtime::elementwise_mul(&a, &b)
+                        .map_err(|e| format!("Element-wise multiplication error: {}", e))?;
+                    stack.push(result);
+                }
+                Instr::ElemDiv => {
+                    let b = stack.pop().ok_or("stack underflow".to_string())?;
+                    let a = stack.pop().ok_or("stack underflow".to_string())?;
+                    let result = rustmat_runtime::elementwise_div(&a, &b)
+                        .map_err(|e| format!("Element-wise division error: {}", e))?;
+                    stack.push(result);
+                }
+                Instr::ElemPow => {
+                    let b = stack.pop().ok_or("stack underflow".to_string())?;
+                    let a = stack.pop().ok_or("stack underflow".to_string())?;
+                    let result = rustmat_runtime::elementwise_pow(&a, &b)
+                        .map_err(|e| format!("Element-wise power error: {}", e))?;
+                    stack.push(result);
+                }
+                Instr::ElemLeftDiv => {
+                    let b = stack.pop().ok_or("stack underflow".to_string())?;
+                    let a = stack.pop().ok_or("stack underflow".to_string())?;
+                    let result = rustmat_runtime::elementwise_div(&b, &a)
+                        .map_err(|e| format!("Element-wise left division error: {}", e))?;
+                    stack.push(result);
+                }
                 Instr::Less => {
                     let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
                         .try_into()
@@ -946,6 +1071,95 @@ impl TurbineEngine {
                         Err(e) => return Err(format!("Matrix creation failed: {e}")),
                     }
                 }
+                Instr::CreateMatrixDynamic(num_rows) => {
+                    // Dynamic matrix creation with concatenation support
+                    let mut row_lengths = Vec::new();
+                    
+                    // Pop row lengths (in reverse order since they're pushed last)
+                    for _ in 0..*num_rows {
+                        let row_len: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
+                            .try_into()
+                            .map_err(|e: String| e)?;
+                        row_lengths.push(row_len as usize);
+                    }
+                    row_lengths.reverse(); // Correct the order
+                    
+                    // Now pop elements according to row structure (in reverse order)
+                    let mut rows_data = Vec::new();
+                    for &row_len in row_lengths.iter().rev() {
+                        let mut row_values = Vec::new();
+                        for _ in 0..row_len {
+                            row_values.push(stack.pop().ok_or("stack underflow".to_string())?);
+                        }
+                        row_values.reverse(); // Correct the order within row
+                        rows_data.push(row_values);
+                    }
+                    
+                    // Reverse rows to get correct order
+                    rows_data.reverse();
+                    
+                    // Use the concatenation logic to create the matrix
+                    let result = match rustmat_runtime::create_matrix_from_values(&rows_data) {
+                        Ok(val) => val,
+                        Err(e) => return Err(e),
+                    };
+                    stack.push(result);
+                }
+                Instr::CreateRange(has_step) => {
+                    if *has_step {
+                        // Stack: start, step, end
+                        let end: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
+                            .try_into()
+                            .map_err(|e: String| e)?;
+                        let step: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
+                            .try_into()
+                            .map_err(|e: String| e)?;
+                        let start: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
+                            .try_into()
+                            .map_err(|e: String| e)?;
+                        
+                        let range_result = match rustmat_runtime::create_range(start, Some(step), end) {
+                            Ok(val) => val,
+                            Err(e) => return Err(e),
+                        };
+                        stack.push(range_result);
+                    } else {
+                        // Stack: start, end
+                        let end: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
+                            .try_into()
+                            .map_err(|e: String| e)?;
+                        let start: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
+                            .try_into()
+                            .map_err(|e: String| e)?;
+                        
+                        let range_result = match rustmat_runtime::create_range(start, None, end) {
+                            Ok(val) => val,
+                            Err(e) => return Err(e),
+                        };
+                        stack.push(range_result);
+                    }
+                }
+                Instr::Index(num_indices) => {
+                    // Pop indices from stack (in reverse order)
+                    let mut indices = Vec::new();
+                    for _ in 0..*num_indices {
+                        let index_val: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
+                            .try_into()
+                            .map_err(|e: String| e)?;
+                        indices.push(index_val);
+                    }
+                    indices.reverse(); // Correct the order
+                    
+                    // Pop the base array/matrix
+                    let base = stack.pop().ok_or("stack underflow".to_string())?;
+                    
+                    // Use the centralized indexing function
+                    let result = match rustmat_runtime::perform_indexing(&base, &indices) {
+                        Ok(val) => val,
+                        Err(e) => return Err(e),
+                    };
+                    stack.push(result);
+                }
             }
             pc += 1;
         }
@@ -1015,6 +1229,10 @@ impl TurbineEngine {
                 Instr::Div => "Div".hash(&mut hasher),
                 Instr::Pow => "Pow".hash(&mut hasher),
                 Instr::Neg => "Neg".hash(&mut hasher),
+                Instr::ElemMul => "ElemMul".hash(&mut hasher),
+                Instr::ElemDiv => "ElemDiv".hash(&mut hasher),
+                Instr::ElemPow => "ElemPow".hash(&mut hasher),
+                Instr::ElemLeftDiv => "ElemLeftDiv".hash(&mut hasher),
                 Instr::LessEqual => "LessEqual".hash(&mut hasher),
                 Instr::Less => "Less".hash(&mut hasher),
                 Instr::Greater => "Greater".hash(&mut hasher),
@@ -1039,6 +1257,18 @@ impl TurbineEngine {
                     "CreateMatrix".hash(&mut hasher);
                     rows.hash(&mut hasher);
                     cols.hash(&mut hasher);
+                }
+                Instr::CreateMatrixDynamic(num_rows) => {
+                    "CreateMatrixDynamic".hash(&mut hasher);
+                    num_rows.hash(&mut hasher);
+                }
+                Instr::CreateRange(has_step) => {
+                    "CreateRange".hash(&mut hasher);
+                    has_step.hash(&mut hasher);
+                }
+                Instr::Index(num_indices) => {
+                    "Index".hash(&mut hasher);
+                    num_indices.hash(&mut hasher);
                 }
                 Instr::Return => "Return".hash(&mut hasher),
             }

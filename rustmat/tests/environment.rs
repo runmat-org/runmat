@@ -300,6 +300,14 @@ fn test_config_file_env_var() {
     env.insert("RUSTMAT_CONFIG", "/nonexistent/config.toml");
 
     let output = run_rustmat_with_env(&["info"], env);
+    
+    // Debug output
+    if !output.status.success() {
+        eprintln!("STDOUT: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("STDERR: {}", String::from_utf8_lossy(&output.stderr));
+        eprintln!("Exit code: {:?}", output.status.code());
+    }
+    
     // Should work even if config file doesn't exist (using defaults)
     assert!(output.status.success());
 }

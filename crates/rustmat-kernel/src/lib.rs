@@ -75,7 +75,7 @@ impl Default for KernelInfo {
             implementation_version: "0.0.1".to_string(),
             language_info: LanguageInfo {
                 name: "matlab".to_string(),
-                version: "R2023b-compatible".to_string(),
+                version: "R2025a-compatible".to_string(),
                 mimetype: "text/x-matlab".to_string(),
                 file_extension: ".m".to_string(),
                 pygments_lexer: "matlab".to_string(),

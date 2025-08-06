@@ -175,8 +175,9 @@ impl PlotOverlay {
                 ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::from_gray(35);
                 ui.style_mut().visuals.widgets.hovered.bg_fill = Color32::from_gray(45);
 
-                ui.heading("🎯 RustMat Plot");
+                ui.heading("RustMat");
                 ui.separator();
+                ui.label("GC Stats: [not available]");
 
                 // Camera information
                 ui.collapsing("📷 Camera", |ui| {

@@ -394,6 +394,10 @@ impl ReplEngine {
                 Instr::Div => Self::binary_op(&mut stack, |a, b| a / b)?,
                 Instr::Pow => Self::binary_op(&mut stack, |a, b| a.powf(b))?,
                 Instr::Neg => Self::unary_op(&mut stack, |a| -a)?,
+                Instr::ElemMul => Self::element_binary_op(&mut stack, rustmat_runtime::elementwise_mul)?,
+                Instr::ElemDiv => Self::element_binary_op(&mut stack, rustmat_runtime::elementwise_div)?,
+                Instr::ElemPow => Self::element_binary_op(&mut stack, rustmat_runtime::elementwise_pow)?,
+                Instr::ElemLeftDiv => Self::element_binary_op(&mut stack, |a, b| rustmat_runtime::elementwise_div(b, a))?,
                 Instr::CallBuiltin(name, argc) => {
                     let mut args = Vec::new();
                     for _ in 0..*argc {
@@ -503,6 +507,69 @@ impl ReplEngine {
                         stack.pop();
                     }
                 }
+                Instr::Index(num_indices) => {
+                    // Pop indices from stack (in reverse order)
+                    let mut indices = Vec::new();
+                    for _ in 0..*num_indices {
+                        let index_val: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                        indices.push(index_val);
+                    }
+                    indices.reverse(); // Correct the order
+                    
+                    // Pop the base array/matrix
+                    let base = stack.pop().ok_or("stack underflow")?;
+                    
+                    // Use the centralized indexing function
+                    let result = rustmat_runtime::perform_indexing(&base, &indices)?;
+                    stack.push(result);
+                }
+                Instr::CreateMatrixDynamic(num_rows) => {
+                    // Dynamic matrix creation with concatenation support
+                    let mut row_lengths = Vec::new();
+                    
+                    // Pop row lengths (in reverse order since they're pushed last)
+                    for _ in 0..*num_rows {
+                        let row_len: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                        row_lengths.push(row_len as usize);
+                    }
+                    row_lengths.reverse(); // Correct the order
+                    
+                    // Now pop elements according to row structure (in reverse order)
+                    let mut rows_data = Vec::new();
+                    for &row_len in row_lengths.iter().rev() {
+                        let mut row_values = Vec::new();
+                        for _ in 0..row_len {
+                            row_values.push(stack.pop().ok_or("stack underflow")?);
+                        }
+                        row_values.reverse(); // Correct the order within row
+                        rows_data.push(row_values);
+                    }
+                    
+                    // Reverse rows to get correct order
+                    rows_data.reverse();
+                    
+                    // Use the concatenation logic to create the matrix
+                    let result = rustmat_runtime::create_matrix_from_values(&rows_data)?;
+                    stack.push(result);
+                }
+                Instr::CreateRange(has_step) => {
+                    if *has_step {
+                        // Stack: start, step, end
+                        let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                        let step: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                        let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                        
+                        let range_result = rustmat_runtime::create_range(start, Some(step), end)?;
+                        stack.push(range_result);
+                    } else {
+                        // Stack: start, end
+                        let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                        let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                        
+                        let range_result = rustmat_runtime::create_range(start, None, end)?;
+                        stack.push(range_result);
+                    }
+                }
                 Instr::Return => break,
             }
             pc += 1;
@@ -541,6 +608,20 @@ impl ReplEngine {
         stack.push(Value::Num(f(a)));
         Ok(())
     }
+
+    /// Helper for element-wise operations that can handle matrices
+    fn element_binary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
+    where
+        F: Fn(&Value, &Value) -> Result<Value, String>,
+    {
+        let b = stack.pop().ok_or("stack underflow")?;
+        let a = stack.pop().ok_or("stack underflow")?;
+        let result = f(&a, &b)?;
+            stack.push(result);
+    Ok(())
+}
+
+
 
     /// Configure garbage collector
     pub fn configure_gc(&self, config: GcConfig) -> Result<()> {

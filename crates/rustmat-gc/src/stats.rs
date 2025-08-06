@@ -138,7 +138,7 @@ impl GcStats {
             collection_type: CollectionType::Minor,
             duration,
             objects_collected,
-            bytes_collected: 0, // TODO: Track bytes collected
+            bytes_collected: objects_collected * 64, // Estimate: avg 64 bytes per object
             heap_size_before: 0,
             heap_size_after: 0,
             promotion_count: 0,

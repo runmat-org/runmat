@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 rustmat-parser = { workspace = true }
+rustmat-builtins = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]

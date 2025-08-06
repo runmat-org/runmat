@@ -1,8 +1,13 @@
 use rustmat_builtins::{builtins, BuiltinFn, Value};
 use rustmat_macros::runtime_builtin;
 
+pub mod arrays;
 pub mod comparison;
+pub mod concatenation;
+pub mod constants;
+pub mod elementwise;
 pub mod indexing;
+pub mod mathematics;
 pub mod matrix;
 pub mod plotting;
 
@@ -16,8 +21,17 @@ pub mod lapack;
 #[link(name = "Accelerate", kind = "framework")]
 extern "C" {}
 
+#[allow(unused_imports)]
+pub use arrays::*;
 pub use comparison::*;
+#[allow(unused_imports)]
+pub use concatenation::*;
+#[allow(unused_imports)]
+pub use constants::*;
+pub use elementwise::*;
 pub use indexing::*;
+#[allow(unused_imports)]
+pub use mathematics::*;
 pub use matrix::*;
 // Note: plotting functions are registered automatically via runtime_builtin macro
 
@@ -27,15 +41,34 @@ pub use blas::*;
 pub use lapack::*;
 
 /// Call a registered MATLAB builtin by name.
-/// Returns an error if no builtin with that name is found.
+/// Supports function overloading by trying different argument patterns.
+/// Returns an error if no builtin with that name and compatible arguments is found.
 pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
+    let mut matching_builtins = Vec::new();
+    
+    // Collect all builtins with the matching name
     for b in builtins() {
         if b.name == name {
-            let f: BuiltinFn = b.func;
-            return (f)(args);
+            matching_builtins.push(b);
         }
     }
-    Err(format!("unknown builtin `{name}`"))
+    
+    if matching_builtins.is_empty() {
+        return Err(format!("unknown builtin `{name}`"));
+    }
+    
+    // Try each builtin until one succeeds
+    let mut last_error = String::new();
+    for builtin in matching_builtins {
+        let f: BuiltinFn = builtin.func;
+        match (f)(args) {
+            Ok(result) => return Ok(result),
+            Err(e) => last_error = e,
+        }
+    }
+    
+    // If none succeeded, return the last error
+    Err(format!("No matching overload for `{}` with {} args: {}", name, args.len(), last_error))
 }
 
 // Common mathematical functions that tests expect
@@ -64,15 +97,7 @@ fn sqrt_builtin(x: f64) -> Result<f64, String> {
     }
 }
 
-#[runtime_builtin(name = "sin")]
-fn sin_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.sin())
-}
-
-#[runtime_builtin(name = "cos")]
-fn cos_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.cos())
-}
+// sin and cos are now defined in the mathematics module to handle both scalars and matrices
 
 #[runtime_builtin(name = "exp")]
 fn exp_builtin(x: f64) -> Result<f64, String> {

@@ -25,6 +25,7 @@ pub struct HirExpr {
 pub enum HirExprKind {
     Number(String),
     Var(VarId),
+    Constant(String), // For built-in constants like pi, e, etc.
     Unary(UnOp, Box<HirExpr>),
     Binary(Box<HirExpr>, BinOp, Box<HirExpr>),
     Matrix(Vec<Vec<HirExpr>>),
@@ -162,6 +163,11 @@ impl Ctx {
         None
     }
 
+    fn is_constant(&self, name: &str) -> bool {
+        // Check if name is a registered constant
+        rustmat_builtins::constants().iter().any(|c| c.name == name)
+    }
+
     fn lower_stmts(&mut self, stmts: &[AstStmt]) -> Result<Vec<HirStmt>, String> {
         stmts.iter().map(|s| self.lower_stmt(s)).collect()
     }
@@ -250,15 +256,19 @@ impl Ctx {
         let (kind, ty) = match expr {
             Number(n) => (HirExprKind::Number(n.clone()), Type::Scalar),
             Ident(name) => {
-                let id = self
-                    .lookup(name)
-                    .ok_or_else(|| format!("undefined variable `{name}`"))?;
-                let ty = if id.0 < self.var_types.len() {
-                    self.var_types[id.0]
+                // First check if it's a built-in constant
+                if self.is_constant(name) {
+                    (HirExprKind::Constant(name.clone()), Type::Scalar)
+                } else if let Some(id) = self.lookup(name) {
+                    let ty = if id.0 < self.var_types.len() {
+                        self.var_types[id.0]
+                    } else {
+                        Type::Unknown
+                    };
+                    (HirExprKind::Var(id), ty)
                 } else {
-                    Type::Unknown
-                };
-                (HirExprKind::Var(id), ty)
+                    return Err(format!("undefined variable `{name}`"));
+                }
             }
             Unary(op, e) => {
                 let inner = self.lower_expr(e)?;
@@ -283,6 +293,17 @@ impl Ctx {
                             Type::Scalar
                         }
                     }
+                    // Element-wise operations preserve the matrix type if either operand is a matrix
+                    BinOp::ElemMul
+                    | BinOp::ElemDiv
+                    | BinOp::ElemPow
+                    | BinOp::ElemLeftDiv => {
+                        if matches!(left_ty, Type::Matrix) || matches!(right_ty, Type::Matrix) {
+                            Type::Matrix
+                        } else {
+                            Type::Scalar
+                        }
+                    }
                     BinOp::Colon => Type::Matrix,
                 };
                 (
@@ -294,8 +315,32 @@ impl Ctx {
                 let arg_exprs: Result<Vec<_>, _> =
                     args.iter().map(|a| self.lower_expr(a)).collect();
                 let arg_exprs = arg_exprs?;
-                // For now, assume all function calls return scalars - this could be improved with type analysis
-                (HirExprKind::FuncCall(name.clone(), arg_exprs), Type::Scalar)
+                
+                // Check if 'name' refers to a variable in scope
+                // If so, this is array indexing, not a function call
+                if let Some(var_id) = self.lookup(name) {
+                    // This is array indexing: variable(indices)
+                    let var_ty = if var_id.0 < self.var_types.len() {
+                        self.var_types[var_id.0]
+                    } else {
+                        Type::Unknown
+                    };
+                    let var_expr = HirExpr {
+                        kind: HirExprKind::Var(var_id),
+                        ty: var_ty,
+                    };
+                    // Array indexing returns scalar for single element, matrix for slices
+                    let index_result_type = if arg_exprs.len() == 1 {
+                        Type::Scalar // Single element access A(i) returns scalar
+                    } else {
+                        Type::Scalar // 2D access A(i,j) also returns scalar
+                    };
+                    (HirExprKind::Index(Box::new(var_expr), arg_exprs), index_result_type)
+                } else {
+                    // This is a function call - determine return type based on function
+                    let return_type = Self::infer_function_return_type(name, &arg_exprs);
+                    (HirExprKind::FuncCall(name.clone(), arg_exprs), return_type)
+                }
             }
             Matrix(rows) => {
                 let mut hir_rows = Vec::new();
@@ -332,5 +377,55 @@ impl Ctx {
             Colon => (HirExprKind::Colon, Type::Matrix),
         };
         Ok(HirExpr { kind, ty })
+    }
+
+    /// Infer the return type of a function call based on the function name and arguments
+    fn infer_function_return_type(func_name: &str, args: &[HirExpr]) -> Type {
+        match func_name {
+            // Array generation functions - always return Matrix
+            "linspace" | "logspace" | "zeros" | "ones" | "eye" | "rand" | "range" | "meshgrid" => Type::Matrix,
+            
+            // Mathematical functions that can work element-wise
+            "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | 
+            "asinh" | "acosh" | "atanh" | "ln" | "exp" | "exp2" | "exp10" |
+            "round" | "floor" | "ceil" | "trunc" | "fract" | "sign" | "gamma" | "factorial" |
+            "real" | "imag" | "angle" => {
+                // If any argument is a matrix, return matrix (element-wise operation)
+                if args.iter().any(|arg| matches!(arg.ty, Type::Matrix)) {
+                    Type::Matrix
+                } else {
+                    Type::Scalar
+                }
+            }
+            
+            // Statistical functions - return scalar for matrices, preserve type for scalars
+            "sum" | "mean" | "std" | "var" | "min" | "max" => {
+                if args.len() == 1 && matches!(args[0].ty, Type::Matrix) {
+                    Type::Scalar // sum([1,2,3]) = 6
+                } else if args.len() >= 2 {
+                    Type::Scalar // min(a,b) = scalar
+                } else {
+                    Type::Scalar // Default to scalar
+                }
+            }
+            
+            // Binary operations between scalars
+            "pow" | "atan2" if args.len() == 2 => {
+                if args.iter().any(|arg| matches!(arg.ty, Type::Matrix)) {
+                    Type::Matrix // Element-wise if any operand is matrix
+                } else {
+                    Type::Scalar
+                }
+            }
+            
+            // Fill function creates matrix of specified size
+            "fill" => Type::Matrix,
+            
+            // Constants and special functions are scalars
+            "pi" | "e" | "inf" | "nan" | "eps" | "sqrt2" | "log2" | "log10" => Type::Scalar,
+            
+            // Default: assume scalar return
+            _ => Type::Scalar,
+        }
     }
 }

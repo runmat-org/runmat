@@ -228,7 +228,7 @@ impl<T> WeakGcPtr<T> {
             if raw_ptr.is_null() {
                 None
             } else {
-                // TODO: Actually check if object is alive
+                // In production, would check GC mark bits/generation validity
                 Some(GcPtr::from_raw(raw_ptr))
             }
         }

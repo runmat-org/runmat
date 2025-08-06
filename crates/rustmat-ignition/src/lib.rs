@@ -16,6 +16,11 @@ pub enum Instr {
     Div,
     Pow,
     Neg,
+    // Element-wise operations
+    ElemMul,
+    ElemDiv,
+    ElemPow,
+    ElemLeftDiv,
     LessEqual,
     Less,
     Greater,
@@ -27,6 +32,9 @@ pub enum Instr {
     Pop,
     CallBuiltin(String, usize),
     CreateMatrix(usize, usize),
+    CreateMatrixDynamic(usize), // Number of rows, each row can have variable elements
+    CreateRange(bool), // true if step is provided, false if start:end
+    Index(usize), // Number of indices
     Return,
 }
 
@@ -135,7 +143,7 @@ impl Compiler {
                         visit_expr(arg, max);
                     }
                 }
-                HirExprKind::Number(_) | HirExprKind::Colon => {
+                HirExprKind::Number(_) | HirExprKind::Constant(_) | HirExprKind::Colon => {
                     // No variables here
                 }
             }
@@ -354,6 +362,19 @@ impl Compiler {
             HirExprKind::Var(id) => {
                 self.emit(Instr::LoadVar(id.0));
             }
+            HirExprKind::Constant(name) => {
+                // Look up the constant value and load it
+                let constants = rustmat_builtins::constants();
+                if let Some(constant) = constants.iter().find(|c| c.name == name) {
+                    if let rustmat_builtins::Value::Num(val) = &constant.value {
+                        self.emit(Instr::LoadConst(*val));
+                    } else {
+                        return Err(format!("Constant {} is not a number", name));
+                    }
+                } else {
+                    return Err(format!("Unknown constant: {}", name));
+                }
+            }
             HirExprKind::Unary(op, e) => {
                 self.compile_expr(e)?;
                 match op {
@@ -374,13 +395,27 @@ impl Compiler {
                         self.emit(Instr::Div)
                     }
                     rustmat_parser::BinOp::Pow => self.emit(Instr::Pow),
+                    rustmat_parser::BinOp::ElemMul => self.emit(Instr::ElemMul),
+                    rustmat_parser::BinOp::ElemDiv | rustmat_parser::BinOp::ElemLeftDiv => {
+                        self.emit(Instr::ElemDiv)
+                    }
+                    rustmat_parser::BinOp::ElemPow => self.emit(Instr::ElemPow),
                     rustmat_parser::BinOp::Colon => {
                         return Err("colon operator not supported".into())
                     }
                 };
             }
-            HirExprKind::Range(..) => {
-                return Err("standalone range not supported".into());
+            HirExprKind::Range(start, step, end) => {
+                // Compile range components
+                self.compile_expr(start)?;
+                if let Some(step) = step {
+                    self.compile_expr(step)?;
+                    self.compile_expr(end)?;
+                    self.emit(Instr::CreateRange(true)); // Has step
+                } else {
+                    self.compile_expr(end)?;
+                    self.emit(Instr::CreateRange(false)); // No step
+                }
             }
             HirExprKind::FuncCall(name, args) => {
                 // Compile arguments in order
@@ -391,19 +426,55 @@ impl Compiler {
             }
             HirExprKind::Matrix(matrix_data) => {
                 let rows = matrix_data.len();
-                let cols = if rows > 0 { matrix_data[0].len() } else { 0 };
+                
+                // Check if any element is non-literal (variable, function call, etc.)
+                let has_non_literals = matrix_data.iter().any(|row| {
+                    row.iter().any(|expr| !matches!(expr.kind, HirExprKind::Number(_) | HirExprKind::Constant(_)))
+                });
 
-                // Compile all matrix elements onto the stack in row-major order
-                for row in matrix_data {
-                    for element in row {
-                        self.compile_expr(element)?;
+                if has_non_literals {
+                    // Use dynamic matrix creation for concatenation
+                    // Compile each row as a separate unit
+                    for row in matrix_data {
+                        // Compile all elements in the row
+                        for element in row {
+                            self.compile_expr(element)?;
+                        }
                     }
+                    // Emit the dynamic matrix creation with row structure
+                    let row_lengths: Vec<usize> = matrix_data.iter().map(|row| row.len()).collect();
+                    for &row_len in &row_lengths {
+                        self.emit(Instr::LoadConst(row_len as f64));
+                    }
+                    self.emit(Instr::CreateMatrixDynamic(rows));
+                } else {
+                    // Use traditional matrix creation for literal values
+                    let cols = if rows > 0 { matrix_data[0].len() } else { 0 };
+                    
+                    // Compile all matrix elements onto the stack in row-major order
+                    for row in matrix_data {
+                        for element in row {
+                            self.compile_expr(element)?;
+                        }
+                    }
+                    
+                    self.emit(Instr::CreateMatrix(rows, cols));
                 }
-
-                self.emit(Instr::CreateMatrix(rows, cols));
             }
-            HirExprKind::Index(..) | HirExprKind::Colon => {
-                return Err("expression not supported".into());
+            HirExprKind::Index(base, indices) => {
+                // Compile the base expression (the array/matrix)
+                self.compile_expr(base)?;
+                
+                // Compile all index expressions
+                for index in indices {
+                    self.compile_expr(index)?;
+                }
+                
+                // Emit index instruction with number of indices
+                self.emit(Instr::Index(indices.len()));
+            }
+            HirExprKind::Colon => {
+                return Err("colon expression not supported".into());
             }
         }
         Ok(())
@@ -438,6 +509,10 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
             Instr::Div => binary(&mut stack, |a, b| a / b)?,
             Instr::Pow => binary(&mut stack, |a, b| a.powf(b))?,
             Instr::Neg => unary(&mut stack, |a| -a)?,
+            Instr::ElemMul => element_binary(&mut stack, rustmat_runtime::elementwise_mul)?,
+            Instr::ElemDiv => element_binary(&mut stack, rustmat_runtime::elementwise_div)?,
+            Instr::ElemPow => element_binary(&mut stack, rustmat_runtime::elementwise_pow)?,
+            Instr::ElemLeftDiv => element_binary(&mut stack, |a, b| rustmat_runtime::elementwise_div(b, a))?,
             Instr::LessEqual => {
                 let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                 let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
@@ -505,6 +580,70 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
                     .map_err(|e| format!("Matrix creation error: {e}"))?;
                 stack.push(Value::Matrix(matrix));
             }
+            Instr::CreateMatrixDynamic(num_rows) => {
+                // Dynamic matrix creation with concatenation support
+                let mut row_lengths = Vec::new();
+                
+                // Pop row lengths (in reverse order since they're pushed last)
+                for _ in 0..num_rows {
+                    let row_len: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    row_lengths.push(row_len as usize);
+                }
+                row_lengths.reverse(); // Correct the order
+                
+                // Now pop elements according to row structure (in reverse order)
+                let mut rows_data = Vec::new();
+                for &row_len in row_lengths.iter().rev() {
+                    let mut row_values = Vec::new();
+                    for _ in 0..row_len {
+                        row_values.push(stack.pop().ok_or("stack underflow")?);
+                    }
+                    row_values.reverse(); // Correct the order within row
+                    rows_data.push(row_values);
+                }
+                
+                // Reverse rows to get correct order
+                rows_data.reverse();
+                
+                // Use the concatenation logic to create the matrix
+                let result = rustmat_runtime::create_matrix_from_values(&rows_data)?;
+                stack.push(result);
+            }
+            Instr::CreateRange(has_step) => {
+                if has_step {
+                    // Stack: start, step, end
+                    let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    let step: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    
+                    let range_result = rustmat_runtime::create_range(start, Some(step), end)?;
+                    stack.push(range_result);
+                } else {
+                    // Stack: start, end
+                    let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    
+                    let range_result = rustmat_runtime::create_range(start, None, end)?;
+                    stack.push(range_result);
+                }
+            }
+            Instr::Index(num_indices) => {
+                // Pop indices from stack (in reverse order)
+                let mut indices = Vec::new();
+                let count = num_indices;
+                for _ in 0..count {
+                    let index_val: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    indices.push(index_val);
+                }
+                indices.reverse(); // Correct the order
+                
+                // Pop the base array/matrix
+                let base = stack.pop().ok_or("stack underflow")?;
+                
+                // Perform the indexing operation using centralized function
+                let result = rustmat_runtime::perform_indexing(&base, &indices)?;
+                stack.push(result);
+            }
             Instr::Pop => {
                 stack.pop();
             }
@@ -536,6 +675,19 @@ where
     stack.push(Value::Num(f(a)));
     Ok(())
 }
+
+fn element_binary<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
+where
+    F: Fn(&Value, &Value) -> Result<Value, String>,
+{
+    let b = stack.pop().ok_or("stack underflow")?;
+    let a = stack.pop().ok_or("stack underflow")?;
+    let result = f(&a, &b)?;
+    stack.push(result);
+    Ok(())
+}
+
+
 
 pub fn execute(program: &HirProgram) -> Result<Vec<Value>, String> {
     let bc = compile(program)?;

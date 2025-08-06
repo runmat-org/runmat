@@ -199,7 +199,35 @@ impl BuiltinFunction {
     
     /// Call the function with argument validation
     pub fn call(&self, args: &Arguments) -> BuiltinResult {
-        // TODO: Add parameter validation here
+        // Validate argument count
+        let expected_params = self.signature.parameters.len();
+        let provided_args = args.len();
+        
+        // Allow variable argument functions (empty parameter list means any number)
+        if !self.signature.parameters.is_empty() && provided_args != expected_params {
+            return Err(format!(
+                "Function '{}' expects {} arguments, got {}",
+                self.name, expected_params, provided_args
+            ));
+        }
+        
+        // Validate parameter types if specified
+        for (i, param) in self.signature.parameters.iter().enumerate() {
+            if i >= args.len() {
+                if param.required {
+                    return Err(format!(
+                        "Missing required parameter '{}' for function '{}'",
+                        param.name, self.name
+                    ));
+                }
+                break;
+            }
+            
+            // Type validation could be added here
+            // For now, we rely on runtime type checking in the function implementations
+        }
+        
+        // Call the function
         (self.implementation)(args)
     }
 }

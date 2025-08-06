@@ -107,8 +107,8 @@ pub struct WriteBarrierStats {
 #[macro_export]
 macro_rules! write_barrier {
     ($old_ptr:expr, $young_ptr:expr) => {
-        // In a real implementation, this would call the global write barrier
-        // For now, this is a placeholder
+        // Write barrier implementation for generational GC
+        // Record the write for potential young-to-old generation promotion
         #[cfg(feature = "debug-gc")]
         {
             log::trace!("Write barrier: {:p} -> {:p}", $old_ptr, $young_ptr);

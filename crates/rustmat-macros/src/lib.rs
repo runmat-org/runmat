@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, AttributeArgs, FnArg, ItemFn, Lit, Meta, MetaNameValue, NestedMeta, Pat,
+    parse_macro_input, AttributeArgs, FnArg, ItemFn, Lit, Meta, MetaNameValue, NestedMeta, Pat, Expr,
 };
 
 /// Attribute used to mark functions as implementing a runtime builtin.
@@ -97,6 +97,74 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     TokenStream::from(quote! {
         #func
         #wrapper
+        #register
+    })
+}
+
+/// Attribute used to declare a runtime constant.
+///
+/// Example:
+/// ```rust,ignore
+/// use rustmat_macros::runtime_constant;
+/// use rustmat_builtins::Value;
+///
+/// #[runtime_constant(name = "pi", value = std::f64::consts::PI)]
+/// const PI_CONSTANT: ();
+/// ```
+///
+/// This registers the constant with the `rustmat-builtins` inventory
+/// so the runtime can discover it at start-up.
+#[proc_macro_attribute]
+pub fn runtime_constant(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as AttributeArgs);
+    let mut name_lit: Option<Lit> = None;
+    let mut value_expr: Option<Expr> = None;
+    
+    for arg in args {
+        match arg {
+            NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) => {
+                if path.is_ident("name") {
+                    name_lit = Some(lit);
+                } else {
+                    panic!("Unknown attribute parameter: {}", quote!(#path));
+                }
+            }
+            NestedMeta::Meta(Meta::Path(path)) if path.is_ident("value") => {
+                panic!("value parameter requires assignment: value = expression");
+            }
+            NestedMeta::Lit(lit) => {
+                // This handles the case where value is provided as a literal
+                value_expr = Some(syn::parse_quote!(#lit));
+            }
+            _ => panic!("Invalid attribute syntax"),
+        }
+    }
+
+    let name = match name_lit {
+        Some(Lit::Str(s)) => s.value(),
+        _ => panic!("name parameter must be a string literal"),
+    };
+
+    let value = value_expr.unwrap_or_else(|| {
+        panic!("value parameter is required");
+    });
+
+    let item = parse_macro_input!(input as syn::Item);
+
+    let register = {
+        quote! {
+            #[allow(non_upper_case_globals)]
+            rustmat_builtins::inventory::submit! {
+                rustmat_builtins::Constant {
+                    name: #name,
+                    value: rustmat_builtins::Value::Num(#value),
+                }
+            }
+        }
+    };
+
+    TokenStream::from(quote! {
+        #item
         #register
     })
 }

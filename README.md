@@ -202,8 +202,8 @@ graph TD
     Runtime --> Plotting;
     Runtime <--> Snapshot;
 
-    style Ignition fill:#f9f,stroke:#333,stroke-width:2px
-    style Turbine fill:#ccf,stroke:#333,stroke-width:2px
+    style Ignition
+    style Turbine
 ```
 
 -   `rustmat-repl` / `rustmat-kernel`: User-facing interfaces for the command line and Jupyter.
