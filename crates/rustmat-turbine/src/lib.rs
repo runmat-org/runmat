@@ -865,6 +865,7 @@ impl TurbineEngine {
         while pc < bytecode.instructions.len() {
             match &bytecode.instructions[pc] {
                 Instr::LoadConst(c) => stack.push(Value::Num(*c)),
+                Instr::LoadString(s) => stack.push(Value::String(s.clone())),
                 Instr::LoadVar(i) => {
                     if *i < vars.len() {
                         stack.push(vars[*i].clone())
@@ -1214,6 +1215,10 @@ impl TurbineEngine {
                 Instr::LoadConst(val) => {
                     "LoadConst".hash(&mut hasher);
                     val.to_bits().hash(&mut hasher);
+                }
+                Instr::LoadString(s) => {
+                    "LoadString".hash(&mut hasher);
+                    s.hash(&mut hasher);
                 }
                 Instr::LoadVar(idx) => {
                     "LoadVar".hash(&mut hasher);

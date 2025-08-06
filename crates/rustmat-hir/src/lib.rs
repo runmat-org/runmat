@@ -7,6 +7,7 @@ use std::collections::HashMap;
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Type {
     Scalar,
+    String,
     Matrix,
     Void,
     Unknown,
@@ -24,6 +25,7 @@ pub struct HirExpr {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number(String),
+    String(String),
     Var(VarId),
     Constant(String), // For built-in constants like pi, e, etc.
     Unary(UnOp, Box<HirExpr>),
@@ -168,6 +170,11 @@ impl Ctx {
         rustmat_builtins::constants().iter().any(|c| c.name == name)
     }
 
+    fn is_builtin_function(&self, name: &str) -> bool {
+        // Check if name is a registered builtin function
+        rustmat_builtins::builtins().iter().any(|b| b.name == name)
+    }
+
     fn lower_stmts(&mut self, stmts: &[AstStmt]) -> Result<Vec<HirStmt>, String> {
         stmts.iter().map(|s| self.lower_stmt(s)).collect()
     }
@@ -255,6 +262,7 @@ impl Ctx {
         use parser::Expr::*;
         let (kind, ty) = match expr {
             Number(n) => (HirExprKind::Number(n.clone()), Type::Scalar),
+            String(s) => (HirExprKind::String(s.clone()), Type::String),
             Ident(name) => {
                 // First check if it's a built-in constant
                 if self.is_constant(name) {
@@ -266,6 +274,10 @@ impl Ctx {
                         Type::Unknown
                     };
                     (HirExprKind::Var(id), ty)
+                } else if self.is_builtin_function(name) {
+                    // Treat bare identifier as function call with no arguments (MATLAB style)
+                    let return_type = Self::infer_function_return_type(name, &[]);
+                    (HirExprKind::FuncCall(name.clone(), vec![]), return_type)
                 } else {
                     return Err(format!("undefined variable `{name}`"));
                 }

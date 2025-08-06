@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Number(String),
+    String(String),
     Ident(String),
     Unary(UnOp, Box<Expr>),
     Binary(Box<Expr>, BinOp, Box<Expr>),
@@ -264,6 +265,7 @@ impl Parser {
         match self.next() {
             Some(info) => match info.token {
                 Token::Integer | Token::Float => Ok(Expr::Number(info.lexeme)),
+                Token::Str => Ok(Expr::String(info.lexeme)),
                 Token::Ident => Ok(Expr::Ident(info.lexeme)),
                 Token::LParen => {
                     let expr = self.parse_expr()?;

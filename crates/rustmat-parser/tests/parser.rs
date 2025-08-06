@@ -362,6 +362,31 @@ fn parse_array_indexing() {
 }
 
 #[test]
+fn parse_string_literal() {
+    let program = parse("'hello world'").unwrap();
+    assert_eq!(
+        program,
+        Program {
+            body: vec![Stmt::ExprStmt(Expr::String("'hello world'".into()))]
+        }
+    );
+}
+
+#[test]
+fn parse_function_call_with_string() {
+    let program = parse("fprintf('test')").unwrap();
+    assert_eq!(
+        program,
+        Program {
+            body: vec![Stmt::ExprStmt(Expr::FuncCall(
+                "fprintf".into(),
+                vec![Expr::String("'test'".into())]
+            ))]
+        }
+    );
+}
+
+#[test]
 fn parse_bracket_indexing() {
     // Bracket-based indexing would be for matrix elements
     // This test documents that we expect this to be parsed as a matrix literal for now

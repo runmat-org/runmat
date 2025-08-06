@@ -8,6 +8,7 @@ use std::convert::TryInto;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instr {
     LoadConst(f64),
+    LoadString(String),
     LoadVar(usize),
     StoreVar(usize),
     Add,
@@ -143,7 +144,7 @@ impl Compiler {
                         visit_expr(arg, max);
                     }
                 }
-                HirExprKind::Number(_) | HirExprKind::Constant(_) | HirExprKind::Colon => {
+                HirExprKind::Number(_) | HirExprKind::String(_) | HirExprKind::Constant(_) | HirExprKind::Colon => {
                     // No variables here
                 }
             }
@@ -359,6 +360,15 @@ impl Compiler {
                 let val: f64 = n.parse().map_err(|_| "invalid number")?;
                 self.emit(Instr::LoadConst(val));
             }
+            HirExprKind::String(s) => {
+                // Strip quotes from string literal for storage
+                let clean_string = if s.starts_with('\'') && s.ends_with('\'') {
+                    s[1..s.len()-1].to_string()
+                } else {
+                    s.clone()
+                };
+                self.emit(Instr::LoadString(clean_string));
+            }
             HirExprKind::Var(id) => {
                 self.emit(Instr::LoadVar(id.0));
             }
@@ -429,7 +439,7 @@ impl Compiler {
                 
                 // Check if any element is non-literal (variable, function call, etc.)
                 let has_non_literals = matrix_data.iter().any(|row| {
-                    row.iter().any(|expr| !matches!(expr.kind, HirExprKind::Number(_) | HirExprKind::Constant(_)))
+                    row.iter().any(|expr| !matches!(expr.kind, HirExprKind::Number(_) | HirExprKind::String(_) | HirExprKind::Constant(_)))
                 });
 
                 if has_non_literals {
@@ -495,6 +505,7 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
     while pc < bytecode.instructions.len() {
         match bytecode.instructions[pc].clone() {
             Instr::LoadConst(c) => stack.push(Value::Num(c)),
+            Instr::LoadString(s) => stack.push(Value::String(s)),
             Instr::LoadVar(i) => stack.push(vars[i].clone()),
             Instr::StoreVar(i) => {
                 let val = stack.pop().ok_or("stack underflow")?;

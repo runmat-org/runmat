@@ -7,6 +7,7 @@ pub mod concatenation;
 pub mod constants;
 pub mod elementwise;
 pub mod indexing;
+pub mod io;
 pub mod mathematics;
 pub mod matrix;
 pub mod plotting;

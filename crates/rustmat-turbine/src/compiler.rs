@@ -62,6 +62,9 @@ impl ControlFlowGraph {
         // Find all jump targets and block boundaries
         for (pc, instr) in instructions.iter().enumerate() {
             match instr {
+                Instr::LoadString(_) => {
+                    // String instructions don't affect control flow
+                }
                 Instr::Jump(target) => {
                     block_starts.insert(*target);
                     // Instruction after jump starts new block (if reachable)
@@ -268,6 +271,10 @@ impl BytecodeCompiler {
                     Instr::LoadConst(val) => {
                         let const_val = builder.ins().f64const(*val);
                         local_stack.push(const_val);
+                    }
+                    Instr::LoadString(_) => {
+                        // Strings cannot be compiled to JIT - fall back to interpreter
+                        return Err(TurbineError::ExecutionError("String operations not supported in JIT mode".to_string()));
                     }
                     Instr::LoadVar(idx) => {
                         let idx_val = builder.ins().iconst(types::I64, *idx as i64);
@@ -535,6 +542,10 @@ impl BytecodeCompiler {
         // Compile instructions starting from start_index
         for (_i, instr) in instructions.iter().enumerate().skip(start_index) {
             match instr {
+                Instr::LoadString(_) => {
+                    // Strings cannot be compiled to JIT - fall back to interpreter
+                    return Err(TurbineError::ExecutionError("String operations not supported in JIT mode".to_string()));
+                }
                 Instr::LoadConst(val) => {
                     // Create f64 constant and push to stack
                     let const_val = builder.ins().f64const(*val);

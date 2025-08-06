@@ -374,6 +374,7 @@ impl ReplEngine {
         while pc < bytecode.instructions.len() {
             match &bytecode.instructions[pc] {
                 Instr::LoadConst(c) => stack.push(Value::Num(*c)),
+                Instr::LoadString(s) => stack.push(Value::String(s.clone())),
                 Instr::LoadVar(i) => {
                     if *i < vars.len() {
                         stack.push(vars[*i].clone())
