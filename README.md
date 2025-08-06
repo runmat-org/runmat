@@ -1,6 +1,6 @@
 # RustMat: High-Performance MATLAB/Octave Runtime in Rust
 
-## Developed by Dystr Inc. (dystr.com)
+## Developed by Dystr Inc. ([dystr.com](https://dystr.com))
 
 [![Build Status](https://<todo:placeholder>)
 [![License](https://<todo:placeholder>)
@@ -29,7 +29,7 @@ RustMat isn't just another MATLAB clone; it's a complete rethinking of the runti
 -   🪐 **Full Jupyter Kernel Integration**: RustMat works as a first-class Jupyter kernel, allowing you to run MATLAB/Octave code in JupyterLab and Jupyter Notebooks with full support for plotting and interactive widgets.
 -   ⚡ **Instant Startup with Snapshots**: We've eliminated slow startup times. The `rustmat-snapshot` system pre-compiles the entire standard library into a binary blob that can be memory-mapped at launch, providing a near-instantaneous REPL and kernel startup.
 -   🛡️ **Memory Safe & Concurrent**: Built in Rust, RustMat guarantees memory safety, eliminating entire classes of bugs. Its generational garbage collector is designed for the demands of numerical computing, efficiently managing memory for large matrices and temporary objects.
--   兼容 **MATLAB/Octave Compatibility**: The parser and runtime are designed to be highly compatible with existing MATLAB and GNU Octave scripts, making it easy to migrate your existing codebase.
+-   📄 **MATLAB/Octave Compatibility**: The parser and runtime are designed to be highly compatible with existing MATLAB and GNU Octave scripts, making it easy to migrate your existing codebase.
 -   🔧 **Extensible Standard Library**: Adding new high-performance functions is trivial. Simply write a standard Rust function and add a `#[runtime_builtin]` macro. The runtime handles the rest, making it easy to extend RustMat with your own custom, high-performance code.
 
 ## 🏁 Getting Started
@@ -39,17 +39,6 @@ Getting up and running with RustMat is simple.
 ### Prerequisites
 
 You need the Rust toolchain (>= 1.70) installed. You can get it from [rustup.rs](https://rustup.rs/).
-
-```bash
-# For Debian/Ubuntu-based systems (for plotting dependencies)
-sudo apt-get install build-essential pkg-config libgtk-3-dev
-
-# For Fedora/CentOS-based systems
-sudo dnf install clang gcc-c++ pkg-config gtk3-devel
-
-# For macOS (Xcode command line tools are sufficient)
-xcode-select --install
-```
 
 ### 1. Installation
 
@@ -119,33 +108,42 @@ To use RustMat in JupyterLab or Jupyter Notebook, you need to register its kerne
 ### Basic Arithmetic & Matrices
 
 ```matlab
-% Variables are dynamically typed
-x = 10.5;
-y = [1, 2, 3; 4, 5, 6]; % Create a 2x3 matrix
-
-% Element-wise operations and matrix multiplication
-z = y .* 2;       % Element-wise multiplication
-A = [1 1; 2 2];
-B = [3 3; 4 4];
-C = A * B;        % Matrix multiplication
-
-% Display results
-disp(C);
+% Basic arithmetic and variables
+x = 5;
+y = 3.14;
+result = x * y + 2;
 ```
 
 ### Loops & Control Flow
 
 ```matlab
-% Calculate the sum of the first 10 squares
-total = 0;
-for i = 1:10
-    if mod(i, 2) == 0
-        % Only sum even squares
-        total = total + i^2;
-    end
+% Control flow with arithmetic conditions
+if result - 15
+    status = 1;  % Greater than 15
+else
+    status = 0;  % Less than or equal to 15
 end
 
-fprintf('Sum of even squares: %d\n', total);
+% For loops with ranges
+sum = 0;
+for i = 1:5
+    sum = sum + i;
+end
+
+% While loops
+counter = 0;
+while counter - 3  % While counter != 3
+    counter = counter + 1;
+end
+
+% Nested control structures
+factorial = 1;
+for n = 1:5
+    factorial = factorial * n;
+    if factorial - 100  % If factorial > 100
+        break;
+    end
+end 
 ```
 
 ### Interactive Plotting
@@ -153,24 +151,17 @@ fprintf('Sum of even squares: %d\n', total);
 Create a beautiful, multi-plot figure with just a few lines of code.
 
 ```matlab
-% Generate data
-x = 0:0.1:2*pi;
-y1 = sin(x);
-y2 = cos(x);
+% Simple sine wave
+x = [0, 1, 2, 3, 4, 5, 6];
+y = [0, 0.841, 0.909, 0.141, -0.757, -0.959, -0.279];  % sin(x) values
 
-% Create a new figure and plot
-figure;
-plot(x, y1, 'LineWidth', 2, 'DisplayName', 'sin(x)');
-hold on; % Overlay the next plot
-scatter(x, y2, 'filled', 'DisplayName', 'cos(x)');
-hold off;
+% Create the plot
+plot(x, y);
 
-% Add labels and a legend
-title('Sine and Cosine Waves');
-xlabel('Angle [rad]');
-ylabel('Value');
-grid on;
-legend('show');
+% Some calculations
+amplitude = 1.0;
+period = 6.28;
+result = amplitude * period;
 ```
 
 When run with RustMat, this will open a GPU-accelerated interactive window displaying the plot.
@@ -224,7 +215,7 @@ graph TD
 -   `rustmat-plot`: The world-class, GPU-accelerated interactive plotting library.
 -   `rustmat-snapshot`: The build-time system for creating fast-loading startup snapshots.
 
-For a deeper dive, see our full [Architecture Document](./crates/rustmat/ARCHITECTURE.md).
+For a deeper dive, see our full [Architecture Document](./docs/ARCHITECTURE.md).
 
 ## ⚙️ Configuration
 
@@ -240,11 +231,11 @@ We welcome contributions of all kinds! Whether you're interested in improving th
 2.  Read our [Architecture Document](./crates/rustmat/ARCHITECTURE.md) to understand how the system works.
 3.  Fork the repository and submit a pull request!
 
-A great place to start is by adding a new builtin function in `crates/rustmat-runtime`—it's incredibly easy thanks to our `#[runtime_builtin]` macro.
+A great place to start is by adding a new builtin function in `crates/rustmat-runtime` — it's incredibly easy thanks to our `#[runtime_builtin]` macro.
 
 ## 📜 License
 
-RustMat is dual-licensed under the terms of both the MIT License and the Apache License (Version 2.0).
+<todo: insert license>
 
 ---
 
