@@ -33,24 +33,27 @@ impl GuiHandle {
     /// Request to show an interactive plot (blocking)
     pub fn show_plot(&self, figure: Figure) -> Result<String, String> {
         let (response_tx, response_rx) = mpsc::channel();
-        
+
         let message = GuiMessage::ShowPlot {
             figure,
             response: response_tx,
         };
 
         // Send the message to the GUI thread
-        self.sender.send(message)
+        self.sender
+            .send(message)
             .map_err(|_| "GUI thread is not running".to_string())?;
 
         // Wait for the response
-        response_rx.recv()
+        response_rx
+            .recv()
             .map_err(|_| "GUI thread response channel closed".to_string())?
     }
 
     /// Request GUI thread shutdown
     pub fn shutdown(&self) -> Result<(), String> {
-        self.sender.send(GuiMessage::Shutdown)
+        self.sender
+            .send(GuiMessage::Shutdown)
             .map_err(|_| "GUI thread is not running".to_string())
     }
 }
@@ -121,7 +124,8 @@ impl GuiManager {
         use crate::gui::PlotWindow;
 
         let config = WindowConfig::default();
-        let mut window = PlotWindow::new(config).await
+        let mut window = PlotWindow::new(config)
+            .await
             .map_err(|e| format!("Failed to create window: {}", e))?;
 
         // Set the figure data

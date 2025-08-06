@@ -3,8 +3,8 @@
 //! Provides professional themes, typography, and layout systems that integrate
 //! seamlessly with RustMat's configuration system.
 
-pub mod theme;
 pub mod config;
+pub mod theme;
 
-pub use theme::{ModernDarkTheme, Typography, Layout};
-pub use config::{PlotThemeConfig, ThemeVariant, validate_theme_config};
+pub use config::{validate_theme_config, PlotThemeConfig, ThemeVariant};
+pub use theme::{Layout, ModernDarkTheme, Typography};

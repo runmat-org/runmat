@@ -1,5 +1,5 @@
 //! RustMat - High-performance MATLAB/Octave runtime
-//! 
+//!
 //! A modern, V8-inspired MATLAB runtime with Jupyter kernel support,
 //! JIT compilation, generational garbage collection, and excellent developer ergonomics.
 
@@ -9,11 +9,10 @@ use env_logger::Env;
 use log::{debug, error, info};
 
 mod config;
-use config::{ConfigLoader, RustMatConfig, PlotMode, PlotBackend};
+use config::{ConfigLoader, PlotBackend, PlotMode, RustMatConfig};
 use rustmat_builtins::Value;
 use rustmat_gc::{
-    gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats,
-    GcConfig,
+    gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
 use rustmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
 use rustmat_repl::ReplEngine;
@@ -180,7 +179,7 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-    
+
     /// Start Jupyter kernel
     Kernel {
         /// Kernel IP address
@@ -281,11 +280,11 @@ enum Commands {
         /// Plot mode override
         #[arg(long, value_enum)]
         mode: Option<PlotMode>,
-        
+
         /// Window width
         #[arg(long)]
         width: Option<u32>,
-        
+
         /// Window height
         #[arg(long)]
         height: Option<u32>,
@@ -377,7 +376,7 @@ enum CompressionAlg {
 enum LogLevel {
     Error,
     Warn,
-    Info, 
+    Info,
     Debug,
     Trace,
 }
@@ -498,23 +497,27 @@ async fn main() -> Result<()> {
     configure_gc_from_config(&config)?;
 
     // Initialize GUI system if needed
-    let _gui_initialized = if config.plotting.mode == PlotMode::Gui || 
-                            (config.plotting.mode == PlotMode::Auto && !config.plotting.force_headless) {
+    let _gui_initialized = if config.plotting.mode == PlotMode::Gui
+        || (config.plotting.mode == PlotMode::Auto && !config.plotting.force_headless)
+    {
         info!("Initializing GUI plotting system");
-        
+
         // Register this thread as the main thread for GUI operations
         rustmat_plot::register_main_thread();
-        
+
         // Initialize native window system (handles macOS main thread requirements)
         match rustmat_plot::initialize_native_window() {
             Ok(()) => {
                 info!("Native window system initialized successfully");
             }
             Err(e) => {
-                info!("Native window initialization failed: {}, using thread manager", e);
+                info!(
+                    "Native window initialization failed: {}, using thread manager",
+                    e
+                );
             }
         }
-        
+
         // Initialize GUI thread manager for cross-platform compatibility
         match rustmat_plot::initialize_gui_manager() {
             Ok(()) => {
@@ -567,11 +570,14 @@ fn load_configuration(cli: &Cli) -> Result<RustMatConfig> {
             info!("Loading configuration from: {}", config_file.display());
             return ConfigLoader::load_from_file(config_file);
         } else {
-            error!("Specified config file does not exist: {}", config_file.display());
+            error!(
+                "Specified config file does not exist: {}",
+                config_file.display()
+            );
             std::process::exit(1);
         }
     }
-    
+
     // Otherwise, use the standard loader
     ConfigLoader::load()
 }
@@ -589,14 +595,14 @@ fn apply_cli_overrides(config: &mut RustMatConfig, cli: &Cli) {
         OptLevel::Speed => config::JitOptLevel::Speed,
         OptLevel::Aggressive => config::JitOptLevel::Aggressive,
     };
-    
+
     // Runtime settings
     config.runtime.timeout = cli.timeout;
     config.runtime.verbose = cli.verbose;
     if let Some(snapshot) = &cli.snapshot {
         config.runtime.snapshot_path = Some(snapshot.clone());
     }
-    
+
     // GC settings
     if let Some(preset) = &cli.gc_preset {
         config.gc.preset = Some(match preset {
@@ -613,14 +619,14 @@ fn apply_cli_overrides(config: &mut RustMatConfig, cli: &Cli) {
         config.gc.threads = Some(threads);
     }
     config.gc.collect_stats = cli.gc_stats;
-    
+
     // Plotting settings
     if let Some(plot_mode) = &cli.plot_mode {
         config.plotting.mode = *plot_mode;
         // Also set environment variable so runtime can see it
         let env_value = match plot_mode {
             PlotMode::Auto => "auto",
-            PlotMode::Gui => "gui", 
+            PlotMode::Gui => "gui",
             PlotMode::Headless => "headless",
             PlotMode::Jupyter => "jupyter",
         };
@@ -633,7 +639,7 @@ fn apply_cli_overrides(config: &mut RustMatConfig, cli: &Cli) {
     if let Some(backend) = &cli.plot_backend {
         config.plotting.backend = *backend;
     }
-    
+
     // Logging settings
     config.logging.debug = cli.debug;
     config.logging.level = match cli.log_level {
@@ -667,7 +673,9 @@ fn configure_gc_from_config(config: &RustMatConfig) -> Result<()> {
 
     info!(
         "Configuring GC with preset: {:?}",
-        config.gc.preset
+        config
+            .gc
+            .preset
             .map(|p| format!("{p:?}"))
             .unwrap_or_else(|| "default".to_string())
     );
@@ -683,8 +691,6 @@ fn configure_gc_from_config(config: &RustMatConfig) -> Result<()> {
     Ok(())
 }
 
-
-
 async fn execute_command(command: Commands, cli: &Cli, config: &RustMatConfig) -> Result<()> {
     match command {
         Commands::Repl { verbose } => {
@@ -692,8 +698,8 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RustMatConfig) -
             let mut repl_config = config.clone();
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
             execute_repl(&repl_config).await
-        },
-        Commands::Kernel { 
+        }
+        Commands::Kernel {
             ip,
             key,
             transport,
@@ -736,7 +742,11 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RustMatConfig) -
             jit,
         } => execute_benchmark(file, iterations, jit, cli).await,
         Commands::Snapshot { snapshot_command } => execute_snapshot_command(snapshot_command).await,
-        Commands::Plot { mode, width, height } => execute_plot_command(mode, width, height, config).await,
+        Commands::Plot {
+            mode,
+            width,
+            height,
+        } => execute_plot_command(mode, width, height, config).await,
         Commands::Config { config_command } => execute_config_command(config_command, config).await,
     }
 }
@@ -754,9 +764,12 @@ async fn execute_repl(config: &RustMatConfig) -> Result<()> {
     );
 
     // Create enhanced REPL engine with optional snapshot loading
-    let mut engine =
-        ReplEngine::with_snapshot(enable_jit, config.runtime.verbose, config.runtime.snapshot_path.as_ref())
-            .context("Failed to create REPL engine")?;
+    let mut engine = ReplEngine::with_snapshot(
+        enable_jit,
+        config.runtime.verbose,
+        config.runtime.snapshot_path.as_ref(),
+    )
+    .context("Failed to create REPL engine")?;
 
     info!("RustMat REPL ready");
 
@@ -775,7 +788,9 @@ async fn execute_repl(config: &RustMatConfig) -> Result<()> {
     }
     println!(
         "Garbage collector: {:?}",
-        config.gc.preset
+        config
+            .gc
+            .preset
             .map(|p| format!("{p:?}"))
             .unwrap_or_else(|| "default".to_string())
     );
@@ -789,13 +804,13 @@ async fn execute_repl(config: &RustMatConfig) -> Result<()> {
 
     let mut input = String::new();
     let is_interactive = atty::is(atty::Stream::Stdin);
-    
+
     loop {
         if is_interactive {
             print!("rustmat> ");
             io::stdout().flush().unwrap();
         }
-        
+
         input.clear();
         match io::stdin().read_line(&mut input) {
             Ok(0) => {
@@ -840,7 +855,7 @@ async fn execute_repl(config: &RustMatConfig) -> Result<()> {
                 // Execute the input using the enhanced engine
                 match engine.execute(line) {
                     Ok(result) => {
-                                if let Some(error) = result.error {
+                        if let Some(error) = result.error {
                             eprintln!("Error: {error}");
                         } else if let Some(value) = result.value {
                             println!("ans = {value:?}");
@@ -924,7 +939,7 @@ async fn execute_kernel(
     };
 
     let mut server = KernelServer::new(config);
-    
+
     info!("Starting kernel server...");
     server
         .start()
@@ -960,13 +975,13 @@ async fn execute_kernel_with_connection(connection_file: PathBuf, timeout: u64) 
     };
 
     let mut server = KernelServer::new(config);
-    
+
     server
         .start()
         .await
         .context("Failed to start kernel server")?;
 
-    // Keep running until interrupted  
+    // Keep running until interrupted
     tokio::signal::ctrl_c()
         .await
         .context("Failed to listen for ctrl-c")?;
@@ -983,15 +998,24 @@ async fn execute_script(script: PathBuf, cli: &Cli, config: &RustMatConfig) -> R
     execute_script_with_args(script, vec![], cli, config).await
 }
 
-async fn execute_script_with_args(script: PathBuf, _args: Vec<String>, _cli: &Cli, config: &RustMatConfig) -> Result<()> {
+async fn execute_script_with_args(
+    script: PathBuf,
+    _args: Vec<String>,
+    _cli: &Cli,
+    config: &RustMatConfig,
+) -> Result<()> {
     info!("Executing script: {script:?}");
 
     let content = fs::read_to_string(&script)
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
     let enable_jit = config.jit.enabled;
-    let mut engine = ReplEngine::with_snapshot(enable_jit, config.runtime.verbose, config.runtime.snapshot_path.as_ref())
-        .context("Failed to create execution engine")?;
+    let mut engine = ReplEngine::with_snapshot(
+        enable_jit,
+        config.runtime.verbose,
+        config.runtime.snapshot_path.as_ref(),
+    )
+    .context("Failed to create execution engine")?;
 
     let start_time = std::time::Instant::now();
     let result = engine
@@ -1036,9 +1060,9 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                 }
                 Err(e) => {
                     error!("Minor GC failed: {e}");
-                std::process::exit(1);
+                    std::process::exit(1);
+                }
             }
-        }
         }
         GcCommand::Major => {
             let start = std::time::Instant::now();
@@ -1049,9 +1073,9 @@ async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
                 }
                 Err(e) => {
                     error!("Major GC failed: {e}");
-            std::process::exit(1);
-        }
-    }
+                    std::process::exit(1);
+                }
+            }
         }
         GcCommand::Config => {
             println!("Current GC Configuration:");
@@ -1228,10 +1252,10 @@ async fn execute_plot_command(
     config: &RustMatConfig,
 ) -> Result<()> {
     info!("Starting interactive plotting window");
-    
+
     // Determine the plotting mode
     let plot_mode = mode.unwrap_or(config.plotting.mode);
-    
+
     match plot_mode {
         PlotMode::Auto => {
             // Auto-detect environment for plotting
@@ -1243,12 +1267,8 @@ async fn execute_plot_command(
                 execute_gui_plot(width, height, config).await
             }
         }
-        PlotMode::Gui => {
-            execute_gui_plot(width, height, config).await
-        }
-        PlotMode::Headless => {
-            execute_headless_plot().await
-        }
+        PlotMode::Gui => execute_gui_plot(width, height, config).await,
+        PlotMode::Headless => execute_headless_plot().await,
         PlotMode::Jupyter => {
             info!("Jupyter plotting mode not yet implemented");
             println!("Jupyter plotting mode will be available in future releases.");
@@ -1258,9 +1278,13 @@ async fn execute_plot_command(
 }
 
 /// Execute GUI plotting
-async fn execute_gui_plot(_width: Option<u32>, _height: Option<u32>, _config: &RustMatConfig) -> Result<()> {
+async fn execute_gui_plot(
+    _width: Option<u32>,
+    _height: Option<u32>,
+    _config: &RustMatConfig,
+) -> Result<()> {
     info!("Initializing GUI plotting window");
-    
+
     // Use rustmat-plot's interactive plotting
     match rustmat_plot::interactive_plot().await {
         Ok(()) => {
@@ -1277,13 +1301,13 @@ async fn execute_gui_plot(_width: Option<u32>, _height: Option<u32>, _config: &R
 /// Execute headless plotting (generates static images)
 async fn execute_headless_plot() -> Result<()> {
     info!("Generating sample static plots");
-    
+
     // Generate some sample plots to demonstrate headless functionality
     let sample_data_x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let sample_data_y = vec![1.0, 4.0, 2.0, 8.0, 3.0];
-    
+
     let options = rustmat_plot::PlotOptions::default();
-    
+
     match rustmat_plot::plot_line(&sample_data_x, &sample_data_y, "sample_plot.png", options) {
         Ok(()) => {
             println!("Sample plot generated: sample_plot.png");
@@ -1300,40 +1324,44 @@ async fn execute_headless_plot() -> Result<()> {
 fn is_gui_available() -> bool {
     // Simple heuristic: check if we're in a TTY and not in a known headless environment
     use std::env;
-    
+
     // Check for headless environment indicators
-    if env::var("CI").is_ok() || 
-       env::var("GITHUB_ACTIONS").is_ok() ||
-       env::var("HEADLESS").is_ok() ||
-       env::var("NO_GUI").is_ok() {
+    if env::var("CI").is_ok()
+        || env::var("GITHUB_ACTIONS").is_ok()
+        || env::var("HEADLESS").is_ok()
+        || env::var("NO_GUI").is_ok()
+    {
         return false;
     }
-    
+
     // Check if running in SSH without X11 forwarding
     if env::var("SSH_CLIENT").is_ok() && env::var("DISPLAY").is_err() {
         return false;
     }
-    
+
     // Use atty to check if stdout is a TTY
     atty::is(atty::Stream::Stdout)
 }
 
 /// Execute config command
-async fn execute_config_command(config_command: ConfigCommand, config: &RustMatConfig) -> Result<()> {
+async fn execute_config_command(
+    config_command: ConfigCommand,
+    config: &RustMatConfig,
+) -> Result<()> {
     match config_command {
         ConfigCommand::Show => {
             println!("Current RustMat Configuration:");
             println!("==============================");
-            
-            let yaml = serde_yaml::to_string(config)
-                .context("Failed to serialize configuration")?;
+
+            let yaml =
+                serde_yaml::to_string(config).context("Failed to serialize configuration")?;
             println!("{}", yaml);
         }
         ConfigCommand::Generate { output } => {
             let sample_config = RustMatConfig::default();
             ConfigLoader::save_to_file(&sample_config, &output)
                 .with_context(|| format!("Failed to write config to {}", output.display()))?;
-            
+
             println!("Sample configuration generated: {}", output.display());
             println!("Edit this file to customize your RustMat settings.");
         }
@@ -1352,20 +1380,25 @@ async fn execute_config_command(config_command: ConfigCommand, config: &RustMatC
             println!("RustMat Configuration File Locations:");
             println!("====================================");
             println!();
-            
+
             if let Ok(config_path) = std::env::var("RUSTMAT_CONFIG") {
                 println!("Environment override: {}", config_path);
             }
-            
+
             println!("Current directory:");
             if let Ok(current_dir) = std::env::current_dir() {
-                for name in &[".rustmat.yaml", ".rustmat.yml", ".rustmat.json", ".rustmat.toml"] {
+                for name in &[
+                    ".rustmat.yaml",
+                    ".rustmat.yml",
+                    ".rustmat.json",
+                    ".rustmat.toml",
+                ] {
                     let path = current_dir.join(name);
                     let exists = if path.exists() { " (exists)" } else { "" };
                     println!("  {}{}", path.display(), exists);
                 }
             }
-            
+
             println!();
             println!("Home directory:");
             if let Some(home_dir) = dirs::home_dir() {
@@ -1374,7 +1407,7 @@ async fn execute_config_command(config_command: ConfigCommand, config: &RustMatC
                     let exists = if path.exists() { " (exists)" } else { "" };
                     println!("  {}{}", path.display(), exists);
                 }
-                
+
                 let config_dir = home_dir.join(".config/rustmat");
                 for name in &["config.yaml", "config.yml", "config.json"] {
                     let path = config_dir.join(name);
@@ -1382,12 +1415,16 @@ async fn execute_config_command(config_command: ConfigCommand, config: &RustMatC
                     println!("  {}{}", path.display(), exists);
                 }
             }
-            
+
             #[cfg(unix)]
             {
                 println!();
                 println!("System-wide:");
-                for name in &["/etc/rustmat/config.yaml", "/etc/rustmat/config.yml", "/etc/rustmat/config.json"] {
+                for name in &[
+                    "/etc/rustmat/config.yaml",
+                    "/etc/rustmat/config.yml",
+                    "/etc/rustmat/config.json",
+                ] {
                     let path = std::path::Path::new(name);
                     let exists = if path.exists() { " (exists)" } else { "" };
                     println!("  {}{}", path.display(), exists);
@@ -1587,7 +1624,7 @@ async fn execute_snapshot_command(snapshot_command: SnapshotCommand) -> Result<(
 
 fn show_version(detailed: bool) {
     println!("RustMat v{}", env!("CARGO_PKG_VERSION"));
-    
+
     if detailed {
         println!(
             "Built with Rust {}",
@@ -1624,7 +1661,7 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     println!("RustMat System Information");
     println!("==========================");
     println!();
-    
+
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
     println!(
         "Rust Version: {}",
@@ -1658,7 +1695,7 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     }
     println!("  GC Statistics: {}", cli.gc_stats);
     println!();
-    
+
     println!("Environment:");
     println!("  RUSTMAT_DEBUG: {:?}", std::env::var("RUSTMAT_DEBUG").ok());
     println!(
@@ -1735,5 +1772,4 @@ fn show_repl_help() {
     println!("  • Use '.gc' to monitor memory usage and collection");
     println!();
     println!("Press Enter after each statement to execute.");
-} 
-
+}

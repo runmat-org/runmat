@@ -1,5 +1,5 @@
 //! RustMat Plot - World-Class Interactive Plotting Library
-//! 
+//!
 //! This library provides both static and interactive plotting capabilities
 //! with GPU acceleration, comprehensive 2D/3D support, and Jupyter integration.
 
@@ -37,30 +37,24 @@ pub use core::*;
 pub use gui::{PlotWindow, WindowConfig};
 
 // Legacy IPC system (deprecated)
-pub use gui::{GuiHandle, GuiManager, init_gui_handle, get_gui_handle};
+pub use gui::{get_gui_handle, init_gui_handle, GuiHandle, GuiManager};
 
 // Robust GUI thread management
 pub use gui::{
-    GuiThreadManager, GuiOperationResult, GuiErrorCode,
-    register_main_thread, is_main_thread, initialize_gui_manager,
-    get_gui_manager, show_plot_global, health_check_global,
+    get_gui_manager, health_check_global, initialize_gui_manager, is_main_thread,
+    register_main_thread, show_plot_global, GuiErrorCode, GuiOperationResult, GuiThreadManager,
 };
 
 // Native window system
 pub use gui::{
-    NativeWindowManager, NativeWindowResult, initialize_native_window,
-    show_plot_native_window, is_native_window_available,
+    initialize_native_window, is_native_window_available, show_plot_native_window,
+    NativeWindowManager, NativeWindowResult,
 };
 
 // Styling and theming system
 pub use styling::{
-    PlotThemeConfig, ThemeVariant, ModernDarkTheme, Typography, Layout,
-    validate_theme_config,
+    validate_theme_config, Layout, ModernDarkTheme, PlotThemeConfig, ThemeVariant, Typography,
 };
-
-
-
-
 
 /// Environment variable specifying the path to the optional YAML config file.
 pub const CONFIG_ENV: &str = "RUSTMAT_PLOT_CONFIG";
@@ -172,15 +166,33 @@ pub struct PlotConfig {
 }
 
 // Default values for configuration
-fn default_line_color() -> String { "#0000ff".to_string() }
-fn default_scatter_color() -> String { "#ff0000".to_string() }
-fn default_bar_color() -> String { "#00ff00".to_string() }
-fn default_hist_color() -> String { "#ffff00".to_string() }
-fn default_background() -> String { "#ffffff".to_string() }
-fn default_width() -> u32 { 800 }
-fn default_height() -> u32 { 600 }
-fn default_line_width() -> u32 { 2 }
-fn default_marker_size() -> u32 { 4 }
+fn default_line_color() -> String {
+    "#0000ff".to_string()
+}
+fn default_scatter_color() -> String {
+    "#ff0000".to_string()
+}
+fn default_bar_color() -> String {
+    "#00ff00".to_string()
+}
+fn default_hist_color() -> String {
+    "#ffff00".to_string()
+}
+fn default_background() -> String {
+    "#ffffff".to_string()
+}
+fn default_width() -> u32 {
+    800
+}
+fn default_height() -> u32 {
+    600
+}
+fn default_line_width() -> u32 {
+    2
+}
+fn default_marker_size() -> u32 {
+    4
+}
 
 impl Default for PlotConfig {
     fn default() -> Self {
@@ -232,7 +244,7 @@ pub fn plot_line(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> R
     if xs.len() != ys.len() {
         return Err("input length mismatch".into());
     }
-    
+
     // Use the new world-class plotting system
     let line_plot = plots::LinePlot::new(xs.to_vec(), ys.to_vec())
         .map_err(|e| format!("Failed to create line plot: {}", e))?
@@ -240,16 +252,16 @@ pub fn plot_line(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> R
         .with_style(
             glam::Vec4::new(1.0, 0.0, 1.0, 1.0), // Bright magenta for debugging
             2.0,
-            plots::LineStyle::Solid
+            plots::LineStyle::Solid,
         );
-    
+
     let mut figure = plots::Figure::new()
         .with_title("Line Plot")
         .with_labels("X", "Y")
         .with_grid(true);
-    
+
     figure.add_line_plot(line_plot);
-    
+
     // Export via simple_plots for now (fallback)
     if path.ends_with(".png") {
         simple_plots::line_plot_png(xs, ys, path, &_options)
@@ -261,11 +273,16 @@ pub fn plot_line(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> R
 }
 
 /// Create a scatter plot using the modern plotting system (backward compatibility)
-pub fn plot_scatter(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> Result<(), String> {
+pub fn plot_scatter(
+    xs: &[f64],
+    ys: &[f64],
+    path: &str,
+    _options: PlotOptions,
+) -> Result<(), String> {
     if xs.len() != ys.len() {
         return Err("input length mismatch".into());
     }
-    
+
     // Use the new world-class plotting system
     let scatter_plot = plots::ScatterPlot::new(xs.to_vec(), ys.to_vec())
         .map_err(|e| format!("Failed to create scatter plot: {}", e))?
@@ -273,16 +290,16 @@ pub fn plot_scatter(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -
         .with_style(
             glam::Vec4::new(0.8, 0.2, 0.2, 1.0), // Red
             5.0,
-            plots::MarkerStyle::Circle
+            plots::MarkerStyle::Circle,
         );
-    
+
     let mut figure = plots::Figure::new()
         .with_title("Scatter Plot")
         .with_labels("X", "Y")
         .with_grid(true);
-    
+
     figure.add_scatter_plot(scatter_plot);
-    
+
     // Export via simple_plots for now (fallback)
     if path.ends_with(".png") {
         simple_plots::scatter_plot_png(xs, ys, path, &_options)
@@ -294,24 +311,29 @@ pub fn plot_scatter(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -
 }
 
 /// Create a bar chart using the modern plotting system (backward compatibility)
-pub fn plot_bar(labels: &[String], values: &[f64], path: &str, _options: PlotOptions) -> Result<(), String> {
+pub fn plot_bar(
+    labels: &[String],
+    values: &[f64],
+    path: &str,
+    _options: PlotOptions,
+) -> Result<(), String> {
     if labels.len() != values.len() {
         return Err("labels and values length mismatch".into());
     }
-    
+
     // Use the new world-class plotting system
     let bar_chart = plots::BarChart::new(labels.to_vec(), values.to_vec())
         .map_err(|e| format!("Failed to create bar chart: {}", e))?
         .with_label("Values")
         .with_style(glam::Vec4::new(0.2, 0.6, 0.3, 1.0), 0.8); // Green bars with 80% width
-    
+
     let mut figure = plots::Figure::new()
         .with_title("Bar Chart")
         .with_labels("Categories", "Values")
         .with_grid(true);
-    
+
     figure.add_bar_chart(bar_chart);
-    
+
     // Export via simple_plots for now (fallback)
     if path.ends_with(".png") {
         simple_plots::bar_chart_png(labels, values, path, &_options)
@@ -321,20 +343,25 @@ pub fn plot_bar(labels: &[String], values: &[f64], path: &str, _options: PlotOpt
 }
 
 /// Create a histogram using the modern plotting system (backward compatibility)
-pub fn plot_histogram(data: &[f64], bins: usize, path: &str, _options: PlotOptions) -> Result<(), String> {
+pub fn plot_histogram(
+    data: &[f64],
+    bins: usize,
+    path: &str,
+    _options: PlotOptions,
+) -> Result<(), String> {
     // Use the new world-class plotting system
     let histogram = plots::Histogram::new(data.to_vec(), bins)
         .map_err(|e| format!("Failed to create histogram: {}", e))?
         .with_label("Frequency")
         .with_style(glam::Vec4::new(0.6, 0.3, 0.7, 1.0), false); // Purple, not normalized
-    
+
     let mut figure = plots::Figure::new()
         .with_title("Histogram")
         .with_labels("Values", "Frequency")
         .with_grid(true);
-    
+
     figure.add_histogram(histogram);
-    
+
     // Export via simple_plots for now (fallback)
     if path.ends_with(".png") {
         simple_plots::histogram_png(data, bins, path, &_options)
@@ -350,13 +377,13 @@ pub fn plot_histogram(data: &[f64], bins: usize, path: &str, _options: PlotOptio
 pub async fn show_interactive() -> Result<(), Box<dyn std::error::Error>> {
     let config = WindowConfig::default();
     let mut window = PlotWindow::new(config).await?;
-    
+
     // Add a test plot
     window.add_test_plot();
-    
+
     // Run the event loop
     window.run().await?;
-    
+
     Ok(())
 }
 
@@ -368,7 +395,9 @@ pub async fn interactive_plot() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Launch an interactive plot window with custom configuration (requires GUI feature)  
 #[cfg(feature = "gui")]
-pub async fn show_interactive_with_config(config: WindowConfig) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn show_interactive_with_config(
+    config: WindowConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut window = PlotWindow::new(config).await?;
     window.add_test_plot();
     window.run().await?;
@@ -377,16 +406,18 @@ pub async fn show_interactive_with_config(config: WindowConfig) -> Result<(), Bo
 
 /// Launch an interactive plot window with a specific figure (requires GUI feature)
 #[cfg(feature = "gui")]
-pub async fn show_interactive_with_figure(figure: &plots::Figure) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn show_interactive_with_figure(
+    figure: &plots::Figure,
+) -> Result<(), Box<dyn std::error::Error>> {
     let config = WindowConfig::default();
     let mut window = PlotWindow::new(config).await?;
-    
+
     // Add the actual figure data instead of test plot
     window.set_figure(figure.clone());
-    
+
     // Run the event loop
     window.run().await?;
-    
+
     Ok(())
 }
 
@@ -410,7 +441,9 @@ pub async fn show_interactive_with_config(_config: ()) -> Result<(), Box<dyn std
 
 /// Placeholder for non-GUI builds
 #[cfg(not(feature = "gui"))]
-pub async fn show_interactive_with_figure(_figure: &plots::Figure) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn show_interactive_with_figure(
+    _figure: &plots::Figure,
+) -> Result<(), Box<dyn std::error::Error>> {
     Err("GUI feature not enabled. Build with --features gui to use interactive plotting.".into())
 }
 
@@ -419,7 +452,10 @@ pub fn show_interactive_via_ipc(figure: plots::Figure) -> Result<String, String>
     if let Some(gui_handle) = get_gui_handle() {
         gui_handle.show_plot(figure)
     } else {
-        Err("GUI system not initialized. Make sure to call init_gui_system() from the main thread.".to_string())
+        Err(
+            "GUI system not initialized. Make sure to call init_gui_system() from the main thread."
+                .to_string(),
+        )
     }
 }
 
@@ -427,9 +463,17 @@ pub fn show_interactive_via_ipc(figure: plots::Figure) -> Result<String, String>
 pub fn show_interactive_robust(figure: plots::Figure) -> Result<String, String> {
     match show_plot_global(figure) {
         Ok(GuiOperationResult::Success(msg)) => Ok(msg),
-        Ok(GuiOperationResult::Error { message, error_code: _, recoverable: _ }) => Err(message),
+        Ok(GuiOperationResult::Error {
+            message,
+            error_code: _,
+            recoverable: _,
+        }) => Err(message),
         Ok(GuiOperationResult::Cancelled(msg)) => Err(msg),
-        Err(GuiOperationResult::Error { message, error_code: _, recoverable: _ }) => Err(message),
+        Err(GuiOperationResult::Error {
+            message,
+            error_code: _,
+            recoverable: _,
+        }) => Err(message),
         Err(GuiOperationResult::Cancelled(msg)) => Err(msg),
         Err(GuiOperationResult::Success(msg)) => Ok(msg), // Shouldn't happen, but handle it
     }

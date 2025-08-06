@@ -1,5 +1,5 @@
 //! Main window management for interactive GUI plotting
-//! 
+//!
 //! Provides the main application window with integrated plot viewport
 //! and control panels using winit and egui.
 
@@ -56,11 +56,11 @@ impl PlotWindow {
     pub async fn new(_config: WindowConfig) -> Result<Self, Box<dyn std::error::Error>> {
         Err("GUI feature not enabled".into())
     }
-    
+
     pub fn add_test_plot(&mut self) {
         // No-op for non-GUI builds
     }
-    
+
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         Err("GUI feature not enabled".into())
     }

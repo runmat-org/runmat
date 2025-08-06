@@ -1,5 +1,5 @@
 //! Volume rendering implementation
-//! 
+//!
 //! GPU-accelerated volume visualization.
 
 // Placeholder for volume rendering implementation

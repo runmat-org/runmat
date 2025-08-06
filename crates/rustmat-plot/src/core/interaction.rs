@@ -1,5 +1,5 @@
 //! Event handling and user interaction for interactive plots
-//! 
+//!
 //! Manages mouse, keyboard, and touch input for plot navigation
 //! and data interaction.
 

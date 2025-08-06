@@ -1,21 +1,21 @@
 //! Jupyter notebook integration for interactive plotting
-//! 
+//!
 //! Provides seamless integration with Jupyter notebooks, enabling interactive
 //! plotting output directly in notebook cells with full GPU acceleration.
 
 use std::collections::HashMap;
 // use std::path::Path; // Not currently used
-use crate::plots::{Figure, LinePlot, ScatterPlot, SurfacePlot, PointCloudPlot};
+use crate::plots::{Figure, LinePlot, PointCloudPlot, ScatterPlot, SurfacePlot};
 
 /// Jupyter notebook output handler
 #[derive(Debug)]
 pub struct JupyterBackend {
     /// Output format preferences
     pub output_format: OutputFormat,
-    
+
     /// Interactive mode settings
     interactive_mode: bool,
-    
+
     /// Export settings
     export_settings: ExportSettings,
 }
@@ -40,18 +40,18 @@ pub enum OutputFormat {
 pub struct WidgetState {
     /// Widget ID
     pub widget_id: String,
-    
+
     /// Current view state
     pub camera_position: [f32; 3],
     pub camera_target: [f32; 3],
     pub zoom_level: f32,
-    
+
     /// Visibility states
     pub visible_plots: Vec<bool>,
-    
+
     /// Style overrides
     pub style_overrides: HashMap<String, String>,
-    
+
     /// Interactive mode
     pub interactive: bool,
 }
@@ -62,16 +62,16 @@ pub struct ExportSettings {
     /// Image resolution for raster formats
     pub width: u32,
     pub height: u32,
-    
+
     /// DPI for high-resolution displays
     pub dpi: f32,
-    
+
     /// Background color
     pub background_color: [f32; 4],
-    
+
     /// Quality settings
     pub quality: Quality,
-    
+
     /// Include metadata
     pub include_metadata: bool,
 }
@@ -123,24 +123,24 @@ impl JupyterBackend {
             export_settings: ExportSettings::default(),
         }
     }
-    
+
     /// Create backend with specific output format
     pub fn with_format(format: OutputFormat) -> Self {
         let mut backend = Self::new();
         backend.output_format = format;
         backend
     }
-    
+
     /// Set interactive mode
     pub fn set_interactive(&mut self, interactive: bool) {
         self.interactive_mode = interactive;
     }
-    
+
     /// Set export settings
     pub fn set_export_settings(&mut self, settings: ExportSettings) {
         self.export_settings = settings;
     }
-    
+
     /// Display a figure in Jupyter notebook
     pub fn display_figure(&mut self, figure: &mut Figure) -> Result<String, String> {
         match self.output_format {
@@ -151,64 +151,66 @@ impl JupyterBackend {
             OutputFormat::PlotlyJSON => self.export_plotly_json(figure),
         }
     }
-    
+
     /// Display a line plot
     pub fn display_line_plot(&mut self, plot: &LinePlot) -> Result<String, String> {
         let mut figure = Figure::new();
         figure.add_line_plot(plot.clone());
         self.display_figure(&mut figure)
     }
-    
+
     /// Display a scatter plot
     pub fn display_scatter_plot(&mut self, plot: &ScatterPlot) -> Result<String, String> {
         let mut figure = Figure::new();
         figure.add_scatter_plot(plot.clone());
         self.display_figure(&mut figure)
     }
-    
+
     /// Display a surface plot
     pub fn display_surface_plot(&mut self, _plot: &SurfacePlot) -> Result<String, String> {
         // TODO: Implement once Figure supports 3D plots
         Ok("<div>3D Surface Plot (not yet integrated with Figure)</div>".to_string())
     }
-    
+
     /// Display a point cloud
     pub fn display_point_cloud(&mut self, _plot: &PointCloudPlot) -> Result<String, String> {
         // TODO: Implement once Figure supports 3D plots
         Ok("<div>3D Point Cloud (not yet integrated with Figure)</div>".to_string())
     }
-    
+
     // Session IDs removed as not currently used
-    
+
     /// Export as PNG image
     fn export_png(&self, _figure: &mut Figure) -> Result<String, String> {
         // TODO: Implement PNG export via static plotting
         let output_path = format!("/tmp/rustmat_plot_{}.png", Self::generate_plot_id());
-        
+
         // TODO: Use static plotting backend for PNG export
         // crate::simple_plots::export_figure_png(figure, &output_path, &self.export_settings)?;
-        
+
         // Return HTML img tag for Jupyter
         Ok(format!(
             "<img src='{}' alt='RustMat Plot' width='{}' height='{}' />",
             output_path, self.export_settings.width, self.export_settings.height
         ))
     }
-    
+
     /// Export as SVG image
     fn export_svg(&self, _figure: &mut Figure) -> Result<String, String> {
         // TODO: Implement SVG export via static plotting
-        let svg_content = format!("<svg width='{}' height='{}'><text x='50' y='50'>Figure SVG Placeholder</text></svg>",
-            self.export_settings.width, self.export_settings.height);
-        
+        let svg_content = format!(
+            "<svg width='{}' height='{}'><text x='50' y='50'>Figure SVG Placeholder</text></svg>",
+            self.export_settings.width, self.export_settings.height
+        );
+
         // Return SVG directly for Jupyter
         Ok(svg_content)
     }
-    
+
     /// Export as interactive HTML widget
     fn export_html_widget(&self, figure: &mut Figure) -> Result<String, String> {
         let widget_id = Self::generate_plot_id();
-        
+
         // Generate HTML with embedded JavaScript for interactivity
         let html = format!(
             r#"
@@ -272,28 +274,28 @@ impl JupyterBackend {
             self.interactive_mode,
             widget_id
         );
-        
+
         Ok(html)
     }
-    
+
     /// Export as base64 encoded image
     fn export_base64(&self, _figure: &mut Figure) -> Result<String, String> {
         // TODO: Generate PNG and encode as base64
         let png_data = vec![0; 1000]; // Placeholder data
         let base64_data = base64_encode(&png_data);
-        
+
         // Return data URL for Jupyter
         Ok(format!(
             "<img src='data:image/png;base64,{}' alt='RustMat Plot' width='{}' height='{}' />",
             base64_data, self.export_settings.width, self.export_settings.height
         ))
     }
-    
+
     /// Export as Plotly-compatible JSON
     fn export_plotly_json(&self, figure: &mut Figure) -> Result<String, String> {
         // Convert Figure to Plotly JSON format
         let plotly_data = self.convert_to_plotly_format(figure)?;
-        
+
         let html = format!(
             r#"
             <div id="plotly_div_{}" style="width: {}px; height: {}px;"></div>
@@ -308,10 +310,10 @@ impl JupyterBackend {
             Self::generate_plot_id(),
             plotly_data
         );
-        
+
         Ok(html)
     }
-    
+
     /// Generate unique plot ID
     fn generate_plot_id() -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -321,19 +323,19 @@ impl JupyterBackend {
             .as_micros();
         format!("{}", timestamp)
     }
-    
+
     /// Serialize figure data for JavaScript
     fn serialize_figure_data(&self, _figure: &Figure) -> Result<String, String> {
         // TODO: Implement proper serialization
         Ok("{}".to_string())
     }
-    
+
     /// Serialize plot options for JavaScript
     fn serialize_plot_options(&self) -> Result<String, String> {
         // TODO: Implement proper serialization
         Ok("{}".to_string())
     }
-    
+
     /// Convert figure to Plotly format
     fn convert_to_plotly_format(&self, _figure: &Figure) -> Result<String, String> {
         // TODO: Implement Plotly conversion
@@ -350,26 +352,25 @@ impl Default for JupyterBackend {
 /// Utility functions for Jupyter integration
 pub mod utils {
     use super::*;
-    
+
     /// Check if running in Jupyter environment
     pub fn is_jupyter_environment() -> bool {
-        std::env::var("JPY_PARENT_PID").is_ok() || 
-        std::env::var("JUPYTER_RUNTIME_DIR").is_ok()
+        std::env::var("JPY_PARENT_PID").is_ok() || std::env::var("JUPYTER_RUNTIME_DIR").is_ok()
     }
-    
+
     /// Get Jupyter kernel information
     pub fn get_kernel_info() -> Option<KernelInfo> {
         if !is_jupyter_environment() {
             return None;
         }
-        
+
         Some(KernelInfo {
             kernel_type: detect_kernel_type(),
             session_id: std::env::var("JPY_SESSION_NAME").ok(),
             runtime_dir: std::env::var("JUPYTER_RUNTIME_DIR").ok(),
         })
     }
-    
+
     /// Detect the type of Jupyter kernel
     fn detect_kernel_type() -> KernelType {
         if std::env::var("IPYKERNEL").is_ok() {
@@ -380,7 +381,7 @@ pub mod utils {
             KernelType::Unknown
         }
     }
-    
+
     /// Auto-configure backend for current environment
     pub fn auto_configure_backend() -> JupyterBackend {
         if is_jupyter_environment() {
@@ -417,7 +418,7 @@ fn base64_encode(data: &[u8]) -> String {
 pub trait JupyterDisplay {
     /// Display this object in Jupyter notebook
     fn display(&self) -> Result<String, String>;
-    
+
     /// Display with specific format
     fn display_as(&self, format: OutputFormat) -> Result<String, String>;
 }
@@ -430,56 +431,56 @@ pub trait JupyterDisplay {
 mod tests {
     use super::*;
     use crate::plots::LinePlot;
-    
+
     #[test]
     fn test_jupyter_backend_creation() {
         let backend = JupyterBackend::new();
-        
+
         assert_eq!(backend.output_format, OutputFormat::HTML);
         assert!(backend.interactive_mode);
     }
-    
+
     #[test]
     fn test_jupyter_backend_with_format() {
         let backend = JupyterBackend::with_format(OutputFormat::PNG);
-        
+
         assert_eq!(backend.output_format, OutputFormat::PNG);
     }
-    
+
     #[test]
     fn test_export_settings() {
         let settings = ExportSettings::default();
-        
+
         assert_eq!(settings.width, 800);
         assert_eq!(settings.height, 600);
         assert_eq!(settings.quality, Quality::Standard);
         assert!(settings.include_metadata);
     }
-    
+
     #[test]
     fn test_jupyter_environment_detection() {
         // This will be false in test environment
         assert!(!utils::is_jupyter_environment());
     }
-    
+
     #[test]
     fn test_auto_configure_backend() {
         let backend = utils::auto_configure_backend();
-        
+
         // Should default to PNG when not in Jupyter
         assert_eq!(backend.output_format, OutputFormat::PNG);
     }
-    
+
     #[test]
     fn test_jupyter_backend_functionality() {
         let line_plot = LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap();
         let mut backend = JupyterBackend::new();
-        
+
         // Should not panic and return some output
         let result = backend.display_line_plot(&line_plot);
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_widget_state() {
         let state = WidgetState {
@@ -491,7 +492,7 @@ mod tests {
             style_overrides: HashMap::new(),
             interactive: true,
         };
-        
+
         assert_eq!(state.widget_id, "test_widget");
         assert_eq!(state.camera_position, [0.0, 0.0, 5.0]);
         assert!(state.interactive);

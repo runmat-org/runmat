@@ -1,5 +1,5 @@
 //! Export functionality for static images and interactive formats
-//! 
+//!
 //! Supports PNG, SVG, PDF, HTML, and other output formats.
 
 pub mod image;

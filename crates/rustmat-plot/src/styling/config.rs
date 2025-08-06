@@ -4,9 +4,9 @@
 //! and use in its main configuration system, while keeping the plotting
 //! library in control of its own theming.
 
-use serde::{Deserialize, Serialize};
+use super::theme::{Layout, ModernDarkTheme, Typography};
 use glam::Vec4;
-use super::theme::{ModernDarkTheme, Typography, Layout};
+use serde::{Deserialize, Serialize};
 
 /// Theme variants available in the plotting system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,19 +33,19 @@ impl Default for ThemeVariant {
 pub struct PlotThemeConfig {
     /// Theme variant to use
     pub variant: ThemeVariant,
-    
+
     /// Typography settings
     pub typography: TypographyConfig,
-    
+
     /// Layout and spacing settings
     pub layout: LayoutConfig,
-    
+
     /// Custom color overrides (when variant is Custom)
     pub custom_colors: Option<CustomColorConfig>,
-    
+
     /// Grid settings
     pub grid: GridConfig,
-    
+
     /// Animation and interaction settings
     pub interaction: InteractionConfig,
 }
@@ -72,12 +72,12 @@ pub struct TypographyConfig {
     pub axis_label_font_size: f32,
     pub tick_label_font_size: f32,
     pub legend_font_size: f32,
-    
+
     /// Font families
     pub title_font_family: String,
     pub body_font_family: String,
     pub monospace_font_family: String,
-    
+
     /// Typography features
     pub enable_antialiasing: bool,
     pub enable_subpixel_rendering: bool,
@@ -109,16 +109,16 @@ pub struct LayoutConfig {
     pub title_margin: f32,
     pub axis_margin: f32,
     pub legend_margin: f32,
-    
+
     /// Line widths
     pub grid_line_width: f32,
     pub axis_line_width: f32,
     pub data_line_width: f32,
-    
+
     /// Point and marker sizes
     pub point_size: f32,
     pub marker_size: f32,
-    
+
     /// Layout features
     pub auto_adjust_margins: bool,
     pub maintain_aspect_ratio: bool,
@@ -150,20 +150,20 @@ pub struct CustomColorConfig {
     pub background_primary: String,
     pub background_secondary: String,
     pub plot_background: String,
-    
+
     /// Text colors
     pub text_primary: String,
     pub text_secondary: String,
-    
+
     /// Accent colors
     pub accent_primary: String,
     pub accent_secondary: String,
-    
+
     /// Grid and axis colors
     pub grid_major: String,
     pub grid_minor: String,
     pub axis_color: String,
-    
+
     /// Data series colors
     pub data_colors: Vec<String>,
 }
@@ -201,11 +201,11 @@ pub struct GridConfig {
     /// Grid visibility
     pub show_major_grid: bool,
     pub show_minor_grid: bool,
-    
+
     /// Grid styling
     pub major_grid_alpha: f32,
     pub minor_grid_alpha: f32,
-    
+
     /// Grid spacing
     pub auto_grid_spacing: bool,
     pub major_grid_divisions: u32,
@@ -233,13 +233,13 @@ pub struct InteractionConfig {
     pub enable_animations: bool,
     pub animation_duration_ms: u32,
     pub animation_easing: String,
-    
+
     /// Interaction settings
     pub enable_zoom: bool,
     pub enable_pan: bool,
     pub enable_selection: bool,
     pub enable_tooltips: bool,
-    
+
     /// Performance settings
     pub max_fps: u32,
     pub enable_vsync: bool,
@@ -279,12 +279,12 @@ impl PlotThemeConfig {
             }
         }
     }
-    
+
     /// Validate this configuration
     pub fn validate(&self) -> Result<(), String> {
         validate_theme_config(self)
     }
-    
+
     /// Get the active typography settings
     pub fn get_typography(&self) -> Typography {
         Typography {
@@ -298,7 +298,7 @@ impl PlotThemeConfig {
             monospace_font_family: self.typography.monospace_font_family.clone(),
         }
     }
-    
+
     /// Get the active layout settings
     pub fn get_layout(&self) -> Layout {
         Layout {
@@ -326,13 +326,27 @@ pub trait PlotTheme {
 }
 
 impl PlotTheme for ModernDarkTheme {
-    fn get_background_color(&self) -> Vec4 { self.background_primary }
-    fn get_text_color(&self) -> Vec4 { self.text_primary }
-    fn get_accent_color(&self) -> Vec4 { self.accent_primary }
-    fn get_grid_color(&self) -> Vec4 { self.grid_major }
-    fn get_axis_color(&self) -> Vec4 { self.axis_color }
-    fn get_data_color(&self, index: usize) -> Vec4 { self.get_data_color(index) }
-    fn apply_to_egui(&self, ctx: &egui::Context) { self.apply_to_egui(ctx) }
+    fn get_background_color(&self) -> Vec4 {
+        self.background_primary
+    }
+    fn get_text_color(&self) -> Vec4 {
+        self.text_primary
+    }
+    fn get_accent_color(&self) -> Vec4 {
+        self.accent_primary
+    }
+    fn get_grid_color(&self) -> Vec4 {
+        self.grid_major
+    }
+    fn get_axis_color(&self) -> Vec4 {
+        self.axis_color
+    }
+    fn get_data_color(&self, index: usize) -> Vec4 {
+        self.get_data_color(index)
+    }
+    fn apply_to_egui(&self, ctx: &egui::Context) {
+        self.apply_to_egui(ctx)
+    }
 }
 
 /// Classic light theme (MATLAB-style)
@@ -355,25 +369,35 @@ impl Default for ClassicLightTheme {
             grid_color: Vec4::new(0.8, 0.8, 0.8, 0.8),
             axis_color: Vec4::new(0.3, 0.3, 0.3, 1.0),
             data_colors: vec![
-                Vec4::new(0.0, 0.5, 1.0, 1.0),   // Blue
-                Vec4::new(1.0, 0.5, 0.0, 1.0),   // Orange
-                Vec4::new(0.5, 0.8, 0.2, 1.0),   // Green
-                Vec4::new(0.8, 0.2, 0.8, 1.0),   // Magenta
-                Vec4::new(1.0, 0.8, 0.0, 1.0),   // Yellow
-                Vec4::new(0.2, 0.8, 0.8, 1.0),   // Cyan
-                Vec4::new(0.8, 0.2, 0.2, 1.0),   // Red
+                Vec4::new(0.0, 0.5, 1.0, 1.0), // Blue
+                Vec4::new(1.0, 0.5, 0.0, 1.0), // Orange
+                Vec4::new(0.5, 0.8, 0.2, 1.0), // Green
+                Vec4::new(0.8, 0.2, 0.8, 1.0), // Magenta
+                Vec4::new(1.0, 0.8, 0.0, 1.0), // Yellow
+                Vec4::new(0.2, 0.8, 0.8, 1.0), // Cyan
+                Vec4::new(0.8, 0.2, 0.2, 1.0), // Red
             ],
         }
     }
 }
 
 impl PlotTheme for ClassicLightTheme {
-    fn get_background_color(&self) -> Vec4 { self.background_color }
-    fn get_text_color(&self) -> Vec4 { self.text_color }
-    fn get_accent_color(&self) -> Vec4 { self.accent_color }
-    fn get_grid_color(&self) -> Vec4 { self.grid_color }
-    fn get_axis_color(&self) -> Vec4 { self.axis_color }
-    fn get_data_color(&self, index: usize) -> Vec4 { 
+    fn get_background_color(&self) -> Vec4 {
+        self.background_color
+    }
+    fn get_text_color(&self) -> Vec4 {
+        self.text_color
+    }
+    fn get_accent_color(&self) -> Vec4 {
+        self.accent_color
+    }
+    fn get_grid_color(&self) -> Vec4 {
+        self.grid_color
+    }
+    fn get_axis_color(&self) -> Vec4 {
+        self.axis_color
+    }
+    fn get_data_color(&self, index: usize) -> Vec4 {
         self.data_colors[index % self.data_colors.len()]
     }
     fn apply_to_egui(&self, ctx: &egui::Context) {
@@ -401,24 +425,34 @@ impl Default for HighContrastTheme {
             grid_color: Vec4::new(0.5, 0.5, 0.5, 1.0),
             axis_color: Vec4::new(1.0, 1.0, 1.0, 1.0),
             data_colors: vec![
-                Vec4::new(1.0, 1.0, 0.0, 1.0),   // Yellow
-                Vec4::new(0.0, 1.0, 1.0, 1.0),   // Cyan
-                Vec4::new(1.0, 0.0, 1.0, 1.0),   // Magenta
-                Vec4::new(1.0, 1.0, 1.0, 1.0),   // White
-                Vec4::new(1.0, 0.5, 0.0, 1.0),   // Orange
-                Vec4::new(0.5, 1.0, 0.5, 1.0),   // Light green
+                Vec4::new(1.0, 1.0, 0.0, 1.0), // Yellow
+                Vec4::new(0.0, 1.0, 1.0, 1.0), // Cyan
+                Vec4::new(1.0, 0.0, 1.0, 1.0), // Magenta
+                Vec4::new(1.0, 1.0, 1.0, 1.0), // White
+                Vec4::new(1.0, 0.5, 0.0, 1.0), // Orange
+                Vec4::new(0.5, 1.0, 0.5, 1.0), // Light green
             ],
         }
     }
 }
 
 impl PlotTheme for HighContrastTheme {
-    fn get_background_color(&self) -> Vec4 { self.background_color }
-    fn get_text_color(&self) -> Vec4 { self.text_color }
-    fn get_accent_color(&self) -> Vec4 { self.accent_color }
-    fn get_grid_color(&self) -> Vec4 { self.grid_color }
-    fn get_axis_color(&self) -> Vec4 { self.axis_color }
-    fn get_data_color(&self, index: usize) -> Vec4 { 
+    fn get_background_color(&self) -> Vec4 {
+        self.background_color
+    }
+    fn get_text_color(&self) -> Vec4 {
+        self.text_color
+    }
+    fn get_accent_color(&self) -> Vec4 {
+        self.accent_color
+    }
+    fn get_grid_color(&self) -> Vec4 {
+        self.grid_color
+    }
+    fn get_axis_color(&self) -> Vec4 {
+        self.axis_color
+    }
+    fn get_data_color(&self, index: usize) -> Vec4 {
         self.data_colors[index % self.data_colors.len()]
     }
     fn apply_to_egui(&self, ctx: &egui::Context) {
@@ -445,12 +479,16 @@ impl CustomTheme {
     /// Create a custom theme from configuration
     pub fn from_config(config: &CustomColorConfig) -> Self {
         Self {
-            background_color: hex_to_vec4(&config.background_primary).unwrap_or(Vec4::new(0.1, 0.1, 0.1, 1.0)),
+            background_color: hex_to_vec4(&config.background_primary)
+                .unwrap_or(Vec4::new(0.1, 0.1, 0.1, 1.0)),
             text_color: hex_to_vec4(&config.text_primary).unwrap_or(Vec4::new(1.0, 1.0, 1.0, 1.0)),
-            accent_color: hex_to_vec4(&config.accent_primary).unwrap_or(Vec4::new(0.0, 0.8, 0.4, 1.0)),
+            accent_color: hex_to_vec4(&config.accent_primary)
+                .unwrap_or(Vec4::new(0.0, 0.8, 0.4, 1.0)),
             grid_color: hex_to_vec4(&config.grid_major).unwrap_or(Vec4::new(0.3, 0.3, 0.3, 0.6)),
             axis_color: hex_to_vec4(&config.axis_color).unwrap_or(Vec4::new(0.7, 0.7, 0.7, 1.0)),
-            data_colors: config.data_colors.iter()
+            data_colors: config
+                .data_colors
+                .iter()
                 .filter_map(|hex| hex_to_vec4(hex))
                 .collect(),
         }
@@ -458,12 +496,22 @@ impl CustomTheme {
 }
 
 impl PlotTheme for CustomTheme {
-    fn get_background_color(&self) -> Vec4 { self.background_color }
-    fn get_text_color(&self) -> Vec4 { self.text_color }
-    fn get_accent_color(&self) -> Vec4 { self.accent_color }
-    fn get_grid_color(&self) -> Vec4 { self.grid_color }
-    fn get_axis_color(&self) -> Vec4 { self.axis_color }
-    fn get_data_color(&self, index: usize) -> Vec4 { 
+    fn get_background_color(&self) -> Vec4 {
+        self.background_color
+    }
+    fn get_text_color(&self) -> Vec4 {
+        self.text_color
+    }
+    fn get_accent_color(&self) -> Vec4 {
+        self.accent_color
+    }
+    fn get_grid_color(&self) -> Vec4 {
+        self.grid_color
+    }
+    fn get_axis_color(&self) -> Vec4 {
+        self.axis_color
+    }
+    fn get_data_color(&self, index: usize) -> Vec4 {
         if self.data_colors.is_empty() {
             Vec4::new(0.5, 0.5, 0.5, 1.0) // Default gray
         } else {
@@ -471,19 +519,20 @@ impl PlotTheme for CustomTheme {
         }
     }
     fn apply_to_egui(&self, ctx: &egui::Context) {
-        let mut visuals = if self.background_color.x + self.background_color.y + self.background_color.z < 1.5 {
-            egui::Visuals::dark()
-        } else {
-            egui::Visuals::light()
-        };
-        
+        let mut visuals =
+            if self.background_color.x + self.background_color.y + self.background_color.z < 1.5 {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            };
+
         visuals.panel_fill = egui::Color32::from_rgba_unmultiplied(
             (self.background_color.x * 255.0) as u8,
             (self.background_color.y * 255.0) as u8,
             (self.background_color.z * 255.0) as u8,
             255,
         );
-        
+
         ctx.set_visuals(visuals);
     }
 }
@@ -494,11 +543,11 @@ fn hex_to_vec4(hex: &str) -> Option<Vec4> {
     if hex.len() != 6 {
         return None;
     }
-    
+
     let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f32 / 255.0;
     let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f32 / 255.0;
     let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f32 / 255.0;
-    
+
     Some(Vec4::new(r, g, b, 1.0))
 }
 
@@ -511,7 +560,7 @@ pub fn validate_theme_config(config: &PlotThemeConfig) -> Result<(), String> {
     if config.typography.axis_label_font_size <= 0.0 {
         return Err("Axis label font size must be positive".to_string());
     }
-    
+
     // Validate layout values
     if config.layout.plot_padding < 0.0 {
         return Err("Plot padding must be non-negative".to_string());
@@ -519,7 +568,7 @@ pub fn validate_theme_config(config: &PlotThemeConfig) -> Result<(), String> {
     if config.layout.data_line_width <= 0.0 {
         return Err("Data line width must be positive".to_string());
     }
-    
+
     // Validate custom colors if present
     if config.variant == ThemeVariant::Custom {
         if let Some(custom) = &config.custom_colors {
@@ -532,17 +581,17 @@ pub fn validate_theme_config(config: &PlotThemeConfig) -> Result<(), String> {
             return Err("Custom theme variant requires custom_colors configuration".to_string());
         }
     }
-    
+
     // Validate animation settings
     if config.interaction.animation_duration_ms > 5000 {
         return Err("Animation duration too long (max 5000ms)".to_string());
     }
-    
+
     // Validate performance settings
     if config.interaction.max_fps == 0 || config.interaction.max_fps > 240 {
         return Err("Max FPS must be between 1 and 240".to_string());
     }
-    
+
     Ok(())
 }
 
@@ -576,7 +625,7 @@ mod tests {
     fn test_theme_variants() {
         let config = PlotThemeConfig::default();
         let theme = config.build_theme();
-        
+
         // Should create a valid theme
         let bg_color = theme.get_background_color();
         assert!(bg_color.w > 0.0); // Alpha should be positive
@@ -586,10 +635,10 @@ mod tests {
     fn test_custom_theme_validation() {
         let mut config = PlotThemeConfig::default();
         config.variant = ThemeVariant::Custom;
-        
+
         // Should fail without custom colors
         assert!(config.validate().is_err());
-        
+
         // Should pass with valid custom colors
         config.custom_colors = Some(CustomColorConfig::default());
         assert!(config.validate().is_ok());
@@ -598,16 +647,16 @@ mod tests {
     #[test]
     fn test_config_validation_bounds() {
         let mut config = PlotThemeConfig::default();
-        
+
         // Test negative font size
         config.typography.title_font_size = -1.0;
         assert!(config.validate().is_err());
-        
+
         // Test excessive animation duration
         config.typography.title_font_size = 18.0; // Reset
         config.interaction.animation_duration_ms = 10000;
         assert!(config.validate().is_err());
-        
+
         // Test invalid FPS
         config.interaction.animation_duration_ms = 300; // Reset
         config.interaction.max_fps = 0;
@@ -627,7 +676,7 @@ mod tests {
         let theme = ModernDarkTheme::default();
         let color1 = theme.get_data_color(0);
         let color2 = theme.get_data_color(theme.data_colors.len());
-        
+
         // Should cycle back to first color
         assert_eq!(color1, color2);
     }

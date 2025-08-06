@@ -48,7 +48,10 @@ impl NativeWindowManager {
         #[cfg(target_os = "macos")]
         {
             if !crate::gui::thread_manager::is_main_thread() {
-                return Err("Native window manager must be initialized on the main thread on macOS".to_string());
+                return Err(
+                    "Native window manager must be initialized on the main thread on macOS"
+                        .to_string(),
+                );
             }
         }
 
@@ -79,7 +82,7 @@ impl NativeWindowManager {
     #[cfg(target_os = "macos")]
     fn show_plot_main_thread(&self, figure: Figure) -> Result<NativeWindowResult, String> {
         use pollster;
-        
+
         // Create and run the plot window directly using our WGPU rendering engine
         let config = crate::gui::window::WindowConfig::default();
         // We don't need a tokio runtime for the direct approach on macOS
@@ -90,10 +93,12 @@ impl NativeWindowManager {
             Ok(mut window) => {
                 // Set the figure data
                 window.set_figure(figure);
-                
+
                 // Run the window event loop (this will block until the window closes)
                 match pollster::block_on(window.run()) {
-                    Ok(_) => Ok(NativeWindowResult::Success("Plot window closed successfully".to_string())),
+                    Ok(_) => Ok(NativeWindowResult::Success(
+                        "Plot window closed successfully".to_string(),
+                    )),
                     Err(e) => Err(format!("Window runtime error: {}", e)),
                 }
             }
@@ -107,20 +112,26 @@ impl NativeWindowManager {
         // For non-macOS platforms, we can use the existing thread-based approach
         // This would use the thread_manager system
         match crate::gui::show_plot_global(figure) {
-            Ok(result) => {
-                match result {
-                    crate::gui::GuiOperationResult::Success(msg) => Ok(NativeWindowResult::Success(msg)),
-                    crate::gui::GuiOperationResult::Cancelled(msg) => Ok(NativeWindowResult::WindowClosed),
-                    crate::gui::GuiOperationResult::Error { message, .. } => Ok(NativeWindowResult::Error(message)),
+            Ok(result) => match result {
+                crate::gui::GuiOperationResult::Success(msg) => {
+                    Ok(NativeWindowResult::Success(msg))
                 }
-            }
-            Err(result) => {
-                match result {
-                    crate::gui::GuiOperationResult::Success(msg) => Ok(NativeWindowResult::Success(msg)),
-                    crate::gui::GuiOperationResult::Cancelled(msg) => Ok(NativeWindowResult::WindowClosed),
-                    crate::gui::GuiOperationResult::Error { message, .. } => Err(message),
+                crate::gui::GuiOperationResult::Cancelled(msg) => {
+                    Ok(NativeWindowResult::WindowClosed)
                 }
-            }
+                crate::gui::GuiOperationResult::Error { message, .. } => {
+                    Ok(NativeWindowResult::Error(message))
+                }
+            },
+            Err(result) => match result {
+                crate::gui::GuiOperationResult::Success(msg) => {
+                    Ok(NativeWindowResult::Success(msg))
+                }
+                crate::gui::GuiOperationResult::Cancelled(msg) => {
+                    Ok(NativeWindowResult::WindowClosed)
+                }
+                crate::gui::GuiOperationResult::Error { message, .. } => Err(message),
+            },
         }
     }
 }
@@ -130,22 +141,26 @@ static NATIVE_WINDOW_MANAGER: OnceLock<Arc<Mutex<NativeWindowManager>>> = OnceLo
 
 /// Initialize the native window system
 pub fn initialize_native_window() -> Result<(), String> {
-    let manager_mutex = NATIVE_WINDOW_MANAGER.get_or_init(|| Arc::new(Mutex::new(NativeWindowManager::new())));
-    
-    let mut manager = manager_mutex.lock()
+    let manager_mutex =
+        NATIVE_WINDOW_MANAGER.get_or_init(|| Arc::new(Mutex::new(NativeWindowManager::new())));
+
+    let mut manager = manager_mutex
+        .lock()
         .map_err(|_| "Failed to acquire manager lock".to_string())?;
-    
+
     manager.initialize()
 }
 
 /// Show a plot using native window
 pub fn show_plot_native_window(figure: Figure) -> Result<String, String> {
-    let manager_mutex = NATIVE_WINDOW_MANAGER.get()
+    let manager_mutex = NATIVE_WINDOW_MANAGER
+        .get()
         .ok_or_else(|| "Native window system not initialized".to_string())?;
-    
-    let manager = manager_mutex.lock()
+
+    let manager = manager_mutex
+        .lock()
         .map_err(|_| "Failed to acquire manager lock".to_string())?;
-    
+
     match manager.show_plot_native(figure) {
         Ok(NativeWindowResult::Success(msg)) => Ok(msg),
         Ok(NativeWindowResult::WindowClosed) => Ok("Plot window closed by user".to_string()),
