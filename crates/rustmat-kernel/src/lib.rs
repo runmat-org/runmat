@@ -8,11 +8,13 @@ use uuid::Uuid;
 
 pub mod connection;
 pub mod execution;
+pub mod jupyter_plotting;
 pub mod protocol;
 pub mod server;
 
 pub use connection::ConnectionInfo;
 pub use execution::ExecutionEngine;
+pub use jupyter_plotting::{JupyterPlottingManager, JupyterPlottingConfig, DisplayData, JupyterPlottingExtension};
 pub use protocol::{ExecuteReply, ExecuteRequest, JupyterMessage, MessageType};
 pub use server::KernelServer;
 

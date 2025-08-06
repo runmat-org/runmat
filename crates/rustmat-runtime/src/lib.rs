@@ -21,17 +21,13 @@ pub mod lapack;
 #[link(name = "Accelerate", kind = "framework")]
 extern "C" {}
 
-#[allow(unused_imports)]
 pub use arrays::*;
 pub use comparison::*;
-#[allow(unused_imports)]
 pub use concatenation::*;
-#[allow(unused_imports)]
-pub use constants::*;
+// Note: constants and mathematics modules only contain #[runtime_builtin] functions
+// and don't export public items, so they don't need to be re-exported
 pub use elementwise::*;
 pub use indexing::*;
-#[allow(unused_imports)]
-pub use mathematics::*;
 pub use matrix::*;
 // Note: plotting functions are registered automatically via runtime_builtin macro
 

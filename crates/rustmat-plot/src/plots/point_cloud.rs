@@ -2,7 +2,7 @@
 //!
 //! High-performance GPU-accelerated 3D point cloud rendering for scatter data.
 
-use crate::core::{BoundingBox, Vertex};
+use crate::core::{BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
 use crate::plots::surface::ColorMap;
 use glam::{Vec3, Vec4};
 
@@ -288,7 +288,36 @@ impl PointCloudPlot {
         self.bounds = Some(BoundingBox::new(min, max));
     }
 
-    // TODO: Implement render_data once core rendering types are available
+    /// Generate complete render data for the graphics pipeline
+    pub fn render_data(&mut self) -> RenderData {
+        println!("DEBUG: PointCloudPlot::render_data() called with {} points", self.positions.len());
+        
+        let vertices = self.generate_vertices().clone();
+        let vertex_count = vertices.len();
+        
+        println!("DEBUG: Generated {} vertices for point cloud", vertex_count);
+
+        let mut material = Material::default();
+        material.albedo = self.default_color;
+
+        let draw_call = DrawCall {
+            vertex_offset: 0,
+            vertex_count,
+            index_offset: None,
+            index_count: None,
+            instance_count: 1,
+        };
+
+        println!("DEBUG: PointCloudPlot render_data completed successfully");
+
+        RenderData {
+            pipeline_type: PipelineType::Points,
+            vertices,
+            indices: None,
+            material,
+            draw_calls: vec![draw_call],
+        }
+    }
 
     /// Get plot statistics for debugging
     pub fn statistics(&self) -> PointCloudStatistics {

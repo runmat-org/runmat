@@ -298,16 +298,9 @@ fn test_empty_env_var_values() {
 fn test_config_file_env_var() {
     let mut env = HashMap::new();
     env.insert("RUSTMAT_CONFIG", "/nonexistent/config.toml");
+    env.insert("NO_GUI", "1"); // Disable GUI to prevent hanging in test environment
 
     let output = run_rustmat_with_env(&["info"], env);
-    
-    // Debug output
-    if !output.status.success() {
-        eprintln!("STDOUT: {}", String::from_utf8_lossy(&output.stdout));
-        eprintln!("STDERR: {}", String::from_utf8_lossy(&output.stderr));
-        eprintln!("Exit code: {:?}", output.status.code());
-    }
-    
     // Should work even if config file doesn't exist (using defaults)
     assert!(output.status.success());
 }

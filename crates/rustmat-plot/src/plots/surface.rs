@@ -2,7 +2,7 @@
 //!
 //! High-performance GPU-accelerated 3D surface rendering with MATLAB-compatible styling.
 
-use crate::core::{BoundingBox, Vertex};
+use crate::core::{BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
 use glam::{Vec3, Vec4};
 
 /// High-performance GPU-accelerated 3D surface plot
@@ -290,6 +290,126 @@ impl SurfacePlot {
 
         data_size + vertices_size + indices_size
     }
+
+    /// Generate vertices for surface mesh
+    fn generate_vertices(&mut self) -> &Vec<Vertex> {
+        if self.dirty || self.vertices.is_none() {
+            println!("DEBUG: Generating surface vertices for {} x {} grid", 
+                     self.x_data.len(), self.y_data.len());
+
+            let mut vertices = Vec::new();
+            
+            // Find Z value range for color mapping
+            let mut min_z = f64::INFINITY;
+            let mut max_z = f64::NEG_INFINITY;
+            for row in &self.z_data {
+                for &z in row {
+                    if z.is_finite() {
+                        min_z = min_z.min(z);
+                        max_z = max_z.max(z);
+                    }
+                }
+            }
+            let z_range = max_z - min_z;
+
+            // Generate vertices for each grid point
+            for (i, &x) in self.x_data.iter().enumerate() {
+                for (j, &y) in self.y_data.iter().enumerate() {
+                    let z = self.z_data[i][j];
+                    let position = Vec3::new(x as f32, y as f32, z as f32);
+                    
+                    // Simple normal calculation (can be improved with proper gradients)
+                    let normal = Vec3::new(0.0, 0.0, 1.0); // Placeholder
+                    
+                    // Color based on Z value using colormap
+                    let t = if z_range > 0.0 { ((z - min_z) / z_range) as f32 } else { 0.5 };
+                    let color_rgb = self.colormap.map_value(t);
+                    let color = Vec4::new(color_rgb.x, color_rgb.y, color_rgb.z, self.alpha);
+                    
+                    vertices.push(Vertex {
+                        position: position.to_array(),
+                        normal: normal.to_array(),
+                        color: color.to_array(),
+                        tex_coords: [
+                            i as f32 / (self.x_data.len() - 1).max(1) as f32,
+                            j as f32 / (self.y_data.len() - 1).max(1) as f32,
+                        ],
+                    });
+                }
+            }
+
+            println!("DEBUG: Generated {} vertices for surface", vertices.len());
+            self.vertices = Some(vertices);
+        }
+        self.vertices.as_ref().unwrap()
+    }
+
+    /// Generate indices for surface triangulation
+    fn generate_indices(&mut self) -> &Vec<u32> {
+        if self.dirty || self.indices.is_none() {
+            println!("DEBUG: Generating surface indices");
+            
+            let mut indices = Vec::new();
+            let x_res = self.x_data.len();
+            let y_res = self.y_data.len();
+            
+            // Generate triangle indices for surface mesh
+            for i in 0..x_res - 1 {
+                for j in 0..y_res - 1 {
+                    let base = (i * y_res + j) as u32;
+                    let next_row = base + y_res as u32;
+                    
+                    // Two triangles per quad
+                    // Triangle 1: (i,j), (i+1,j), (i,j+1)
+                    indices.push(base);
+                    indices.push(next_row);
+                    indices.push(base + 1);
+                    
+                    // Triangle 2: (i+1,j), (i+1,j+1), (i,j+1)
+                    indices.push(next_row);
+                    indices.push(next_row + 1);
+                    indices.push(base + 1);
+                }
+            }
+
+            println!("DEBUG: Generated {} indices for surface", indices.len());
+            self.indices = Some(indices);
+            self.dirty = false;
+        }
+        self.indices.as_ref().unwrap()
+    }
+
+    /// Generate complete render data for the graphics pipeline
+    pub fn render_data(&mut self) -> RenderData {
+        println!("DEBUG: SurfacePlot::render_data() called for {} x {} surface", 
+                 self.x_data.len(), self.y_data.len());
+        
+        let vertices = self.generate_vertices().clone();
+        let indices = self.generate_indices().clone();
+        
+        println!("DEBUG: Surface render data: {} vertices, {} indices", vertices.len(), indices.len());
+
+        let mut material = Material::default();
+        material.albedo = Vec4::new(1.0, 1.0, 1.0, self.alpha);
+
+        let draw_call = DrawCall {
+            vertex_offset: 0,
+            vertex_count: vertices.len(),
+            index_offset: Some(0),
+            index_count: Some(indices.len()),
+            instance_count: 1,
+        };
+
+        println!("DEBUG: SurfacePlot render_data completed successfully");
+
+        RenderData {
+            pipeline_type: if self.wireframe { PipelineType::Lines } else { PipelineType::Triangles },
+            vertices,
+            indices: Some(indices),
+            material,
+            draw_calls: vec![draw_call],
+        }
+    }
 }
 
 /// Surface plot performance and data statistics
@@ -311,13 +431,24 @@ impl ColorMap {
             ColorMap::Jet => self.jet_colormap(t),
             ColorMap::Hot => self.hot_colormap(t),
             ColorMap::Cool => self.cool_colormap(t),
+            ColorMap::Spring => self.spring_colormap(t),
+            ColorMap::Summer => self.summer_colormap(t),
+            ColorMap::Autumn => self.autumn_colormap(t),
+            ColorMap::Winter => self.winter_colormap(t),
+            ColorMap::Gray => Vec3::splat(t),
+            ColorMap::Bone => self.bone_colormap(t),
+            ColorMap::Copper => self.copper_colormap(t),
+            ColorMap::Pink => self.pink_colormap(t),
+            ColorMap::Lines => self.lines_colormap(t),
             ColorMap::Viridis => self.viridis_colormap(t),
             ColorMap::Plasma => self.plasma_colormap(t),
-            ColorMap::Gray => Vec3::splat(t),
+            ColorMap::Inferno => self.inferno_colormap(t),
+            ColorMap::Magma => self.magma_colormap(t),
+            ColorMap::Turbo => self.turbo_colormap(t),
+            ColorMap::Parula => self.parula_colormap(t),
             ColorMap::Custom(min_color, max_color) => {
                 min_color.truncate().lerp(max_color.truncate(), t)
             }
-            _ => self.default_colormap(t), // Fallback for unimplemented maps
         }
     }
 
@@ -363,7 +494,147 @@ impl ColorMap {
         Vec3::new(r, g, b)
     }
 
+    /// Spring colormap (magenta -> yellow)
+    fn spring_colormap(&self, t: f32) -> Vec3 {
+        Vec3::new(1.0, t, 1.0 - t)
+    }
+
+    /// Summer colormap (green -> yellow)
+    fn summer_colormap(&self, t: f32) -> Vec3 {
+        Vec3::new(t, 0.5 + 0.5 * t, 0.4)
+    }
+
+    /// Autumn colormap (red -> yellow)
+    fn autumn_colormap(&self, t: f32) -> Vec3 {
+        Vec3::new(1.0, t, 0.0)
+    }
+
+    /// Winter colormap (blue -> green)
+    fn winter_colormap(&self, t: f32) -> Vec3 {
+        Vec3::new(0.0, t, 1.0 - 0.5 * t)
+    }
+
+    /// Bone colormap (black -> white with blue tint)
+    fn bone_colormap(&self, t: f32) -> Vec3 {
+        if t < 3.0 / 8.0 {
+            Vec3::new(7.0 / 8.0 * t, 7.0 / 8.0 * t, 29.0 / 24.0 * t)
+        } else if t < 3.0 / 4.0 {
+            Vec3::new((29.0 + 7.0 * t) / 24.0, (29.0 + 7.0 * t) / 24.0, (29.0 + 7.0 * t) / 24.0)
+        } else {
+            Vec3::new((29.0 + 7.0 * t) / 24.0, (29.0 + 7.0 * t) / 24.0, (29.0 + 7.0 * t) / 24.0)
+        }
+    }
+
+    /// Copper colormap (black -> copper)
+    fn copper_colormap(&self, t: f32) -> Vec3 {
+        Vec3::new((1.25 * t).min(1.0), 0.7812 * t, 0.4975 * t)
+    }
+
+    /// Pink colormap (black -> pink -> white)
+    fn pink_colormap(&self, t: f32) -> Vec3 {
+        let sqrt_t = t.sqrt();
+        if t < 3.0 / 8.0 {
+            Vec3::new(14.0 / 9.0 * sqrt_t, 2.0 / 3.0 * sqrt_t, 2.0 / 3.0 * sqrt_t)
+        } else {
+            Vec3::new(2.0 * sqrt_t - 1.0 / 3.0, 8.0 / 9.0 * sqrt_t + 1.0 / 3.0, 8.0 / 9.0 * sqrt_t + 1.0 / 3.0)
+        }
+    }
+
+    /// Lines colormap (cycling through basic colors)
+    fn lines_colormap(&self, t: f32) -> Vec3 {
+        let _phase = (t * 7.0) % 1.0; // For future use in color transitions
+        let index = (t * 7.0) as usize % 7;
+        match index {
+            0 => Vec3::new(0.0, 0.0, 1.0), // Blue
+            1 => Vec3::new(0.0, 0.5, 0.0), // Green
+            2 => Vec3::new(1.0, 0.0, 0.0), // Red
+            3 => Vec3::new(0.0, 0.75, 0.75), // Cyan
+            4 => Vec3::new(0.75, 0.0, 0.75), // Magenta
+            5 => Vec3::new(0.75, 0.75, 0.0), // Yellow
+            _ => Vec3::new(0.25, 0.25, 0.25), // Dark gray
+        }
+    }
+
+    /// Inferno colormap (perceptually uniform)
+    fn inferno_colormap(&self, t: f32) -> Vec3 {
+        // Simplified Inferno approximation
+        let r = (0.001462 + t * (0.988362 - 0.001462)).clamp(0.0, 1.0);
+        let g = (0.000466 + t * t * (0.982895 - 0.000466)).clamp(0.0, 1.0);
+        let b = (0.013866 + t * (1.0 - t) * (0.416065 - 0.013866)).clamp(0.0, 1.0);
+        Vec3::new(r, g, b)
+    }
+
+    /// Magma colormap (perceptually uniform) 
+    fn magma_colormap(&self, t: f32) -> Vec3 {
+        // Simplified Magma approximation
+        let r = (0.001462 + t * (0.987053 - 0.001462)).clamp(0.0, 1.0);
+        let g = (0.000466 + t * t * (0.991438 - 0.000466)).clamp(0.0, 1.0);
+        let b = (0.013866 + t * (0.644237 - 0.013866) * (1.0 - t)).clamp(0.0, 1.0);
+        Vec3::new(r, g, b)
+    }
+
+    /// Turbo colormap (improved rainbow)
+    fn turbo_colormap(&self, t: f32) -> Vec3 {
+        // Simplified Turbo approximation (Google's improved rainbow)
+        let r = if t < 0.5 {
+            (0.13 + 0.87 * (2.0 * t).powf(0.25)).clamp(0.0, 1.0)
+        } else {
+            (0.8685 + 0.1315 * (2.0 * (1.0 - t)).powf(0.25)).clamp(0.0, 1.0)
+        };
+        
+        let g = if t < 0.25 {
+            4.0 * t
+        } else if t < 0.75 {
+            1.0
+        } else {
+            1.0 - 4.0 * (t - 0.75)
+        }.clamp(0.0, 1.0);
+        
+        let b = if t < 0.5 {
+            (0.8 * (1.0 - 2.0 * t).powf(0.25)).clamp(0.0, 1.0)
+        } else {
+            (0.1 + 0.9 * (2.0 * t - 1.0).powf(0.25)).clamp(0.0, 1.0)
+        };
+        
+        Vec3::new(r, g, b)
+    }
+
+    /// Parula colormap (MATLAB's default)
+    fn parula_colormap(&self, t: f32) -> Vec3 {
+        // Simplified Parula approximation
+        let r = if t < 0.25 {
+            0.2081 * (1.0 - t)
+        } else if t < 0.5 {
+            t - 0.25
+        } else if t < 0.75 {
+            1.0
+        } else {
+            1.0 - 0.5 * (t - 0.75)
+        }.clamp(0.0, 1.0);
+        
+        let g = if t < 0.125 {
+            0.1663 * t / 0.125
+        } else if t < 0.375 {
+            0.1663 + (0.7079 - 0.1663) * (t - 0.125) / 0.25
+        } else if t < 0.625 {
+            0.7079 + (0.9839 - 0.7079) * (t - 0.375) / 0.25
+        } else {
+            0.9839 * (1.0 - (t - 0.625) / 0.375)
+        }.clamp(0.0, 1.0);
+        
+        let b = if t < 0.25 {
+            0.5 + 0.5 * t / 0.25
+        } else if t < 0.5 {
+            1.0
+        } else {
+            1.0 - 2.0 * (t - 0.5)
+        }.clamp(0.0, 1.0);
+        
+        Vec3::new(r, g, b)
+    }
+
     /// Default colormap fallback
+    #[allow(dead_code)] // Fallback method for colormap errors
     fn default_colormap(&self, t: f32) -> Vec3 {
         // Use a simple RGB transition as fallback
         if t < 0.5 {

@@ -134,6 +134,21 @@ fn static_export(figure: &mut Figure, filename: &str) -> Result<String, String> 
 
             Ok(format!("Histogram saved to {}", filename))
         }
+        Some(PlotElement::PointCloud(point_cloud)) => {
+            // For static export, render point cloud as 2D projection (X-Y view)
+            let x_data: Vec<f64> = point_cloud.positions.iter().map(|pos| pos.x as f64).collect();
+            let y_data: Vec<f64> = point_cloud.positions.iter().map(|pos| pos.y as f64).collect();
+
+            rustmat_plot::plot_scatter(
+                &x_data,
+                &y_data,
+                filename,
+                rustmat_plot::PlotOptions::default(),
+            )
+            .map_err(|e| format!("Point cloud export failed: {}", e))?;
+
+            Ok(format!("Point cloud (2D projection) saved to {}", filename))
+        }
         None => Err("No plots found in figure to export".to_string()),
     }
 }
@@ -299,6 +314,8 @@ fn scatter3_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
         return Err("X, Y, and Z data must have the same length".to_string());
     }
 
+    println!("DEBUG: Creating scatter3 plot with {} points", x_data.len());
+
     // Create 3D positions
     let positions: Vec<glam::Vec3> = x_data
         .iter()
@@ -307,16 +324,28 @@ fn scatter3_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
         .map(|((&x, &y), &z)| glam::Vec3::new(x as f32, y as f32, z as f32))
         .collect();
 
-    // Create point cloud
+    // Create high-performance point cloud with mario kart style
     let point_cloud = PointCloudPlot::new(positions)
-        .with_default_color(glam::Vec4::new(0.0, 0.6, 0.8, 1.0))
-        .with_label("3D Points");
+        .with_default_color(glam::Vec4::new(1.0, 0.6, 0.2, 1.0))  // Orange
+        .with_default_size(8.0)  // Larger size for cube effect
+        .with_point_style(PointStyle::Square)  // Square points for cubic appearance
+        .with_colormap(ColorMap::Hot)  // Hot colormap for orange gradient
+        .with_label("3D Point Cloud");
 
-    // For now, return a placeholder until 3D integration is complete
-    Ok(format!(
-        "3D Point cloud created with {} points",
-        point_cloud.len()
-    ))
+    println!("DEBUG: PointCloudPlot created successfully with {} points", point_cloud.len());
+
+    // Create figure for 3D visualization and display it
+    let mut figure = Figure::new()
+        .with_title("High-Performance 3D Point Cloud")
+        .with_labels("X", "Y");  // Note: 3D Z-axis support to be added
+
+    // Add the point cloud to the figure
+    figure.add_point_cloud_plot(point_cloud);
+
+    println!("DEBUG: 3D Point cloud added to figure, executing plot...");
+
+    // Execute the plot to display the window
+    execute_plot(figure)
 }
 
 #[runtime_builtin(name = "mesh")]

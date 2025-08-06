@@ -393,7 +393,6 @@ impl<'window> PlotWindow<'window> {
         let _camera_pos = self.plot_renderer.camera.position;
 
         // Track the plot area for WGPU rendering
-        #[allow(unused_assignments)]
         let mut plot_area: Option<egui::Rect> = None;
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {

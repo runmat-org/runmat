@@ -17,7 +17,7 @@ pub struct WindowConfig {
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
-            title: "RustMat Plot - Interactive Visualization".to_string(),
+            title: "RustMat - Interactive Visualization | Powered by Dystr".to_string(),
             width: 1200,
             height: 800,
             resizable: true,

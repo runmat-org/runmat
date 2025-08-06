@@ -234,7 +234,6 @@ impl PlotRenderer {
         // Collect render data and create buffers first
         let mut render_items = Vec::new();
         let mut total_vertices = 0;
-        #[allow(unused_mut)]
         let mut total_triangles = 0;
 
         for node in self.scene.get_visible_nodes() {
@@ -266,6 +265,16 @@ impl PlotRenderer {
 
                     render_items.push((render_data, vertex_buffer));
                     total_vertices += render_data.vertices.len();
+                    
+                    // Count triangles based on pipeline type
+                    match render_data.pipeline_type {
+                        crate::core::PipelineType::Triangles => {
+                            total_triangles += render_data.vertices.len() / 3;
+                        }
+                        _ => {
+                            // Other pipeline types don't count as triangles
+                        }
+                    }
                 }
             }
         }

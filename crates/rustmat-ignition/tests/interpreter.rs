@@ -141,19 +141,21 @@ fn for_loop_start_greater_than_end() {
 }
 
 #[test]
-fn colon_operator_errors() {
+fn colon_operator_with_step() {
     let ast = parse("x = 1:2:5").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    assert!(result.is_err());
+    assert!(result.is_ok());
+    // Should create range [1, 3, 5] 
 }
 
 #[test]
-fn range_with_step_errors() {
+fn range_with_step() {
     let ast = parse("x = 1:2:10").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    assert!(result.is_err());
+    assert!(result.is_ok());
+    // Should create range [1, 3, 5, 7, 9]
 }
 
 #[test]

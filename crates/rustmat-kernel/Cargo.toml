@@ -19,6 +19,7 @@ rustmat-builtins = { workspace = true }
 rustmat-runtime = { workspace = true }
 rustmat-repl = { workspace = true }
 rustmat-snapshot = { workspace = true }
+rustmat-plot = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }

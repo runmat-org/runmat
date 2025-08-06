@@ -180,13 +180,25 @@ impl JupyterBackend {
 
     // Session IDs removed as not currently used
 
-    /// Export as PNG image
-    fn export_png(&self, _figure: &mut Figure) -> Result<String, String> {
-        // TODO: Implement PNG export via static plotting
-        let output_path = format!("/tmp/rustmat_plot_{}.png", Self::generate_plot_id());
+    /// Export as PNG image using our GPU-accelerated export system
+    fn export_png(&self, figure: &mut Figure) -> Result<String, String> {
+        use crate::export::ImageExporter;
 
-        // TODO: Use static plotting backend for PNG export
-        // crate::simple_plots::export_figure_png(figure, &output_path, &self.export_settings)?;
+        let output_path = format!("/tmp/rustmat_plot_{}.png", Self::generate_plot_id());
+        
+        // Use our high-performance GPU export system
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create async runtime: {e}"))?;
+            
+        runtime.block_on(async {
+            let exporter = ImageExporter::new().await
+                .map_err(|e| format!("Failed to create image exporter: {e}"))?;
+            
+            exporter.export_png(figure, &output_path).await
+                .map_err(|e| format!("Failed to export PNG: {e}"))?;
+            
+            Ok::<(), String>(())
+        })?;
 
         // Return HTML img tag for Jupyter
         Ok(format!(
@@ -195,94 +207,56 @@ impl JupyterBackend {
         ))
     }
 
-    /// Export as SVG image
-    fn export_svg(&self, _figure: &mut Figure) -> Result<String, String> {
-        // TODO: Implement SVG export via static plotting
-        let svg_content = format!(
-            "<svg width='{}' height='{}'><text x='50' y='50'>Figure SVG Placeholder</text></svg>",
-            self.export_settings.width, self.export_settings.height
-        );
+    /// Export as SVG image using our vector export system
+    fn export_svg(&self, figure: &mut Figure) -> Result<String, String> {
+        use crate::export::VectorExporter;
+
+        let exporter = VectorExporter::new();
+        let svg_content = exporter.render_to_svg(figure)?;
 
         // Return SVG directly for Jupyter
         Ok(svg_content)
     }
 
-    /// Export as interactive HTML widget
-    fn export_html_widget(&self, figure: &mut Figure) -> Result<String, String> {
-        let widget_id = Self::generate_plot_id();
+    /// Export as interactive HTML widget using our web export system
+    fn export_html_widget(&self, _figure: &mut Figure) -> Result<String, String> {
+        use crate::export::WebExporter;
 
-        // Generate HTML with embedded JavaScript for interactivity
-        let html = format!(
-            r#"
-            <div id="rustmat_plot_{}" style="width: {}px; height: {}px; border: 1px solid #ccc;">
-                <canvas id="rustmat_canvas_{}" width="{}" height="{}"></canvas>
-                <div id="rustmat_controls_{}" style="position: absolute; top: 10px; right: 10px;">
-                    <button onclick="resetView('{}')">Reset View</button>
-                    <button onclick="toggleWireframe('{}')">Toggle Wireframe</button>
-                </div>
-            </div>
-            <script>
-                // Initialize RustMat plot widget
-                window.rustmat_plots = window.rustmat_plots || {{}};
-                window.rustmat_plots['{}'] = {{
-                    data: {},
-                    options: {},
-                    interactive: {}
-                }};
-                
-                // Initialize WebGL context and rendering
-                initRustMatPlot('{}');
-                
-                function resetView(plotId) {{
-                    // Reset camera to default position
-                    console.log('Resetting view for plot:', plotId);
-                }}
-                
-                function toggleWireframe(plotId) {{
-                    // Toggle wireframe mode
-                    console.log('Toggling wireframe for plot:', plotId);
-                }}
-                
-                function initRustMatPlot(plotId) {{
-                    // Initialize WebGL rendering for the plot
-                    const canvas = document.getElementById('rustmat_canvas_' + plotId);
-                    if (!canvas) return;
-                    
-                    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-                    if (!gl) {{
-                        console.error('WebGL not supported');
-                        return;
-                    }}
-                    
-                    // TODO: Initialize WGPU-compatible WebGL rendering
-                    console.log('Initializing RustMat plot:', plotId);
-                }}
-            </script>
-            "#,
-            widget_id,
-            self.export_settings.width,
-            self.export_settings.height,
-            widget_id,
-            self.export_settings.width,
-            self.export_settings.height,
-            widget_id,
-            widget_id,
-            widget_id,
-            widget_id,
-            self.serialize_figure_data(figure)?,
-            self.serialize_plot_options()?,
-            self.interactive_mode,
-            widget_id
-        );
+        let mut exporter = WebExporter::new();
+        let html_content = exporter.render_to_html()?;
 
-        Ok(html)
+        Ok(html_content)
     }
 
-    /// Export as base64 encoded image
-    fn export_base64(&self, _figure: &mut Figure) -> Result<String, String> {
-        // TODO: Generate PNG and encode as base64
-        let png_data = vec![0; 1000]; // Placeholder data
+    /// Export as base64 encoded image using our PNG export system
+    fn export_base64(&self, figure: &mut Figure) -> Result<String, String> {
+        use crate::export::ImageExporter;
+
+        // Create temporary file for PNG export
+        let temp_path = format!("/tmp/rustmat_base64_{}.png", Self::generate_plot_id());
+        
+        // Export PNG first
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create async runtime: {e}"))?;
+            
+        runtime.block_on(async {
+            let exporter = ImageExporter::new().await
+                .map_err(|e| format!("Failed to create image exporter: {e}"))?;
+            
+            exporter.export_png(figure, &temp_path).await
+                .map_err(|e| format!("Failed to export PNG: {e}"))?;
+            
+            Ok::<(), String>(())
+        })?;
+
+        // Read PNG data and encode as base64
+        let png_data = std::fs::read(&temp_path)
+            .map_err(|e| format!("Failed to read PNG file: {e}"))?;
+        
         let base64_data = base64_encode(&png_data);
+        
+        // Clean up temporary file
+        let _ = std::fs::remove_file(&temp_path);
 
         // Return data URL for Jupyter
         Ok(format!(
@@ -325,12 +299,16 @@ impl JupyterBackend {
     }
 
     /// Serialize figure data for JavaScript
+    /// Note: Will be used for WebAssembly widget serialization
+    #[allow(dead_code)]
     fn serialize_figure_data(&self, _figure: &Figure) -> Result<String, String> {
         // TODO: Implement proper serialization
         Ok("{}".to_string())
     }
 
     /// Serialize plot options for JavaScript
+    /// Note: Will be used for WebAssembly widget configuration
+    #[allow(dead_code)]
     fn serialize_plot_options(&self) -> Result<String, String> {
         // TODO: Implement proper serialization
         Ok("{}".to_string())
@@ -408,10 +386,27 @@ pub enum KernelType {
     Unknown,
 }
 
-/// Simple base64 encoding (placeholder)
+/// Simple base64 encoding using standard library
 fn base64_encode(data: &[u8]) -> String {
-    // TODO: Implement proper base64 encoding or use a crate
-    format!("base64_encoded_data_{}_bytes", data.len())
+    
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    
+    for chunk in data.chunks(3) {
+        let mut buf = [0u8; 3];
+        for (i, &byte) in chunk.iter().enumerate() {
+            buf[i] = byte;
+        }
+        
+        let b = ((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32);
+        
+        result.push(CHARS[((b >> 18) & 63) as usize] as char);
+        result.push(CHARS[((b >> 12) & 63) as usize] as char);
+        result.push(if chunk.len() > 1 { CHARS[((b >> 6) & 63) as usize] as char } else { '=' });
+        result.push(if chunk.len() > 2 { CHARS[(b & 63) as usize] as char } else { '=' });
+    }
+    
+    result
 }
 
 /// Extension trait for easy Jupyter integration

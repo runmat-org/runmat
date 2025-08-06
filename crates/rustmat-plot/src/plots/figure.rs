@@ -4,7 +4,7 @@
 //! coordinate system, handling overlays, legends, and proper rendering order.
 
 use crate::core::{BoundingBox, RenderData};
-use crate::plots::{BarChart, Histogram, LinePlot, ScatterPlot};
+use crate::plots::{BarChart, Histogram, LinePlot, PointCloudPlot, ScatterPlot};
 use glam::Vec4;
 use std::collections::HashMap;
 
@@ -38,6 +38,7 @@ pub enum PlotElement {
     Scatter(ScatterPlot),
     Bar(BarChart),
     Histogram(Histogram),
+    PointCloud(PointCloudPlot),
 }
 
 /// Legend entry for a plot
@@ -55,6 +56,7 @@ pub enum PlotType {
     Scatter,
     Bar,
     Histogram,
+    PointCloud,
 }
 
 impl Figure {
@@ -138,6 +140,13 @@ impl Figure {
     /// Add a histogram to the figure
     pub fn add_histogram(&mut self, plot: Histogram) -> usize {
         self.plots.push(PlotElement::Histogram(plot));
+        self.dirty = true;
+        self.plots.len() - 1
+    }
+
+    /// Add a point cloud to the figure
+    pub fn add_point_cloud_plot(&mut self, plot: PointCloudPlot) -> usize {
+        self.plots.push(PlotElement::PointCloud(plot));
         self.dirty = true;
         self.plots.len() - 1
     }
@@ -283,6 +292,7 @@ impl PlotElement {
             PlotElement::Scatter(plot) => plot.visible,
             PlotElement::Bar(plot) => plot.visible,
             PlotElement::Histogram(plot) => plot.visible,
+            PlotElement::PointCloud(plot) => plot.visible,
         }
     }
 
@@ -293,6 +303,7 @@ impl PlotElement {
             PlotElement::Scatter(plot) => plot.label.clone(),
             PlotElement::Bar(plot) => plot.label.clone(),
             PlotElement::Histogram(plot) => plot.label.clone(),
+            PlotElement::PointCloud(plot) => plot.label.clone(),
         }
     }
 
@@ -303,6 +314,7 @@ impl PlotElement {
             PlotElement::Scatter(plot) => plot.color,
             PlotElement::Bar(plot) => plot.color,
             PlotElement::Histogram(plot) => plot.color,
+            PlotElement::PointCloud(plot) => plot.default_color,
         }
     }
 
@@ -313,6 +325,7 @@ impl PlotElement {
             PlotElement::Scatter(_) => PlotType::Scatter,
             PlotElement::Bar(_) => PlotType::Bar,
             PlotElement::Histogram(_) => PlotType::Histogram,
+            PlotElement::PointCloud(_) => PlotType::PointCloud,
         }
     }
 
@@ -323,6 +336,7 @@ impl PlotElement {
             PlotElement::Scatter(plot) => plot.bounds(),
             PlotElement::Bar(plot) => plot.bounds(),
             PlotElement::Histogram(plot) => plot.bounds(),
+            PlotElement::PointCloud(plot) => plot.bounds(),
         }
     }
 
@@ -333,6 +347,7 @@ impl PlotElement {
             PlotElement::Scatter(plot) => plot.render_data(),
             PlotElement::Bar(plot) => plot.render_data(),
             PlotElement::Histogram(plot) => plot.render_data(),
+            PlotElement::PointCloud(plot) => plot.render_data(),
         }
     }
 
@@ -343,6 +358,7 @@ impl PlotElement {
             PlotElement::Scatter(plot) => plot.estimated_memory_usage(),
             PlotElement::Bar(plot) => plot.estimated_memory_usage(),
             PlotElement::Histogram(plot) => plot.estimated_memory_usage(),
+            PlotElement::PointCloud(plot) => plot.estimated_memory_usage(),
         }
     }
 }

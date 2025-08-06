@@ -1,0 +1,584 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        default: 'v0.0.1'
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-release:
+    name: Build ${{ matrix.platform.release_for }}
+    strategy:
+      matrix:
+        platform:
+          - release_for: FreeBSD-x86_64
+            os: ubuntu-20.04
+            target: x86_64-unknown-freebsd
+            bin: rustmat
+            name: rustmat-FreeBSD-x86_64.tar.gz
+            command: build
+
+          - release_for: Windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: rustmat.exe
+            name: rustmat-Windows-x86_64.zip
+            command: build
+
+          - release_for: Windows-aarch64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+            bin: rustmat.exe
+            name: rustmat-Windows-aarch64.zip
+            command: build
+
+          - release_for: macOS-x86_64
+            os: macOS-latest
+            target: x86_64-apple-darwin
+            bin: rustmat
+            name: rustmat-Darwin-x86_64.tar.gz
+            command: build
+
+          - release_for: macOS-aarch64
+            os: macOS-latest
+            target: aarch64-apple-darwin
+            bin: rustmat
+            name: rustmat-Darwin-aarch64.tar.gz
+            command: build
+
+          - release_for: Linux-x86_64
+            os: ubuntu-20.04
+            target: x86_64-unknown-linux-gnu
+            bin: rustmat
+            name: rustmat-Linux-x86_64.tar.gz
+            command: build
+
+          - release_for: Linux-aarch64
+            os: ubuntu-20.04
+            target: aarch64-unknown-linux-gnu
+            bin: rustmat
+            name: rustmat-Linux-aarch64.tar.gz
+            command: build
+
+    runs-on: ${{ matrix.platform.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build binary
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: ${{ matrix.platform.command }}
+          target: ${{ matrix.platform.target }}
+          args: "--locked --release --bin rustmat"
+          strip: true
+
+      - name: Package as archive
+        shell: bash
+        run: |
+          cd target/${{ matrix.platform.target }}/release
+          if [[ "${{ matrix.platform.os }}" == "windows-latest" ]]; then
+            7z a ../../../${{ matrix.platform.name }} ${{ matrix.platform.bin }}
+          else
+            tar czvf ../../../${{ matrix.platform.name }} ${{ matrix.platform.bin }}
+          fi
+          cd -
+
+      - name: Publish release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustmat-${{ matrix.platform.release_for }}
+          path: "rustmat-*"
+
+  build-installers:
+    name: Build installers
+    needs: [build-release]
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            installer_type: msi
+            artifact_name: rustmat-Windows-x86_64.zip
+            installer_name: rustmat-x86_64.msi
+
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            installer_type: msi
+            artifact_name: rustmat-Windows-aarch64.zip
+            installer_name: rustmat-aarch64.msi
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            installer_type: dmg
+            artifact_name: rustmat-Darwin-x86_64.tar.gz
+            installer_name: rustmat-x86_64.dmg
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            installer_type: dmg
+            artifact_name: rustmat-Darwin-aarch64.tar.gz
+            installer_name: rustmat-aarch64.dmg
+
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            installer_type: deb
+            artifact_name: rustmat-Linux-x86_64.tar.gz
+            installer_name: rustmat_amd64.deb
+
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            installer_type: deb
+            artifact_name: rustmat-Linux-aarch64.tar.gz
+            installer_name: rustmat_arm64.deb
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rustmat-${{ matrix.target }}
+          path: artifacts/
+
+      # Windows MSI installer
+      - name: Create MSI installer (Windows)
+        if: matrix.installer_type == 'msi'
+        run: |
+          # Extract binary
+          if ("${{ matrix.target }}" -eq "x86_64-pc-windows-msvc") {
+            $arch = "x64"
+          } else {
+            $arch = "arm64"
+          }
+          
+          Expand-Archive -Path "artifacts/${{ matrix.artifact_name }}" -DestinationPath "extracted/"
+          
+          # Create WiX configuration
+          $wixConfig = @"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+            <Product Id="*" Name="RustMat" Language="1033" Version="0.0.1" Manufacturer="RustMat Team" UpgradeCode="12345678-1234-1234-1234-123456789012">
+              <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+              <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+              <MediaTemplate EmbedCab="yes" />
+              <Feature Id="ProductFeature" Title="RustMat" Level="1">
+                <ComponentGroupRef Id="ProductComponents" />
+              </Feature>
+            </Product>
+            <Fragment>
+              <Directory Id="TARGETDIR" Name="SourceDir">
+                <Directory Id="ProgramFiles64Folder">
+                  <Directory Id="INSTALLFOLDER" Name="RustMat" />
+                </Directory>
+              </Directory>
+            </Fragment>
+            <Fragment>
+              <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+                <Component Id="MainExecutable" Guid="87654321-4321-4321-4321-210987654321">
+                  <File Id="rustmat.exe" Source="extracted/rustmat.exe" KeyPath="yes" />
+                  <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
+                </Component>
+              </ComponentGroup>
+            </Fragment>
+          </Wix>
+          "@
+          
+          $wixConfig | Out-File -FilePath "rustmat.wxs" -Encoding UTF8
+          
+          # Install WiX toolset
+          dotnet tool install --global wix
+          wix extension add WixToolset.UI.wixext
+          
+          # Build MSI
+          wix build rustmat.wxs -o "${{ matrix.installer_name }}"
+
+      # macOS DMG installer
+      - name: Create DMG installer (macOS)
+        if: matrix.installer_type == 'dmg'
+        run: |
+          # Extract binary
+          tar -xzf "artifacts/${{ matrix.artifact_name }}"
+          mkdir -p "dmg/RustMat.app/Contents/MacOS"
+          mkdir -p "dmg/RustMat.app/Contents/Resources"
+          
+          # Create app bundle
+          cp rustmat "dmg/RustMat.app/Contents/MacOS/"
+          
+          # Create Info.plist
+          cat > "dmg/RustMat.app/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>rustmat</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.rustmat.rustmat</string>
+            <key>CFBundleName</key>
+            <string>RustMat</string>
+            <key>CFBundleVersion</key>
+            <string>0.0.1</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.0.1</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+          </dict>
+          </plist>
+          EOF
+          
+          # Create DMG
+          brew install create-dmg
+          create-dmg \
+            --volname "RustMat" \
+            --volicon "dmg/RustMat.app/Contents/Resources/icon.icns" \
+            --window-pos 200 120 \
+            --window-size 600 300 \
+            --icon-size 100 \
+            --icon "RustMat.app" 175 120 \
+            --hide-extension "RustMat.app" \
+            --app-drop-link 425 120 \
+            "${{ matrix.installer_name }}" \
+            "dmg/"
+
+      # Linux DEB package
+      - name: Create DEB package (Linux)
+        if: matrix.installer_type == 'deb'
+        run: |
+          # Extract binary
+          tar -xzf "artifacts/${{ matrix.artifact_name }}"
+          
+          # Create package structure
+          mkdir -p "deb/DEBIAN"
+          mkdir -p "deb/usr/local/bin"
+          mkdir -p "deb/usr/share/doc/rustmat"
+          mkdir -p "deb/usr/share/applications"
+          
+          # Copy binary
+          cp rustmat "deb/usr/local/bin/"
+          chmod +x "deb/usr/local/bin/rustmat"
+          
+          # Create control file
+          cat > "deb/DEBIAN/control" << EOF
+          Package: rustmat
+          Version: 0.0.1
+          Section: science
+          Priority: optional
+          Architecture: ${{ matrix.target == 'x86_64-unknown-linux-gnu' && 'amd64' || 'arm64' }}
+          Maintainer: RustMat Team <team@rustmat.com>
+          Description: High-performance MATLAB/Octave runtime with Jupyter kernel support
+           RustMat is a high-performance implementation of MATLAB/Octave with 
+           built-in Jupyter kernel support for interactive computing.
+          EOF
+          
+          # Create desktop entry
+          cat > "deb/usr/share/applications/rustmat.desktop" << EOF
+          [Desktop Entry]
+          Name=RustMat
+          Comment=High-performance MATLAB/Octave runtime
+          Exec=/usr/local/bin/rustmat
+          Icon=rustmat
+          Terminal=true
+          Type=Application
+          Categories=Science;Math;Development;
+          EOF
+          
+          # Create copyright file
+          cat > "deb/usr/share/doc/rustmat/copyright" << EOF
+          Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+          Upstream-Name: rustmat
+          Source: https://github.com/rustmat/rustmat
+          
+          Files: *
+          Copyright: $(date +%Y) RustMat Team
+          License: MIT or Apache-2.0
+          EOF
+          
+          # Build package
+          dpkg-deb --build deb "${{ matrix.installer_name }}"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.target }}-${{ matrix.installer_type }}
+          path: "${{ matrix.installer_name }}"
+
+  create-release:
+    name: Create Release
+    needs: [build-release, build-installers]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: RustMat ${{ github.event.inputs.version || github.ref_name }}
+          body: |
+            ## RustMat ${{ github.event.inputs.version || github.ref_name }}
+            
+            High-performance MATLAB/Octave runtime with Jupyter kernel support.
+            
+            ### Installation
+            
+            #### Quick Install (Recommended)
+            ```bash
+            # Linux/macOS
+            curl -fsSL https://rustmat.com/install.sh | sh
+            
+            # Windows (PowerShell)
+            iwr https://rustmat.com/install.ps1 | iex
+            ```
+            
+            #### Manual Installation
+            1. Download the appropriate binary for your platform below
+            2. Extract the archive
+            3. Add the binary to your PATH
+            
+            #### Package Installers
+            - **Windows**: Download the `.msi` installer
+            - **macOS**: Download the `.dmg` installer
+            - **Linux**: Download the `.deb` package
+            
+            ### What's New
+            - Enhanced Jupyter plotting with WebAssembly widgets
+            - Improved performance for matrix operations
+            - Bug fixes and stability improvements
+            
+            ### Documentation
+            - [Getting Started](https://rustmat.com/docs/getting-started)
+            - [API Reference](https://rustmat.com/docs/api)
+            - [Examples](https://rustmat.com/docs/examples)
+          files: |
+            artifacts/**/*
+          draft: false
+          prerelease: false
+
+  update-website:
+    name: Update Documentation Website
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd website
+          npm ci
+
+      - name: Build website
+        run: |
+          cd website
+          npm run build
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: website/dist
+          cname: rustmat.com
+
+  create-install-scripts:
+    name: Create Installation Scripts
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create install scripts
+        run: |
+          mkdir -p install-scripts
+          
+          # Create Linux/macOS install script
+          cat > install-scripts/install.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          # RustMat Installation Script
+          
+          REPO="rustmat/rustmat"
+          BINARY_NAME="rustmat"
+          INSTALL_DIR="$HOME/.local/bin"
+          
+          # Detect OS and architecture
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          
+          case $OS in
+            linux)
+              case $ARCH in
+                x86_64) PLATFORM="Linux-x86_64" ;;
+                aarch64|arm64) PLATFORM="Linux-aarch64" ;;
+                *) echo "Unsupported architecture: $ARCH" && exit 1 ;;
+              esac
+              ;;
+            darwin)
+              case $ARCH in
+                x86_64) PLATFORM="Darwin-x86_64" ;;
+                arm64) PLATFORM="Darwin-aarch64" ;;
+                *) echo "Unsupported architecture: $ARCH" && exit 1 ;;
+              esac
+              ;;
+            *)
+              echo "Unsupported OS: $OS"
+              exit 1
+              ;;
+          esac
+          
+          echo "Installing RustMat for $PLATFORM..."
+          
+          # Get latest release
+          LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          
+          if [ -z "$LATEST_RELEASE" ]; then
+            echo "Failed to get latest release"
+            exit 1
+          fi
+          
+          echo "Latest release: $LATEST_RELEASE"
+          
+          # Download and install
+          DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_RELEASE/rustmat-$PLATFORM.tar.gz"
+          TEMP_DIR=$(mktemp -d)
+          
+          echo "Downloading from: $DOWNLOAD_URL"
+          curl -L "$DOWNLOAD_URL" | tar -xz -C "$TEMP_DIR"
+          
+          # Create install directory
+          mkdir -p "$INSTALL_DIR"
+          
+          # Install binary
+          cp "$TEMP_DIR/$BINARY_NAME" "$INSTALL_DIR/"
+          chmod +x "$INSTALL_DIR/$BINARY_NAME"
+          
+          # Cleanup
+          rm -rf "$TEMP_DIR"
+          
+          echo "RustMat installed to $INSTALL_DIR/$BINARY_NAME"
+          
+          # Check if in PATH
+          if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
+            echo ""
+            echo "Add $INSTALL_DIR to your PATH to use rustmat from anywhere:"
+            echo "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.bashrc"
+            echo "  source ~/.bashrc"
+          fi
+          
+          echo ""
+          echo "Installation complete! Run 'rustmat --help' to get started."
+          EOF
+          
+          # Create Windows install script
+          cat > install-scripts/install.ps1 << 'EOF'
+          # RustMat Installation Script for Windows
+          
+          $ErrorActionPreference = "Stop"
+          
+          $REPO = "rustmat/rustmat"
+          $BINARY_NAME = "rustmat.exe"
+          $INSTALL_DIR = "$env:USERPROFILE\.local\bin"
+          
+          # Detect architecture
+          $ARCH = $env:PROCESSOR_ARCHITECTURE
+          switch ($ARCH) {
+            "AMD64" { $PLATFORM = "Windows-x86_64" }
+            "ARM64" { $PLATFORM = "Windows-aarch64" }
+            default { 
+              Write-Host "Unsupported architecture: $ARCH" -ForegroundColor Red
+              exit 1
+            }
+          }
+          
+          Write-Host "Installing RustMat for $PLATFORM..." -ForegroundColor Green
+          
+          # Get latest release
+          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO/releases/latest"
+          $LATEST_RELEASE = $response.tag_name
+          
+          if (-not $LATEST_RELEASE) {
+            Write-Host "Failed to get latest release" -ForegroundColor Red
+            exit 1
+          }
+          
+          Write-Host "Latest release: $LATEST_RELEASE" -ForegroundColor Blue
+          
+          # Download and install
+          $DOWNLOAD_URL = "https://github.com/$REPO/releases/download/$LATEST_RELEASE/rustmat-$PLATFORM.zip"
+          $TEMP_FILE = "$env:TEMP\rustmat-$PLATFORM.zip"
+          $TEMP_DIR = "$env:TEMP\rustmat-extract"
+          
+          Write-Host "Downloading from: $DOWNLOAD_URL" -ForegroundColor Blue
+          Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $TEMP_FILE
+          
+          # Extract
+          if (Test-Path $TEMP_DIR) {
+            Remove-Item $TEMP_DIR -Recurse -Force
+          }
+          Expand-Archive -Path $TEMP_FILE -DestinationPath $TEMP_DIR
+          
+          # Create install directory
+          if (-not (Test-Path $INSTALL_DIR)) {
+            New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
+          }
+          
+          # Install binary
+          Copy-Item "$TEMP_DIR\$BINARY_NAME" "$INSTALL_DIR\" -Force
+          
+          # Cleanup
+          Remove-Item $TEMP_FILE -Force
+          Remove-Item $TEMP_DIR -Recurse -Force
+          
+          Write-Host "RustMat installed to $INSTALL_DIR\$BINARY_NAME" -ForegroundColor Green
+          
+          # Add to PATH if not already there
+          $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+          if ($userPath -notlike "*$INSTALL_DIR*") {
+            $newPath = "$INSTALL_DIR;$userPath"
+            [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
+            Write-Host "Added $INSTALL_DIR to your PATH" -ForegroundColor Yellow
+            Write-Host "Please restart your terminal to use rustmat from anywhere." -ForegroundColor Yellow
+          }
+          
+          Write-Host ""
+          Write-Host "Installation complete! Run 'rustmat --help' to get started." -ForegroundColor Green
+          EOF
+
+      - name: Upload install scripts to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          files: |
+            install-scripts/install.sh
+            install-scripts/install.ps1

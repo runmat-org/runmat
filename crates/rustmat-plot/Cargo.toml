@@ -38,12 +38,19 @@ rayon = "1.0"
 atty = "0.2"
 log = "0.4"
 
+# Web browser integration
+webbrowser = "0.8"
+
 # Jupyter integration (optional)
 eframe = { version = "0.27.2", optional = true, features = ["glow"] }
 
 # Serialization and config
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_yaml = "0.9"
+
+# Image processing for export
+image = { version = "0.24", features = ["png", "jpeg"] }
 
 
 

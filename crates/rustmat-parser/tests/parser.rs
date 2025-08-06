@@ -280,7 +280,7 @@ fn elementwise_power_operator() {
         Program {
             body: vec![Stmt::ExprStmt(Expr::Binary(
                 Box::new(Expr::Number("3".into())),
-                BinOp::Pow,
+                BinOp::ElemPow,
                 Box::new(Expr::Number("2".into())),
             ))]
         }

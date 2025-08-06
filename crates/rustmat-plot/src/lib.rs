@@ -225,7 +225,7 @@ pub fn load_config() -> PlotConfig {
 }
 
 /// Parse a hex color string to RGBColor.
-#[allow(dead_code)]
+#[allow(dead_code)] // Utility function for future color parsing
 fn parse_color(hex: &str) -> Result<RGBColor, &'static str> {
     let hex = hex.trim_start_matches('#');
     if hex.len() != 6 {

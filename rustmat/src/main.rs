@@ -155,9 +155,7 @@ struct Cli {
     #[arg(long, value_enum, env = "RUSTMAT_PLOT_BACKEND")]
     plot_backend: Option<PlotBackend>,
 
-    /// Configuration file path (.rustmat.yaml, .rustmat.json, etc.)
-    #[arg(long, env = "RUSTMAT_CONFIG")]
-    config_file: Option<PathBuf>,
+    // config_file is now handled by the config field above
 
     /// Generate sample configuration file
     #[arg(long)]
@@ -564,21 +562,30 @@ async fn main() -> Result<()> {
 
 /// Load configuration from files and environment
 fn load_configuration(cli: &Cli) -> Result<RustMatConfig> {
-    // If a specific config file is provided, try to load it
-    if let Some(config_file) = &cli.config_file {
+    // Check if config file was explicitly provided via CLI (not just env var)
+    // We can detect this by checking if RUSTMAT_CONFIG env var matches the cli.config value
+    let config_from_env = std::env::var("RUSTMAT_CONFIG").ok()
+        .map(|path| PathBuf::from(path));
+    
+    if let Some(config_file) = &cli.config {
+        // If config matches env var, it came from environment - be graceful
+        let is_from_env = config_from_env.as_ref() == Some(config_file);
+        
         if config_file.exists() {
             info!("Loading configuration from: {}", config_file.display());
             return ConfigLoader::load_from_file(config_file);
-        } else {
+        } else if !is_from_env {
+            // Only exit if explicitly specified via CLI, not env var
             error!(
                 "Specified config file does not exist: {}",
                 config_file.display()
             );
             std::process::exit(1);
         }
+        // If from env var and doesn't exist, fall through to standard loader
     }
 
-    // Otherwise, use the standard loader
+    // Use the standard loader (which will also check RUSTMAT_CONFIG but gracefully)
     ConfigLoader::load()
 }
 
