@@ -29,8 +29,10 @@ impl Vertex {
     }
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+        let stride = std::mem::size_of::<Vertex>() as wgpu::BufferAddress;
+        println!("VERTEX: Struct size = {}, stride = {}", std::mem::size_of::<Vertex>(), stride);
         wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            array_stride: stride,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
                 // Position
@@ -560,18 +562,12 @@ impl WgpuRenderer {
                     topology: wgpu::PrimitiveTopology::TriangleList,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
+                    cull_mode: None, // Disable culling for 2D plotting
                     polygon_mode: wgpu::PolygonMode::Fill,
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
+                depth_stencil: None, // Disable depth testing for 2D plotting
                 multisample: wgpu::MultisampleState {
                     count: 1,
                     mask: !0,
@@ -586,7 +582,7 @@ impl WgpuRenderer {
         &'a self,
         encoder: &'a mut wgpu::CommandEncoder,
         view: &'a wgpu::TextureView,
-        depth_view: &'a wgpu::TextureView,
+        _depth_view: &'a wgpu::TextureView,
     ) -> wgpu::RenderPass<'a> {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
@@ -603,14 +599,7 @@ impl WgpuRenderer {
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
+            depth_stencil_attachment: None, // No depth testing for 2D plotting
             occlusion_query_set: None,
             timestamp_writes: None,
         })

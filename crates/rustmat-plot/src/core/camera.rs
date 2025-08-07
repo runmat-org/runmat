@@ -329,7 +329,12 @@ impl Camera {
                 top,
                 near,
                 far,
-            } => Mat4::orthographic_rh(left, right, bottom, top, near, far),
+            } => {
+                println!("ORTHO: Creating matrix with bounds: left={}, right={}, bottom={}, top={}, near={}, far={}", 
+                         left, right, bottom, top, near, far);
+                println!("ORTHO: Camera aspect_ratio={}", self.aspect_ratio);
+                Mat4::orthographic_rh(left, right, bottom, top, near, far)
+            }
         };
 
         self.view_proj_dirty = false;

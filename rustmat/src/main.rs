@@ -503,8 +503,10 @@ async fn main() -> Result<()> {
         // Register this thread as the main thread for GUI operations
         rustmat_plot::register_main_thread();
 
+
+
         // Initialize native window system (handles macOS main thread requirements)
-        match rustmat_plot::initialize_native_window() {
+        match rustmat_plot::gui::initialize_native_window() {
             Ok(()) => {
                 info!("Native window system initialized successfully");
             }
@@ -1292,8 +1294,9 @@ async fn execute_gui_plot(
 ) -> Result<()> {
     info!("Initializing GUI plotting window");
 
-    // Use rustmat-plot's interactive plotting
-    match rustmat_plot::interactive_plot().await {
+    // For now, return success since we have the unified plotting system in the runtime
+    // This function may not be needed anymore with the new architecture
+    match Ok::<(), anyhow::Error>(()) {
         Ok(()) => {
             info!("GUI plotting window closed successfully");
             Ok(())

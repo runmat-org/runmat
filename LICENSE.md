@@ -1,6 +1,6 @@
 # License
 
-RustMat is licensed under the **MIT License with Attribution Requirements** and **Commercial Scientific Software Company Copyleft Provisions**.
+RustMat is licensed under the **MIT License** with **Attribution Requirements** and **Commercial Scientific Software Company Copyleft** Provisions.
 
 ## MIT License with Additional Terms
 
@@ -31,17 +31,3 @@ This copyleft provision does **NOT** apply to:
 ### Disclaimer
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
----
-
-## License Summary
-
-This license ensures that:
-- ✅ **Free for everyone**: Individuals, researchers, and most companies can use RustMat freely
-- ✅ **Open innovation**: Most users can create private forks and modifications
-- ✅ **Attribution preserved**: Dystr gets credit for creating RustMat
-- ✅ **Community protection**: Large scientific software companies must contribute improvements back
-
-## Questions?
-
-For license clarification or commercial licensing inquiries, contact: [legal@dystr.com](mailto:legal@dystr.com)

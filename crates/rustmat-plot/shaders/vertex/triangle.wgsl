@@ -28,9 +28,9 @@ struct VertexOutput {
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     
-    let world_position = uniforms.model * vec4<f32>(input.position, 1.0);
-    out.clip_position = uniforms.view_proj * world_position;
-    out.world_position = world_position.xyz;
+    // TEMP: Bypass projection matrix - use direct NDC coordinates
+    out.clip_position = vec4<f32>(input.position, 1.0);
+    out.world_position = input.position;
     out.color = input.color;
     out.normal = normalize(input.normal); // Skip normal transformation for 2D plotting
     out.tex_coords = input.tex_coords;
@@ -40,11 +40,6 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // Basic lighting calculation
-    let light_dir = normalize(vec3<f32>(1.0, 1.0, 1.0));
-    let ambient = 0.3;
-    let diffuse = max(0.0, dot(input.normal, light_dir));
-    let lighting = ambient + diffuse * 0.7;
-    
-    return vec4<f32>(input.color.rgb * lighting, input.color.a);
+    // Flat colors for 2D plotting (no lighting)
+    return input.color;
 }

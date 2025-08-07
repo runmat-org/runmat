@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 pub mod connection;
 pub mod execution;
+#[cfg(feature = "jupyter")]
 pub mod jupyter_plotting;
 pub mod protocol;
 pub mod server;

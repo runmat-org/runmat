@@ -18,8 +18,9 @@ use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::Wind
 impl<'window> PlotWindow<'window> {
     /// Create a new interactive plot window
     pub async fn new(config: WindowConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        // Create window and event loop
-        let event_loop = EventLoop::new()?;
+        // Create a new EventLoop (assumes this is the only EventLoop creation)
+        let event_loop = EventLoop::new()
+            .map_err(|e| format!("Failed to create EventLoop: {}", e))?;
         let window = WindowBuilder::new()
             .with_title(&config.title)
             .with_inner_size(PhysicalSize::new(config.width, config.height))

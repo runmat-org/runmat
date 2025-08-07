@@ -28,6 +28,8 @@ openblas-src = { version = "0.10", features = ["cblas", "lapacke"], optional = t
 default = ["gui"]
 # GUI plotting support
 gui = ["rustmat-plot/gui"]
+# Jupyter notebook integration
+jupyter = ["rustmat-plot/jupyter"]
 # High-performance BLAS/LAPACK support using platform-native libraries
 # macOS: Uses Apple's Accelerate framework (WORKS on both Intel and Apple Silicon!)
 # Other platforms: Uses OpenBLAS

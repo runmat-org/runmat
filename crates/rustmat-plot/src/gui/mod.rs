@@ -5,8 +5,10 @@
 
 #[cfg(feature = "gui")]
 pub mod controls;
-pub mod ipc; // Legacy IPC system (deprecated)
+
+
 pub mod native_window;
+pub mod single_window_manager; // V8-caliber single window management
 #[cfg(feature = "gui")]
 pub mod plot_overlay;
 pub mod thread_manager; // Robust thread management
@@ -25,7 +27,7 @@ pub use plot_overlay::PlotOverlay;
 pub use window::*;
 
 // Legacy IPC exports (deprecated)
-pub use ipc::{get_gui_handle, init_gui_handle, GuiHandle, GuiManager, GuiMessage};
+// Legacy IPC system removed - using sequential window manager instead
 
 // Thread manager exports
 pub use thread_manager::{
@@ -33,8 +35,15 @@ pub use thread_manager::{
     register_main_thread, show_plot_global, GuiErrorCode, GuiOperationResult, GuiThreadManager,
 };
 
+
+
 // Native window exports
 pub use native_window::{
     initialize_native_window, is_native_window_available, show_plot_native_window,
     NativeWindowManager, NativeWindowResult,
 };
+
+
+
+// Single window manager exports
+pub use single_window_manager::{is_window_available, show_plot_sequential};

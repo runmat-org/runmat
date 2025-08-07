@@ -5,7 +5,6 @@
 
 use rustmat_builtins::Matrix;
 use rustmat_macros::runtime_builtin;
-use rustmat_plot::jupyter::JupyterBackend;
 use rustmat_plot::plots::figure::PlotElement;
 use rustmat_plot::plots::*;
 use std::env;
@@ -60,13 +59,13 @@ fn interactive_export(figure: &mut Figure) -> Result<String, String> {
     // Use platform-optimal GUI system for best compatibility
     let figure_clone = figure.clone();
 
-    // Try platform-optimal GUI system first
+    // Try platform-optimal GUI system 
     match rustmat_plot::show_interactive_platform_optimal(figure_clone) {
         Ok(result) => Ok(result),
         Err(e) => {
-            // GUI system failed, fall back to static export
-            eprintln!("Interactive plotting failed, using static export: {}", e);
-            static_export(figure, "plot.png")
+            // Return the actual error instead of silently falling back to broken static export
+            // This will force us to fix the real GPU rendering issues
+            Err(format!("Interactive plotting failed: {}. Please check GPU/GUI system setup.", e))
         }
     }
 }
@@ -154,9 +153,16 @@ fn static_export(figure: &mut Figure, filename: &str) -> Result<String, String> 
 }
 
 /// Export plot for Jupyter
+#[cfg(feature = "jupyter")]
 fn jupyter_export(figure: &mut Figure) -> Result<String, String> {
+    use rustmat_plot::jupyter::JupyterBackend;
     let mut backend = JupyterBackend::new();
     backend.display_figure(figure)
+}
+
+#[cfg(not(feature = "jupyter"))]
+fn jupyter_export(_figure: &mut Figure) -> Result<String, String> {
+    Err("Jupyter feature not enabled".to_string())
 }
 
 /// Extract numeric vector from a Matrix
@@ -323,8 +329,8 @@ fn scatter3_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
         .zip(z_data.iter())
         .map(|((&x, &y), &z)| glam::Vec3::new(x as f32, y as f32, z as f32))
         .collect();
-
-    // Create high-performance point cloud with mario kart style
+    
+    // Create high-performance point cloud
     let point_cloud = PointCloudPlot::new(positions)
         .with_default_color(glam::Vec4::new(1.0, 0.6, 0.2, 1.0))  // Orange
         .with_default_size(8.0)  // Larger size for cube effect

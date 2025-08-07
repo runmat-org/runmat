@@ -3,13 +3,19 @@
 //! Provides seamless integration between the RustMat kernel and the plotting system,
 //! enabling automatic plot display in Jupyter notebooks.
 
+#[cfg(feature = "jupyter")]
 use crate::{KernelError, Result};
+#[cfg(feature = "jupyter")]
 use rustmat_plot::jupyter::{JupyterBackend, OutputFormat};
+#[cfg(feature = "jupyter")]
 use rustmat_plot::plots::Figure;
+#[cfg(feature = "jupyter")]
 use serde_json::Value as JsonValue;
+#[cfg(feature = "jupyter")]
 use std::collections::HashMap;
 
 /// Jupyter plotting manager for the RustMat kernel
+#[cfg(feature = "jupyter")]
 pub struct JupyterPlottingManager {
     /// Jupyter backend for rendering plots
     backend: JupyterBackend,
@@ -22,6 +28,7 @@ pub struct JupyterPlottingManager {
 }
 
 /// Jupyter plotting configuration
+#[cfg(feature = "jupyter")]
 #[derive(Debug, Clone)]
 pub struct JupyterPlottingConfig {
     /// Default output format
@@ -49,6 +56,7 @@ pub struct DisplayData {
     pub transient: HashMap<String, JsonValue>,
 }
 
+#[cfg(feature = "jupyter")]
 impl Default for JupyterPlottingConfig {
     fn default() -> Self {
         Self {
@@ -62,6 +70,7 @@ impl Default for JupyterPlottingConfig {
     }
 }
 
+#[cfg(feature = "jupyter")]
 impl JupyterPlottingManager {
     /// Create a new Jupyter plotting manager
     pub fn new() -> Self {

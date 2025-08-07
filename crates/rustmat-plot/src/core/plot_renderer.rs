@@ -149,6 +149,7 @@ impl PlotRenderer {
         }
 
         // Update camera to fit data
+        // println!("Scene now has {} visible nodes", self.scene.get_visible_nodes().len());
         self.fit_camera_to_data();
     }
 
@@ -186,6 +187,7 @@ impl PlotRenderer {
                 max_y + y_margin,
             );
 
+            // println!("Calculated data bounds: {:?}", bounds); // Too noisy
             self.data_bounds = Some(bounds);
             Some(bounds)
         } else {
@@ -206,10 +208,14 @@ impl PlotRenderer {
                 ..
             } = self.camera.projection
             {
-                *left = x_min as f32;
-                *right = x_max as f32;
-                *bottom = y_min as f32;
-                *top = y_max as f32;
+                // TEMP: Use fixed bounds to test projection matrix
+                *left = -2.0;
+                *right = 4.0;
+                *bottom = -2.0;
+                *top = 4.0;
+                
+                println!("CAMERA: Set orthographic bounds: left={}, right={}, bottom={}, top={}", 
+                         *left, *right, *bottom, *top);
             }
 
             // Center camera to look at data center
@@ -310,20 +316,14 @@ impl PlotRenderer {
             timestamp_writes: None,
         });
 
-        // Re-enable viewport clipping with simple coordinate approach
-        let (viewport_x, viewport_y, viewport_width, viewport_height) = _viewport;
-        render_pass.set_viewport(
-            viewport_x,
-            viewport_y,
-            viewport_width,
-            viewport_height,
-            0.0, // min_depth
-            1.0, // max_depth
-        );
+        // TEMP: Disable viewport to test if that's causing triangle collapse
+        // let (viewport_x, viewport_y, viewport_width, viewport_height) = _viewport;
+        // render_pass.set_viewport(viewport_x, viewport_y, viewport_width, viewport_height, 0.0, 1.0);
 
         // Render all items
         for (render_data, vertex_buffer) in &render_items {
             let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
+            println!("RENDER: Using {:?} pipeline for {} vertices", render_data.pipeline_type, render_data.vertices.len());
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -548,11 +548,15 @@ impl PlotRenderer {
             if let Some(index_buffer) = index_buffer {
                 render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 if let Some(indices) = &render_data.indices {
+                    println!("RENDER: Drawing {} indices with triangle pipeline", indices.len());
                     render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
                 }
             } else {
+                println!("RENDER: Drawing direct vertices - no index buffer");
                 // Use draw_calls from render_data for proper vertex range handling
                 for draw_call in &render_data.draw_calls {
+                    println!("RENDER: Direct draw - vertex_offset={}, vertex_count={}, instance_count={}", 
+                             draw_call.vertex_offset, draw_call.vertex_count, draw_call.instance_count);
                     render_pass.draw(
                         draw_call.vertex_offset as u32
                             ..(draw_call.vertex_offset + draw_call.vertex_count) as u32,

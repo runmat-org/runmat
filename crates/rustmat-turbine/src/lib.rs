@@ -605,22 +605,17 @@ impl TurbineEngine {
                 }
 
                 // RustMat runtime functions
-                "rustmat_call_builtin" => {
-                    // This would link to rustmat_runtime::call_builtin in a complete implementation
-                    debug!("RustMat builtin dispatcher requested but not available for linking");
-                    None
+                "rustmat_call_builtin_f64" => {
+                    debug!("Providing runtime builtin dispatcher for f64 functions");
+                    Some(runtime_builtin_f64_dispatch as *const u8)
+                }
+                "rustmat_call_builtin_matrix" => {
+                    debug!("Providing runtime builtin dispatcher for matrix functions");
+                    Some(runtime_builtin_matrix_dispatch as *const u8)
                 }
                 "rustmat_create_matrix" => {
-                    // This would link to rustmat_builtins::Matrix::new in a complete implementation
-                    debug!("RustMat matrix constructor requested but not available for linking");
-                    None
-                }
-                "rustmat_matrix_get" | "rustmat_matrix_set" => {
-                    // These would link to matrix operations in a complete implementation
-                    debug!(
-                        "RustMat matrix operation {name} requested but not available for linking"
-                    );
-                    None
+                    debug!("Providing runtime matrix constructor");
+                    Some(runtime_create_matrix as *const u8)
                 }
 
                 // Memory management functions
@@ -654,6 +649,8 @@ impl TurbineEngine {
         info!("Turbine JIT engine initialized successfully for {target_triple}");
         Ok(engine)
     }
+
+
 
     /// Check if the current platform supports JIT compilation
     pub fn is_jit_supported() -> bool {
@@ -1304,3 +1301,195 @@ pub struct TurbineStats {
 // Make compiled functions safe to send between threads
 unsafe impl Send for CompiledFunction {}
 unsafe impl Sync for CompiledFunction {}
+
+/// Runtime function implementations for JIT-compiled code
+/// These functions provide the bridge between JIT-compiled code and the RustMat runtime
+
+/// Runtime builtin dispatcher for f64-returning functions
+/// 
+/// # Arguments
+/// * `name_ptr` - Pointer to function name string
+/// * `name_len` - Length of function name string  
+/// * `args_ptr` - Pointer to f64 arguments array
+/// * `args_len` - Number of arguments
+///
+/// # Returns
+/// * f64 result of the builtin function
+///
+/// # Safety
+/// This function is called from JIT-compiled code and must handle invalid pointers gracefully
+#[no_mangle]
+pub extern "C" fn runtime_builtin_f64_dispatch(
+    name_ptr: *const u8,
+    name_len: usize,
+    args_ptr: *const f64,
+    args_len: usize,
+) -> f64 {
+    // Validate input pointers
+    if name_ptr.is_null() || (args_len > 0 && args_ptr.is_null()) {
+        log::error!("Invalid pointers passed to runtime_builtin_f64_dispatch");
+        return 0.0;
+    }
+
+    // Convert name pointer to string
+    let name = unsafe {
+        match std::str::from_utf8(std::slice::from_raw_parts(name_ptr, name_len)) {
+            Ok(s) => s,
+            Err(_) => {
+                log::error!("Invalid UTF-8 in function name");
+                return 0.0;
+            }
+        }
+    };
+
+    // Convert args pointer to slice
+    let args_slice = if args_len > 0 {
+        unsafe { std::slice::from_raw_parts(args_ptr, args_len) }
+    } else {
+        &[]
+    };
+
+    // Convert f64 args to Value args
+    let value_args: Vec<rustmat_builtins::Value> = args_slice
+        .iter()
+        .map(|&x| rustmat_builtins::Value::Num(x))
+        .collect();
+
+    // Call the runtime dispatcher
+    match rustmat_runtime::call_builtin(name, &value_args) {
+        Ok(rustmat_builtins::Value::Num(result)) => result,
+        Ok(rustmat_builtins::Value::Int(result)) => result as f64,
+        Ok(rustmat_builtins::Value::Bool(result)) => if result { 1.0 } else { 0.0 },
+        Ok(_) => {
+            log::warn!("Builtin function '{}' returned non-numeric result", name);
+            0.0
+        }
+        Err(e) => {
+            log::error!("Builtin function '{}' failed: {}", name, e);
+            0.0
+        }
+    }
+}
+
+/// Runtime builtin dispatcher for matrix-returning functions
+///
+/// # Arguments  
+/// * `name_ptr` - Pointer to function name string
+/// * `name_len` - Length of function name string
+/// * `args_ptr` - Pointer to f64 arguments array  
+/// * `args_len` - Number of arguments
+///
+/// # Returns
+/// * Pointer to GC-allocated result (0 on error)
+///
+/// # Safety
+/// This function is called from JIT-compiled code and must handle invalid pointers gracefully
+#[no_mangle]
+pub extern "C" fn runtime_builtin_matrix_dispatch(
+    name_ptr: *const u8,
+    name_len: usize,
+    args_ptr: *const f64,
+    args_len: usize,
+) -> i64 {
+    // Validate input pointers
+    if name_ptr.is_null() || (args_len > 0 && args_ptr.is_null()) {
+        log::error!("Invalid pointers passed to runtime_builtin_matrix_dispatch");
+        return 0;
+    }
+
+    // Convert name pointer to string
+    let name = unsafe {
+        match std::str::from_utf8(std::slice::from_raw_parts(name_ptr, name_len)) {
+            Ok(s) => s,
+            Err(_) => {
+                log::error!("Invalid UTF-8 in function name");
+                return 0;
+            }
+        }
+    };
+
+    // Convert args pointer to slice
+    let args_slice = if args_len > 0 {
+        unsafe { std::slice::from_raw_parts(args_ptr, args_len) }
+    } else {
+        &[]
+    };
+
+    // Convert f64 args to Value args
+    let value_args: Vec<rustmat_builtins::Value> = args_slice
+        .iter()
+        .map(|&x| rustmat_builtins::Value::Num(x))
+        .collect();
+
+    // Call the runtime dispatcher
+    match rustmat_runtime::call_builtin(name, &value_args) {
+        Ok(result) => {
+            // Allocate result in GC memory and return pointer
+            match rustmat_gc::gc_allocate(result) {
+                Ok(gc_ptr) => unsafe { gc_ptr.as_raw() as i64 },
+                Err(_) => {
+                    log::error!("Failed to allocate GC memory for result");
+                    0
+                }
+            }
+        }
+        Err(e) => {
+            log::error!("Builtin function '{}' failed: {}", name, e);
+            0
+        }
+    }
+}
+
+/// Runtime matrix constructor
+///
+/// # Arguments
+/// * `rows` - Number of rows
+/// * `cols` - Number of columns
+/// * `elements_ptr` - Pointer to f64 elements array (row-major order)
+/// * `elements_len` - Number of elements (should equal rows * cols)
+///
+/// # Returns  
+/// * Pointer to GC-allocated matrix (0 on error)
+///
+/// # Safety
+/// This function is called from JIT-compiled code and must handle invalid pointers gracefully
+#[no_mangle]
+pub extern "C" fn runtime_create_matrix(
+    rows: usize,
+    cols: usize,
+    elements_ptr: *const f64,
+    elements_len: usize,
+) -> i64 {
+    // Validate inputs
+    if elements_ptr.is_null() || elements_len != rows * cols {
+        log::error!(
+            "Invalid matrix creation parameters: rows={}, cols={}, elements_len={}",
+            rows,
+            cols,
+            elements_len
+        );
+        return 0;
+    }
+
+    // Convert elements pointer to Vec
+    let elements = unsafe { std::slice::from_raw_parts(elements_ptr, elements_len) }.to_vec();
+
+    // Create matrix
+    match rustmat_builtins::Matrix::new(elements, rows, cols) {
+        Ok(matrix) => {
+            let value = rustmat_builtins::Value::Matrix(matrix);
+            // Allocate in GC memory and return pointer
+            match rustmat_gc::gc_allocate(value) {
+                Ok(gc_ptr) => unsafe { gc_ptr.as_raw() as i64 },
+                Err(_) => {
+                    log::error!("Failed to allocate GC memory for matrix");
+                    0
+                }
+            }
+        }
+        Err(e) => {
+            log::error!("Matrix creation failed: {}", e);
+            0
+        }
+    }
+}

@@ -21,6 +21,10 @@ rustmat-repl = { workspace = true }
 rustmat-snapshot = { workspace = true }
 rustmat-plot = { workspace = true }
 
+[features]
+default = ["jupyter"]
+jupyter = ["rustmat-plot/jupyter", "rustmat-runtime/jupyter"]
+
 [dev-dependencies]
 env_logger = { workspace = true }
 tempfile = "3" 

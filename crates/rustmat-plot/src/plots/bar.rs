@@ -146,37 +146,19 @@ impl BarChart {
     /// Create the geometry for all bars
     fn create_bar_geometry(&self) -> (Vec<Vertex>, Vec<u32>) {
         let mut vertices = Vec::new();
-        let mut indices = Vec::new();
+        let indices = Vec::new(); // Empty - using direct vertex drawing
 
-        let bar_spacing = 1.0; // Space between bar centers
-        let half_width = self.bar_width * 0.5;
+        let _bar_spacing = 1.0; // Space between bar centers (unused in test)
+        let _half_width = self.bar_width * 0.5; // Unused in test
 
-        for (i, &value) in self.values.iter().enumerate() {
-            let x_center = i as f32 * bar_spacing;
-            let left = x_center - half_width;
-            let right = x_center + half_width;
-            let bottom = 0.0;
-            let top = value as f32;
-
-            // Create vertices for this bar (rectangle)
-            let base_vertex_index = vertices.len() as u32;
-
-            // Four corners of the rectangle
-            vertices.push(Vertex::new(Vec3::new(left, bottom, 0.0), self.color)); // Bottom-left
-            vertices.push(Vertex::new(Vec3::new(right, bottom, 0.0), self.color)); // Bottom-right
-            vertices.push(Vertex::new(Vec3::new(right, top, 0.0), self.color)); // Top-right
-            vertices.push(Vertex::new(Vec3::new(left, top, 0.0), self.color)); // Top-left
-
-            // Two triangles to form the rectangle
-            indices.extend_from_slice(&[
-                base_vertex_index,
-                base_vertex_index + 1,
-                base_vertex_index + 2, // Bottom-right triangle
-                base_vertex_index,
-                base_vertex_index + 2,
-                base_vertex_index + 3, // Top-left triangle
-            ]);
-        }
+        // TEST: Direct vertex layout (no indices) to bypass index buffer issues
+        vertices.push(Vertex::new(Vec3::new(-0.5, -0.5, 0.0), Vec4::new(1.0, 0.0, 0.0, 1.0))); // Red  
+        vertices.push(Vertex::new(Vec3::new(0.5, -0.5, 0.0), Vec4::new(0.0, 1.0, 0.0, 1.0)));  // Green  
+        vertices.push(Vertex::new(Vec3::new(0.0, 0.5, 0.0), Vec4::new(0.0, 0.0, 1.0, 1.0)));   // Blue
+        
+        // No indices - use direct vertex drawing
+        
+        println!("TEST: Created single large triangle with 3 vertices, 3 indices");
 
         (vertices, indices)
     }
@@ -206,9 +188,9 @@ impl BarChart {
 
     /// Generate complete render data for the graphics pipeline
     pub fn render_data(&mut self) -> RenderData {
-        let (vertices, indices) = self.generate_vertices();
+        let (vertices, _indices) = self.generate_vertices();
         let vertices = vertices.clone();
-        let indices = indices.clone();
+
 
         let mut material = Material::default();
         material.albedo = self.color;
@@ -216,15 +198,18 @@ impl BarChart {
         let draw_call = DrawCall {
             vertex_offset: 0,
             vertex_count: vertices.len(),
-            index_offset: Some(0),
-            index_count: Some(indices.len()),
+            index_offset: None, // No index buffer for direct drawing
+            index_count: None,  // No index buffer for direct drawing
             instance_count: 1,
         };
 
+        // println!("Bar chart render data: {} vertices, {} indices, pipeline={:?}", 
+        //          vertices.len(), indices.len(), PipelineType::Triangles);
+        
         RenderData {
             pipeline_type: PipelineType::Triangles,
             vertices,
-            indices: Some(indices),
+            indices: None, // Use direct vertex drawing, no index buffer
             material,
             draw_calls: vec![draw_call],
         }

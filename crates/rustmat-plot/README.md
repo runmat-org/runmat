@@ -156,15 +156,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Current Status & Known Issues
+
+`rustmat-plot` is under active development. The core GPU-accelerated architecture is implemented and functional, but there are several important limitations to be aware of:
+
+### ⚠️ Current Limitations
+
+-   **Triangle Rendering Issue (macOS Metal)**: Bar charts and filled 2D shapes currently render as thin lines instead of filled areas on macOS. This is a low-level WGPU/Metal triangle rasterization issue that affects the triangle rendering pipeline. Line plots work correctly.
+    
+    **Status**: Under investigation. The issue has been isolated to triangle primitive assembly in the Metal backend. All high-level geometry generation, vertex data, shaders, and draw calls are correct.
+    
+    **Workaround**: Line plots, scatter plots, and 3D point clouds work as expected. Bar charts will display but appear as outlines only.
+
+-   **Sequential Plotting**: Opening multiple plot windows sequentially may cause EventLoop recreation errors on macOS due to `winit` limitations. The first plot window works correctly.
+    
+    **Workaround**: Restart the application between different plotting sessions.
+
+-   **Legacy Export Backend**: Static PNG exports currently use a fallback `plotters`-based renderer, which may not match the interactive GPU rendering exactly.
+
+### ✅ What Works
+
+-   **Interactive GUI**: Full-featured interactive plotting windows with smooth navigation, zooming, and real-time controls
+-   **Line Plots**: Complete 2D line plotting with multiple series, styling, and legends  
+-   **Scatter Plots**: 2D and 3D scatter plots with configurable markers and colors
+-   **3D Point Clouds**: High-performance 3D visualization with interactive camera controls
+-   **GPU Performance**: Excellent rendering performance for large datasets via WGPU acceleration
+-   **Cross-Platform**: Works on Windows, Linux, and macOS (with triangle rendering limitation)
+-   **MATLAB API Compatibility**: Familiar `plot()`, `scatter()`, `scatter3()` function interface
+
 ## Roadmap & TODOs
 
-`rustmat-plot` is under active development. While the core architecture is robust, several areas are planned for future enhancement:
+Active areas of development, in priority order:
+
+-   **🔥 PRIORITY: Fix Triangle Rendering (macOS Metal)**: Resolve the triangle rasterization issue preventing filled shapes from rendering correctly. Investigation points to WGPU primitive topology or Metal driver interaction.
+
+-   **EventLoop Management**: Implement robust sequential plotting support to eliminate EventLoop recreation errors.
 
 -   **Unified Static Export**: Replace the legacy `plotters`-based backend in `simple_plots.rs` with a unified headless rendering mode using the `wgpu` engine. This will ensure that exported PNGs and SVGs are pixel-perfect matches of the interactive plots.
+
 -   **Complete Export Modules**: Fully implement the `src/export` modules for high-quality vector (SVG, PDF) and web (HTML, interactive widgets) outputs.
+
 -   **Advanced Data Handling**: Implement the `src/data` modules for optimized GPU buffer management, level-of-detail (LOD) for large datasets, and advanced geometry processing.
+
 -   **Volume Rendering**: Implement the `VolumePlot` type for 3D volumetric data visualization.
+
 -   **Jupyter WebGL Widget**: Complete the WebGL-based interactive widget for Jupyter to provide a fully interactive experience within notebooks, matching the native GUI.
+
 -   **Expanded Theming**: Add more built-in themes and expand the customizability of the styling system.
+
 -   **3D in Figures**: Fully integrate 3D plots like `SurfacePlot` into the `Figure` system for multi-plot 3D scenes.
+
+---
+
+**For Developers**: If you're contributing to the triangle rendering fix, see the detailed technical investigation in the Git history. Key files: `crates/rustmat-plot/src/plots/bar.rs`, `crates/rustmat-plot/src/core/plot_renderer.rs`, and `crates/rustmat-plot/shaders/vertex/triangle.wgsl`. The issue has been isolated to direct vertex drawing with `PrimitiveTopology::TriangleList` on Metal backend.
 
