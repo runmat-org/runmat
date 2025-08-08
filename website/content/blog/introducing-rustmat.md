@@ -106,7 +106,7 @@ Loops, conditionals, and function calls with up to 10,000 iterations:
 ### **Key Performance Insights:**
 - **Consistent speedups**: 150-180x faster across all workload types
 - **JIT benefits**: Additional 6-13% performance boost for mathematical functions
-- **Sub-50ms startup**: Revolutionary snapshotting eliminates MATLAB's notorious cold start delays
+- **Sub-5ms startup**: Revolutionary snapshotting eliminates MATLAB's notorious cold start delays
 - **Memory safety**: Zero crashes or memory leaks in extensive testing
 - **BLAS/LAPACK integration**: Leverages optimized linear algebra libraries
 
@@ -191,7 +191,7 @@ echo "plot(sin(0:0.1:2*pi))" | rustmat
 The performance improvements have practical implications for real workflows:
 
 - **Faster iteration cycles**: What takes 15 minutes in Octave runs in 5 seconds, enabling rapid prototyping
-- **Truly interactive development**: Sub-50ms startup enables real-time exploratory computing  
+- **Truly interactive development**: Sub-5ms startup enables real-time exploratory computing  
 - **Significant cost savings**: Avoid MATLAB's $2,150+ annual per-user licensing while getting comparable performance
 - **Reduced infrastructure costs**: Computations that needed clusters can run on laptops
 - **Memory safety**: Rust's ownership model prevents entire classes of bugs that corrupt research data

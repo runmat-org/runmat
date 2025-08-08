@@ -168,7 +168,7 @@ eigenvals = eig(B);`}</CodeBlock>
             </CardHeader>
             <CardContent>
               <CardDescription className="text-sm">
-                Revolutionary snapshotting technology enables sub-50ms cold starts and 
+                  Revolutionary snapshotting technology enables sub-5ms cold starts and 
                 persistent workspace state across sessions.
               </CardDescription>
             </CardContent>
