@@ -66,8 +66,7 @@ fn interactive_export(figure: &mut Figure) -> Result<String, String> {
             // Return the actual error instead of silently falling back to broken static export
             // This will force us to fix the real GPU rendering issues
             Err(format!(
-                "Interactive plotting failed: {}. Please check GPU/GUI system setup.",
-                e
+                "Interactive plotting failed: {e}. Please check GPU/GUI system setup."
             ))
         }
     }
@@ -83,8 +82,8 @@ fn static_export(figure: &mut Figure, filename: &str) -> Result<String, String> 
 
     match figure.get_plot_mut(0) {
         Some(PlotElement::Line(line_plot)) => {
-            let x_data: Vec<f64> = line_plot.x_data.iter().map(|&x| x as f64).collect();
-            let y_data: Vec<f64> = line_plot.y_data.iter().map(|&y| y as f64).collect();
+            let x_data: Vec<f64> = line_plot.x_data.to_vec();
+            let y_data: Vec<f64> = line_plot.y_data.to_vec();
 
             rustmat_plot::plot_line(
                 &x_data,
@@ -92,13 +91,13 @@ fn static_export(figure: &mut Figure, filename: &str) -> Result<String, String> 
                 filename,
                 rustmat_plot::PlotOptions::default(),
             )
-            .map_err(|e| format!("Plot export failed: {}", e))?;
+            .map_err(|e| format!("Plot export failed: {e}"))?;
 
-            Ok(format!("Plot saved to {}", filename))
+            Ok(format!("Plot saved to {filename}"))
         }
         Some(PlotElement::Scatter(scatter_plot)) => {
-            let x_data: Vec<f64> = scatter_plot.x_data.iter().map(|&x| x as f64).collect();
-            let y_data: Vec<f64> = scatter_plot.y_data.iter().map(|&y| y as f64).collect();
+            let x_data: Vec<f64> = scatter_plot.x_data.to_vec();
+            let y_data: Vec<f64> = scatter_plot.y_data.to_vec();
 
             rustmat_plot::plot_scatter(
                 &x_data,
@@ -106,12 +105,12 @@ fn static_export(figure: &mut Figure, filename: &str) -> Result<String, String> 
                 filename,
                 rustmat_plot::PlotOptions::default(),
             )
-            .map_err(|e| format!("Plot export failed: {}", e))?;
+            .map_err(|e| format!("Plot export failed: {e}"))?;
 
-            Ok(format!("Scatter plot saved to {}", filename))
+            Ok(format!("Scatter plot saved to {filename}"))
         }
         Some(PlotElement::Bar(bar_chart)) => {
-            let values: Vec<f64> = bar_chart.values.iter().map(|&v| v as f64).collect();
+            let values: Vec<f64> = bar_chart.values.to_vec();
 
             rustmat_plot::plot_bar(
                 &bar_chart.labels,
@@ -119,12 +118,12 @@ fn static_export(figure: &mut Figure, filename: &str) -> Result<String, String> 
                 filename,
                 rustmat_plot::PlotOptions::default(),
             )
-            .map_err(|e| format!("Plot export failed: {}", e))?;
+            .map_err(|e| format!("Plot export failed: {e}"))?;
 
-            Ok(format!("Bar chart saved to {}", filename))
+            Ok(format!("Bar chart saved to {filename}"))
         }
         Some(PlotElement::Histogram(histogram)) => {
-            let data: Vec<f64> = histogram.data.iter().map(|&d| d as f64).collect();
+            let data: Vec<f64> = histogram.data.to_vec();
 
             rustmat_plot::plot_histogram(
                 &data,
@@ -132,9 +131,9 @@ fn static_export(figure: &mut Figure, filename: &str) -> Result<String, String> 
                 filename,
                 rustmat_plot::PlotOptions::default(),
             )
-            .map_err(|e| format!("Plot export failed: {}", e))?;
+            .map_err(|e| format!("Plot export failed: {e}"))?;
 
-            Ok(format!("Histogram saved to {}", filename))
+            Ok(format!("Histogram saved to {filename}"))
         }
         Some(PlotElement::PointCloud(point_cloud)) => {
             // For static export, render point cloud as 2D projection (X-Y view)
@@ -155,9 +154,9 @@ fn static_export(figure: &mut Figure, filename: &str) -> Result<String, String> 
                 filename,
                 rustmat_plot::PlotOptions::default(),
             )
-            .map_err(|e| format!("Point cloud export failed: {}", e))?;
+            .map_err(|e| format!("Point cloud export failed: {e}"))?;
 
-            Ok(format!("Point cloud (2D projection) saved to {}", filename))
+            Ok(format!("Point cloud (2D projection) saved to {filename}"))
         }
         None => Err("No plots found in figure to export".to_string()),
     }
@@ -192,7 +191,7 @@ fn plot_builtin(x: Matrix, y: Matrix) -> Result<String, String> {
 
     // Create a line plot
     let line_plot = LinePlot::new(x_data.clone(), y_data.clone())
-        .map_err(|e| format!("Failed to create line plot: {}", e))?
+        .map_err(|e| format!("Failed to create line plot: {e}"))?
         .with_label("Data")
         .with_style(
             glam::Vec4::new(0.0, 0.4, 0.8, 1.0), // Blue
@@ -221,7 +220,7 @@ fn scatter_builtin(x: Matrix, y: Matrix) -> Result<String, String> {
 
     // Create modern scatter plot
     let scatter_plot = ScatterPlot::new(x_data, y_data)
-        .map_err(|e| format!("Failed to create scatter plot: {}", e))?
+        .map_err(|e| format!("Failed to create scatter plot: {e}"))?
         .with_label("Data")
         .with_style(
             glam::Vec4::new(0.8, 0.2, 0.2, 1.0), // Red
@@ -244,11 +243,11 @@ fn bar_builtin(values: Matrix) -> Result<String, String> {
     let data = extract_numeric_vector(&values);
 
     // Create simple string labels
-    let labels: Vec<String> = (1..=data.len()).map(|i| format!("Item {}", i)).collect();
+    let labels: Vec<String> = (1..=data.len()).map(|i| format!("Item {i}")).collect();
 
     // Create modern bar chart
     let bar_chart = BarChart::new(labels, data)
-        .map_err(|e| format!("Failed to create bar chart: {}", e))?
+        .map_err(|e| format!("Failed to create bar chart: {e}"))?
         .with_label("Values")
         .with_style(glam::Vec4::new(0.2, 0.6, 0.3, 1.0), 0.8); // Green with 80% width
 
@@ -269,7 +268,7 @@ fn hist_builtin(values: Matrix) -> Result<String, String> {
 
     // Create modern histogram
     let histogram = Histogram::new(data, bins)
-        .map_err(|e| format!("Failed to create histogram: {}", e))?
+        .map_err(|e| format!("Failed to create histogram: {e}"))?
         .with_label("Frequency")
         .with_style(glam::Vec4::new(0.6, 0.3, 0.7, 1.0), false); // Purple, not normalized
 
@@ -310,7 +309,7 @@ fn surf_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
 
     // Create surface plot
     let surface = SurfacePlot::new(x_data, y_data, z_grid)
-        .map_err(|e| format!("Failed to create surface plot: {}", e))?
+        .map_err(|e| format!("Failed to create surface plot: {e}"))?
         .with_colormap(ColorMap::Viridis)
         .with_label("Surface");
 

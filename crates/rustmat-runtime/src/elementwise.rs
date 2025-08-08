@@ -53,8 +53,7 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
         }
 
         _ => Err(format!(
-            "Element-wise multiplication not supported for types: {:?} .* {:?}",
-            a, b
+            "Element-wise multiplication not supported for types: {a:?} .* {b:?}"
         )),
     }
 }
@@ -107,8 +106,7 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
         }
 
         _ => Err(format!(
-            "Addition not supported for types: {:?} + {:?}",
-            a, b
+            "Addition not supported for types: {a:?} + {b:?}"
         )),
     }
 }
@@ -161,8 +159,7 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
         }
 
         _ => Err(format!(
-            "Subtraction not supported for types: {:?} - {:?}",
-            a, b
+            "Subtraction not supported for types: {a:?} - {b:?}"
         )),
     }
 }
@@ -275,8 +272,7 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
         }
 
         _ => Err(format!(
-            "Element-wise division not supported for types: {:?} ./ {:?}",
-            a, b
+            "Element-wise division not supported for types: {a:?} ./ {b:?}"
         )),
     }
 }
@@ -329,8 +325,7 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
         }
 
         _ => Err(format!(
-            "Element-wise power not supported for types: {:?} .^ {:?}",
-            a, b
+            "Element-wise power not supported for types: {a:?} .^ {b:?}"
         )),
     }
 }

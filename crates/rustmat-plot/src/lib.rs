@@ -109,7 +109,7 @@ fn render_figure_to_file(figure: plots::Figure, path: &str) -> Result<String, St
     {
         // Show interactively - user can screenshot or we'll implement proper export later
         show_plot_sequential(figure)?;
-        Ok(format!("Plot displayed interactively. Static export to {} not yet implemented - please screenshot the window.", path))
+        Ok(format!("Plot displayed interactively. Static export to {path} not yet implemented - please screenshot the window."))
     }
     #[cfg(not(feature = "gui"))]
     {
@@ -127,7 +127,7 @@ pub fn plot_line(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> R
     }
 
     let line_plot = plots::LinePlot::new(xs.to_vec(), ys.to_vec())
-        .map_err(|e| format!("Failed to create line plot: {}", e))?
+        .map_err(|e| format!("Failed to create line plot: {e}"))?
         .with_label("Data")
         .with_style(
             glam::Vec4::new(0.0, 0.4, 0.8, 1.0), // Blue
@@ -158,7 +158,7 @@ pub fn plot_scatter(
     }
 
     let scatter_plot = plots::ScatterPlot::new(xs.to_vec(), ys.to_vec())
-        .map_err(|e| format!("Failed to create scatter plot: {}", e))?
+        .map_err(|e| format!("Failed to create scatter plot: {e}"))?
         .with_label("Data")
         .with_style(
             glam::Vec4::new(0.8, 0.2, 0.2, 1.0), // Red
@@ -189,7 +189,7 @@ pub fn plot_bar(
     }
 
     let bar_chart = plots::BarChart::new(labels.to_vec(), values.to_vec())
-        .map_err(|e| format!("Failed to create bar chart: {}", e))?
+        .map_err(|e| format!("Failed to create bar chart: {e}"))?
         .with_label("Values")
         .with_style(glam::Vec4::new(0.2, 0.6, 0.3, 1.0), 0.8); // Green bars
 
@@ -212,7 +212,7 @@ pub fn plot_histogram(
     _options: PlotOptions,
 ) -> Result<(), String> {
     let histogram = plots::Histogram::new(data.to_vec(), bins)
-        .map_err(|e| format!("Failed to create histogram: {}", e))?
+        .map_err(|e| format!("Failed to create histogram: {e}"))?
         .with_label("Frequency")
         .with_style(glam::Vec4::new(0.6, 0.3, 0.7, 1.0), false); // Purple
 

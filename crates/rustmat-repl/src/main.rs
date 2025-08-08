@@ -87,7 +87,7 @@ fn main() -> Result<()> {
                 if let Some(error) = result.error {
                     eprintln!("Error: {error}");
                 } else if let Some(value) = result.value {
-                    println!("ans = {}", value);
+                    println!("ans = {value}");
                     if result.execution_time_ms > 100 {
                         println!(
                             "  (executed in {}ms{})",

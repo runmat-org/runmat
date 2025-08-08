@@ -9,11 +9,11 @@ use std::sync::{Mutex, OnceLock};
 /// Display a string to the console (MATLAB fprintf with single string argument)
 #[runtime_builtin(name = "fprintf")]
 pub fn fprintf_string_builtin(format_str: String) -> Result<f64, String> {
-    print!("{}", format_str);
+    print!("{format_str}");
     use std::io::{self, Write};
     io::stdout()
         .flush()
-        .map_err(|e| format!("Failed to flush stdout: {}", e))?;
+        .map_err(|e| format!("Failed to flush stdout: {e}"))?;
     Ok(format_str.len() as f64) // fprintf returns number of characters written
 }
 
@@ -30,18 +30,18 @@ pub fn fprintf_format_builtin(format_str: String, value: f64) -> Result<f64, Str
             .and_then(|n| n.parse::<usize>().ok())
             .unwrap_or(6);
         match spec {
-            "d" => format_str.replacen(&caps[0], &format!("{:.0}", value), 1),
-            _ => format_str.replacen(&caps[0], &format!("{:.*}", prec, value), 1),
+            "d" => format_str.replacen(&caps[0], &format!("{value:.0}"), 1),
+            _ => format_str.replacen(&caps[0], &format!("{value:.prec$}"), 1),
         }
     } else {
         format_str.replace("\\n", "\n")
     };
 
-    print!("{}", output);
+    print!("{output}");
     use std::io::{self, Write};
     io::stdout()
         .flush()
-        .map_err(|e| format!("Failed to flush stdout: {}", e))?;
+        .map_err(|e| format!("Failed to flush stdout: {e}"))?;
     Ok(output.len() as f64)
 }
 
@@ -64,32 +64,32 @@ pub fn fprintf_format2_builtin(
                 .and_then(|n| n.parse::<usize>().ok())
                 .unwrap_or(6);
             let rep = match spec {
-                "d" => format!("{:.0}", val),
-                _ => format!("{:.*}", prec, val),
+                "d" => format!("{val:.0}"),
+                _ => format!("{val:.prec$}"),
             };
             output = output.replacen(&caps[0], &rep, 1);
         }
     }
     output = output.replace("\\n", "\n");
-    print!("{}", output);
+    print!("{output}");
     use std::io::{self, Write};
     io::stdout()
         .flush()
-        .map_err(|e| format!("Failed to flush stdout: {}", e))?;
+        .map_err(|e| format!("Failed to flush stdout: {e}"))?;
     Ok(output.len() as f64)
 }
 
 /// Display a string with automatic newline (MATLAB disp)
 #[runtime_builtin(name = "disp")]
 pub fn disp_string_builtin(s: String) -> Result<f64, String> {
-    println!("{}", s);
+    println!("{s}");
     Ok(0.0)
 }
 
 /// Display a number with automatic newline
 #[runtime_builtin(name = "disp")]
 pub fn disp_number_builtin(n: f64) -> Result<f64, String> {
-    println!("{}", n);
+    println!("{n}");
     Ok(0.0)
 }
 
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn test_disp_number() {
-        let result = disp_number_builtin(3.14159);
+        let result = disp_number_builtin(std::f64::consts::PI);
         assert!(result.is_ok());
     }
 

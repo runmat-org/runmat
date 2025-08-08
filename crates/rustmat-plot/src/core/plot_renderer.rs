@@ -122,16 +122,14 @@ impl PlotRenderer {
     fn add_figure_to_scene(&mut self, mut figure: Figure) {
         use crate::core::SceneNode;
 
-        let mut node_id_counter = 0u64;
-
         // Convert figure to render data first, then create scene nodes
         let render_data_list = figure.render_data();
 
-        for render_data in render_data_list.into_iter() {
+        for (node_id_counter, render_data) in render_data_list.into_iter().enumerate() {
             // Create scene node for this plot element
             let node = SceneNode {
-                id: node_id_counter,
-                name: format!("Plot {}", node_id_counter),
+                id: node_id_counter as u64,
+                name: format!("Plot {node_id_counter}"),
                 transform: Mat4::IDENTITY,
                 visible: true,
                 cast_shadows: false,
@@ -145,7 +143,6 @@ impl PlotRenderer {
             };
 
             self.scene.add_node(node);
-            node_id_counter += 1;
         }
 
         // Update camera to fit data
@@ -656,12 +653,10 @@ pub mod plot_utils {
     pub fn format_tick_label(value: f64) -> String {
         if value.abs() < 0.001 {
             "0".to_string()
-        } else if value.abs() >= 1000.0 {
-            format!("{:.0}", value)
-        } else if value.fract().abs() < 0.001 {
-            format!("{:.0}", value)
+        } else if value.abs() >= 1000.0 || value.fract().abs() < 0.001 {
+            format!("{value:.0}")
         } else {
-            format!("{:.1}", value)
+            format!("{value:.1}")
         }
     }
 

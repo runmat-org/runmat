@@ -182,12 +182,14 @@ mod tests {
 
     #[test]
     fn test_connection_json_roundtrip() {
-        let mut conn = ConnectionInfo::default();
-        conn.shell_port = 12345;
-        conn.iopub_port = 12346;
-        conn.stdin_port = 12347;
-        conn.control_port = 12348;
-        conn.hb_port = 12349;
+        let conn = ConnectionInfo {
+            shell_port: 12345,
+            iopub_port: 12346,
+            stdin_port: 12347,
+            control_port: 12348,
+            hb_port: 12349,
+            ..Default::default()
+        };
 
         let json = conn.to_json().unwrap();
         let parsed = ConnectionInfo::from_json(&json).unwrap();
@@ -199,12 +201,14 @@ mod tests {
 
     #[test]
     fn test_connection_file_io() {
-        let mut conn = ConnectionInfo::default();
-        conn.shell_port = 12345;
-        conn.iopub_port = 12346;
-        conn.stdin_port = 12347;
-        conn.control_port = 12348;
-        conn.hb_port = 12349;
+        let conn = ConnectionInfo {
+            shell_port: 12345,
+            iopub_port: 12346,
+            stdin_port: 12347,
+            control_port: 12348,
+            hb_port: 12349,
+            ..Default::default()
+        };
 
         let temp_file = NamedTempFile::new().unwrap();
         conn.write_to_file(temp_file.path()).unwrap();
@@ -216,9 +220,11 @@ mod tests {
 
     #[test]
     fn test_socket_urls() {
-        let mut conn = ConnectionInfo::default();
-        conn.shell_port = 12345;
-        conn.iopub_port = 12346;
+        let conn = ConnectionInfo {
+            shell_port: 12345,
+            iopub_port: 12346,
+            ..Default::default()
+        };
 
         assert_eq!(conn.shell_url(), "tcp://127.0.0.1:12345");
         assert_eq!(conn.iopub_url(), "tcp://127.0.0.1:12346");

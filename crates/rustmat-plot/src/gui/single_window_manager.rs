@@ -54,7 +54,7 @@ fn show_plot_internal(figure: Figure) -> Result<String, String> {
                 handle.block_on(async {
                     let mut window = PlotWindow::new(config)
                         .await
-                        .map_err(|e| format!("Failed to create plot window: {}", e))?;
+                        .map_err(|e| format!("Failed to create plot window: {e}"))?;
 
                     // Set the figure data
                     window.set_figure(figure);
@@ -63,7 +63,7 @@ fn show_plot_internal(figure: Figure) -> Result<String, String> {
                     window
                         .run()
                         .await
-                        .map_err(|e| format!("Window execution failed: {}", e))?;
+                        .map_err(|e| format!("Window execution failed: {e}"))?;
 
                     Ok("Plot window closed successfully".to_string())
                 })
@@ -72,12 +72,12 @@ fn show_plot_internal(figure: Figure) -> Result<String, String> {
         Err(_) => {
             // No runtime available, create one
             let rt = tokio::runtime::Runtime::new()
-                .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+                .map_err(|e| format!("Failed to create async runtime: {e}"))?;
 
             rt.block_on(async {
                 let mut window = PlotWindow::new(config)
                     .await
-                    .map_err(|e| format!("Failed to create plot window: {}", e))?;
+                    .map_err(|e| format!("Failed to create plot window: {e}"))?;
 
                 // Set the figure data
                 window.set_figure(figure);
@@ -86,7 +86,7 @@ fn show_plot_internal(figure: Figure) -> Result<String, String> {
                 window
                     .run()
                     .await
-                    .map_err(|e| format!("Window execution failed: {}", e))?;
+                    .map_err(|e| format!("Window execution failed: {e}"))?;
 
                 Ok("Plot window closed successfully".to_string())
             })

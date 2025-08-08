@@ -121,8 +121,7 @@ fn test_jit_optimization_levels() {
         let output = run_rustmat(&["--jit-opt-level", level, "info"]);
         assert!(
             output.status.success(),
-            "Failed with optimization level: {}",
-            level
+            "Failed with optimization level: {level}"
         );
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -137,7 +136,7 @@ fn test_gc_presets() {
 
     for preset in &presets {
         let output = run_rustmat(&["--gc-preset", preset, "info"]);
-        assert!(output.status.success(), "Failed with GC preset: {}", preset);
+        assert!(output.status.success(), "Failed with GC preset: {preset}");
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("GC Preset"));
@@ -189,7 +188,7 @@ fn test_debug_flag() {
     // Debug flag should enable debug logging
     let stderr = String::from_utf8_lossy(&output.stderr);
     // Should see debug-level logs
-    assert!(stderr.contains("DEBUG") || output.stdout.len() > 0);
+    assert!(stderr.contains("DEBUG") || !output.stdout.is_empty());
 }
 
 #[test]
@@ -357,7 +356,7 @@ fn test_log_level_configurations() {
 
     for level in &log_levels {
         let output = run_rustmat(&["--log-level", level, "info"]);
-        assert!(output.status.success(), "Failed with log level: {}", level);
+        assert!(output.status.success(), "Failed with log level: {level}");
     }
 }
 

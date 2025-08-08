@@ -38,5 +38,5 @@ fn simple_string_literal() {
 fn debug_print_tokens_for_apostrophe_case() {
     let input = "B = A';";
     let tokens = tokenize(input);
-    println!("TOKENS: {:?}", tokens);
+    println!("TOKENS: {tokens:?}");
 }

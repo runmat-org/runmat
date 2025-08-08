@@ -89,11 +89,11 @@ impl VolumePlot {
         // Validate consistent dimensions
         for (x, plane) in volume_data.iter().enumerate() {
             if plane.len() != dimensions.1 {
-                return Err(format!("Inconsistent Y dimension at X={}", x));
+                return Err(format!("Inconsistent Y dimension at X={x}"));
             }
             for (y, row) in plane.iter().enumerate() {
                 if row.len() != dimensions.2 {
-                    return Err(format!("Inconsistent Z dimension at X={}, Y={}", x, y));
+                    return Err(format!("Inconsistent Z dimension at X={x}, Y={y}"));
                 }
             }
         }
@@ -192,7 +192,7 @@ impl VolumePlot {
                 Vec3::new(min.x, max.y, max.z), // 7
             ];
 
-            for (_i, pos) in positions.iter().enumerate() {
+            for pos in positions.iter() {
                 vertices.push(Vertex {
                     position: pos.to_array(),
                     normal: [0.0, 0.0, 1.0], // Will be computed in shader
@@ -249,8 +249,7 @@ impl VolumePlot {
             indices.len()
         );
 
-        let mut material = Material::default();
-        material.albedo = Vec4::new(1.0, 1.0, 1.0, self.opacity);
+        let material = Material { albedo: Vec4::new(1.0, 1.0, 1.0, self.opacity), ..Default::default() };
 
         let draw_call = DrawCall {
             vertex_offset: 0,

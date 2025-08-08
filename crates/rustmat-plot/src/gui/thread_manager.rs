@@ -69,7 +69,7 @@ pub enum GuiErrorCode {
 impl std::fmt::Display for GuiOperationResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GuiOperationResult::Success(msg) => write!(f, "Success: {}", msg),
+            GuiOperationResult::Success(msg) => write!(f, "Success: {msg}"),
             GuiOperationResult::Error {
                 message,
                 error_code,
@@ -77,11 +77,10 @@ impl std::fmt::Display for GuiOperationResult {
             } => {
                 write!(
                     f,
-                    "Error [{:?}]: {} (recoverable: {})",
-                    error_code, message, recoverable
+                    "Error [{error_code:?}]: {message} (recoverable: {recoverable})"
                 )
             }
-            GuiOperationResult::Cancelled(msg) => write!(f, "Cancelled: {}", msg),
+            GuiOperationResult::Cancelled(msg) => write!(f, "Cancelled: {msg}"),
         }
     }
 }
@@ -91,6 +90,12 @@ impl std::error::Error for GuiOperationResult {}
 /// Main thread detection and validation
 pub struct MainThreadDetector {
     main_thread_id: OnceLock<ThreadId>,
+}
+
+impl Default for MainThreadDetector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MainThreadDetector {
@@ -105,7 +110,7 @@ impl MainThreadDetector {
     /// This should be called from main() before any GUI operations
     pub fn register_main_thread(&self) {
         let current_id = thread::current().id();
-        if let Err(_) = self.main_thread_id.set(current_id) {
+        if self.main_thread_id.set(current_id).is_err() {
             // Already set - this is fine, multiple calls are safe
         }
     }
@@ -189,7 +194,7 @@ impl GuiThreadManager {
             .name("rustmat-gui".to_string())
             .spawn(move || Self::gui_thread_main(receiver, health_state_clone))
             .map_err(|e| GuiOperationResult::Error {
-                message: format!("Failed to spawn GUI thread: {}", e),
+                message: format!("Failed to spawn GUI thread: {e}"),
                 error_code: GuiErrorCode::ThreadCommunicationFailed,
                 recoverable: false,
             })?;
@@ -222,17 +227,14 @@ impl GuiThreadManager {
                         health.last_response = std::time::Instant::now();
                         health.response_count += 1;
 
-                        match &result {
-                            Some(GuiOperationResult::Error { .. }) => {
-                                health.error_count += 1;
-                                health.is_healthy = health.error_count < 10; // Allow some errors
-                            }
-                            _ => {}
+                        if let Some(GuiOperationResult::Error { .. }) = &result {
+                            health.error_count += 1;
+                            health.is_healthy = health.error_count < 10; // Allow some errors
                         }
                     }
 
                     // If this was a shutdown message, break the loop
-                    if matches!(result, None) {
+                    if result.is_none() {
                         break;
                     }
                 }
@@ -307,7 +309,7 @@ impl GuiThreadManager {
             Ok(rt) => rt,
             Err(e) => {
                 return GuiOperationResult::Error {
-                    message: format!("Failed to create async runtime: {}", e),
+                    message: format!("Failed to create async runtime: {e}"),
                     error_code: GuiErrorCode::ResourceExhaustion,
                     recoverable: true,
                 }
@@ -320,7 +322,7 @@ impl GuiThreadManager {
                 Ok(window) => window,
                 Err(e) => {
                     return GuiOperationResult::Error {
-                        message: format!("Failed to create window: {}", e),
+                        message: format!("Failed to create window: {e}"),
                         error_code: GuiErrorCode::WindowCreationFailed,
                         recoverable: true,
                     }
@@ -334,7 +336,7 @@ impl GuiThreadManager {
             match window.run().await {
                 Ok(_) => GuiOperationResult::Success("Plot window closed".to_string()),
                 Err(e) => GuiOperationResult::Error {
-                    message: format!("Window runtime error: {}", e),
+                    message: format!("Window runtime error: {e}"),
                     error_code: GuiErrorCode::PlatformError,
                     recoverable: true,
                 },

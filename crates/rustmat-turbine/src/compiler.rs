@@ -11,6 +11,14 @@ use cranelift_module::{FuncId, Module};
 use rustmat_ignition::Instr;
 use std::collections::{BTreeSet, HashMap};
 
+/// Context for compilation containing related parameters
+struct CompileContext<'a> {
+    vars_ptr: Value,
+    function_definitions: &'a HashMap<String, rustmat_ignition::UserFunction>,
+    module: &'a mut JITModule,
+    rustmat_call_user_function_id: FuncId,
+}
+
 /// Stack simulation for tracking values during compilation  
 /// Values are represented as f64 values
 #[derive(Debug, Clone)]
@@ -227,16 +235,20 @@ impl BytecodeCompiler {
             }
         }
 
-        // Compile with proper control flow graph
+        // Compile with control flow graph
+        let mut ctx = CompileContext {
+            vars_ptr,
+            function_definitions,
+            module,
+            rustmat_call_user_function_id,
+        };
+        
         Self::compile_with_cfg(
             &mut builder,
             &mut stack,
             instructions,
             &cfg,
-            vars_ptr,
-            function_definitions,
-            module,
-            rustmat_call_user_function_id,
+            &mut ctx,
         )?;
 
         // Seal all blocks (including entry block which is in cfg.blocks)
@@ -253,10 +265,7 @@ impl BytecodeCompiler {
         _stack: &mut StackSimulator,
         instructions: &[Instr],
         cfg: &ControlFlowGraph,
-        vars_ptr: Value,
-        function_definitions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>,
-        module: &mut JITModule,
-        rustmat_call_user_function_id: FuncId,
+        ctx: &mut CompileContext,
     ) -> Result<()> {
         // Get all blocks sorted by start PC for processing
         let mut sorted_blocks: Vec<_> = cfg.blocks.iter().collect();
@@ -299,7 +308,7 @@ impl BytecodeCompiler {
                         let idx_val = builder.ins().iconst(types::I64, *idx as i64);
                         let element_size = builder.ins().iconst(types::I64, 8);
                         let offset = builder.ins().imul(idx_val, element_size);
-                        let var_addr = builder.ins().iadd(vars_ptr, offset);
+                        let var_addr = builder.ins().iadd(ctx.vars_ptr, offset);
                         let val = builder.ins().load(types::F64, MemFlags::new(), var_addr, 0);
                         local_stack.push(val);
                     }
@@ -308,7 +317,7 @@ impl BytecodeCompiler {
                         let idx_val = builder.ins().iconst(types::I64, *idx as i64);
                         let element_size = builder.ins().iconst(types::I64, 8);
                         let offset = builder.ins().imul(idx_val, element_size);
-                        let var_addr = builder.ins().iadd(vars_ptr, offset);
+                        let var_addr = builder.ins().iadd(ctx.vars_ptr, offset);
                         builder.ins().store(MemFlags::new(), val, var_addr, 0);
                     }
                     Instr::Add => {
@@ -426,7 +435,7 @@ impl BytecodeCompiler {
                             // Pop row length
                             let row_len_val = local_stack.pop()?;
                             let row_len = Self::extract_f64_from_value(builder, row_len_val)
-                                .map_err(|e| TurbineError::ExecutionError(e))?;
+                                .map_err(TurbineError::ExecutionError)?;
 
                             // Pop row elements
                             let mut row_values = Vec::new();
@@ -468,7 +477,7 @@ impl BytecodeCompiler {
                         indices.reverse();
                         let base = local_stack.pop()?;
                         let result = Self::compile_matrix_indexing(builder, base, &indices)
-                            .map_err(|e| TurbineError::ExecutionError(e))?;
+                            .map_err(TurbineError::ExecutionError)?;
                         local_stack.push(result);
                     }
                     Instr::Pop => {
@@ -532,11 +541,11 @@ impl BytecodeCompiler {
 
                         let result = Self::call_user_function_jit(
                             builder,
-                            module,
-                            rustmat_call_user_function_id,
+                            ctx.module,
+                            ctx.rustmat_call_user_function_id,
                             func_name,
                             &args,
-                            function_definitions,
+                            ctx.function_definitions,
                         )?;
                         local_stack.push(result);
                     }
@@ -545,7 +554,7 @@ impl BytecodeCompiler {
                         let offset_val = builder.ins().iconst(types::I64, *offset as i64);
                         let element_size = builder.ins().iconst(types::I64, 8);
                         let local_offset = builder.ins().imul(offset_val, element_size);
-                        let var_addr = builder.ins().iadd(vars_ptr, local_offset);
+                        let var_addr = builder.ins().iadd(ctx.vars_ptr, local_offset);
                         let val = builder.ins().load(types::F64, MemFlags::new(), var_addr, 0);
                         local_stack.push(val);
                     }
@@ -555,7 +564,7 @@ impl BytecodeCompiler {
                         let offset_val = builder.ins().iconst(types::I64, *offset as i64);
                         let element_size = builder.ins().iconst(types::I64, 8);
                         let local_offset = builder.ins().imul(offset_val, element_size);
-                        let var_addr = builder.ins().iadd(vars_ptr, local_offset);
+                        let var_addr = builder.ins().iadd(ctx.vars_ptr, local_offset);
                         builder.ins().store(MemFlags::new(), val, var_addr, 0);
                     }
                     Instr::EnterScope(_count) => {
@@ -624,7 +633,7 @@ impl BytecodeCompiler {
     ) -> Result<Value> {
         // Look up the function definition
         let function_def = function_definitions.get(func_name).ok_or_else(|| {
-            TurbineError::ExecutionError(format!("Unknown function: {}", func_name))
+            TurbineError::ExecutionError(format!("Unknown function: {func_name}"))
         })?;
 
         // Validate argument count
@@ -688,7 +697,7 @@ impl BytecodeCompiler {
 
         // Use the expert's pattern: declare_func_in_func to get a valid FuncRef
         let runtime_fn =
-            module.declare_func_in_func(rustmat_call_user_function_id, &mut builder.func);
+            module.declare_func_in_func(rustmat_call_user_function_id, builder.func);
 
         // Allocate space for the result (f64)
         let result_slot =
@@ -1279,7 +1288,7 @@ impl BytecodeCompiler {
             }
             "transpose" => {
                 // Simple transpose operation - return input for identity case
-                if args.len() >= 1 {
+                if !args.is_empty() {
                     args[0]
                 } else {
                     builder.ins().iconst(types::I64, 0)

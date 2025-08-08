@@ -416,11 +416,11 @@ fn format_number_short_g(value: f64) -> String {
     }
 
     // Decide between fixed and scientific notation roughly like MATLAB short g
-    let use_scientific = abs < 1e-4 || abs >= 1e6;
+    let use_scientific = !(1e-4..1e6).contains(&abs);
 
     if use_scientific {
         // 5 significant digits in scientific notation for short g style
-        let s = format!("{:.5e}", v);
+        let s = format!("{v:.5e}");
         // Trim trailing zeros in fraction part
         if let Some(idx) = s.find('e') {
             let (mut mantissa, exp) = s.split_at(idx);
@@ -436,7 +436,7 @@ fn format_number_short_g(value: f64) -> String {
                 }
                 mantissa = &mantissa[..end];
             }
-            return format!("{}{}", mantissa, exp);
+            return format!("{mantissa}{exp}");
         }
         return s;
     }
@@ -449,7 +449,7 @@ fn format_number_short_g(value: f64) -> String {
     // Round to that many decimals
     let pow = 10f64.powi(decimals as i32);
     let rounded = (v * pow).round() / pow;
-    let mut s = format!("{:.*}", decimals, rounded);
+    let mut s = format!("{rounded:.decimals$}");
     if let Some(dot) = s.find('.') {
         // Trim trailing zeros
         let mut end = s.len();
@@ -470,18 +470,18 @@ fn format_number_short_g(value: f64) -> String {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Int(i) => write!(f, "{}", i),
+            Value::Int(i) => write!(f, "{i}"),
             Value::Num(n) => write!(f, "{}", format_number_short_g(*n)),
             Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
-            Value::String(s) => write!(f, "'{}'", s),
-            Value::Matrix(m) => write!(f, "{}", m),
+            Value::String(s) => write!(f, "'{s}'"),
+            Value::Matrix(m) => write!(f, "{m}"),
             Value::Cell(items) => {
                 write!(f, "{{")?;
                 for (idx, item) in items.iter().enumerate() {
                     if idx > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", item)?;
+                    write!(f, "{item}")?;
                 }
                 write!(f, "}}")
             }

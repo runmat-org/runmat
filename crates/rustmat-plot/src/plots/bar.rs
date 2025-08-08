@@ -175,12 +175,12 @@ impl BarChart {
 
             // Create indices for two triangles per bar (6 indices per bar)
             // Triangle 1: bottom-left, bottom-right, top-right
-            indices.push(vertex_offset + 0);
+            indices.push(vertex_offset);
             indices.push(vertex_offset + 1);
             indices.push(vertex_offset + 2);
 
             // Triangle 2: bottom-left, top-right, top-left
-            indices.push(vertex_offset + 0);
+            indices.push(vertex_offset);
             indices.push(vertex_offset + 2);
             indices.push(vertex_offset + 3);
         }
@@ -217,8 +217,7 @@ impl BarChart {
         let vertices = vertices.clone();
         let indices = indices.clone();
 
-        let mut material = Material::default();
-        material.albedo = self.color;
+        let material = Material { albedo: self.color, ..Default::default() };
 
         let draw_call = DrawCall {
             vertex_offset: 0,
@@ -312,7 +311,7 @@ pub mod matlab_compat {
             "y" | "yellow" => Ok(Vec4::new(1.0, 1.0, 0.0, 1.0)),
             "k" | "black" => Ok(Vec4::new(0.0, 0.0, 0.0, 1.0)),
             "w" | "white" => Ok(Vec4::new(1.0, 1.0, 1.0, 1.0)),
-            _ => Err(format!("Unknown color: {}", color)),
+            _ => Err(format!("Unknown color: {color}")),
         }
     }
 }

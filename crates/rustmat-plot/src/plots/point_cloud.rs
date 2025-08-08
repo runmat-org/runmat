@@ -298,10 +298,9 @@ impl PointCloudPlot {
         let vertices = self.generate_vertices().clone();
         let vertex_count = vertices.len();
 
-        println!("DEBUG: Generated {} vertices for point cloud", vertex_count);
+        println!("DEBUG: Generated {vertex_count} vertices for point cloud");
 
-        let mut material = Material::default();
-        material.albedo = self.default_color;
+        let material = Material { albedo: self.default_color, ..Default::default() };
 
         let draw_call = DrawCall {
             vertex_offset: 0,
@@ -379,8 +378,8 @@ pub mod matlab_compat {
 
         let positions: Vec<Vec3> = x
             .into_iter()
-            .zip(y.into_iter())
-            .zip(z.into_iter())
+            .zip(y)
+            .zip(z)
             .map(|((x, y), z)| Vec3::new(x as f32, y as f32, z as f32))
             .collect();
 
@@ -412,7 +411,7 @@ pub mod matlab_compat {
             "viridis" => ColorMap::Viridis,
             "plasma" => ColorMap::Plasma,
             "gray" | "grey" => ColorMap::Gray,
-            _ => return Err(format!("Unknown colormap: {}", colormap)),
+            _ => return Err(format!("Unknown colormap: {colormap}")),
         };
 
         Ok(scatter3(x, y, z)?.with_values(values)?.with_colormap(cmap))

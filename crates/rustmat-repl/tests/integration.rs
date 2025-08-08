@@ -67,7 +67,7 @@ fn test_gc_integration_during_execution() {
 
         // Execute operations that create objects
         for i in 0..10 {
-            let code = format!("matrix{} = [1, 2; 3, 4]", i);
+            let code = format!("matrix{i} = [1, 2; 3, 4]");
             let result = engine.execute(&code);
             assert!(result.is_ok());
         }
@@ -123,7 +123,7 @@ fn test_complex_mathematical_operations() {
 
         for op in &complex_operations {
             let result = engine.execute(op);
-            assert!(result.is_ok(), "Failed to execute: {}", op);
+            assert!(result.is_ok(), "Failed to execute: {op}");
             assert!(result.unwrap().error.is_none());
         }
 
@@ -233,7 +233,7 @@ fn test_statistics_accuracy() {
 
         let num_executions = 7;
         for i in 0..num_executions {
-            let code = format!("val{} = {}", i, i);
+            let code = format!("val{i} = {i}");
             let result = engine.execute(&code);
             assert!(result.is_ok());
         }
@@ -286,7 +286,7 @@ fn test_concurrent_engine_usage() {
             let handle = thread::spawn(move || {
                 // Don't nest gc_test_context - create engine directly in thread
                 let mut engine = ReplEngine::new().unwrap();
-                let code = format!("thread_var = {} + 1", thread_id);
+                let code = format!("thread_var = {thread_id} + 1");
                 let result = engine.execute(&code);
 
                 let mut results_guard = results_clone.lock().unwrap();
@@ -325,7 +325,7 @@ fn test_matrix_operations_integration() {
 
         for test in &matrix_tests {
             let result = engine.execute(test);
-            assert!(result.is_ok(), "Matrix operation failed: {}", test);
+            assert!(result.is_ok(), "Matrix operation failed: {test}");
 
             let exec_result = result.unwrap();
             assert!(exec_result.error.is_none());
@@ -345,7 +345,7 @@ fn test_performance_degradation_detection() {
         let mut execution_times = Vec::new();
 
         for i in 0..20 {
-            let code = format!("perf_test_{} = {} * 2 + 1", i, i);
+            let code = format!("perf_test_{i} = {i} * 2 + 1");
             let result = engine.execute(&code).unwrap();
             execution_times.push(result.execution_time_ms);
         }
@@ -364,9 +364,7 @@ fn test_performance_degradation_detection() {
         if first_batch_avg > 0.0 {
             assert!(
                 last_batch_avg < first_batch_avg * 3.0,
-                "Performance degraded: first batch avg = {}, last batch avg = {}",
-                first_batch_avg,
-                last_batch_avg
+                "Performance degraded: first batch avg = {first_batch_avg}, last batch avg = {last_batch_avg}"
             );
         } else {
             // Both are very fast (≤1ms), which is good performance
@@ -390,7 +388,7 @@ fn test_repl_function_definition_and_call_same_statement() {
         // The REPL now properly uses the shared Ignition interpreter with function support
         let exec_result = result.unwrap();
         if let Some(error) = &exec_result.error {
-            panic!("Function call failed with error: {}", error);
+            panic!("Function call failed with error: {error}");
         }
 
         // This verifies that our architectural fix (removing duplicate interpreter) works
@@ -414,7 +412,7 @@ fn test_repl_function_persistence() {
         // Functions should persist across REPL commands
         let exec_result = result2.unwrap();
         if let Some(error) = &exec_result.error {
-            panic!("Function call failed with error: {}", error);
+            panic!("Function call failed with error: {error}");
         }
     });
 }
@@ -426,23 +424,23 @@ fn test_debug_function_context() {
 
         // First, just define a function
         let result1 = engine.execute("function y = test_func(x); y = x + 1; end");
-        println!("Function definition result: {:?}", result1);
+        println!("Function definition result: {result1:?}");
         assert!(result1.is_ok(), "Function definition should succeed");
 
         // Try to call a simple builtin to verify engine works
         let result2 = engine.execute("builtin_test = abs(-5)");
-        println!("Builtin call result: {:?}", result2);
+        println!("Builtin call result: {result2:?}");
         assert!(result2.is_ok(), "Builtin call should succeed");
 
         // Now try to call our user-defined function
         let result3 = engine.execute("user_func_test = test_func(10)");
-        println!("User function call result: {:?}", result3);
+        println!("User function call result: {result3:?}");
 
         if let Err(e) = &result3 {
-            println!("Function call error: {}", e);
+            println!("Function call error: {e}");
         } else if let Ok(exec_result) = &result3 {
             if let Some(error) = &exec_result.error {
-                println!("Execution error: {}", error);
+                println!("Execution error: {error}");
             } else {
                 println!("Function call succeeded!");
             }

@@ -102,7 +102,7 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                 _total_cols += m.cols;
                 matrices.push(m.clone());
             }
-            _ => return Err(format!("Cannot concatenate value of type {:?}", value)),
+            _ => return Err(format!("Cannot concatenate value of type {value:?}")),
         }
     }
 
@@ -160,7 +160,7 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                 _total_rows += m.rows;
                 matrices.push(m.clone());
             }
-            _ => return Err(format!("Cannot concatenate value of type {:?}", value)),
+            _ => return Err(format!("Cannot concatenate value of type {value:?}")),
         }
     }
 

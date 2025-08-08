@@ -30,6 +30,7 @@ impl Default for ThemeVariant {
 
 /// Complete plotting theme configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PlotThemeConfig {
     /// Theme variant to use
     pub variant: ThemeVariant,
@@ -50,18 +51,6 @@ pub struct PlotThemeConfig {
     pub interaction: InteractionConfig,
 }
 
-impl Default for PlotThemeConfig {
-    fn default() -> Self {
-        Self {
-            variant: ThemeVariant::default(),
-            typography: TypographyConfig::default(),
-            layout: LayoutConfig::default(),
-            custom_colors: None,
-            grid: GridConfig::default(),
-            interaction: InteractionConfig::default(),
-        }
-    }
-}
 
 /// Typography configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -574,7 +563,7 @@ pub fn validate_theme_config(config: &PlotThemeConfig) -> Result<(), String> {
         if let Some(custom) = &config.custom_colors {
             for color in &custom.data_colors {
                 if hex_to_vec4(color).is_none() {
-                    return Err(format!("Invalid hex color: {}", color));
+                    return Err(format!("Invalid hex color: {color}"));
                 }
             }
         } else {
@@ -633,8 +622,7 @@ mod tests {
 
     #[test]
     fn test_custom_theme_validation() {
-        let mut config = PlotThemeConfig::default();
-        config.variant = ThemeVariant::Custom;
+        let mut config = PlotThemeConfig { variant: ThemeVariant::Custom, ..Default::default() };
 
         // Should fail without custom colors
         assert!(config.validate().is_err());

@@ -296,5 +296,6 @@ fn test_serialization_roundtrip() {
 fn test_format_constants() {
     assert_eq!(SNAPSHOT_MAGIC.len(), 8);
     assert_eq!(SNAPSHOT_MAGIC, b"RUSTMAT\x01");
-    assert!(SNAPSHOT_VERSION > 0);
+    // Ensure SNAPSHOT_VERSION is positive (constant assertion)
+    const _: () = assert!(SNAPSHOT_VERSION > 0);
 }

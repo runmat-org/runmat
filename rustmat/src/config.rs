@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 /// Main RustMat configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct RustMatConfig {
     /// Runtime configuration
     pub runtime: RuntimeConfig,
@@ -60,6 +61,7 @@ pub struct JitConfig {
 
 /// GC configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct GcConfig {
     /// GC preset
     pub preset: Option<GcPreset>,
@@ -372,18 +374,6 @@ fn default_lod_threshold() -> u32 {
     10000 // Points threshold for LOD
 }
 
-impl Default for RustMatConfig {
-    fn default() -> Self {
-        Self {
-            runtime: RuntimeConfig::default(),
-            jit: JitConfig::default(),
-            gc: GcConfig::default(),
-            plotting: PlottingConfig::default(),
-            kernel: KernelConfig::default(),
-            logging: LoggingConfig::default(),
-        }
-    }
-}
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -405,16 +395,6 @@ impl Default for JitConfig {
     }
 }
 
-impl Default for GcConfig {
-    fn default() -> Self {
-        Self {
-            preset: None,
-            young_size_mb: None,
-            threads: None,
-            collect_stats: false,
-        }
-    }
-}
 
 impl Default for PlottingConfig {
     fn default() -> Self {
@@ -837,7 +817,7 @@ mod tests {
     fn test_config_defaults() {
         let config = RustMatConfig::default();
         assert_eq!(config.runtime.timeout, 300);
-        assert_eq!(config.jit.enabled, true);
+        assert!(config.jit.enabled);
         assert_eq!(config.jit.threshold, 10);
         assert_eq!(config.plotting.mode, PlotMode::Auto);
     }

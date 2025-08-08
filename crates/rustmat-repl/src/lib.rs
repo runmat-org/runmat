@@ -193,7 +193,7 @@ impl ReplEngine {
                 "Variable array after preparation: {:?}",
                 self.variable_array
             );
-            debug!("Updated variable mapping: {:?}", updated_vars);
+            debug!("Updated variable mapping: {updated_vars:?}");
             debug!("Bytecode instructions: {:?}", bytecode.instructions);
         }
 
@@ -306,7 +306,7 @@ impl ReplEngine {
                         self.stats.interpreter_fallback += 1;
                     }
                     if self.verbose {
-                        debug!("Interpreter results: {:?}", results);
+                        debug!("Interpreter results: {results:?}");
                     }
 
                     // For expressions, get the result from the temporary variable
@@ -316,8 +316,7 @@ impl ReplEngine {
                             result_value = Some(self.variable_array[temp_var_id].clone());
                             if self.verbose {
                                 debug!(
-                                    "Expression result from temp var {}: {:?}",
-                                    temp_var_id, result_value
+                                    "Expression result from temp var {temp_var_id}: {result_value:?}"
                                 );
                             }
                         }
@@ -326,7 +325,7 @@ impl ReplEngine {
                     }
 
                     if self.verbose {
-                        debug!("Final result_value: {:?}", result_value);
+                        debug!("Final result_value: {result_value:?}");
                     }
                     debug!(
                         "Interpreter execution successful, variable_array: {:?}",

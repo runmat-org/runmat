@@ -88,6 +88,12 @@ pub struct DirectUniforms {
     pub viewport_max: [f32; 2], // NDC coordinates of viewport top-right
 }
 
+impl Default for Uniforms {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Uniforms {
     pub fn new() -> Self {
         Self {

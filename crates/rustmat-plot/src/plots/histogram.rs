@@ -276,7 +276,7 @@ impl Histogram {
 
         let heights = self.get_bin_heights();
 
-        for (_i, (&height, edges)) in heights.iter().zip(self.bin_edges.windows(2)).enumerate() {
+        for (&height, edges) in heights.iter().zip(self.bin_edges.windows(2)) {
             let left = edges[0] as f32;
             let right = edges[1] as f32;
             let bottom = 0.0;
@@ -333,8 +333,7 @@ impl Histogram {
         let vertices = vertices.clone();
         let indices = indices.clone();
 
-        let mut material = Material::default();
-        material.albedo = self.color;
+        let material = Material { albedo: self.color, ..Default::default() };
 
         let draw_call = DrawCall {
             vertex_offset: 0,
@@ -537,7 +536,7 @@ mod tests {
         let render_data = hist.render_data();
 
         assert_eq!(render_data.pipeline_type, PipelineType::Triangles);
-        assert!(render_data.vertices.len() > 0);
+        assert!(!render_data.vertices.is_empty());
         assert!(render_data.indices.is_some());
     }
 

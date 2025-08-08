@@ -32,7 +32,8 @@ fn benchmark_snapshot_creation(c: &mut Criterion) {
                     let config = preset.config();
                     let builder = SnapshotBuilder::new(config);
 
-                    black_box(builder.build_and_save(&snapshot_path).unwrap());
+                    builder.build_and_save(&snapshot_path).unwrap();
+                    black_box(());
                 });
             });
         });
@@ -145,7 +146,7 @@ fn benchmark_compression_algorithms(c: &mut Criterion) {
         for (algo_name, config) in &algorithms {
             group.throughput(Throughput::Bytes(data.len() as u64));
             group.bench_with_input(
-                BenchmarkId::new(format!("{}_{}", data_name, algo_name), data.len()),
+                BenchmarkId::new(format!("{data_name}_{algo_name}"), data.len()),
                 &(data, config),
                 |b, (_data, config)| {
                     b.iter(|| {
@@ -155,7 +156,8 @@ fn benchmark_compression_algorithms(c: &mut Criterion) {
 
                             // Create a minimal snapshot with this data size
                             let builder = SnapshotBuilder::new((*config).clone());
-                            black_box(builder.build_and_save(&snapshot_path).unwrap());
+                            builder.build_and_save(&snapshot_path).unwrap();
+                            black_box(());
                         });
                     });
                 },

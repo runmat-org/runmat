@@ -77,7 +77,7 @@ fn test_pipeline_type_completeness() {
 
     // All types should be Debug-printable
     for pipeline_type in types {
-        let debug_str = format!("{:?}", pipeline_type);
+        let debug_str = format!("{pipeline_type:?}");
         assert!(!debug_str.is_empty());
 
         // Check that PartialEq works

@@ -15,7 +15,7 @@ fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Matrix, String> {
     }
 
     if n == 1 {
-        return Ok(Matrix::new(vec![x2], 1, 1)?);
+        return Matrix::new(vec![x2], 1, 1);
     }
 
     let n_usize = n as usize;
@@ -33,7 +33,7 @@ fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Matrix, String> {
         data[n_usize - 1] = x2;
     }
 
-    Ok(Matrix::new(data, 1, n_usize)?)
+    Matrix::new(data, 1, n_usize)
 }
 
 /// Generate logarithmically spaced vector
@@ -57,7 +57,7 @@ fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Matrix, String> {
         }
     }
 
-    Ok(Matrix::new(data, 1, n_usize)?)
+    Matrix::new(data, 1, n_usize)
 }
 
 /// Generate zeros matrix
@@ -95,7 +95,7 @@ fn eye_builtin(n: i32) -> Result<Matrix, String> {
         data[i * n_usize + i] = 1.0;
     }
 
-    Ok(Matrix::new(data, n_usize, n_usize)?)
+    Matrix::new(data, n_usize, n_usize)
 }
 
 /// Generate random matrix with uniform distribution [0,1)
@@ -123,7 +123,7 @@ fn rand_builtin(m: i32, n: i32) -> Result<Matrix, String> {
         }
     }
 
-    Ok(Matrix::new(data, rows, cols)?)
+    Matrix::new(data, rows, cols)
 }
 
 /// Generate matrix filled with specific value
@@ -138,7 +138,7 @@ fn fill_builtin(value: f64, m: i32, n: i32) -> Result<Matrix, String> {
     let cols = n as usize;
     let data = vec![value; rows * cols];
 
-    Ok(Matrix::new(data, rows, cols)?)
+    Matrix::new(data, rows, cols)
 }
 
 /// Generate random matrix with normal distribution (mean=0, std=1)
@@ -182,7 +182,7 @@ fn randn_builtin(m: i32, n: i32) -> Result<Matrix, String> {
         data.push(normal_val);
     }
 
-    Ok(Matrix::new(data, rows, cols)?)
+    Matrix::new(data, rows, cols)
 }
 
 /// Get the length of the largest dimension of a matrix
@@ -202,7 +202,7 @@ fn range_builtin(start: f64, step: f64, stop: f64) -> Result<Matrix, String> {
 
     if (step > 0.0 && start > stop) || (step < 0.0 && start < stop) {
         // Empty range
-        return Ok(Matrix::new(vec![], 1, 0)?);
+        return Matrix::new(vec![], 1, 0);
     }
 
     let mut data = Vec::new();
@@ -221,7 +221,7 @@ fn range_builtin(start: f64, step: f64, stop: f64) -> Result<Matrix, String> {
     }
 
     let len = data.len();
-    Ok(Matrix::new(data, 1, len)?)
+    Matrix::new(data, 1, len)
 }
 
 /// Generate meshgrid for 2D plotting
@@ -248,7 +248,7 @@ fn meshgrid_builtin(x: Matrix, y: Matrix) -> Result<Matrix, String> {
         x_data.extend_from_slice(x_vec);
     }
 
-    Ok(Matrix::new(x_data, ny, nx)?)
+    Matrix::new(x_data, ny, nx)
 }
 
 /// Create a range vector (equivalent to start:end or start:step:end in MATLAB)
@@ -348,10 +348,10 @@ mod tests {
 
     #[test]
     fn test_fill() {
-        let result = fill_builtin(3.14, 2, 2).unwrap();
+        let result = fill_builtin(std::f64::consts::PI, 2, 2).unwrap();
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 2);
-        assert!(result.data.iter().all(|&x| (x - 3.14).abs() < f64::EPSILON));
+        assert!(result.data.iter().all(|&x| (x - std::f64::consts::PI).abs() < f64::EPSILON));
     }
 
     #[test]
@@ -375,7 +375,7 @@ mod tests {
         assert_eq!(result.cols, 4);
         assert_eq!(result.data.len(), 12);
         // Check that values are in [0, 1)
-        assert!(result.data.iter().all(|&x| x >= 0.0 && x < 1.0));
+        assert!(result.data.iter().all(|&x| (0.0..1.0).contains(&x)));
     }
 
     #[test]

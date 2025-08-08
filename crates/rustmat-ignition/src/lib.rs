@@ -552,10 +552,10 @@ impl Compiler {
                     if let rustmat_builtins::Value::Num(val) = &constant.value {
                         self.emit(Instr::LoadConst(*val));
                     } else {
-                        return Err(format!("Constant {} is not a number", name));
+                        return Err(format!("Constant {name} is not a number"));
                     }
                 } else {
-                    return Err(format!("Unknown constant: {}", name));
+                    return Err(format!("Unknown constant: {name}"));
                 }
             }
             HirExprKind::Unary(op, e) => {
@@ -846,7 +846,7 @@ pub fn interpret_with_vars(
                 let func = bytecode
                     .functions
                     .get(&name)
-                    .ok_or_else(|| format!("undefined function: {}", name))?
+                    .ok_or_else(|| format!("undefined function: {name}"))?
                     .clone();
 
                 // Validate argument count - MATLAB requires exact match
@@ -1171,7 +1171,7 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
                 let func = bytecode
                     .functions
                     .get(&name)
-                    .ok_or_else(|| format!("undefined function: {}", name))?
+                    .ok_or_else(|| format!("undefined function: {name}"))?
                     .clone();
 
                 // Validate argument count - MATLAB requires exact match

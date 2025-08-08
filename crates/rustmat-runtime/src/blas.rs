@@ -162,7 +162,7 @@ fn value_vector_to_f64(values: &[Value]) -> Result<Vec<f64>, String> {
         .map(|v| match v {
             Value::Num(n) => Ok(*n),
             Value::Int(i) => Ok(*i as f64),
-            _ => Err(format!("Cannot convert {:?} to f64", v)),
+            _ => Err(format!("Cannot convert {v:?} to f64")),
         })
         .collect()
 }

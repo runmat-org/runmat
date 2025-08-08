@@ -315,8 +315,7 @@ fn test_turbine_control_flow_pattern() {
     let result = interpret(&bytecode);
     assert!(
         result.is_ok(),
-        "Interpreter should handle this control flow: {:?}",
-        result
+        "Interpreter should handle this control flow: {result:?}"
     );
 
     let vars = result.unwrap();
@@ -348,8 +347,7 @@ fn test_function_parameter_binding() {
 
     assert!(
         result.is_ok(),
-        "Function with parameters should work: {:?}",
-        result
+        "Function with parameters should work: {result:?}"
     );
     let vars = result.unwrap();
 
@@ -359,8 +357,7 @@ fn test_function_parameter_binding() {
         .find(|v| matches!(v, Value::Num(n) if *n == 30.0));
     assert!(
         found_result.is_some(),
-        "Function should compute 10 + 20 = 30, but found variables: {:?}",
-        vars
+        "Function should compute 10 + 20 = 30, but found variables: {vars:?}"
     );
 }
 
@@ -382,8 +379,7 @@ fn test_function_local_variables() {
         .find(|v| matches!(v, Value::Num(n) if *n == 19.0));
     assert!(
         found_result.is_some(),
-        "Function should compute 7 * 2 + 5 = 19, but found variables: {:?}",
-        vars
+        "Function should compute 7 * 2 + 5 = 19, but found variables: {vars:?}"
     );
 }
 
@@ -403,8 +399,7 @@ fn test_function_recursive_calls() {
         .find(|v| matches!(v, Value::Num(n) if *n == 120.0));
     assert!(
         found_result.is_some(),
-        "Function should compute 5! = 120, but found variables: {:?}",
-        vars
+        "Function should compute 5! = 120, but found variables: {vars:?}"
     );
 }
 
@@ -427,8 +422,7 @@ fn test_function_multiple_calls() {
         .find(|v| matches!(v, Value::Num(n) if *n == 10.0));
     assert!(
         found_a.is_some(),
-        "First call should be 5 * 2 = 10, but found variables: {:?}",
-        vars
+        "First call should be 5 * 2 = 10, but found variables: {vars:?}"
     );
 
     let found_b = vars
@@ -436,8 +430,7 @@ fn test_function_multiple_calls() {
         .find(|v| matches!(v, Value::Num(n) if *n == 20.0));
     assert!(
         found_b.is_some(),
-        "Second call should be 10 * 2 = 20, but found variables: {:?}",
-        vars
+        "Second call should be 10 * 2 = 20, but found variables: {vars:?}"
     );
 
     let found_c = vars
@@ -445,8 +438,7 @@ fn test_function_multiple_calls() {
         .find(|v| matches!(v, Value::Num(n) if *n == 30.0));
     assert!(
         found_c.is_some(),
-        "Third call should be 15 * 2 = 30, but found variables: {:?}",
-        vars
+        "Third call should be 15 * 2 = 30, but found variables: {vars:?}"
     );
 }
 
@@ -466,8 +458,7 @@ fn test_function_with_control_flow() {
         .find(|v| matches!(v, Value::Num(n) if *n == 42.0));
     assert!(
         found_pos.is_some(),
-        "abs_value(42) should be 42, but found variables: {:?}",
-        vars
+        "abs_value(42) should be 42, but found variables: {vars:?}"
     );
 
     let found_neg = vars
@@ -475,8 +466,7 @@ fn test_function_with_control_flow() {
         .find(|v| matches!(v, Value::Num(n) if *n == 17.0));
     assert!(
         found_neg.is_some(),
-        "abs_value(-17) should be 17, but found variables: {:?}",
-        vars
+        "abs_value(-17) should be 17, but found variables: {vars:?}"
     );
 }
 
@@ -499,8 +489,7 @@ fn test_function_with_loops() {
         .find(|v| matches!(v, Value::Num(n) if *n == 55.0));
     assert!(
         found_result.is_some(),
-        "sum_to_n(10) should be 55, but found variables: {:?}",
-        vars
+        "sum_to_n(10) should be 55, but found variables: {vars:?}"
     );
 }
 
@@ -522,7 +511,7 @@ fn test_nested_function_calls() {
     let found_result = vars
         .iter()
         .find(|v| matches!(v, Value::Num(n) if *n == 20.0));
-    assert!(found_result.is_some(), "multiply_and_add(4) should be 20 (add(4*2, 4*3) = add(8, 12) = 20), but found variables: {:?}", vars);
+    assert!(found_result.is_some(), "multiply_and_add(4) should be 20 (add(4*2, 4*3) = add(8, 12) = 20), but found variables: {vars:?}");
 }
 
 #[test]
@@ -541,8 +530,7 @@ fn test_function_variable_isolation() {
         .find(|v| matches!(v, Value::Num(n) if *n == 42.0));
     assert!(
         found_result.is_some(),
-        "Function should return 42, but found variables: {:?}",
-        vars
+        "Function should return 42, but found variables: {vars:?}"
     );
 
     // Check that global variable is unchanged (should still be 100)
@@ -551,8 +539,7 @@ fn test_function_variable_isolation() {
         .find(|v| matches!(v, Value::Num(n) if *n == 100.0));
     assert!(
         found_global.is_some(),
-        "Global variable should remain 100, but found variables: {:?}",
-        vars
+        "Global variable should remain 100, but found variables: {vars:?}"
     );
 }
 
@@ -569,8 +556,7 @@ fn test_undefined_function_call() {
     let error_msg = result.unwrap_err();
     assert!(
         error_msg.contains("undefined function") || error_msg.contains("nonexistent_function"),
-        "Error should mention undefined function, got: {}",
-        error_msg
+        "Error should mention undefined function, got: {error_msg}"
     );
 }
 
@@ -589,8 +575,7 @@ fn test_function_wrong_argument_count() {
     let error_msg = format!("{:?}", result.unwrap_err());
     assert!(
         error_msg.contains("argument") || error_msg.contains("parameter"),
-        "Error should mention argument/parameter mismatch, got: {}",
-        error_msg
+        "Error should mention argument/parameter mismatch, got: {error_msg}"
     );
 }
 
@@ -605,8 +590,7 @@ fn test_function_no_parameters() {
 
     assert!(
         result.is_ok(),
-        "Function with no parameters should work: {:?}",
-        result
+        "Function with no parameters should work: {result:?}"
     );
     let vars = result.unwrap();
 
@@ -616,8 +600,7 @@ fn test_function_no_parameters() {
         .find(|v| matches!(v, Value::Num(n) if *n == 42.0));
     assert!(
         found_result.is_some(),
-        "Function should return 42, but found variables: {:?}",
-        vars
+        "Function should return 42, but found variables: {vars:?}"
     );
 }
 
@@ -655,7 +638,6 @@ fn test_function_deep_recursion() {
         .find(|v| matches!(v, Value::Num(n) if *n == 10.0));
     assert!(
         found_result.is_some(),
-        "countdown(10) should return 10, but found variables: {:?}",
-        vars
+        "countdown(10) should return 10, but found variables: {vars:?}"
     );
 }

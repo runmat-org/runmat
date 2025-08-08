@@ -51,13 +51,13 @@ impl CompressedPtr {
         let ptr_addr = ptr as usize;
 
         if ptr_addr < base_addr {
-            log::warn!("Pointer {:p} is below heap base {:p}", ptr, heap_base);
+            log::warn!("Pointer {ptr:p} is below heap base {heap_base:p}");
             return Self::null();
         }
 
         let offset = ptr_addr - base_addr;
         if offset > u32::MAX as usize {
-            log::warn!("Pointer {:p} offset {} exceeds 32-bit range", ptr, offset);
+            log::warn!("Pointer {ptr:p} offset {offset} exceeds 32-bit range");
             return Self::null();
         }
 
@@ -142,17 +142,10 @@ fn initialize_heap_base(first_ptr: *const u8) {
         Ordering::Relaxed,
     ) {
         Ok(_) => {
-            log::info!(
-                "Initialized pointer compression heap base at {:p}",
-                base_ptr
-            );
+            log::info!("Initialized pointer compression heap base at {base_ptr:p}");
         }
         Err(existing) => {
-            log::debug!(
-                "Heap base already initialized at {:p}, first ptr was {:p}",
-                existing,
-                first_ptr
-            );
+            log::debug!("Heap base already initialized at {existing:p}, first ptr was {first_ptr:p}");
         }
     }
 }

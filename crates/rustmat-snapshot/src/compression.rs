@@ -572,13 +572,13 @@ mod tests {
                 assert_eq!(decompressed, data);
             }
             Err(e) => {
-                println!("Decompression error: {:?}", e);
+                println!("Decompression error: {e:?}");
                 println!("This is expected if compression fell back to None due to ineffective compression ratio");
                 // If decompression fails, ensure we're dealing with uncompressed data
                 if matches!(result.info.algorithm, CompressionAlgorithm::None) {
                     assert_eq!(result.data, data);
                 } else {
-                    panic!("Decompression failed: {:?}", e);
+                    panic!("Decompression failed: {e:?}");
                 }
             }
         }

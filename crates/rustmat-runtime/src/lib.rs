@@ -114,7 +114,7 @@ fn tic_builtin() -> Result<f64, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| format!("Time error: {}", e))?;
+        .map_err(|e| format!("Time error: {e}"))?;
     Ok(now.as_secs_f64())
 }
 

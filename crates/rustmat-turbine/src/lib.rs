@@ -262,7 +262,7 @@ pub extern "C" fn rustmat_value_elementwise_mul(
                 Err(_) => std::ptr::null_mut(),
             },
             Err(e) => {
-                error!("Element-wise multiplication error: {}", e);
+                error!("Element-wise multiplication error: {e}");
                 std::ptr::null_mut()
             }
         }
@@ -289,7 +289,7 @@ pub extern "C" fn rustmat_value_elementwise_div(
                 Err(_) => std::ptr::null_mut(),
             },
             Err(e) => {
-                error!("Element-wise division error: {}", e);
+                error!("Element-wise division error: {e}");
                 std::ptr::null_mut()
             }
         }
@@ -316,7 +316,7 @@ pub extern "C" fn rustmat_value_elementwise_pow(
                 Err(_) => std::ptr::null_mut(),
             },
             Err(e) => {
-                error!("Element-wise power error: {}", e);
+                error!("Element-wise power error: {e}");
                 std::ptr::null_mut()
             }
         }
@@ -344,7 +344,7 @@ pub extern "C" fn rustmat_value_elementwise_leftdiv(
                 Err(_) => std::ptr::null_mut(),
             },
             Err(e) => {
-                error!("Element-wise left division error: {}", e);
+                error!("Element-wise left division error: {e}");
                 std::ptr::null_mut()
             }
         }
@@ -513,11 +513,18 @@ impl RuntimeContext {
 
 /// Set the runtime context for JIT function calls
 /// This should be called before executing JIT-compiled code that calls user functions
+///
+/// # Safety
+/// The context must remain valid for the entire duration of JIT execution.
+/// The caller must ensure the context pointer remains valid.
 pub unsafe fn set_runtime_context(context: &'static RuntimeContext) {
     RUNTIME_CONTEXT = Some(context);
 }
 
 /// Clear the runtime context
+///
+/// # Safety  
+/// This must only be called when no JIT-compiled code is running.
 pub unsafe fn clear_runtime_context() {
     RUNTIME_CONTEXT = None;
 }
@@ -560,7 +567,7 @@ pub extern "C" fn rustmat_call_user_function(
         let function_def = match context.function_definitions.get(func_name) {
             Some(def) => def,
             None => {
-                error!("Unknown user function: {}", func_name);
+                error!("Unknown user function: {func_name}");
                 return -4; // Error: Function not found
             }
         };
@@ -600,14 +607,14 @@ pub extern "C" fn rustmat_call_user_function(
                 *(result_ptr as *mut f64) = match result {
                     Value::Num(n) => n,
                     _ => {
-                        error!("Function {} returned non-numeric value", func_name);
+                        error!("Function {func_name} returned non-numeric value");
                         return -6; // Error: Invalid return type
                     }
                 };
                 0 // Success
             }
             Err(e) => {
-                error!("Error executing function {}: {}", func_name, e);
+                error!("Error executing function {func_name}: {e}");
                 -7 // Error: Execution failed
             }
         }
@@ -647,10 +654,10 @@ fn execute_user_function_isolated(
         body: remapped_body,
     };
     let func_bytecode = rustmat_ignition::compile_with_functions(&func_program, all_functions)
-        .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {}", e)))?;
+        .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;
 
     let func_result_vars = rustmat_ignition::interpret_with_vars(&func_bytecode, &mut func_vars)
-        .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {}", e)))?;
+        .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {e}")))?;
 
     // Copy back the modified variables
     func_vars = func_result_vars;
@@ -664,8 +671,7 @@ fn execute_user_function_isolated(
             Ok(func_vars[local_output_index].clone())
         } else {
             Err(TurbineError::ExecutionError(format!(
-                "Output variable index {} out of bounds",
-                local_output_index
+                "Output variable index {local_output_index} out of bounds"
             )))
         }
     } else {
@@ -1190,7 +1196,6 @@ unsafe impl Sync for CompiledFunction {}
 
 /// Runtime function implementations for JIT-compiled code
 /// These functions provide the bridge between JIT-compiled code and the RustMat runtime
-
 /// Runtime builtin dispatcher for f64-returning functions
 ///
 /// # Arguments
@@ -1253,11 +1258,11 @@ pub extern "C" fn runtime_builtin_f64_dispatch(
             }
         }
         Ok(_) => {
-            log::warn!("Builtin function '{}' returned non-numeric result", name);
+            log::warn!("Builtin function '{name}' returned non-numeric result");
             0.0
         }
         Err(e) => {
-            log::error!("Builtin function '{}' failed: {}", name, e);
+            log::error!("Builtin function '{name}' failed: {e}");
             0.0
         }
     }
@@ -1326,7 +1331,7 @@ pub extern "C" fn runtime_builtin_matrix_dispatch(
             }
         }
         Err(e) => {
-            log::error!("Builtin function '{}' failed: {}", name, e);
+            log::error!("Builtin function '{name}' failed: {e}");
             0
         }
     }
@@ -1355,10 +1360,7 @@ pub extern "C" fn runtime_create_matrix(
     // Validate inputs
     if elements_ptr.is_null() || elements_len != rows * cols {
         log::error!(
-            "Invalid matrix creation parameters: rows={}, cols={}, elements_len={}",
-            rows,
-            cols,
-            elements_len
+            "Invalid matrix creation parameters: rows={rows}, cols={cols}, elements_len={elements_len}"
         );
         return 0;
     }
@@ -1380,7 +1382,7 @@ pub extern "C" fn runtime_create_matrix(
             }
         }
         Err(e) => {
-            log::error!("Matrix creation failed: {}", e);
+            log::error!("Matrix creation failed: {e}");
             0
         }
     }

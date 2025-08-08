@@ -307,7 +307,7 @@ impl JupyterPlottingManager {
 
                     if x_data.len() == y_data.len() {
                         let scatter_plot = rustmat_plot::plots::ScatterPlot::new(x_data, y_data)
-                            .map_err(|e| KernelError::Execution(e))?;
+                            .map_err(KernelError::Execution)?;
                         figure.add_scatter_plot(scatter_plot);
                     } else {
                         return Err(KernelError::Execution(
@@ -317,18 +317,18 @@ impl JupyterPlottingManager {
                 }
             }
             "bar" => {
-                if args.len() >= 1 {
+                if !args.is_empty() {
                     let y_data = self.extract_numeric_array(&args[0])?;
                     let x_labels: Vec<String> =
-                        (0..y_data.len()).map(|i| format!("{}", i)).collect();
+                        (0..y_data.len()).map(|i| format!("{i}")).collect();
 
                     let bar_chart = rustmat_plot::plots::BarChart::new(x_labels, y_data)
-                        .map_err(|e| KernelError::Execution(e))?;
+                        .map_err(KernelError::Execution)?;
                     figure.add_bar_chart(bar_chart);
                 }
             }
             "hist" => {
-                if args.len() >= 1 {
+                if !args.is_empty() {
                     let data = self.extract_numeric_array(&args[0])?;
                     let bins = if args.len() > 1 {
                         self.extract_number(&args[1])? as usize
@@ -337,14 +337,13 @@ impl JupyterPlottingManager {
                     };
 
                     let histogram = rustmat_plot::plots::Histogram::new(data, bins)
-                        .map_err(|e| KernelError::Execution(e))?;
+                        .map_err(KernelError::Execution)?;
                     figure.add_histogram(histogram);
                 }
             }
             _ => {
                 return Err(KernelError::Execution(format!(
-                    "Unknown plot function: {}",
-                    function_name
+                    "Unknown plot function: {function_name}"
                 )));
             }
         }

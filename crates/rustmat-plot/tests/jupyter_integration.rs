@@ -381,7 +381,7 @@ fn test_performance_benchmarks() {
     }
 
     let duration = start.elapsed();
-    println!("Generated 10 HTML plots in {:?}", duration);
+    println!("Generated 10 HTML plots in {duration:?}");
 
     // Should complete within reasonable time (adjust threshold as needed)
     assert!(duration.as_millis() < 5000); // 5 seconds max for 10 plots

@@ -22,7 +22,8 @@ fn test_turbine_engine_creation() {
 fn test_jit_support_detection() {
     // Should return a boolean without error
     let supported = TurbineEngine::is_jit_supported();
-    assert!(supported == true || supported == false);
+    // Test just validates that the variable exists and has a boolean value
+    let _ = supported;
 }
 
 #[test]
@@ -174,7 +175,7 @@ fn test_multiple_function_compilation() {
                 let bytecode = compile(&hir).unwrap();
 
                 let result = engine.compile_bytecode(&bytecode);
-                assert!(result.is_ok(), "Failed to compile case {}: {}", i, source);
+                assert!(result.is_ok(), "Failed to compile case {i}: {source}");
             }
 
             let _stats = engine.stats();
@@ -264,7 +265,7 @@ fn test_concurrent_compilation_safety() {
             for i in 0..3 {
                 let engine_clone = Arc::clone(&engine);
                 let handle = thread::spawn(move || {
-                    let source = format!("thread_{} = {} + 1", i, i);
+                    let source = format!("thread_{i} = {i} + 1");
                     let ast = parse(&source).unwrap();
                     let hir = lower(&ast).unwrap();
                     let bytecode = compile(&hir).unwrap();
@@ -380,7 +381,7 @@ fn test_cache_eviction_under_pressure() {
         if let Ok(mut engine) = TurbineEngine::new() {
             // Compile many different functions to test cache behavior
             for i in 0..20 {
-                let source = format!("cache_test_{} = {}", i, i);
+                let source = format!("cache_test_{i} = {i}");
                 let ast = parse(&source).unwrap();
                 let hir = lower(&ast).unwrap();
                 let bytecode = compile(&hir).unwrap();
@@ -418,7 +419,7 @@ fn test_execution_with_different_variable_counts() {
 
                 let mut vars = vec![Value::Num(0.0); bytecode.var_count];
                 let result = engine.execute_or_compile(&bytecode, &mut vars);
-                assert!(result.is_ok(), "Failed with case: {}", source);
+                assert!(result.is_ok(), "Failed with case: {source}");
             }
         }
     });

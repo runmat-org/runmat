@@ -24,8 +24,7 @@ fn test_compilation_performance() {
             // Compilation should be reasonably fast (less than 1 second for simple code)
             assert!(
                 compilation_time < Duration::from_secs(1),
-                "Compilation took too long: {:?}",
-                compilation_time
+                "Compilation took too long: {compilation_time:?}"
             );
         }
     });
@@ -52,8 +51,7 @@ fn test_execution_performance() {
             // Execution should be fast (less than 100ms for simple arithmetic)
             assert!(
                 execution_time < Duration::from_millis(100),
-                "Execution took too long: {:?}",
-                execution_time
+                "Execution took too long: {execution_time:?}"
             );
         }
     });
@@ -89,9 +87,7 @@ fn test_repeated_execution_performance() {
             // Allow up to 5x slowdown (generous threshold)
             assert!(
                 last_execution < first_execution * 5,
-                "Performance degraded: first={:?}, last={:?}",
-                first_execution,
-                last_execution
+                "Performance degraded: first={first_execution:?}, last={last_execution:?}"
             );
         }
     });
@@ -121,9 +117,7 @@ fn test_compilation_cache_performance() {
             // Cached compilation should be much faster
             assert!(
                 time2 <= time1,
-                "Cached compilation not faster: first={:?}, cached={:?}",
-                time1,
-                time2
+                "Cached compilation not faster: first={time1:?}, cached={time2:?}"
             );
         }
     });
@@ -140,7 +134,7 @@ fn test_memory_usage_during_compilation() {
 
             // Compile multiple functions
             for i in 0..10 {
-                let source = format!("memory_test_{} = {} * 2", i, i);
+                let source = format!("memory_test_{i} = {i} * 2");
                 let ast = parse(&source).unwrap();
                 let hir = lower(&ast).unwrap();
                 let bytecode = compile(&hir).unwrap();
@@ -158,8 +152,7 @@ fn test_memory_usage_during_compilation() {
             let memory_increase = final_memory.saturating_sub(initial_memory);
             assert!(
                 memory_increase < 10 * 1024 * 1024,
-                "Excessive memory usage: increased by {} bytes",
-                memory_increase
+                "Excessive memory usage: increased by {memory_increase} bytes"
             );
         }
     });
@@ -191,8 +184,7 @@ fn test_hotspot_compilation_timing() {
             for time in &times {
                 assert!(
                     *time < Duration::from_millis(50),
-                    "Individual execution too slow: {:?}",
-                    time
+                    "Individual execution too slow: {time:?}"
                 );
             }
 
@@ -200,8 +192,7 @@ fn test_hotspot_compilation_timing() {
             let average_time: Duration = times.iter().sum::<Duration>() / times.len() as u32;
             assert!(
                 average_time < Duration::from_millis(10),
-                "Average execution time too slow: {:?}",
-                average_time
+                "Average execution time too slow: {average_time:?}"
             );
         }
     });
@@ -227,8 +218,7 @@ fn test_complex_operation_performance() {
             // Complex arithmetic should still be fast
             assert!(
                 elapsed < Duration::from_millis(20),
-                "Complex operation too slow: {:?}",
-                elapsed
+                "Complex operation too slow: {elapsed:?}"
             );
         }
     });
@@ -244,9 +234,9 @@ fn test_compilation_scalability() {
             for i in 1..=10 {
                 let mut expr = "1".to_string();
                 for j in 2..=i {
-                    expr = format!("({} + {})", expr, j);
+                    expr = format!("({expr} + {j})");
                 }
-                let source = format!("scalability_test = {}", expr);
+                let source = format!("scalability_test = {expr}");
 
                 let ast = parse(&source).unwrap();
                 let hir = lower(&ast).unwrap();
@@ -272,9 +262,7 @@ fn test_compilation_scalability() {
                 // Allow up to 10x increase for 10x complexity
                 assert!(
                     last_time < first_time * 20,
-                    "Compilation time grew too much: first={:?}, last={:?}",
-                    first_time,
-                    last_time
+                    "Compilation time grew too much: first={first_time:?}, last={last_time:?}"
                 );
             }
         }
@@ -320,8 +308,7 @@ fn test_concurrent_execution_performance() {
             // Concurrent execution should complete in reasonable time
             assert!(
                 total_time < Duration::from_secs(5),
-                "Concurrent execution took too long: {:?}",
-                total_time
+                "Concurrent execution took too long: {total_time:?}"
             );
         }
     });
@@ -356,8 +343,7 @@ fn test_garbage_collection_impact() {
             // Performance should not be severely impacted by GC
             assert!(
                 elapsed < Duration::from_millis(100),
-                "Execution after GC too slow: {:?}",
-                elapsed
+                "Execution after GC too slow: {elapsed:?}"
             );
         }
     });
@@ -386,8 +372,7 @@ fn test_engine_statistics_overhead() {
             // Statistics collection should not significantly impact performance
             assert!(
                 elapsed < Duration::from_millis(500),
-                "Statistics collection overhead too high: {:?}",
-                elapsed
+                "Statistics collection overhead too high: {elapsed:?}"
             );
         }
     });
@@ -427,8 +412,7 @@ fn test_peak_memory_usage() {
             let peak_increase = final_peak.saturating_sub(initial_peak);
             assert!(
                 peak_increase < 50 * 1024 * 1024,
-                "Peak memory usage too high: increased by {} bytes",
-                peak_increase
+                "Peak memory usage too high: increased by {peak_increase} bytes"
             );
         }
     });

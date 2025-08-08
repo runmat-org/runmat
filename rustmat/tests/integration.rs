@@ -272,8 +272,7 @@ fn test_cli_help_and_documentation() {
     for section in &required_sections {
         assert!(
             stdout.contains(section),
-            "Help missing section: {}",
-            section
+            "Help missing section: {section}"
         );
     }
 }
@@ -298,8 +297,7 @@ fn test_version_information() {
     for component in &required_components {
         assert!(
             stdout.contains(component),
-            "Version info missing component: {}",
-            component
+            "Version info missing component: {component}"
         );
     }
 }
@@ -339,8 +337,7 @@ fn test_gc_commands() {
         let output = run_rustmat(&["gc", cmd]);
         assert!(
             output.status.success() || output.status.success(), // Some might not be implemented yet
-            "GC command failed: gc {}",
-            cmd
+            "GC command failed: gc {cmd}"
         );
     }
 }
@@ -361,8 +358,7 @@ fn test_multi_configuration_compatibility() {
         let output = run_rustmat(&args);
         assert!(
             output.status.success(),
-            "Configuration combination failed: {:?}",
-            combo
+            "Configuration combination failed: {combo:?}"
         );
     }
 }
@@ -420,8 +416,8 @@ fn test_concurrent_execution_safety() {
     for i in 0..3 {
         let temp_dir_clone = Arc::clone(&temp_dir);
         let handle = thread::spawn(move || {
-            let script_path = temp_dir_clone.path().join(format!("concurrent_{}.m", i));
-            fs::write(&script_path, format!("thread_result_{} = {} * 10", i, i)).unwrap();
+            let script_path = temp_dir_clone.path().join(format!("concurrent_{i}.m"));
+            fs::write(&script_path, format!("thread_result_{i} = {i} * 10")).unwrap();
 
             let output = run_rustmat(&["run", script_path.to_str().unwrap()]);
             output.status.success()
@@ -432,7 +428,7 @@ fn test_concurrent_execution_safety() {
     // Wait for all threads and check results
     for (i, handle) in handles.into_iter().enumerate() {
         let success = handle.join().unwrap();
-        assert!(success, "Concurrent execution {} failed", i);
+        assert!(success, "Concurrent execution {i} failed");
     }
 }
 

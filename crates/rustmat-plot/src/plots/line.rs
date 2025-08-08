@@ -173,8 +173,7 @@ impl LinePlot {
         let vertices = self.generate_vertices().clone();
         let vertex_count = vertices.len();
 
-        let mut material = Material::default();
-        material.albedo = self.color;
+        let material = Material { albedo: self.color, ..Default::default() };
 
         let draw_call = DrawCall {
             vertex_offset: 0,
@@ -261,7 +260,7 @@ pub mod matlab_compat {
             "y" | "yellow" => Ok(Vec4::new(1.0, 1.0, 0.0, 1.0)),
             "k" | "black" => Ok(Vec4::new(0.0, 0.0, 0.0, 1.0)),
             "w" | "white" => Ok(Vec4::new(1.0, 1.0, 1.0, 1.0)),
-            _ => Err(format!("Unknown color: {}", color)),
+            _ => Err(format!("Unknown color: {color}")),
         }
     }
 }

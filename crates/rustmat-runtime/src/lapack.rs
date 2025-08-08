@@ -74,7 +74,7 @@ pub fn lapack_solve_linear_system(a: &Matrix, b: &[f64]) -> Result<Vec<f64>, Str
     }
 
     if info != 0 {
-        return Err(format!("LAPACK DGESV failed with info = {}", info));
+        return Err(format!("LAPACK DGESV failed with info = {info}"));
     }
 
     Ok(b_copy)
@@ -110,7 +110,7 @@ pub fn lapack_lu_decomposition(matrix: &Matrix) -> Result<LuDecomposition, Strin
     }
 
     if info != 0 {
-        return Err(format!("LAPACK DGETRF failed with info = {}", info));
+        return Err(format!("LAPACK DGETRF failed with info = {info}"));
     }
 
     // Transpose result back to row-major
@@ -146,8 +146,7 @@ pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, Strin
 
     if info != 0 {
         return Err(format!(
-            "LAPACK DGEQRF workspace query failed with info = {}",
-            info
+            "LAPACK DGEQRF workspace query failed with info = {info}"
         ));
     }
 
@@ -160,7 +159,7 @@ pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, Strin
     }
 
     if info != 0 {
-        return Err(format!("LAPACK DGEQRF failed with info = {}", info));
+        return Err(format!("LAPACK DGEQRF failed with info = {info}"));
     }
 
     // Extract R matrix (upper triangular part)
@@ -181,7 +180,7 @@ pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, Strin
     }
 
     if info != 0 {
-        return Err(format!("LAPACK DORGQR failed with info = {}", info));
+        return Err(format!("LAPACK DORGQR failed with info = {info}"));
     }
 
     let q = Matrix::new(q_data, matrix.rows, matrix.cols)?;
@@ -226,8 +225,7 @@ pub fn lapack_eigenvalues(
 
     if info != 0 {
         return Err(format!(
-            "LAPACK DSYEV workspace query failed with info = {}",
-            info
+            "LAPACK DSYEV workspace query failed with info = {info}"
         ));
     }
 
@@ -250,7 +248,7 @@ pub fn lapack_eigenvalues(
     }
 
     if info != 0 {
-        return Err(format!("LAPACK DSYEV failed with info = {}", info));
+        return Err(format!("LAPACK DSYEV failed with info = {info}"));
     }
 
     let eigenvectors = if compute_vectors {
@@ -319,7 +317,7 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
     }
 
     if info != 0 {
-        return Err(format!("LAPACK DGETRF failed with info = {}", info));
+        return Err(format!("LAPACK DGETRF failed with info = {info}"));
     }
 
     // Query optimal work array size for inversion
@@ -329,8 +327,7 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
 
     if info != 0 {
         return Err(format!(
-            "LAPACK DGETRI workspace query failed with info = {}",
-            info
+            "LAPACK DGETRI workspace query failed with info = {info}"
         ));
     }
 
@@ -343,7 +340,7 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
     }
 
     if info != 0 {
-        return Err(format!("LAPACK DGETRI failed with info = {}", info));
+        return Err(format!("LAPACK DGETRI failed with info = {info}"));
     }
 
     // Transpose result back to row-major
@@ -368,7 +365,7 @@ fn value_vector_to_f64(values: &[Value]) -> Result<Vec<f64>, String> {
         .map(|v| match v {
             Value::Num(n) => Ok(*n),
             Value::Int(i) => Ok(*i as f64),
-            _ => Err(format!("Cannot convert {:?} to f64", v)),
+            _ => Err(format!("Cannot convert {v:?} to f64")),
         })
         .collect()
 }

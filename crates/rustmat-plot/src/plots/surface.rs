@@ -403,8 +403,7 @@ impl SurfacePlot {
             indices.len()
         );
 
-        let mut material = Material::default();
-        material.albedo = Vec4::new(1.0, 1.0, 1.0, self.alpha);
+        let material = Material { albedo: Vec4::new(1.0, 1.0, 1.0, self.alpha), ..Default::default() };
 
         let draw_call = DrawCall {
             vertex_offset: 0,
@@ -536,12 +535,6 @@ impl ColorMap {
     fn bone_colormap(&self, t: f32) -> Vec3 {
         if t < 3.0 / 8.0 {
             Vec3::new(7.0 / 8.0 * t, 7.0 / 8.0 * t, 29.0 / 24.0 * t)
-        } else if t < 3.0 / 4.0 {
-            Vec3::new(
-                (29.0 + 7.0 * t) / 24.0,
-                (29.0 + 7.0 * t) / 24.0,
-                (29.0 + 7.0 * t) / 24.0,
-            )
         } else {
             Vec3::new(
                 (29.0 + 7.0 * t) / 24.0,
@@ -719,7 +712,7 @@ pub mod matlab_compat {
             "viridis" => ColorMap::Viridis,
             "plasma" => ColorMap::Plasma,
             "gray" | "grey" => ColorMap::Gray,
-            _ => return Err(format!("Unknown colormap: {}", colormap)),
+            _ => return Err(format!("Unknown colormap: {colormap}")),
         };
 
         Ok(SurfacePlot::new(x, y, z)?.with_colormap(cmap))

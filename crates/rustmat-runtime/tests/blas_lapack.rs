@@ -150,10 +150,10 @@ fn test_lapack_matrix_inverse() {
 
     let inv = lapack_matrix_inverse(&matrix).unwrap();
 
-    let expected = vec![2.0 / 3.0, -1.0 / 3.0, -1.0 / 3.0, 2.0 / 3.0];
+    let expected = [2.0 / 3.0, -1.0 / 3.0, -1.0 / 3.0, 2.0 / 3.0];
 
-    for i in 0..4 {
-        assert!((inv.data[i] - expected[i]).abs() < 1e-10);
+    for (i, &expected_val) in expected.iter().enumerate() {
+        assert!((inv.data[i] - expected_val).abs() < 1e-10);
     }
 
     // Verify A * A^(-1) = I

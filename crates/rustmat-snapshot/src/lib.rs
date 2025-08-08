@@ -26,6 +26,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Type alias for builtin function dispatch table to reduce complexity
+type BuiltinDispatchTable = Arc<RwLock<Vec<fn(&[rustmat_builtins::Value]) -> Result<rustmat_builtins::Value, String>>>>;
 use std::time::Duration;
 
 use parking_lot::RwLock;
@@ -75,8 +78,7 @@ pub struct BuiltinRegistry {
 
     /// Function dispatch table (runtime-generated)
     #[serde(skip)]
-    pub dispatch_table:
-        Arc<RwLock<Vec<fn(&[rustmat_builtins::Value]) -> Result<rustmat_builtins::Value, String>>>>,
+    pub dispatch_table: BuiltinDispatchTable,
 }
 
 /// Metadata for a builtin function

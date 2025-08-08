@@ -29,24 +29,24 @@ fn tan_builtin(x: f64) -> Result<f64, String> {
 #[runtime_builtin(name = "sin")]
 fn sin_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.sin()).collect();
-    Ok(Matrix::new(data, x.rows, x.cols)?)
+    Matrix::new(data, x.rows, x.cols)
 }
 
 #[runtime_builtin(name = "cos")]
 fn cos_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.cos()).collect();
-    Ok(Matrix::new(data, x.rows, x.cols)?)
+    Matrix::new(data, x.rows, x.cols)
 }
 
 #[runtime_builtin(name = "tan")]
 fn tan_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.tan()).collect();
-    Ok(Matrix::new(data, x.rows, x.cols)?)
+    Matrix::new(data, x.rows, x.cols)
 }
 
 #[runtime_builtin(name = "asin")]
 fn asin_builtin(x: f64) -> Result<f64, String> {
-    if x < -1.0 || x > 1.0 {
+    if !(-1.0..=1.0).contains(&x) {
         Err("Input must be in range [-1, 1] for asin".to_string())
     } else {
         Ok(x.asin())
@@ -55,7 +55,7 @@ fn asin_builtin(x: f64) -> Result<f64, String> {
 
 #[runtime_builtin(name = "acos")]
 fn acos_builtin(x: f64) -> Result<f64, String> {
-    if x < -1.0 || x > 1.0 {
+    if !(-1.0..=1.0).contains(&x) {
         Err("Input must be in range [-1, 1] for acos".to_string())
     } else {
         Ok(x.acos())
@@ -166,25 +166,25 @@ fn abs_builtin(x: f64) -> Result<f64, String> {
 #[runtime_builtin(name = "abs")]
 fn abs_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.abs()).collect();
-    Ok(Matrix::new(data, x.rows, x.cols)?)
+    Matrix::new(data, x.rows, x.cols)
 }
 
 #[runtime_builtin(name = "exp")]
 fn exp_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.exp()).collect();
-    Ok(Matrix::new(data, x.rows, x.cols)?)
+    Matrix::new(data, x.rows, x.cols)
 }
 
 #[runtime_builtin(name = "log")]
 fn log_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.ln()).collect();
-    Ok(Matrix::new(data, x.rows, x.cols)?)
+    Matrix::new(data, x.rows, x.cols)
 }
 
 #[runtime_builtin(name = "sqrt")]
 fn sqrt_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.sqrt()).collect();
-    Ok(Matrix::new(data, x.rows, x.cols)?)
+    Matrix::new(data, x.rows, x.cols)
 }
 
 // Rounding and related functions

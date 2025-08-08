@@ -61,15 +61,15 @@ fn test_pipeline_types() {
     let triangle_pipeline = PipelineType::Triangles;
 
     // Test Debug trait
-    assert_eq!(format!("{:?}", point_pipeline), "Points");
-    assert_eq!(format!("{:?}", line_pipeline), "Lines");
-    assert_eq!(format!("{:?}", triangle_pipeline), "Triangles");
+    assert_eq!(format!("{point_pipeline:?}"), "Points");
+    assert_eq!(format!("{line_pipeline:?}"), "Lines");
+    assert_eq!(format!("{triangle_pipeline:?}"), "Triangles");
 }
 
 #[test]
 fn test_vertex_creation_batch() {
     // Test creating multiple vertices for typical plotting scenarios
-    let vertices = vec![
+    let vertices = [
         Vertex::new(Vec3::new(0.0, 0.0, 0.0), Vec4::new(1.0, 0.0, 0.0, 1.0)), // Red
         Vertex::new(Vec3::new(1.0, 1.0, 0.0), Vec4::new(0.0, 1.0, 0.0, 1.0)), // Green
         Vertex::new(Vec3::new(2.0, 0.5, 0.0), Vec4::new(0.0, 0.0, 1.0, 1.0)), // Blue

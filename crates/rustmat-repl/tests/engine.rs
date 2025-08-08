@@ -78,7 +78,7 @@ fn test_execution_statistics_tracking() {
         let inputs = ["x = 1", "y = 2", "z = 3"];
         for input in &inputs {
             let result = engine.execute(input);
-            assert!(result.is_ok(), "Failed to execute: {}", input);
+            assert!(result.is_ok(), "Failed to execute: {input}");
         }
 
         let stats = engine.stats();
@@ -198,7 +198,7 @@ fn test_multiple_executions_performance_tracking() {
 
         // Execute the same operation multiple times to potentially trigger JIT
         for i in 1..=20 {
-            let input = format!("x{} = {} + {}", i, i, i);
+            let input = format!("x{i} = {i} + {i}");
             let result = engine.execute(&input);
             assert!(result.is_ok());
         }
@@ -263,7 +263,7 @@ fn test_concurrent_safety() {
         for i in 0..5 {
             let engine_clone = Arc::clone(&engine);
             let handle = thread::spawn(move || {
-                let input = format!("x{} = {} * 2", i, i);
+                let input = format!("x{i} = {i} * 2");
                 let mut eng = engine_clone.lock().unwrap();
                 eng.execute(&input)
             });
@@ -288,7 +288,8 @@ fn test_execution_result_structure() {
         // Execution time can be 0 for very fast operations
         assert!(result.error.is_none());
         // used_jit should be either true or false
-        assert!(result.used_jit == true || result.used_jit == false);
+        // Test just validates that the field exists and has a boolean value
+        let _ = result.used_jit;
     });
 }
 

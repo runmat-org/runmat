@@ -682,8 +682,7 @@ fn test_optimization_levels() {
         let engine = TurbineEngine::with_config(config);
         assert!(
             engine.is_ok(),
-            "Failed to create engine with optimization level {:?}",
-            opt_level
+            "Failed to create engine with optimization level {opt_level:?}"
         );
     }
 }
@@ -766,7 +765,8 @@ fn test_platform_detection() {
     let is_supported = TurbineEngine::is_jit_supported();
 
     // This should always return a boolean without panicking
-    assert!(is_supported == true || is_supported == false);
+    // Test just validates that the function returns a boolean value
+    let _ = is_supported;
 
     // If supported, engine creation should work
     if is_supported {
@@ -911,7 +911,7 @@ fn test_runtime_interface_implementation() {
     // Note: The current implementation uses f64 operations for efficiency
     // Runtime interface functions (builtin calls, matrix creation) are available but
     // this simple arithmetic test uses direct f64 operations for performance
-    println!("Execution result: {:?}", exec_result);
+    println!("Execution result: {exec_result:?}");
     println!("Variable result: {:?}", vars[0]);
 
     // The result should be successful execution
@@ -1063,8 +1063,8 @@ fn test_jit_user_function_fallback() {
 
     let (status, used_jit) = result.unwrap();
     assert_eq!(status, 0, "Execution should succeed");
-    assert_eq!(
-        used_jit, false,
+    assert!(
+        !used_jit,
         "Should use interpreter fallback for functions"
     );
 
@@ -1271,8 +1271,7 @@ fn test_jit_function_compilation_attempts() {
         let error = exec_result.unwrap_err();
         assert!(
             error.to_string().contains("test") || error.to_string().contains("undefined"),
-            "Should get undefined function error, got: {}",
-            error
+            "Should get undefined function error, got: {error}"
         );
     }
 }
@@ -1393,8 +1392,7 @@ fn test_jit_simple_function_compilation() {
 
     assert!(
         result.is_ok(),
-        "Function execution should work: {:?}",
-        result
+        "Function execution should work: {result:?}"
     );
     let (status, used_jit) = result.unwrap();
     assert_eq!(status, 0, "Execution should succeed");
@@ -1403,8 +1401,7 @@ fn test_jit_simple_function_compilation() {
     if let Value::Num(n) = vars[0] {
         assert!(
             (n - 10.0).abs() < 1e-10,
-            "double(5) should be 10.0, got {}",
-            n
+            "double(5) should be 10.0, got {n}"
         );
     } else {
         panic!("Expected numeric result");
@@ -1412,7 +1409,7 @@ fn test_jit_simple_function_compilation() {
 
     // For simple arithmetic functions, JIT should succeed
     // (JIT failure would still work via interpreter fallback)
-    println!("JIT used: {}", used_jit);
+    println!("JIT used: {used_jit}");
 }
 
 #[test]
@@ -1524,16 +1521,14 @@ fn test_jit_nested_function_calls_compilation() {
     let result = engine.execute_or_compile(&bytecode, &mut vars);
     assert!(
         result.is_ok(),
-        "Nested function execution should work: {:?}",
-        result
+        "Nested function execution should work: {result:?}"
     );
 
     // Check the result: multiply_and_add(4) = add(4*2, 4*3) = add(8, 12) = 20
     if let Value::Num(n) = vars[0] {
         assert!(
             (n - 20.0).abs() < 1e-10,
-            "multiply_and_add(4) should be 20.0, got {}",
-            n
+            "multiply_and_add(4) should be 20.0, got {n}"
         );
     } else {
         panic!("Expected numeric result");
@@ -1620,8 +1615,7 @@ fn test_jit_function_parameter_validation() {
     if let Value::Num(n) = vars_correct[0] {
         assert!(
             (n - 10.0).abs() < 1e-10,
-            "add_two(3, 7) should be 10.0, got {}",
-            n
+            "add_two(3, 7) should be 10.0, got {n}"
         );
     }
 }
@@ -1681,23 +1675,20 @@ fn test_jit_function_variable_isolation() {
     let result = engine.execute_or_compile(&bytecode, &mut vars);
     assert!(
         result.is_ok(),
-        "Variable isolation test should work: {:?}",
-        result
+        "Variable isolation test should work: {result:?}"
     );
 
     // Check results
     if let Value::Num(n) = vars[0] {
         assert!(
             (n - 50.0).abs() < 1e-10,
-            "isolate_test(8) should be 50.0, got {}",
-            n
+            "isolate_test(8) should be 50.0, got {n}"
         );
     }
     if let Value::Num(n) = vars[1] {
         assert!(
             (n - 100.0).abs() < 1e-10,
-            "Global variable should remain 100.0, got {}",
-            n
+            "Global variable should remain 100.0, got {n}"
         );
     }
 }
@@ -1790,14 +1781,13 @@ fn test_jit_function_compilation_performance() {
     if let Value::Num(n) = vars[0] {
         assert!(
             (n - 72.0).abs() < 1e-10,
-            "compute_intensive(6) should be 72.0, got {}",
-            n
+            "compute_intensive(6) should be 72.0, got {n}"
         );
     }
 
     // We don't strictly require JIT to be used (depends on heuristics),
     // but this test exercises the hot path
-    println!("JIT was used {} times out of 50 executions", jit_used_count);
+    println!("JIT was used {jit_used_count} times out of 50 executions");
 }
 
 #[test]
@@ -1862,8 +1852,7 @@ fn test_jit_function_error_handling() {
     if let Value::Num(n) = vars_simple[0] {
         assert!(
             (n - 42.0).abs() < 1e-10,
-            "simple(42) should be 42.0, got {}",
-            n
+            "simple(42) should be 42.0, got {n}"
         );
     }
 }

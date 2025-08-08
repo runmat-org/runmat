@@ -48,7 +48,7 @@ fn demo_multiple_lines() -> Result<(), Box<dyn std::error::Error>> {
     let x: Vec<f64> = (0..=100).map(|i| i as f64 * 0.1).collect();
 
     // Linear function: y = x
-    let y_linear: Vec<f64> = x.iter().map(|&x| x).collect();
+    let y_linear: Vec<f64> = x.to_vec();
     let linear_plot = LinePlot::new(x.clone(), y_linear)?
         .with_style(Vec4::new(0.0, 0.4, 0.7, 1.0), 2.0, LineStyle::Solid)
         .with_label("Linear (y = x)");
@@ -274,7 +274,7 @@ fn demo_matlab_compatibility() -> Result<(), Box<dyn std::error::Error>> {
     // Test that colors are indeed different (basic check)
     if legend.len() >= 2 {
         let color_different = legend[0].color != legend[1].color;
-        println!("  ✅ Color cycling works: {}", color_different);
+        println!("  ✅ Color cycling works: {color_different}");
     }
 
     Ok(())
@@ -351,7 +351,7 @@ fn demo_complex_overlay() -> Result<(), Box<dyn std::error::Error>> {
     // Show render data complexity
     let render_data = figure.render_data();
     let total_vertices: usize = render_data.iter().map(|rd| rd.vertices.len()).sum();
-    println!("     • Total vertices: {}", total_vertices);
+    println!("     • Total vertices: {total_vertices}");
     println!("     • Render batches: {}", render_data.len());
 
     // Test bounds computation across all plot types
@@ -370,7 +370,7 @@ mod rand {
     use std::cell::Cell;
 
     thread_local! {
-        static SEED: Cell<u64> = Cell::new(1);
+        static SEED: Cell<u64> = const { Cell::new(1) };
     }
 
     pub fn random<T>() -> T

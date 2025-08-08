@@ -38,7 +38,7 @@ fn test_rustmat_debug_env_var() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Should have some debug output or at least work without errors
-    assert!(stderr.len() > 0 || stdout.len() > 0);
+    assert!(!stderr.is_empty() || !stdout.is_empty());
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn test_rustmat_log_level_env_var() {
         env.insert("RUSTMAT_LOG_LEVEL", *level);
 
         let output = run_rustmat_with_env(&["info"], env);
-        assert!(output.status.success(), "Failed with log level: {}", level);
+        assert!(output.status.success(), "Failed with log level: {level}");
     }
 }
 
@@ -103,12 +103,11 @@ fn test_rustmat_jit_opt_level_env_var() {
         let output = run_rustmat_with_env(&["info"], env);
         assert!(
             output.status.success(),
-            "Failed with opt level: {}",
-            env_val
+            "Failed with opt level: {env_val}"
         );
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains(&format!("JIT Optimization: {}", expected_output)));
+        assert!(stdout.contains(&format!("JIT Optimization: {expected_output}")));
     }
 }
 
@@ -128,12 +127,11 @@ fn test_rustmat_gc_preset_env_var() {
         let output = run_rustmat_with_env(&["info"], env);
         assert!(
             output.status.success(),
-            "Failed with GC preset: {}",
-            env_val
+            "Failed with GC preset: {env_val}"
         );
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains(&format!("GC Preset: \"{}\"", expected_output)));
+        assert!(stdout.contains(&format!("GC Preset: \"{expected_output}\"")));
     }
 }
 
@@ -322,8 +320,7 @@ fn test_port_env_vars_for_kernel() {
         let output = run_rustmat_with_env(&["kernel", "--help"], env);
         assert!(
             output.status.success(),
-            "Failed with port env var: {}",
-            port_var
+            "Failed with port env var: {port_var}"
         );
     }
 }
@@ -363,7 +360,7 @@ fn test_numeric_env_var_boundaries() {
         env.insert(*env_var, *value);
 
         let output = run_rustmat_with_env(&["info"], env);
-        assert!(output.status.success(), "Failed with {}={}", env_var, value);
+        assert!(output.status.success(), "Failed with {env_var}={value}");
     }
 }
 
@@ -385,8 +382,7 @@ fn test_boolean_env_var_variations() {
         let output = run_rustmat_with_env(&["info"], env);
         assert!(
             output.status.success(),
-            "Failed with RUSTMAT_DEBUG={}",
-            value
+            "Failed with RUSTMAT_DEBUG={value}"
         );
 
         // Test with GC stats too
@@ -396,8 +392,7 @@ fn test_boolean_env_var_variations() {
         let output = run_rustmat_with_env(&["info"], env2);
         assert!(
             output.status.success(),
-            "Failed with RUSTMAT_GC_STATS={}",
-            value
+            "Failed with RUSTMAT_GC_STATS={value}"
         );
     }
 }

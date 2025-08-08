@@ -18,8 +18,8 @@ pub enum NativeWindowResult {
 impl std::fmt::Display for NativeWindowResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NativeWindowResult::Success(msg) => write!(f, "Success: {}", msg),
-            NativeWindowResult::Error(msg) => write!(f, "Error: {}", msg),
+            NativeWindowResult::Success(msg) => write!(f, "Success: {msg}"),
+            NativeWindowResult::Error(msg) => write!(f, "Error: {msg}"),
             NativeWindowResult::WindowClosed => write!(f, "Window closed by user"),
         }
     }
@@ -28,6 +28,12 @@ impl std::fmt::Display for NativeWindowResult {
 /// Native window manager that properly handles cross-platform requirements
 pub struct NativeWindowManager {
     is_initialized: bool,
+}
+
+impl Default for NativeWindowManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NativeWindowManager {
@@ -99,10 +105,10 @@ impl NativeWindowManager {
                     Ok(_) => Ok(NativeWindowResult::Success(
                         "Plot window closed successfully".to_string(),
                     )),
-                    Err(e) => Err(format!("Window runtime error: {}", e)),
+                    Err(e) => Err(format!("Window runtime error: {e}")),
                 }
             }
-            Err(e) => Err(format!("Failed to create plot window: {}", e)),
+            Err(e) => Err(format!("Failed to create plot window: {e}")),
         }
     }
 

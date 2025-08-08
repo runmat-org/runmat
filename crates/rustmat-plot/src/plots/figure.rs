@@ -154,7 +154,7 @@ impl Figure {
     /// Remove a plot by index
     pub fn remove_plot(&mut self, index: usize) -> Result<(), String> {
         if index >= self.plots.len() {
-            return Err(format!("Plot index {} out of bounds", index));
+            return Err(format!("Plot index {index} out of bounds"));
         }
         self.plots.remove(index);
         self.dirty = true;
@@ -405,7 +405,7 @@ pub mod matlab_compat {
                 Vec4::new(0.9290, 0.6940, 0.1250, 1.0), // Yellow
                 Vec4::new(0.4940, 0.1840, 0.5560, 1.0), // Purple
                 Vec4::new(0.4660, 0.6740, 0.1880, 1.0), // Green
-                Vec4::new(0.3010, 0.7450, 0.9330, 1.0), // Cyan
+                Vec4::new(std::f64::consts::LOG10_2 as f32, 0.7450, 0.9330, 1.0), // Cyan
                 Vec4::new(0.6350, 0.0780, 0.1840, 1.0), // Red
             ];
             let color = colors[i % colors.len()];

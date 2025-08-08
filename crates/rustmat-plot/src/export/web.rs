@@ -161,7 +161,7 @@ impl WebExporter {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_micros();
-        format!("rustmat_{}", timestamp)
+        format!("rustmat_{timestamp}")
     }
 
     /// Update export settings

@@ -301,7 +301,7 @@ impl JupyterBackend {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_micros();
-        format!("{}", timestamp)
+        format!("{timestamp}")
     }
 
     /// Serialize figure data for JavaScript

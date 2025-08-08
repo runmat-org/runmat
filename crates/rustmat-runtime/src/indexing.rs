@@ -112,6 +112,6 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                 Err("Cannot index scalar values".to_string())
             }
         }
-        _ => Err(format!("Cannot index value of type {:?}", base)),
+        _ => Err(format!("Cannot index value of type {base:?}")),
     }
 }

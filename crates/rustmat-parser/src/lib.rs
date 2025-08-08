@@ -1,4 +1,3 @@
-// use logos::Logos; // Not needed since we use rustmat_lexer::tokenize
 use rustmat_lexer::Token;
 use serde::{Deserialize, Serialize};
 
@@ -128,7 +127,7 @@ pub fn parse(input: &str) -> Result<Program, ParseError> {
 
 // For backward compatibility
 pub fn parse_simple(input: &str) -> Result<Program, String> {
-    parse(input).map_err(|e| format!("{}", e))
+    parse(input).map_err(|e| format!("{e}"))
 }
 
 impl std::fmt::Display for ParseError {
@@ -139,10 +138,10 @@ impl std::fmt::Display for ParseError {
             self.position, self.message
         )?;
         if let Some(found) = &self.found_token {
-            write!(f, " (found: '{}')", found)?;
+            write!(f, " (found: '{found}')")?;
         }
         if let Some(expected) = &self.expected {
-            write!(f, " (expected: {})", expected)?;
+            write!(f, " (expected: {expected})")?;
         }
         Ok(())
     }
@@ -163,7 +162,7 @@ impl From<String> for ParseError {
 
 impl From<ParseError> for String {
     fn from(error: ParseError) -> Self {
-        format!("{}", error)
+        format!("{error}")
     }
 }
 
@@ -438,7 +437,7 @@ impl Parser {
                             ))
                         }
                     };
-                    Err(format!("unexpected {} in expression context", token_desc))
+                    Err(format!("unexpected {token_desc} in expression context"))
                 }
             },
             None => Err("unexpected end of input, expected expression".into()),

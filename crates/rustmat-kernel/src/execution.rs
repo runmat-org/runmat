@@ -258,7 +258,7 @@ impl ExecutionEngine {
     /// Capture stderr output, including error messages
     fn capture_stderr(&self, error_msg: &str) -> String {
         // Format error message for stderr
-        format!("Error: {}", error_msg)
+        format!("Error: {error_msg}")
     }
 }
 

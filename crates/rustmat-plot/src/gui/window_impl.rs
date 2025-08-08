@@ -20,7 +20,7 @@ impl<'window> PlotWindow<'window> {
     pub async fn new(config: WindowConfig) -> Result<Self, Box<dyn std::error::Error>> {
         // Create a new EventLoop (assumes this is the only EventLoop creation)
         let event_loop =
-            EventLoop::new().map_err(|e| format!("Failed to create EventLoop: {}", e))?;
+            EventLoop::new().map_err(|e| format!("Failed to create EventLoop: {e}"))?;
         let window = WindowBuilder::new()
             .with_title(&config.title)
             .with_inner_size(PhysicalSize::new(config.width, config.height))
@@ -267,7 +267,7 @@ impl<'window> PlotWindow<'window> {
                             self.resize(self.config.width, self.config.height)
                         }
                         Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
-                        Err(e) => eprintln!("Render error: {:?}", e),
+                        Err(e) => eprintln!("Render error: {e:?}"),
                     }
                 }
 
@@ -398,10 +398,11 @@ impl<'window> PlotWindow<'window> {
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Use PlotOverlay for unified UI rendering - no more duplicate sidebar code!
-            let mut overlay_config = OverlayConfig::default();
-            // RE-ENABLE GRID to compare coordinate systems
-            overlay_config.show_grid = true;
-            overlay_config.show_axes = true;
+            let overlay_config = OverlayConfig { 
+                show_grid: true, 
+                show_axes: true, 
+                ..Default::default() 
+            };
             let overlay_metrics = OverlayMetrics {
                 vertex_count: scene_stats.total_vertices,
                 triangle_count: scene_stats.total_triangles,

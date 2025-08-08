@@ -279,7 +279,7 @@ fn test_plot_cleanup() {
 
     // Add plots up to the limit
     for i in 0..5 {
-        let figure = Figure::new().with_title(&format!("Plot {}", i));
+        let figure = Figure::new().with_title(format!("Plot {i}"));
         manager.register_plot(figure).unwrap();
     }
 
@@ -311,7 +311,7 @@ fn test_clear_plots() {
 
     // Add some plots
     for i in 0..3 {
-        let figure = Figure::new().with_title(&format!("Plot {}", i));
+        let figure = Figure::new().with_title(format!("Plot {i}"));
         manager.register_plot(figure).unwrap();
     }
 
@@ -356,7 +356,7 @@ fn test_concurrent_plotting() {
     for i in 0..5 {
         let manager_clone = Arc::clone(&manager);
         let handle = thread::spawn(move || {
-            let figure = Figure::new().with_title(&format!("Concurrent Plot {}", i));
+            let figure = Figure::new().with_title(format!("Concurrent Plot {i}"));
             let mut manager_guard = manager_clone.lock().unwrap();
             let result = manager_guard.register_plot(figure);
             assert!(result.is_ok());
@@ -455,7 +455,7 @@ fn test_performance_large_datasets() {
     let duration = start.elapsed();
 
     assert!(result.is_ok());
-    println!("Large dataset plot creation took: {:?}", duration);
+    println!("Large dataset plot creation took: {duration:?}");
 
     // Should complete within reasonable time
     assert!(duration.as_millis() < 10000); // 10 seconds max

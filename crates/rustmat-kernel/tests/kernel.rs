@@ -3,7 +3,6 @@ use rustmat_kernel::{
     protocol::{ExecuteRequest, JupyterMessage, MessageType},
     ConnectionInfo, ExecutionEngine, KernelConfig, KernelServer,
 };
-use serde_json;
 use std::collections::HashMap;
 use tempfile::NamedTempFile;
 
@@ -83,7 +82,7 @@ async fn test_execution_engine_async() {
     let mut engine = ExecutionEngine::new();
 
     // Test multiple sequential executions (each independent for now)
-    let codes = vec![
+    let codes = [
         "x = 1",
         "y = 2",
         "z = 1 + 2",      // Use literal values since x,y don't persist
@@ -95,8 +94,7 @@ async fn test_execution_engine_async() {
         assert_eq!(
             result.status,
             ExecutionStatus::Success,
-            "Failed for code: {}",
-            code
+            "Failed for code: {code}"
         );
         assert_eq!(engine.execution_count(), (i + 1) as u64);
     }
@@ -127,7 +125,7 @@ fn test_matlab_syntax_execution() {
 
     for (code, expected_status) in test_cases {
         let result = engine.execute(code).unwrap();
-        assert_eq!(result.status, expected_status, "Failed for code: {}", code);
+        assert_eq!(result.status, expected_status, "Failed for code: {code}");
     }
 }
 
@@ -146,8 +144,7 @@ fn test_unsupported_syntax_errors() {
         let result = engine.execute(code).unwrap();
         assert_eq!(
             result.status, expected_status,
-            "Failed for code: {} (should have failed)",
-            code
+            "Failed for code: {code} (should have failed)"
         );
     }
 }
@@ -165,7 +162,7 @@ fn test_matrix_syntax_support() {
 
     for (code, expected_status) in test_cases {
         let result = engine.execute(code).unwrap();
-        assert_eq!(result.status, expected_status, "Failed for code: {}", code);
+        assert_eq!(result.status, expected_status, "Failed for code: {code}");
     }
 }
 

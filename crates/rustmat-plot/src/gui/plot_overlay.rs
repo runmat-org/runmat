@@ -102,6 +102,12 @@ pub struct OverlayMetrics {
     pub fps: f32,
 }
 
+impl Default for PlotOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlotOverlay {
     /// Create a new plot overlay
     pub fn new() -> Self {
@@ -549,7 +555,7 @@ impl PlotOverlay {
                         if ui.button("Visit dystr.com").clicked() {
                             // Open dystr.com in browser
                             if let Err(e) = webbrowser::open("https://dystr.com") {
-                                eprintln!("Failed to open browser: {}", e);
+                                eprintln!("Failed to open browser: {e}");
                             }
                         }
 

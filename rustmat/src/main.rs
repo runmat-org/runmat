@@ -469,7 +469,7 @@ async fn main() -> Result<()> {
     // Handle config generation first
     if cli.generate_config {
         let sample_config = ConfigLoader::generate_sample_config();
-        println!("{}", sample_config);
+        println!("{sample_config}");
         return Ok(());
     }
 
@@ -500,7 +500,7 @@ async fn main() -> Result<()> {
         .init();
 
     info!("RustMat v{} starting", env!("CARGO_PKG_VERSION"));
-    debug!("Configuration loaded: {:?}", config);
+    debug!("Configuration loaded: {config:?}");
 
     // Configure Garbage Collector
     configure_gc_from_config(&config)?;
@@ -521,8 +521,7 @@ async fn main() -> Result<()> {
             }
             Err(e) => {
                 info!(
-                    "Native window initialization failed: {}, using thread manager",
-                    e
+                    "Native window initialization failed: {e}, using thread manager"
                 );
             }
         }
@@ -535,18 +534,18 @@ async fn main() -> Result<()> {
                 // Perform a health check to ensure the system is working
                 match rustmat_plot::health_check_global() {
                     Ok(result) => {
-                        info!("GUI system health check: {}", result);
+                        info!("GUI system health check: {result}");
                         true
                     }
                     Err(e) => {
-                        error!("GUI system health check failed: {}", e);
+                        error!("GUI system health check failed: {e}");
                         // Continue anyway, might work when actually needed
                         true
                     }
                 }
             }
             Err(e) => {
-                error!("Failed to initialize GUI thread manager: {}", e);
+                error!("Failed to initialize GUI thread manager: {e}");
                 false
             }
         }
@@ -577,7 +576,7 @@ fn load_configuration(cli: &Cli) -> Result<RustMatConfig> {
     // We can detect this by checking if RUSTMAT_CONFIG env var matches the cli.config value
     let config_from_env = std::env::var("RUSTMAT_CONFIG")
         .ok()
-        .map(|path| PathBuf::from(path));
+        .map(PathBuf::from);
 
     if let Some(config_file) = &cli.config {
         // If config matches env var, it came from environment - be graceful
@@ -882,7 +881,7 @@ async fn execute_repl(config: &RustMatConfig) -> Result<()> {
                         if let Some(error) = result.error {
                             eprintln!("Error: {error}");
                         } else if let Some(value) = result.value {
-                            println!("ans = {}", value);
+                            println!("ans = {value}");
                             if config.runtime.verbose && result.execution_time_ms > 10 {
                                 println!(
                                     "  ({}ms {})",
@@ -1317,7 +1316,7 @@ async fn execute_gui_plot(
             Ok(())
         }
         Err(e) => {
-            error!("GUI plotting failed: {}", e);
+            error!("GUI plotting failed: {e}");
             Err(anyhow::anyhow!("GUI plotting failed: {}", e))
         }
     }
@@ -1339,7 +1338,7 @@ async fn execute_headless_plot() -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            error!("Failed to generate plot: {}", e);
+            error!("Failed to generate plot: {e}");
             Err(anyhow::anyhow!("Plot generation failed: {}", e))
         }
     }
@@ -1380,7 +1379,7 @@ async fn execute_config_command(
 
             let yaml =
                 serde_yaml::to_string(config).context("Failed to serialize configuration")?;
-            println!("{}", yaml);
+            println!("{yaml}");
         }
         ConfigCommand::Generate { output } => {
             let sample_config = RustMatConfig::default();
@@ -1396,7 +1395,7 @@ async fn execute_config_command(
                     println!("Configuration file is valid: {}", config_file.display());
                 }
                 Err(e) => {
-                    error!("Configuration validation failed: {}", e);
+                    error!("Configuration validation failed: {e}");
                     std::process::exit(1);
                 }
             }
@@ -1407,7 +1406,7 @@ async fn execute_config_command(
             println!();
 
             if let Ok(config_path) = std::env::var("RUSTMAT_CONFIG") {
-                println!("Environment override: {}", config_path);
+                println!("Environment override: {config_path}");
             }
 
             println!("Current directory:");
@@ -1869,14 +1868,14 @@ async fn install_jupyter_kernel() -> Result<()> {
 fn find_jupyter_kernel_dir() -> Result<PathBuf> {
     // Try to get Jupyter data directory using standard methods
     if let Ok(output) = std::process::Command::new("jupyter")
-        .args(&["--data-dir"])
+        .args(["--data-dir"])
         .output()
     {
         if output.status.success() {
             let data_dir_str = String::from_utf8_lossy(&output.stdout);
             let data_dir = data_dir_str.trim();
             let kernels_dir = PathBuf::from(data_dir).join("kernels");
-            if kernels_dir.exists() || kernels_dir.parent().map_or(false, |p| p.exists()) {
+            if kernels_dir.exists() || kernels_dir.parent().is_some_and(|p| p.exists()) {
                 return Ok(kernels_dir);
             }
         }
@@ -1886,7 +1885,7 @@ fn find_jupyter_kernel_dir() -> Result<PathBuf> {
     if let Some(home_dir) = dirs::home_dir() {
         // Try user-level installation first
         let user_kernels = home_dir.join(".local/share/jupyter/kernels");
-        if user_kernels.exists() || user_kernels.parent().map_or(false, |p| p.exists()) {
+        if user_kernels.exists() || user_kernels.parent().is_some_and(|p| p.exists()) {
             return Ok(user_kernels);
         }
 
@@ -1894,7 +1893,7 @@ fn find_jupyter_kernel_dir() -> Result<PathBuf> {
         #[cfg(target_os = "macos")]
         {
             let macos_kernels = home_dir.join("Library/Jupyter/kernels");
-            if macos_kernels.exists() || macos_kernels.parent().map_or(false, |p| p.exists()) {
+            if macos_kernels.exists() || macos_kernels.parent().is_some_and(|p| p.exists()) {
                 return Ok(macos_kernels);
             }
         }

@@ -164,8 +164,7 @@ fn test_snapshot_compression() {
 
         // Compressed should be smaller (unless data is very small or already compressed)
         println!(
-            "Uncompressed: {} bytes, Compressed: {} bytes",
-            uncompressed_size, compressed_size
+            "Uncompressed: {uncompressed_size} bytes, Compressed: {compressed_size} bytes"
         );
 
         // Load both and verify they produce equivalent snapshots

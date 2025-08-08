@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_grid(true);
 
     let result = rustmat_plot::show_interactive_platform_optimal(figure)?;
-    println!("Interactive plot result: {}", result);
+    println!("Interactive plot result: {result}");
 
     Ok(())
 }
