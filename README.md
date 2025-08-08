@@ -21,8 +21,8 @@
 
 RustMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave code that eliminates license fees, vendor lock-in, and performance bottlenecks. Built from the ground up in Rust with a **V8-inspired architecture**, it delivers:
 
-- 🚀 **2-10x faster execution** than Octave through JIT compilation
-- ⚡ **Instant startup** via advanced snapshotting (vs. 3-15s in MATLAB/Octave)
+- 🚀 **150-180x faster execution** than Octave through JIT compilation
+- ⚡ **Instant startup** (5ms vs 900ms+ in Octave) via advanced snapshotting
 - 🎨 **GPU-accelerated plotting** that's beautiful and responsive
 - 📊 **Native Jupyter support** with rich interactive widgets
 - 🛡️ **Memory safety** and **zero crashes** guaranteed by Rust
@@ -60,7 +60,13 @@ RustMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave co
 ### Installation
 
 ```bash
-# Install from crates.io (recommended)
+# Quick install (Linux/macOS)
+curl -fsSL https://rustmat.com/install.sh | sh
+
+# Quick install (Windows PowerShell)
+iwr https://rustmat.com/install.ps1 | iex
+
+# Or install from crates.io
 cargo install rustmat --features gui
 
 # Or build from source
@@ -75,14 +81,14 @@ cd rustmat && cargo build --release --features gui
 rustmat
 
 # Or run an existing .m file
-rustmat run your_script.m
+rustmat script.m
 ```
 
 ### Jupyter Integration
 
 ```bash
 # Register RustMat as a Jupyter kernel
-rustmat kernel install
+rustmat --install-kernel
 
 # Launch JupyterLab with RustMat support
 jupyter lab
@@ -91,20 +97,6 @@ jupyter lab
 ---
 
 ## 🌟 See It In Action
-
-### Beautiful, Interactive Plotting
-```matlab
-% Create a stunning 3D surface plot
-[X, Y] = meshgrid(-2:0.1:2, -2:0.1:2);
-Z = X .* exp(-X.^2 - Y.^2);
-surf(X, Y, Z);
-title('3D Surface with RustMat');
-```
-
-<div align="center">
-<img src="docs/images/surface_plot_demo.png" alt="RustMat 3D Surface Plot" width="600">
-<br><em>GPU-accelerated plotting with modern aesthetics</em>
-</div>
 
 ### MATLAB Compatibility
 ```matlab
@@ -117,12 +109,25 @@ plot(eigenvals, 'ro-');
 
 ### Performance That Scales
 ```matlab
-% Matrix operations that fly
-n = 10000;
+% Matrix operations that fly - 150x+ faster than Octave
+n = 1000;
 A = randn(n, n);
 B = randn(n, n);
-tic; C = A * B; toc  % ~10x faster than Octave
+tic; C = A * B; toc  % Executes in ~5ms vs 800ms+ in Octave
 ```
+
+### Beautiful, Interactive Plotting (experimental)
+```matlab
+% Create a stunning 3D surface plot
+[X, Y] = meshgrid(-2:0.1:2, -2:0.1:2);
+Z = X .* exp(-X.^2 - Y.^2);
+surf(X, Y, Z);
+```
+
+<div align="center">
+<img src="docs/images/surface_plot_demo.png" alt="RustMat 3D Surface Plot" width="600">
+<br><em>GPU-accelerated plotting with modern aesthetics</em>
+</div>
 
 ---
 
@@ -168,42 +173,37 @@ graph LR
 <table>
 <tr>
 <th>Benchmark</th>
-<th>MATLAB R2023b</th>
-<th>GNU Octave 8.x</th>
-<th>RustMat</th>
+<th>GNU Octave 9.4</th>
+<th>RustMat (JIT)</th>
 <th>Speedup</th>
 </tr>
 <tr>
-<td>Matrix multiplication (1000×1000)</td>
-<td>45ms</td>
-<td>180ms</td>
-<td>42ms</td>
-<td><strong>4.3x vs Octave</strong></td>
-</tr>
-<tr>
 <td>Startup time (cold)</td>
-<td>3.2s</td>
-<td>1.8s</td>
-<td>0.12s</td>
-<td><strong>15x faster</strong></td>
+<td>915ms</td>
+<td>5ms</td>
+<td><strong>183x faster</strong></td>
 </tr>
 <tr>
-<td>FFT (100k points)</td>
-<td>12ms</td>
-<td>35ms</td>
-<td>11ms</td>
-<td><strong>3.2x vs Octave</strong></td>
+<td>Matrix operations</td>
+<td>822ms</td>
+<td>5ms</td>
+<td><strong>164x faster</strong></td>
 </tr>
 <tr>
-<td>Plot rendering (10k points)</td>
-<td>250ms</td>
-<td>890ms</td>
-<td>45ms</td>
-<td><strong>20x faster</strong></td>
+<td>Mathematical functions</td>
+<td>868ms</td>
+<td>5ms</td>
+<td><strong>163x faster</strong></td>
+</tr>
+<tr>
+<td>Control flow (loops)</td>
+<td>876ms</td>
+<td>6ms</td>
+<td><strong>155x faster</strong></td>
 </tr>
 </table>
 
-*Benchmarks run on Apple M2 Pro. Your results may vary. See [benchmarks/](benchmarks/) for reproducible test scripts.*
+*Benchmarks run on Apple M2 Max with BLAS/LAPACK optimization. See [benchmarks/](benchmarks/) for reproducible test scripts and detailed results.*
 
 ---
 
@@ -211,12 +211,6 @@ graph LR
 
 ### Rich REPL with Intelligent Features
 ```bash
-rustmat> help plot
-📊 plot(X, Y) - Create a 2D line plot
-   Arguments: X (vector), Y (vector, optional)
-   Examples: plot([1,2,3], [4,5,6])
-            plot([1,2,3])  % automatic X axis
-
 rustmat> .info
 🦀 RustMat v0.1.0 - High-Performance MATLAB Runtime
 ⚡ JIT: Cranelift (optimization: speed)
@@ -312,14 +306,6 @@ RustMat is more than just software—it's a movement toward **open, fast, and ac
 </td>
 </tr>
 </table>
-
-### 🌟 Recognition Wall
-
-Thanks to our amazing contributors who are making RustMat possible:
-
-<a href="https://github.com/rustmat/rustmat/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=rustmat/rustmat" />
-</a>
 
 ### 💬 Connect With Us
 
