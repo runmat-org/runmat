@@ -33,8 +33,8 @@ pub enum HirExprKind {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirStmt {
-    ExprStmt(HirExpr),
-    Assign(VarId, HirExpr),
+    ExprStmt(HirExpr, bool), // Expression and whether it's semicolon-terminated (suppressed)
+    Assign(VarId, HirExpr, bool), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
     If {
         cond: HirExpr,
         then_body: Vec<HirStmt>,
@@ -145,10 +145,10 @@ pub mod remapping {
     /// Remap VarIds in a single HIR statement
     pub fn remap_stmt(stmt: &HirStmt, var_map: &HashMap<VarId, VarId>) -> HirStmt {
         match stmt {
-            HirStmt::ExprStmt(expr) => HirStmt::ExprStmt(remap_expr(expr, var_map)),
-            HirStmt::Assign(var_id, expr) => {
+            HirStmt::ExprStmt(expr, suppressed) => HirStmt::ExprStmt(remap_expr(expr, var_map), *suppressed),
+            HirStmt::Assign(var_id, expr, suppressed) => {
                 let new_var_id = var_map.get(var_id).copied().unwrap_or(*var_id);
-                HirStmt::Assign(new_var_id, remap_expr(expr, var_map))
+                HirStmt::Assign(new_var_id, remap_expr(expr, var_map), *suppressed)
             }
             HirStmt::If {
                 cond,
@@ -236,8 +236,8 @@ pub mod remapping {
 
     fn collect_stmt_variables(stmt: &HirStmt, vars: &mut std::collections::HashSet<VarId>) {
         match stmt {
-            HirStmt::ExprStmt(expr) => collect_expr_variables(expr, vars),
-            HirStmt::Assign(var_id, expr) => {
+            HirStmt::ExprStmt(expr, _) => collect_expr_variables(expr, vars),
+            HirStmt::Assign(var_id, expr, _) => {
                 vars.insert(*var_id);
                 collect_expr_variables(expr, vars);
             }
@@ -468,8 +468,8 @@ impl Ctx {
 
     fn lower_stmt(&mut self, stmt: &AstStmt) -> Result<HirStmt, String> {
         match stmt {
-            AstStmt::ExprStmt(e) => Ok(HirStmt::ExprStmt(self.lower_expr(e)?)),
-            AstStmt::Assign(name, expr) => {
+            AstStmt::ExprStmt(e, semicolon_terminated) => Ok(HirStmt::ExprStmt(self.lower_expr(e)?, *semicolon_terminated)),
+            AstStmt::Assign(name, expr, semicolon_terminated) => {
                 let id = match self.lookup(name) {
                     Some(id) => id,
                     None => self.define(name.clone()),
@@ -478,7 +478,7 @@ impl Ctx {
                 if id.0 < self.var_types.len() {
                     self.var_types[id.0] = value.ty.clone();
                 }
-                Ok(HirStmt::Assign(id, value))
+                Ok(HirStmt::Assign(id, value, *semicolon_terminated))
             }
             AstStmt::If {
                 cond,

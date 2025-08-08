@@ -47,6 +47,36 @@ pub struct ExecutionResult {
     pub execution_time_ms: u64,
     pub used_jit: bool,
     pub error: Option<String>,
+    /// Type information displayed when output is suppressed by semicolon
+    pub type_info: Option<String>,
+}
+
+/// Format value type information like MATLAB (e.g., "1000x1 vector", "3x3 matrix")
+fn format_type_info(value: &Value) -> String {
+    match value {
+        Value::Int(_) => "scalar".to_string(),
+        Value::Num(_) => "scalar".to_string(),
+        Value::Bool(_) => "logical scalar".to_string(),
+        Value::String(_) => "string".to_string(),
+        Value::Matrix(m) => {
+            if m.rows == 1 && m.cols == 1 {
+                "scalar".to_string()
+            } else if m.rows == 1 {
+                format!("{}x{} vector", m.rows, m.cols)
+            } else if m.cols == 1 {
+                format!("{}x{} vector", m.rows, m.cols)
+            } else {
+                format!("{}x{} matrix", m.rows, m.cols)
+            }
+        }
+        Value::Cell(cells) => {
+            if cells.len() == 1 {
+                "1x1 cell".to_string()
+            } else {
+                format!("{}x1 cell array", cells.len())
+            }
+        }
+    }
 }
 
 impl ReplEngine {
@@ -198,7 +228,8 @@ impl ReplEngine {
         }
 
         let mut used_jit = false;
-        let mut result_value = None;
+        let mut result_value: Option<Value> = None; // Always start fresh for each execution
+        let mut suppressed_value: Option<Value> = None; // Track value for type info when suppressed
         let mut error = None;
 
         // Check if this is an expression statement (ends with Pop)
@@ -207,6 +238,33 @@ impl ReplEngine {
             .last()
             .map(|instr| matches!(instr, rustmat_ignition::Instr::Pop))
             .unwrap_or(false);
+            
+        // Check if this is a semicolon-suppressed statement (expression or assignment)
+        // Control flow statements never return values regardless of semicolons
+        let is_semicolon_suppressed = if hir.body.len() == 1 {
+            match &hir.body[0] {
+                rustmat_hir::HirStmt::ExprStmt(_, true) => true, // true means semicolon-terminated (suppressed)
+                rustmat_hir::HirStmt::Assign(_, _, true) => true, // true means semicolon-terminated (suppressed)
+                rustmat_hir::HirStmt::If { .. } => true, // Control flow statements never return values
+                rustmat_hir::HirStmt::While { .. } => true, // Control flow statements never return values
+                rustmat_hir::HirStmt::For { .. } => true, // Control flow statements never return values
+                rustmat_hir::HirStmt::Break => true, // Control statements never return values
+                rustmat_hir::HirStmt::Continue => true, // Control statements never return values
+                rustmat_hir::HirStmt::Return => true, // Return statements never return values (to REPL)
+                rustmat_hir::HirStmt::Function { .. } => true, // Function definitions never return values
+                _ => false,
+            }
+        } else {
+            false
+        };
+        
+        if self.verbose {
+            debug!("HIR body len: {}", hir.body.len());
+            if !hir.body.is_empty() {
+                debug!("HIR statement: {:?}", &hir.body[0]);
+            }
+            debug!("is_semicolon_suppressed: {}", is_semicolon_suppressed);
+        }
 
         // Use JIT for assignments, interpreter for expressions (to capture results properly)
         if let Some(ref mut jit_engine) = &mut self.jit_engine {
@@ -234,13 +292,25 @@ impl ReplEngine {
                         } else {
                             self.stats.interpreter_fallback += 1;
                         }
-                        // For assignments, the result is typically the assigned value
-                        result_value = self
+                        // For assignments, capture the assigned value for both display and type info
+                        let assignment_value = self
                             .variable_array
                             .iter()
                             .rev()
                             .find(|v| !matches!(v, Value::Num(0.0)))
                             .cloned();
+                            
+                        if !is_semicolon_suppressed {
+                            result_value = assignment_value.clone();
+                            if self.verbose {
+                                debug!("JIT assignment result: {:?}", result_value);
+                            }
+                        } else {
+                            suppressed_value = assignment_value;
+                            if self.verbose {
+                                debug!("JIT assignment suppressed due to semicolon, captured for type info");
+                            }
+                        }
 
                         if self.verbose {
                             debug!(
@@ -309,19 +379,52 @@ impl ReplEngine {
                         debug!("Interpreter results: {results:?}");
                     }
 
-                    // For expressions, get the result from the temporary variable
-                    if is_expression_stmt && !execution_bytecode.instructions.is_empty() {
-                        let temp_var_id = execution_bytecode.var_count - 1; // The temp variable we added
-                        if temp_var_id < self.variable_array.len() {
-                            result_value = Some(self.variable_array[temp_var_id].clone());
+                    // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
+                    if hir.body.len() == 1 {
+                        if let rustmat_hir::HirStmt::Assign(var_id, _, semicolon_terminated) = &hir.body[0] {
                             if self.verbose {
-                                debug!(
-                                    "Expression result from temp var {temp_var_id}: {result_value:?}"
-                                );
+                                debug!("Assignment detected, var_id: {}, semicolon_terminated: {}", var_id.0, semicolon_terminated);
+                            }
+                            // For assignments, capture the assigned value for both display and type info
+                            if var_id.0 < self.variable_array.len() {
+                                let assignment_value = self.variable_array[var_id.0].clone();
+                                if !semicolon_terminated {
+                                    result_value = Some(assignment_value);
+                                    if self.verbose {
+                                        debug!("Setting assignment result_value: {:?}", result_value);
+                                    }
+                                } else {
+                                    suppressed_value = Some(assignment_value);
+                                    if self.verbose {
+                                        debug!("Assignment suppressed, captured for type info: {:?}", suppressed_value);
+                                    }
+                                }
                             }
                         }
-                    } else {
+                    }
+                    
+                    // For expressions, get the result from the temporary variable (capture for both display and type info)
+                    if is_expression_stmt && !execution_bytecode.instructions.is_empty() && result_value.is_none() && suppressed_value.is_none() {
+                        let temp_var_id = execution_bytecode.var_count - 1; // The temp variable we added
+                        if temp_var_id < self.variable_array.len() {
+                            let expression_value = self.variable_array[temp_var_id].clone();
+                            if !is_semicolon_suppressed {
+                                result_value = Some(expression_value);
+                                if self.verbose {
+                                    debug!("Expression result from temp var {temp_var_id}: {result_value:?}");
+                                }
+                            } else {
+                                suppressed_value = Some(expression_value);
+                                if self.verbose {
+                                    debug!("Expression suppressed, captured for type info from temp var {temp_var_id}: {suppressed_value:?}");
+                                }
+                            }
+                        }
+                    } else if !is_semicolon_suppressed && result_value.is_none() {
                         result_value = results.into_iter().last();
+                        if self.verbose {
+                            debug!("Fallback result from interpreter: {result_value:?}");
+                        }
                     }
 
                     if self.verbose {
@@ -356,11 +459,15 @@ impl ReplEngine {
             debug!("Execution completed in {execution_time_ms}ms (JIT: {used_jit})");
         }
 
+        // Generate type info if we have a suppressed value
+        let type_info = suppressed_value.as_ref().map(|v| format_type_info(v));
+
         Ok(ExecutionResult {
             value: result_value,
             execution_time_ms,
             used_jit,
             error,
+            type_info,
         })
     }
 

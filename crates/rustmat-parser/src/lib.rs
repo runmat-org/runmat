@@ -47,8 +47,8 @@ pub enum UnOp {
 
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
-    ExprStmt(Expr),
-    Assign(String, Expr),
+    ExprStmt(Expr, bool), // Expression and whether it's semicolon-terminated (suppressed)
+    Assign(String, Expr, bool), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
     If {
         cond: Expr,
         then_body: Vec<Stmt>,
@@ -179,8 +179,7 @@ impl Parser {
             if self.consume(&Token::Semicolon) {
                 continue;
             }
-            body.push(self.parse_stmt()?);
-            self.consume(&Token::Semicolon);
+            body.push(self.parse_stmt_with_semicolon()?);
         }
         Ok(Program { body })
     }
@@ -215,6 +214,18 @@ impl Parser {
         }
     }
 
+    fn parse_stmt_with_semicolon(&mut self) -> Result<Stmt, ParseError> {
+        let stmt = self.parse_stmt()?;
+        let is_semicolon_terminated = self.consume(&Token::Semicolon);
+        
+        // Apply semicolon suppression to both expression statements and assignments
+        match stmt {
+            Stmt::ExprStmt(expr, _) => Ok(Stmt::ExprStmt(expr, is_semicolon_terminated)),
+            Stmt::Assign(name, expr, _) => Ok(Stmt::Assign(name, expr, is_semicolon_terminated)),
+            other => Ok(other),
+        }
+    }
+
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match self.peek_token() {
             Some(Token::If) => self.parse_if().map_err(|e| e.into()),
@@ -245,10 +256,10 @@ impl Parser {
                         return Err(self.error_with_expected("expected assignment operator", "'='"));
                     }
                     let expr = self.parse_expr()?;
-                    Ok(Stmt::Assign(name, expr))
+                    Ok(Stmt::Assign(name, expr, false)) // Will be updated by parse_stmt_with_semicolon
                 } else {
                     let expr = self.parse_expr()?;
-                    Ok(Stmt::ExprStmt(expr))
+                    Ok(Stmt::ExprStmt(expr, false)) // Will be updated by parse_stmt_with_semicolon
                 }
             }
         }
@@ -575,8 +586,16 @@ impl Parser {
             if self.consume(&Token::Semicolon) {
                 continue;
             }
-            body.push(self.parse_stmt()?);
-            self.consume(&Token::Semicolon);
+            let stmt = self.parse_stmt().map_err(|e| e.message)?;
+            let is_semicolon_terminated = self.consume(&Token::Semicolon);
+            
+            // Apply semicolon suppression to both expression statements and assignments
+            let final_stmt = match stmt {
+                Stmt::ExprStmt(expr, _) => Stmt::ExprStmt(expr, is_semicolon_terminated),
+                Stmt::Assign(name, expr, _) => Stmt::Assign(name, expr, is_semicolon_terminated),
+                other => other,
+            };
+            body.push(final_stmt);
         }
         Ok(body)
     }

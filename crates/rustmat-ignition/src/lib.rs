@@ -211,13 +211,13 @@ impl Compiler {
         fn visit_stmts(stmts: &[HirStmt], max: &mut usize) {
             for s in stmts {
                 match s {
-                    HirStmt::Assign(id, expr) => {
+                    HirStmt::Assign(id, expr, _) => {
                         if id.0 + 1 > *max {
                             *max = id.0 + 1;
                         }
                         visit_expr(expr, max);
                     }
-                    HirStmt::ExprStmt(expr) => {
+                    HirStmt::ExprStmt(expr, _) => {
                         visit_expr(expr, max);
                     }
                     HirStmt::If {
@@ -276,11 +276,11 @@ impl Compiler {
 
     fn compile_stmt(&mut self, stmt: &HirStmt) -> Result<(), String> {
         match stmt {
-            HirStmt::ExprStmt(expr) => {
+            HirStmt::ExprStmt(expr, _) => {
                 self.compile_expr(expr)?;
                 self.emit(Instr::Pop);
             }
-            HirStmt::Assign(id, expr) => {
+            HirStmt::Assign(id, expr, _) => {
                 self.compile_expr(expr)?;
                 self.emit(Instr::StoreVar(id.0));
             }
@@ -458,8 +458,8 @@ impl Compiler {
 
                 fn visit_stmt_for_vars(stmt: &HirStmt, max: &mut usize) {
                     match stmt {
-                        HirStmt::ExprStmt(expr) => visit_expr_for_vars(expr, max),
-                        HirStmt::Assign(id, expr) => {
+                        HirStmt::ExprStmt(expr, _) => visit_expr_for_vars(expr, max),
+                        HirStmt::Assign(id, expr, _) => {
                             if id.0 + 1 > *max {
                                 *max = id.0 + 1;
                             }

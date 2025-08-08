@@ -7,14 +7,14 @@ fn lower_simple_assignments() {
     let hir = lower(&ast).unwrap();
     assert_eq!(hir.body.len(), 2);
     let (x_id, y_id) = match (&hir.body[0], &hir.body[1]) {
-        (HirStmt::Assign(x_id, x_expr), HirStmt::Assign(y_id, _)) => {
+        (HirStmt::Assign(x_id, x_expr, _), HirStmt::Assign(y_id, _, _)) => {
             assert!(matches!(x_expr.kind, HirExprKind::Number(_)));
             (*x_id, *y_id)
         }
         _ => panic!("unexpected stmt kinds"),
     };
     // second assignment should reference first variable
-    if let HirStmt::Assign(_, rhs) = &hir.body[1] {
+    if let HirStmt::Assign(_, rhs, _) = &hir.body[1] {
         if let HirExprKind::Binary(left, _, _) = &rhs.kind {
             if let HirExprKind::Var(id) = left.kind {
                 assert_eq!(id, x_id);
@@ -40,13 +40,13 @@ fn function_scope_shadows_outer_variable() {
     let hir = lower(&ast).unwrap();
     // outer assignment defines variable 0
     let outer_id = match &hir.body[0] {
-        HirStmt::Assign(id, _) => *id,
+        HirStmt::Assign(id, _, _) => *id,
         _ => panic!(),
     };
     if let HirStmt::Function { params, body, .. } = &hir.body[1] {
         let param_id = params[0];
         assert_ne!(param_id, outer_id);
-        if let HirStmt::Assign(_, expr) = &body[0] {
+        if let HirStmt::Assign(_, expr, _) = &body[0] {
             if let HirExprKind::Binary(left, _, _) = &expr.kind {
                 if let HirExprKind::Var(id) = left.kind {
                     assert_eq!(id, param_id);
@@ -75,7 +75,7 @@ fn type_inference_propagates_through_assignments() {
     let ast = parse("x=[1,2]; y=x+1;").unwrap();
     let hir = lower(&ast).unwrap();
     let (x_id, y_id) = match (&hir.body[0], &hir.body[1]) {
-        (HirStmt::Assign(x_id, x_expr), HirStmt::Assign(y_id, y_expr)) => {
+        (HirStmt::Assign(x_id, x_expr, _), HirStmt::Assign(y_id, y_expr, _)) => {
             assert!(matches!(x_expr.ty, Type::Matrix { .. }));
             assert!(matches!(y_expr.ty, Type::Matrix { .. }));
             (*x_id, *y_id)
@@ -89,10 +89,10 @@ fn type_inference_propagates_through_assignments() {
 fn reassignment_updates_variable_type() {
     let ast = parse("x=1; x=[1,2];").unwrap();
     let hir = lower(&ast).unwrap();
-    if let HirStmt::Assign(id, expr2) = &hir.body[1] {
+    if let HirStmt::Assign(id, expr2, _) = &hir.body[1] {
         assert!(matches!(expr2.ty, Type::Matrix { .. }));
         // ensure variable id is same as first assignment
-        if let HirStmt::Assign(id1, _) = &hir.body[0] {
+        if let HirStmt::Assign(id1, _, _) = &hir.body[0] {
             assert_eq!(*id, *id1);
         } else {
             panic!();
