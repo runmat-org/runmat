@@ -19,7 +19,7 @@ export default function HomePage() {
             <span className="gradient-brand">The Modern MATLAB Runtime</span>
           </h1>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            A free, high-performance alternative to MATLAB that runs your existing code faster and more reliably. 
+              A free, high-performance runtime for MATLAB code that runs your existing scripts faster and more reliably. 
             No license fees, no vendor lock-in, just blazing-fast numerical computing with beautiful visualizations.
           </p>
             <div className="flex flex-col sm:flex-row gap-4">

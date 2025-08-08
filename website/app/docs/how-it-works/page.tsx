@@ -34,7 +34,7 @@ export default function HowItWorksPage() {
           <p className="text-xl text-muted-foreground leading-relaxed">
             Traditional MATLAB interpreters can feel sluggish for compute-intensive workloads. RunMat takes a 
             different approach with a V8-inspired architecture that prioritizes performance without sacrificing 
-            compatibility. Here&apos;s how we built a MATLAB engine that starts in 5ms and runs many workloads 
+            compatibility. Here&apos;s how we built a MATLAB runtime that starts in 5ms and runs many workloads 
             significantly faster than existing implementations like GNU Octave.
           </p>
         </div>

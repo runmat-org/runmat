@@ -7,12 +7,12 @@ readTime: "8 min read"
 slug: "introducing-runmat"
 tags: ["MATLAB", "Rust", "JIT", "scientific computing", "open source"]
 keywords: "MATLAB alternative, Rust scientific computing, JIT compiler, numerical computing, open source MATLAB, GNU Octave replacement"
-excerpt: "RunMat solves scientific computing's triple bind: expensive MATLAB licenses, slow free alternatives, and memory safety issues. Get MATLAB performance with Rust safety, completely free."
+excerpt: "RunMat solves scientific computing's triple bind: expensive MATLAB licenses, slow free alternatives, and memory safety issues. Run MATLAB code with high performance and Rust safety, completely free."
 image: "/images/blog/runmat-hero.png"
 imageAlt: "RunMat logo with performance charts showing 10x speedup over GNU Octave"
 ogType: "article"
 ogTitle: "Introducing RunMat: Free, Fast MATLAB Alternative Built in Rust"
-ogDescription: "Get MATLAB performance without the $2,150+ license fee. RunMat delivers 10x faster execution than GNU Octave with 99.99% MATLAB compatibility."
+ogDescription: "Run MATLAB code with performance and Rust safety, completely free."
 twitterCard: "summary_large_image"
 twitterTitle: "RunMat: Free, Fast MATLAB Alternative"
 twitterDescription: "10x faster than GNU Octave, 99.99% MATLAB compatible, completely free. Built in Rust with V8-inspired JIT compilation."
@@ -29,8 +29,7 @@ This creates an impossible choice:
 - **Accept terrible performance:** GNU Octave, the primary free alternative, is dramatically slower than MATLAB. Our benchmarks show **150-180x slower performance** (versus RunMat) across typical workloads—a 5-second computation takes 15+ minutes in Octave. Your research crawls, simulations become unusable, and productivity plummets.
 - **Learn a new language:** Python's NumPy/SciPy ecosystem is powerful, but it means abandoning the MATLAB syntax you already know and rewriting existing codebases. This is time-consuming and error-prone.
 - **Risk crashes and security issues:** Traditional implementations in C/C++ are vulnerable to memory bugs, segfaults, and security vulnerabilities that can corrupt research data or compromise systems.
-
-**We refuse to accept this trade-off.** RunMat provides the performance of MATLAB, the safety of modern systems programming, and the accessibility of open source—all while maintaining nearly perfect compatibility with the MATLAB syntax you already know.
+**We refuse to accept this trade-off.** RunMat delivers high-performance execution of MATLAB code with the safety of modern systems programming and the accessibility of open source — often running MATLAB scripts faster than the original runtime while maintaining nearly perfect compatibility with the syntax you already know.
 
 ## What Makes RunMat Different
 
@@ -114,7 +113,7 @@ Loops, conditionals, and function calls with up to 10,000 iterations:
 
 ## Goal: Near-Perfect MATLAB Compatibility
 
-**Our goal is 99.99% compatibility with existing MATLAB code.** This isn't just about supporting the "common subset"—we're building a true replacement that handles the edge cases, quirks, and advanced features that real MATLAB codebases depend on.
+**Our goal is 99.99% compatibility with existing MATLAB code.** This isn't just about supporting the "common subset"—we're building a high-performance runtime that handles the edge cases, quirks, and advanced features that real MATLAB codebases depend on.
 
 **Currently supported (and growing daily):**
 
@@ -192,7 +191,7 @@ The performance improvements have practical implications for real workflows:
 
 - **Faster iteration cycles**: What takes 15 minutes in Octave runs in 5 seconds, enabling rapid prototyping
 - **Truly interactive development**: Sub-5ms startup enables real-time exploratory computing  
-- **Significant cost savings**: Avoid MATLAB's $2,150+ annual per-user licensing while getting comparable performance
+- **Significant cost savings**: Avoid MATLAB's $2,150+ annual per-user licensing while often achieving superior performance for MATLAB code execution
 - **Reduced infrastructure costs**: Computations that needed clusters can run on laptops
 - **Memory safety**: Rust's ownership model prevents entire classes of bugs that corrupt research data
 
