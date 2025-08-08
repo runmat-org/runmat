@@ -1,5 +1,5 @@
 # 🚀 RustMat
-### A blazing-fast, open-source MATLAB/Octave runtime built in Rust
+### A blazing-fast, open-source MATLAB/Octave runtime, by the creators of [Dystr](https://dystr.com)
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/rustmat/rustmat/ci.yml?branch=main)](https://github.com/rustmat/rustmat/actions)
 [![License](https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg)](LICENSE.md)
@@ -7,7 +7,7 @@
 [![Downloads](https://img.shields.io/crates/d/rustmat.svg)](https://crates.io/crates/rustmat)
 [![Discord](https://img.shields.io/discord/placeholder?color=7289da&label=discord)](https://discord.gg/rustmat)
 
-> **Copy-paste your existing MATLAB code and watch it run faster and for free** ✨
+> **Copy-paste your existing MATLAB code and watch it run blazing fast and for free** ✨
 
 <div align="center">
 
@@ -27,6 +27,43 @@ RustMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave co
 - 📊 **Native Jupyter support** with rich interactive widgets
 - 🛡️ **Memory safety** and **zero crashes** guaranteed by Rust
 - 💰 **$0 licensing costs** - completely free and open source
+
+## 📊 Performance Benchmarks
+
+<table>
+<tr>
+<th>Benchmark</th>
+<th>GNU Octave 9.4</th>
+<th>RustMat (JIT)</th>
+<th>Speedup</th>
+</tr>
+<tr>
+<td>Startup time (cold)</td>
+<td>915ms</td>
+<td>5ms</td>
+<td><strong>183x faster</strong></td>
+</tr>
+<tr>
+<td>Matrix operations</td>
+<td>822ms</td>
+<td>5ms</td>
+<td><strong>164x faster</strong></td>
+</tr>
+<tr>
+<td>Mathematical functions</td>
+<td>868ms</td>
+<td>5ms</td>
+<td><strong>163x faster</strong></td>
+</tr>
+<tr>
+<td>Control flow (loops)</td>
+<td>876ms</td>
+<td>6ms</td>
+<td><strong>155x faster</strong></td>
+</tr>
+</table>
+
+*Benchmarks run on Apple M2 Max with BLAS/LAPACK optimization. See [benchmarks/](benchmarks/) for reproducible test scripts and detailed results.*
 
 ### Why Engineers and Scientists Love RustMat
 
@@ -52,8 +89,6 @@ RustMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave co
 </td>
 </tr>
 </table>
-
----
 
 ## 🎯 Quick Start
 
@@ -94,8 +129,6 @@ rustmat --install-kernel
 jupyter lab
 ```
 
----
-
 ## 🌟 See It In Action
 
 ### MATLAB Compatibility
@@ -123,13 +156,6 @@ tic; C = A * B; toc  % Executes in ~5ms vs 800ms+ in Octave
 Z = X .* exp(-X.^2 - Y.^2);
 surf(X, Y, Z);
 ```
-
-<div align="center">
-<img src="docs/images/surface_plot_demo.png" alt="RustMat 3D Surface Plot" width="600">
-<br><em>GPU-accelerated plotting with modern aesthetics</em>
-</div>
-
----
 
 ## 🏗️ Architecture: V8-Inspired Performance
 
@@ -166,47 +192,6 @@ graph LR
 | **📦 rustmat-snapshot** | Fast startup system | Binary blob serialization |
 | **🔧 rustmat-runtime** | 50+ builtin functions | BLAS/LAPACK integration |
 
----
-
-## 📊 Performance Benchmarks
-
-<table>
-<tr>
-<th>Benchmark</th>
-<th>GNU Octave 9.4</th>
-<th>RustMat (JIT)</th>
-<th>Speedup</th>
-</tr>
-<tr>
-<td>Startup time (cold)</td>
-<td>915ms</td>
-<td>5ms</td>
-<td><strong>183x faster</strong></td>
-</tr>
-<tr>
-<td>Matrix operations</td>
-<td>822ms</td>
-<td>5ms</td>
-<td><strong>164x faster</strong></td>
-</tr>
-<tr>
-<td>Mathematical functions</td>
-<td>868ms</td>
-<td>5ms</td>
-<td><strong>163x faster</strong></td>
-</tr>
-<tr>
-<td>Control flow (loops)</td>
-<td>876ms</td>
-<td>6ms</td>
-<td><strong>155x faster</strong></td>
-</tr>
-</table>
-
-*Benchmarks run on Apple M2 Max with BLAS/LAPACK optimization. See [benchmarks/](benchmarks/) for reproducible test scripts and detailed results.*
-
----
-
 ## 🎨 Modern Developer Experience
 
 ### Rich REPL with Intelligent Features
@@ -234,8 +219,6 @@ fn my_custom_function(x: f64, y: f64) -> f64 {
 }
 ```
 
----
-
 ## 🌍 Who Uses RustMat?
 
 <div align="center">
@@ -260,8 +243,6 @@ Rapid prototyping without<br/>expensive toolchain costs
 </tr>
 </table>
 </div>
-
----
 
 ## 🤝 Join the Revolution
 
@@ -314,8 +295,6 @@ RustMat is more than just software—it's a movement toward **open, fast, and ac
 - **Twitter**: [@rustmat_dev](https://twitter.com/rustmat_dev) for updates and announcements
 - **Newsletter**: [Subscribe](https://rustmat.dev/newsletter) for monthly updates
 
----
-
 ## 📜 License
 
 RustMat is licensed under the **MIT License with Attribution Requirements**. This means:
@@ -327,8 +306,6 @@ RustMat is licensed under the **MIT License with Attribution Requirements**. Thi
 ⚠️ **Special provisions** - large scientific software companies must keep modifications open source  
 
 See [LICENSE.md](LICENSE.md) for complete terms or visit [rustmat.dev/license](https://rustmat.dev/license) for FAQs.
-
----
 
 <div align="center">
 
