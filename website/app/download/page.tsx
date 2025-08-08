@@ -31,24 +31,14 @@ export default function DownloadPage() {
             Download RustMat
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-300 leading-relaxed max-w-3xl mx-auto">
-            Get started with RustMat in seconds. Choose your preferred installation method below.
+            Get started with RustMat in seconds.
           </p>
         </div>
 
         {/* Quick Install */}
         <section className="mb-12">
           <Card className="bg-gradient-to-r from-blue-50 to-orange-50 dark:from-blue-900/20 dark:to-orange-900/20 border-blue-200 dark:border-blue-800">
-            <CardContent className="p-8 text-center">
-              <div className="flex items-center justify-center mb-6">
-                <Zap className="h-8 w-8 mr-3 text-blue-600" />
-                <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
-                  Quick Install
-                </h2>
-              </div>
-              <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
-                Copy and paste one command to install RustMat on any platform. The script will automatically detect your system and install the latest version.
-              </p>
-              
+            <CardContent className="p-4 text-center">
               <OSInstallCommand className="max-w-4xl mx-auto" />
             </CardContent>
           </Card>

@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CodeBlock } from "@/components/CodeBlock";
+
 import { OSInstallCommand } from "@/components/OSInstallCommand";
 import Link from "next/link";
 
@@ -22,11 +22,13 @@ export default function HomePage() {
             A free, high-performance alternative to MATLAB that runs your existing code faster and more reliably. 
             No license fees, no vendor lock-in, just blazing-fast numerical computing with beautiful visualizations.
           </p>
-            <div className="flex gap-4">
-              <Button size="lg" asChild>
-                <Link href="/download">Download RustMat</Link>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
+                <Link href="/download">
+                  Download RustMat
+                </Link>
               </Button>
-              <Button variant="outline" size="lg" asChild>
+              <Button variant="outline" size="lg" asChild className="h-12 px-8">
                 <Link href="/docs/getting-started">Get Started</Link>
               </Button>
             </div>
@@ -39,7 +41,7 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl lg:text-6xl">
-              Why Choose RustMat?
+              Why Use RustMat?
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
               All the power of MATLAB without the price tag or limitations
@@ -96,24 +98,134 @@ export default function HomePage() {
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
             Copy-paste your existing MATLAB code and watch it run faster and for free
           </p>
-        </div>
-        <div className="mx-auto max-w-[58rem]">
-          <Card>
-            <CardContent className="p-6">
-              <CodeBlock language="matlab">{`% Generate data
-x = linspace(0, 4 * pi, 1000);
-y = sin(x) .* exp(-x/10);
+          </div>
 
-% Create beautiful plot
-plot(x, y);
+          <div className="mx-auto max-w-7xl">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+              {/* Terminal/Shell on the left */}
+              <div className="order-2 lg:order-1">
+                <Card className="bg-gray-900 dark:bg-gray-900 bg-gray-100 border-gray-700 dark:border-gray-700 border-gray-300 shadow-2xl py-0">
+                  {/* Terminal Header */}
+                  <div className="flex items-center justify-between px-4 py-3 bg-gray-800 dark:bg-gray-800 bg-gray-200 rounded-t-lg border-b border-gray-700 dark:border-gray-700 border-b-gray-300">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                      <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                      <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                    </div>
+                    <div className="w-12"></div>
+                  </div>
 
-% Matrix operations
-A = randn(1000, 1000);
-B = A * A';
-eigenvals = eig(B);`}</CodeBlock>
-            </CardContent>
-          </Card>
-        </div>
+                  {/* Terminal Content */}
+                  <CardContent className="px-6 pt-4 pb-6 font-mono text-sm">
+                    <div className="space-y-2 text-white dark:text-white text-gray-900">
+                      {/* Initial command */}
+                      <div className="flex">
+                        <span className="text-gray-500 dark:text-gray-500 text-gray-600 dark:text-gray-500 dark:text-gray-500 text-gray-600 text-gray-600">$</span>
+                        <span className="ml-2">rustmat</span>
+                      </div>
+
+                      {/* RustMat header */}
+                      <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">RustMat v0.1.0 by Dystr (https://dystr.com)</div>
+                      <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">High-performance MATLAB/Octave runtime with JIT compilation</div>
+                      <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">Type &apos;help&apos; for help, &apos;exit&apos; to quit</div>
+                      <div className="h-4"></div>
+
+                      {/* Interactive session */}
+                      <div className="space-y-5">
+                        {/* Generate data section */}
+                        <div className="space-y-1">
+                          <div className="text-cyan-300 dark:text-cyan-300 text-cyan-700 mb-2">% Generate data</div>
+                          <div>
+                            <div className="flex">
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="ml-2">x = linspace(0, 4 * pi, 1000);</span>
+                            </div>
+                            <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Num(1000x1 vector)</div>
+                          </div>
+                          <div>
+                            <div className="flex">
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="ml-2">y = sin(x) .* exp(-x/10);</span>
+                            </div>
+                            <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Num(1000x1 vector)</div>
+                          </div>
+                        </div>
+
+                        {/* Create plot section */}
+                        <div className="space-y-1">
+                          <div className="text-cyan-300 dark:text-cyan-300 text-cyan-700 mb-2">% Create beautiful plot</div>
+                          <div>
+                            <div className="flex">
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="ml-2">plot(x, y);</span>
+                            </div>
+                            <div className="text-gray-500 dark:text-gray-500 text-gray-600">[Interactive plot window opened]</div>
+                          </div>
+                        </div>
+
+                        {/* Matrix operations section */}
+                        <div className="space-y-1">
+                          <div className="text-cyan-300 dark:text-cyan-300 text-cyan-700 mb-2">% Matrix operations</div>
+                          <div>
+                            <div className="flex">
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="ml-2">A = randn(1000, 1000);</span>
+                            </div>
+                            <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Matrix(1000x1000 double)</div>
+                          </div>
+                          <div>
+                            <div className="flex">
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="ml-2">B = A * A&apos;;</span>
+                            </div>
+                            <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Matrix(1000x1000 double)</div>
+                          </div>
+                          <div>
+                            <div className="flex">
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="ml-2">eigenvals = eig(B);</span>
+                            </div>
+                            <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Num(1000x1 complex vector)</div>
+                          </div>
+                        </div>
+
+                        {/* Cursor */}
+                        <div className="flex mt-3">
+                          <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                          <span className="ml-2 animate-pulse">▊</span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* RustMat Plot Window */}
+              <div className="order-1 lg:order-2">
+                <div className="bg-gray-700 rounded-lg shadow-2xl overflow-hidden">
+                  {/* macOS Window Header */}
+                  <div className="bg-gray-600 px-4 py-3 flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                      <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                      <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                    </div>
+                    <div className="text-gray-200 text-sm font-medium">RustMat - Interactive Visualization</div>
+                    <div className="w-16"></div>
+                  </div>
+
+                  {/* Window Content Area */}
+                  <div className="overflow-hidden">
+                    <img
+                      src="/plot-example.jpg"
+                      alt="RustMat interactive plot showing a damped sine wave with real-time visualization controls"
+                      className="w-full h-auto"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -190,11 +302,11 @@ eigenvals = eig(B);`}</CodeBlock>
           
           <OSInstallCommand className="w-full max-w-4xl" />
           
-          <div className="flex gap-4">
-            <Button size="lg" asChild>
-              <Link href="/download">More Install Options</Link>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
+                <Link href="/download">More Install Options</Link>
             </Button>
-            <Button variant="outline" size="lg" asChild>
+              <Button variant="outline" size="lg" asChild className="h-12 px-8">
               <Link href="/docs/getting-started">Get Started</Link>
             </Button>
           </div>
