@@ -145,9 +145,76 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                 });
             }
             Err(_) => {
+                // Robust error recovery: scan the remaining slice and emit best-effort tokens
+                // so that downstream parsers can continue (e.g., identifiers, whitespace, parens).
                 let s = lex.slice();
                 let span = lex.span();
-                for (off, ch) in s.char_indices() {
+
+                let mut byte_index = 0usize; // offset within s
+
+                while byte_index < s.len() {
+                    // Helper to read next char and its byte length
+                    let ch = s[byte_index..].chars().next().unwrap();
+                    let ch_len = ch.len_utf8();
+
+                    // Skip whitespace entirely (would normally be skipped by Logos attributes)
+                    if ch.is_whitespace() {
+                        byte_index += ch_len;
+                        continue;
+                    }
+
+                    // Coalesce identifiers: [a-zA-Z_][a-zA-Z0-9_]*
+                    if ch == '_' || ch.is_ascii_alphabetic() {
+                        let start_off = byte_index;
+                        byte_index += ch_len;
+                        while byte_index < s.len() {
+                            let nxt = s[byte_index..].chars().next().unwrap();
+                            if nxt == '_' || nxt.is_ascii_alphanumeric() {
+                                byte_index += nxt.len_utf8();
+                            } else {
+                                break;
+                            }
+                        }
+                        let start = span.start + start_off;
+                        let end = span.start + byte_index;
+                        out.push(SpannedToken {
+                            token: Token::Ident,
+                            lexeme: s[start_off..byte_index].to_string(),
+                            start,
+                            end,
+                        });
+                        continue;
+                    }
+
+                    // Numbers: simplistic integer/float scan to avoid splitting
+                    if ch.is_ascii_digit() {
+                        let start_off = byte_index;
+                        byte_index += ch_len;
+                        while byte_index < s.len() {
+                            let nxt = s[byte_index..].chars().next().unwrap();
+                            if nxt.is_ascii_digit() {
+                                byte_index += nxt.len_utf8();
+                            } else if nxt == '.' {
+                                // include one dot and continue scanning digits/exponent
+                                byte_index += 1;
+                            } else if nxt == 'e' || nxt == 'E' || nxt == '+' || nxt == '-' {
+                                byte_index += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        let start = span.start + start_off;
+                        let end = span.start + byte_index;
+                        out.push(SpannedToken {
+                            token: Token::Integer, // good enough for recovery; detailed kind not required
+                            lexeme: s[start_off..byte_index].to_string(),
+                            start,
+                            end,
+                        });
+                        continue;
+                    }
+
+                    // Single-character punctuation/operators
                     let token = match ch {
                         '\'' => Token::Transpose,
                         ';' => Token::Semicolon,
@@ -174,14 +241,16 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                         '=' => Token::Assign,
                         _ => Token::Error,
                     };
-                    let start = span.start + off;
-                    let end = start + ch.len_utf8();
+
+                    let start = span.start + byte_index;
+                    let end = start + ch_len;
                     out.push(SpannedToken {
                         token,
                         lexeme: ch.to_string(),
                         start,
                         end,
                     });
+                    byte_index += ch_len;
                 }
             }
         }
@@ -196,8 +265,10 @@ fn string_or_skip(_lexer: &mut Lexer<Token>) -> Filter<()> {
     Filter::Emit(())
 }
 
-fn transpose_filter(_lex: &mut Lexer<Token>) -> Filter<()> {
+fn transpose_filter(lex: &mut Lexer<Token>) -> Filter<()> {
     // Always emit transpose for a single apostrophe.
     // Full strings like 'text' are matched by the longer Str regex and will take precedence.
+    // Transpose acts like a value (similar to closing parentheses)
+    lex.extras.last_was_value = true;
     Filter::Emit(())
 }
