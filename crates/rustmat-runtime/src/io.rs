@@ -118,7 +118,7 @@ mod tests {
     fn test_fprintf() {
         let result = fprintf_string_builtin("Hello, world!".to_string());
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0.0);
+        assert_eq!(result.unwrap(), 13.0);
     }
     
     #[test]

@@ -66,6 +66,6 @@ fn repl_binary_processes_single_line() -> Result<(), Box<dyn std::error::Error>>
     // Should contain REPL banner and show result of x=1 execution
     assert!(stdout.contains("RustMat REPL"));
     assert!(stdout.contains("rustmat>"));
-    assert!(stdout.contains("ans = Num(1.0)")); // Result of x=1
+    assert!(stdout.contains("ans = 1")); // Result of x=1
     Ok(())
 }

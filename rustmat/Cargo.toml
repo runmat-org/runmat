@@ -43,9 +43,10 @@ rustmat-snapshot = { path = "../crates/rustmat-snapshot" }
 rustmat-plot = { path = "../crates/rustmat-plot" }
 
 [features]
-# GUI plotting features (enabled by default)
-default = ["gui"]
+# GUI plotting features and BLAS/LAPACK (enabled by default)
+default = ["gui", "blas-lapack"]
 gui = ["rustmat-plot/gui"]
+blas-lapack = ["rustmat-runtime/blas-lapack"]
 
 [dev-dependencies]
 tempfile = "3.12" 

@@ -1,5 +1,6 @@
 pub use inventory;
 use std::convert::TryFrom;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -74,6 +75,25 @@ impl Matrix {
             rows,
             cols,
         }
+    }
+}
+
+impl fmt::Display for Matrix {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
+        for r in 0..self.rows {
+            for c in 0..self.cols {
+                if c > 0 {
+                    write!(f, " ")?;
+                }
+                let v = self.data[r * self.cols + c];
+                write!(f, "{}", format_number_short_g(v))?;
+            }
+            if r + 1 < self.rows {
+                write!(f, "; ")?;
+            }
+        }
+        write!(f, "]")
     }
 }
 
@@ -350,4 +370,94 @@ pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
 
 pub fn constants() -> Vec<&'static Constant> {
     inventory::iter::<Constant>().collect()
+}
+
+// ----------------------
+// Display implementations
+// ----------------------
+
+fn format_number_short_g(value: f64) -> String {
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value.is_sign_negative() { "-Inf" } else { "Inf" }.to_string();
+    }
+    // Normalize -0.0 to 0
+    let mut v = value;
+    if v == 0.0 { v = 0.0; }
+
+    let abs = v.abs();
+    if abs == 0.0 {
+        return "0".to_string();
+    }
+
+    // Decide between fixed and scientific notation roughly like MATLAB short g
+    let use_scientific = abs < 1e-4 || abs >= 1e6;
+
+    if use_scientific {
+        // 5 significant digits in scientific notation for short g style
+        let s = format!("{:.5e}", v);
+        // Trim trailing zeros in fraction part
+        if let Some(idx) = s.find('e') {
+            let (mut mantissa, exp) = s.split_at(idx);
+            // mantissa like "-1.23450"
+            if let Some(dot_idx) = mantissa.find('.') {
+                // Trim trailing zeros
+                let mut end = mantissa.len();
+                while end > dot_idx + 1 && mantissa.as_bytes()[end - 1] == b'0' {
+                    end -= 1;
+                }
+                if end > 0 && mantissa.as_bytes()[end - 1] == b'.' {
+                    end -= 1;
+                }
+                mantissa = &mantissa[..end];
+            }
+            return format!("{}{}", mantissa, exp);
+        }
+        return s;
+    }
+
+    // Fixed notation with up to 12 significant digits, trim trailing zeros
+    // Compute number of decimals to retain to reach ~12 significant digits
+    let exp10 = abs.log10().floor() as i32; // position of most significant digit
+    let sig_digits: i32 = 12;
+    let decimals = (sig_digits - 1 - exp10).clamp(0, 12) as usize;
+    // Round to that many decimals
+    let pow = 10f64.powi(decimals as i32);
+    let rounded = (v * pow).round() / pow;
+    let mut s = format!("{:.*}", decimals, rounded);
+    if let Some(dot) = s.find('.') {
+        // Trim trailing zeros
+        let mut end = s.len();
+        while end > dot + 1 && s.as_bytes()[end - 1] == b'0' {
+            end -= 1;
+        }
+        if end > 0 && s.as_bytes()[end - 1] == b'.' {
+            end -= 1;
+        }
+        s.truncate(end);
+    }
+    if s.is_empty() || s == "-0" { s = "0".to_string(); }
+    s
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Int(i) => write!(f, "{}", i),
+            Value::Num(n) => write!(f, "{}", format_number_short_g(*n)),
+            Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
+            Value::String(s) => write!(f, "'{}'", s),
+            Value::Matrix(m) => write!(f, "{}", m),
+            Value::Cell(items) => {
+                write!(f, "{{")?;
+                for (idx, item) in items.iter().enumerate() {
+                    if idx > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, "}}")
+            }
+        }
+    }
 }

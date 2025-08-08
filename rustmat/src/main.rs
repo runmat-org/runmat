@@ -29,9 +29,11 @@ use std::time::Duration;
     version = "0.0.1",
     about = "High-performance MATLAB/Octave runtime with JIT compilation and GC",
     long_about = r#"
-RustMat is a modern, high-performance runtime for MATLAB/Octave code built in Rust.
-It features a V8-inspired tiered execution model with a baseline interpreter feeding 
-an optimizing JIT compiler built on Cranelift.
+RustMat is a modern, high-performance runtime for MATLAB/Octave code built 
+by Dystr (https://dystr.com).
+
+It is built in Rust, and features a V8-inspired tiered execution model with a 
+baseline interpreter feeding an optimizing JIT compiler built on Cranelift.
 
 Key features:
 • JIT compilation with Cranelift for optimal performance
@@ -50,12 +52,13 @@ Performance Features:
 • Zero-copy memory management where possible
 
 Examples:
-  rustmat                                    # Start interactive REPL with JIT
+  rustmat                                   # Start interactive REPL with JIT
   rustmat --no-jit                          # Start REPL with interpreter only
   rustmat --gc-preset low-latency           # Optimize GC for low latency
   rustmat script.m                          # Execute MATLAB script
-  rustmat --kernel                          # Start Jupyter kernel
-  rustmat --kernel-connection connection.json # Start with connection file
+  rustmat --install-kernel                  # Install as Jupyter kernel
+  rustmat kernel                            # Start Jupyter kernel
+  rustmat kernel-connection connection.json # Start with connection file
   rustmat --version --detailed              # Show detailed version information
 "#,
     after_help = r#"
@@ -160,6 +163,10 @@ struct Cli {
     /// Generate sample configuration file
     #[arg(long)]
     generate_config: bool,
+
+    /// Install RustMat as a Jupyter kernel
+    #[arg(long)]
+    install_kernel: bool,
 
     /// Command to execute
     #[command(subcommand)]
@@ -465,6 +472,11 @@ async fn main() -> Result<()> {
         let sample_config = ConfigLoader::generate_sample_config();
         println!("{}", sample_config);
         return Ok(());
+    }
+
+    // Handle kernel installation
+    if cli.install_kernel {
+        return install_jupyter_kernel().await;
     }
 
     // Load configuration with CLI overrides
@@ -785,8 +797,10 @@ async fn execute_repl(config: &RustMatConfig) -> Result<()> {
     // Use rustyline for better REPL experience
     use std::io::{self, Write};
 
-    println!("RustMat Interactive Console v{}", env!("CARGO_PKG_VERSION"));
-    println!("High-performance MATLAB/Octave runtime with JIT compilation");
+    println!("RustMat v{} by Dystr (https://dystr.com)", env!("CARGO_PKG_VERSION"));
+    println!("High-performance MATLAB/Octave runtime with JIT compilation and GC");
+    println!();
+
     if enable_jit {
         println!(
             "JIT compiler: enabled (Cranelift optimization level: {:?})",
@@ -867,7 +881,7 @@ async fn execute_repl(config: &RustMatConfig) -> Result<()> {
                         if let Some(error) = result.error {
                             eprintln!("Error: {error}");
                         } else if let Some(value) = result.value {
-                            println!("ans = {value:?}");
+                            println!("ans = {}", value);
                             if config.runtime.verbose && result.execution_time_ms > 10 {
                                 println!(
                                     "  ({}ms {})",
@@ -1734,6 +1748,7 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
 
     println!("Available Commands:");
     println!("  repl                 Start interactive REPL with JIT");
+    println!("  --install-kernel     Install RustMat as Jupyter kernel");
     println!("  kernel               Start Jupyter kernel");
     println!("  kernel-connection    Start kernel with connection file");
     println!("  run <file>           Execute MATLAB script");
@@ -1782,4 +1797,128 @@ fn show_repl_help() {
     println!("  • Use '.gc' to monitor memory usage and collection");
     println!();
     println!("Press Enter after each statement to execute.");
+}
+
+/// Install RustMat as a Jupyter kernel
+async fn install_jupyter_kernel() -> Result<()> {
+    use std::fs;
+
+    info!("Installing RustMat as a Jupyter kernel");
+
+    // Get the path to the current executable
+    let current_exe = std::env::current_exe()
+        .context("Failed to get current executable path")?;
+
+    // Find Jupyter kernel directory
+    let kernel_dir = find_jupyter_kernel_dir()
+        .context("Failed to find Jupyter kernel directory")?;
+
+    let rustmat_kernel_dir = kernel_dir.join("rustmat");
+
+    // Create kernel directory
+    fs::create_dir_all(&rustmat_kernel_dir)
+        .with_context(|| format!("Failed to create kernel directory: {}", rustmat_kernel_dir.display()))?;
+
+    // Create kernel.json
+    let kernel_json = format!(
+        r#"{{
+  "argv": [
+    "{}",
+    "kernel-connection",
+    "{{connection_file}}"
+  ],
+  "display_name": "RustMat",
+  "language": "matlab",
+  "metadata": {{
+    "debugger": false
+  }}
+}}"#,
+        current_exe.display()
+    );
+
+    let kernel_json_path = rustmat_kernel_dir.join("kernel.json");
+    fs::write(&kernel_json_path, kernel_json)
+        .with_context(|| format!("Failed to write kernel.json to {}", kernel_json_path.display()))?;
+
+    // Create logo files (optional - we'll create simple text-based ones for now)
+    create_kernel_logos(&rustmat_kernel_dir)?;
+
+    println!("RustMat Jupyter kernel installed successfully!");
+    println!("Kernel directory: {}", rustmat_kernel_dir.display());
+    println!();
+    println!("You can now start Jupyter and select 'RustMat' as a kernel:");
+    println!("  jupyter notebook");
+    println!("  # or");
+    println!("  jupyter lab");
+    println!();
+    println!("To verify the installation:");
+    println!("  jupyter kernelspec list");
+
+    Ok(())
+}
+
+/// Find the Jupyter kernel directory
+fn find_jupyter_kernel_dir() -> Result<PathBuf> {
+    // Try to get Jupyter data directory using standard methods
+    if let Ok(output) = std::process::Command::new("jupyter")
+        .args(&["--data-dir"])
+        .output()
+    {
+        if output.status.success() {
+            let data_dir_str = String::from_utf8_lossy(&output.stdout);
+            let data_dir = data_dir_str.trim();
+            let kernels_dir = PathBuf::from(data_dir).join("kernels");
+            if kernels_dir.exists() || kernels_dir.parent().map_or(false, |p| p.exists()) {
+                return Ok(kernels_dir);
+            }
+        }
+    }
+
+    // Fallback to standard locations
+    if let Some(home_dir) = dirs::home_dir() {
+        // Try user-level installation first
+        let user_kernels = home_dir.join(".local/share/jupyter/kernels");
+        if user_kernels.exists() || user_kernels.parent().map_or(false, |p| p.exists()) {
+            return Ok(user_kernels);
+        }
+
+        // macOS specific location
+        #[cfg(target_os = "macos")]
+        {
+            let macos_kernels = home_dir.join("Library/Jupyter/kernels");
+            if macos_kernels.exists() || macos_kernels.parent().map_or(false, |p| p.exists()) {
+                return Ok(macos_kernels);
+            }
+        }
+
+        // Windows specific location
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                let windows_kernels = PathBuf::from(appdata).join("jupyter/kernels");
+                if windows_kernels.exists() || windows_kernels.parent().map_or(false, |p| p.exists()) {
+                    return Ok(windows_kernels);
+                }
+            }
+        }
+
+        // Default fallback
+        let default_kernels = home_dir.join(".local/share/jupyter/kernels");
+        return Ok(default_kernels);
+    }
+
+    Err(anyhow::anyhow!("Could not determine Jupyter kernel directory. Please install Jupyter first."))
+}
+
+/// Create simple kernel logos
+fn create_kernel_logos(kernel_dir: &std::path::Path) -> Result<()> {
+    // For now, we'll skip logo creation since it requires image processing
+    // In a full implementation, you'd want to include actual PNG logos
+    
+    // Create a simple text file that indicates logos could be added
+    let logo_info = kernel_dir.join("logo-readme.txt");
+    fs::write(logo_info, "RustMat kernel logos can be added here:\n- logo-32x32.png\n- logo-64x64.png")
+        .context("Failed to create logo info file")?;
+    
+    Ok(())
 }

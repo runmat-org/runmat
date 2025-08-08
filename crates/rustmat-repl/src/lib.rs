@@ -178,6 +178,15 @@ impl ReplEngine {
             );
         }
 
+        // Prepare variable array with existing values before execution
+        self.prepare_variable_array_for_execution(&bytecode, &updated_vars);
+        
+        if self.verbose {
+            debug!("Variable array after preparation: {:?}", self.variable_array);
+            debug!("Updated variable mapping: {:?}", updated_vars);
+            debug!("Bytecode instructions: {:?}", bytecode.instructions);
+        }
+
         let mut used_jit = false;
         let mut result_value = None;
         let mut error = None;
@@ -254,13 +263,53 @@ impl ReplEngine {
                     bytecode.var_count
                 );
             }
-            match self.interpret_with_context(&bytecode) {
+            
+            // For expressions, modify bytecode to store result in a temp variable instead of using stack
+            let mut execution_bytecode = bytecode.clone();
+            if is_expression_stmt && !execution_bytecode.instructions.is_empty() {
+                execution_bytecode.instructions.pop(); // Remove the Pop instruction
+                
+                // Add StoreVar instruction to store the result in a temporary variable
+                let temp_var_id = execution_bytecode.var_count;
+                execution_bytecode.instructions.push(rustmat_ignition::Instr::StoreVar(temp_var_id));
+                execution_bytecode.var_count += 1; // Expand variable count for temp variable
+                
+                // Ensure our variable array can hold the temporary variable
+                if self.variable_array.len() <= temp_var_id {
+                    self.variable_array.resize(temp_var_id + 1, Value::Num(0.0));
+                }
+                
+                if self.verbose {
+                    debug!("Modified expression bytecode, new instructions: {:?}", execution_bytecode.instructions);
+                }
+            }
+            
+            match self.interpret_with_context(&execution_bytecode) {
                 Ok(results) => {
                     // Only increment interpreter_fallback if JIT wasn't attempted
                     if self.jit_engine.is_none() || is_expression_stmt {
                         self.stats.interpreter_fallback += 1;
                     }
-                    result_value = results.into_iter().last();
+                    if self.verbose {
+                        debug!("Interpreter results: {:?}", results);
+                    }
+                    
+                    // For expressions, get the result from the temporary variable
+                    if is_expression_stmt && !execution_bytecode.instructions.is_empty() {
+                        let temp_var_id = execution_bytecode.var_count - 1; // The temp variable we added
+                        if temp_var_id < self.variable_array.len() {
+                            result_value = Some(self.variable_array[temp_var_id].clone());
+                            if self.verbose {
+                                debug!("Expression result from temp var {}: {:?}", temp_var_id, result_value);
+                            }
+                        }
+                    } else {
+                        result_value = results.into_iter().last();
+                    }
+                    
+                    if self.verbose {
+                        debug!("Final result_value: {:?}", result_value);
+                    }
                     debug!(
                         "Interpreter execution successful, variable_array: {:?}",
                         self.variable_array
@@ -325,11 +374,7 @@ impl ReplEngine {
         &mut self,
         bytecode: &rustmat_ignition::Bytecode,
     ) -> Result<Vec<Value>, String> {
-        // Ensure our variable array is large enough
-        if self.variable_array.len() < bytecode.var_count {
-            self.variable_array
-                .resize(bytecode.var_count, Value::Num(0.0));
-        }
+        // Variable array should already be prepared by prepare_variable_array_for_execution
 
         // Use the main Ignition interpreter which has full function and scoping support
         match rustmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array) {
@@ -347,6 +392,29 @@ impl ReplEngine {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Prepare variable array for execution by populating with existing values
+    fn prepare_variable_array_for_execution(
+        &mut self,
+        bytecode: &rustmat_ignition::Bytecode,
+        updated_var_mapping: &HashMap<String, usize>,
+    ) {
+        // Create a new variable array of the correct size
+        let mut new_variable_array = vec![Value::Num(0.0); bytecode.var_count];
+
+        // Populate with existing values based on the variable mapping
+        for (var_name, &new_var_id) in updated_var_mapping {
+            if let Some(&old_var_id) = self.variable_names.get(var_name) {
+                // If we had this variable before, copy its value to the new position
+                if old_var_id < self.variable_array.len() && new_var_id < new_variable_array.len() {
+                    new_variable_array[new_var_id] = self.variable_array[old_var_id].clone();
+                }
+            }
+        }
+
+        // Update our variable array and mapping
+        self.variable_array = new_variable_array;
     }
 
     /// Convert stored HIR function definitions to UserFunction format for compilation
