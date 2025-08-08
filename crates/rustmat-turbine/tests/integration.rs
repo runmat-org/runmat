@@ -292,7 +292,7 @@ fn test_error_handling_in_compilation() {
             let mut bytecode = Bytecode {
                 instructions: vec![], // Empty instructions
                 var_count: 0,
-        functions: std::collections::HashMap::new(),
+                functions: std::collections::HashMap::new(),
             };
 
             let result = engine.compile_bytecode(&bytecode);

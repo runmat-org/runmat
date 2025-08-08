@@ -30,7 +30,11 @@ impl Vertex {
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         let stride = std::mem::size_of::<Vertex>() as wgpu::BufferAddress;
-        println!("VERTEX: Struct size = {}, stride = {}", std::mem::size_of::<Vertex>(), stride);
+        println!(
+            "VERTEX: Struct size = {}, stride = {}",
+            std::mem::size_of::<Vertex>(),
+            stride
+        );
         wgpu::VertexBufferLayout {
             array_stride: stride,
             step_mode: wgpu::VertexStepMode::Vertex,

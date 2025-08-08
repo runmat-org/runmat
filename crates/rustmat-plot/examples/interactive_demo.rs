@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_title("Interactive Demo")
         .with_labels("X", "Y")
         .with_grid(true);
-    
+
     let result = rustmat_plot::show_interactive_platform_optimal(figure)?;
     println!("Interactive plot result: {}", result);
 

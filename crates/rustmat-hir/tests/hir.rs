@@ -76,8 +76,8 @@ fn type_inference_propagates_through_assignments() {
     let hir = lower(&ast).unwrap();
     let (x_id, y_id) = match (&hir.body[0], &hir.body[1]) {
         (HirStmt::Assign(x_id, x_expr), HirStmt::Assign(y_id, y_expr)) => {
-                    assert!(matches!(x_expr.ty, Type::Matrix { .. }));
-        assert!(matches!(y_expr.ty, Type::Matrix { .. }));
+            assert!(matches!(x_expr.ty, Type::Matrix { .. }));
+            assert!(matches!(y_expr.ty, Type::Matrix { .. }));
             (*x_id, *y_id)
         }
         _ => panic!("unexpected statements"),

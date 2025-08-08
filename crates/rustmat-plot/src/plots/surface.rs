@@ -294,11 +294,14 @@ impl SurfacePlot {
     /// Generate vertices for surface mesh
     fn generate_vertices(&mut self) -> &Vec<Vertex> {
         if self.dirty || self.vertices.is_none() {
-            println!("DEBUG: Generating surface vertices for {} x {} grid", 
-                     self.x_data.len(), self.y_data.len());
+            println!(
+                "DEBUG: Generating surface vertices for {} x {} grid",
+                self.x_data.len(),
+                self.y_data.len()
+            );
 
             let mut vertices = Vec::new();
-            
+
             // Find Z value range for color mapping
             let mut min_z = f64::INFINITY;
             let mut max_z = f64::NEG_INFINITY;
@@ -317,15 +320,19 @@ impl SurfacePlot {
                 for (j, &y) in self.y_data.iter().enumerate() {
                     let z = self.z_data[i][j];
                     let position = Vec3::new(x as f32, y as f32, z as f32);
-                    
+
                     // Simple normal calculation (can be improved with proper gradients)
                     let normal = Vec3::new(0.0, 0.0, 1.0); // Placeholder
-                    
+
                     // Color based on Z value using colormap
-                    let t = if z_range > 0.0 { ((z - min_z) / z_range) as f32 } else { 0.5 };
+                    let t = if z_range > 0.0 {
+                        ((z - min_z) / z_range) as f32
+                    } else {
+                        0.5
+                    };
                     let color_rgb = self.colormap.map_value(t);
                     let color = Vec4::new(color_rgb.x, color_rgb.y, color_rgb.z, self.alpha);
-                    
+
                     vertices.push(Vertex {
                         position: position.to_array(),
                         normal: normal.to_array(),
@@ -348,23 +355,23 @@ impl SurfacePlot {
     fn generate_indices(&mut self) -> &Vec<u32> {
         if self.dirty || self.indices.is_none() {
             println!("DEBUG: Generating surface indices");
-            
+
             let mut indices = Vec::new();
             let x_res = self.x_data.len();
             let y_res = self.y_data.len();
-            
+
             // Generate triangle indices for surface mesh
             for i in 0..x_res - 1 {
                 for j in 0..y_res - 1 {
                     let base = (i * y_res + j) as u32;
                     let next_row = base + y_res as u32;
-                    
+
                     // Two triangles per quad
                     // Triangle 1: (i,j), (i+1,j), (i,j+1)
                     indices.push(base);
                     indices.push(next_row);
                     indices.push(base + 1);
-                    
+
                     // Triangle 2: (i+1,j), (i+1,j+1), (i,j+1)
                     indices.push(next_row);
                     indices.push(next_row + 1);
@@ -381,13 +388,20 @@ impl SurfacePlot {
 
     /// Generate complete render data for the graphics pipeline
     pub fn render_data(&mut self) -> RenderData {
-        println!("DEBUG: SurfacePlot::render_data() called for {} x {} surface", 
-                 self.x_data.len(), self.y_data.len());
-        
+        println!(
+            "DEBUG: SurfacePlot::render_data() called for {} x {} surface",
+            self.x_data.len(),
+            self.y_data.len()
+        );
+
         let vertices = self.generate_vertices().clone();
         let indices = self.generate_indices().clone();
-        
-        println!("DEBUG: Surface render data: {} vertices, {} indices", vertices.len(), indices.len());
+
+        println!(
+            "DEBUG: Surface render data: {} vertices, {} indices",
+            vertices.len(),
+            indices.len()
+        );
 
         let mut material = Material::default();
         material.albedo = Vec4::new(1.0, 1.0, 1.0, self.alpha);
@@ -403,7 +417,11 @@ impl SurfacePlot {
         println!("DEBUG: SurfacePlot render_data completed successfully");
 
         RenderData {
-            pipeline_type: if self.wireframe { PipelineType::Lines } else { PipelineType::Triangles },
+            pipeline_type: if self.wireframe {
+                PipelineType::Lines
+            } else {
+                PipelineType::Triangles
+            },
             vertices,
             indices: Some(indices),
             material,
@@ -519,9 +537,17 @@ impl ColorMap {
         if t < 3.0 / 8.0 {
             Vec3::new(7.0 / 8.0 * t, 7.0 / 8.0 * t, 29.0 / 24.0 * t)
         } else if t < 3.0 / 4.0 {
-            Vec3::new((29.0 + 7.0 * t) / 24.0, (29.0 + 7.0 * t) / 24.0, (29.0 + 7.0 * t) / 24.0)
+            Vec3::new(
+                (29.0 + 7.0 * t) / 24.0,
+                (29.0 + 7.0 * t) / 24.0,
+                (29.0 + 7.0 * t) / 24.0,
+            )
         } else {
-            Vec3::new((29.0 + 7.0 * t) / 24.0, (29.0 + 7.0 * t) / 24.0, (29.0 + 7.0 * t) / 24.0)
+            Vec3::new(
+                (29.0 + 7.0 * t) / 24.0,
+                (29.0 + 7.0 * t) / 24.0,
+                (29.0 + 7.0 * t) / 24.0,
+            )
         }
     }
 
@@ -536,7 +562,11 @@ impl ColorMap {
         if t < 3.0 / 8.0 {
             Vec3::new(14.0 / 9.0 * sqrt_t, 2.0 / 3.0 * sqrt_t, 2.0 / 3.0 * sqrt_t)
         } else {
-            Vec3::new(2.0 * sqrt_t - 1.0 / 3.0, 8.0 / 9.0 * sqrt_t + 1.0 / 3.0, 8.0 / 9.0 * sqrt_t + 1.0 / 3.0)
+            Vec3::new(
+                2.0 * sqrt_t - 1.0 / 3.0,
+                8.0 / 9.0 * sqrt_t + 1.0 / 3.0,
+                8.0 / 9.0 * sqrt_t + 1.0 / 3.0,
+            )
         }
     }
 
@@ -545,12 +575,12 @@ impl ColorMap {
         let _phase = (t * 7.0) % 1.0; // For future use in color transitions
         let index = (t * 7.0) as usize % 7;
         match index {
-            0 => Vec3::new(0.0, 0.0, 1.0), // Blue
-            1 => Vec3::new(0.0, 0.5, 0.0), // Green
-            2 => Vec3::new(1.0, 0.0, 0.0), // Red
-            3 => Vec3::new(0.0, 0.75, 0.75), // Cyan
-            4 => Vec3::new(0.75, 0.0, 0.75), // Magenta
-            5 => Vec3::new(0.75, 0.75, 0.0), // Yellow
+            0 => Vec3::new(0.0, 0.0, 1.0),    // Blue
+            1 => Vec3::new(0.0, 0.5, 0.0),    // Green
+            2 => Vec3::new(1.0, 0.0, 0.0),    // Red
+            3 => Vec3::new(0.0, 0.75, 0.75),  // Cyan
+            4 => Vec3::new(0.75, 0.0, 0.75),  // Magenta
+            5 => Vec3::new(0.75, 0.75, 0.0),  // Yellow
             _ => Vec3::new(0.25, 0.25, 0.25), // Dark gray
         }
     }
@@ -564,7 +594,7 @@ impl ColorMap {
         Vec3::new(r, g, b)
     }
 
-    /// Magma colormap (perceptually uniform) 
+    /// Magma colormap (perceptually uniform)
     fn magma_colormap(&self, t: f32) -> Vec3 {
         // Simplified Magma approximation
         let r = (0.001462 + t * (0.987053 - 0.001462)).clamp(0.0, 1.0);
@@ -581,21 +611,22 @@ impl ColorMap {
         } else {
             (0.8685 + 0.1315 * (2.0 * (1.0 - t)).powf(0.25)).clamp(0.0, 1.0)
         };
-        
+
         let g = if t < 0.25 {
             4.0 * t
         } else if t < 0.75 {
             1.0
         } else {
             1.0 - 4.0 * (t - 0.75)
-        }.clamp(0.0, 1.0);
-        
+        }
+        .clamp(0.0, 1.0);
+
         let b = if t < 0.5 {
             (0.8 * (1.0 - 2.0 * t).powf(0.25)).clamp(0.0, 1.0)
         } else {
             (0.1 + 0.9 * (2.0 * t - 1.0).powf(0.25)).clamp(0.0, 1.0)
         };
-        
+
         Vec3::new(r, g, b)
     }
 
@@ -610,8 +641,9 @@ impl ColorMap {
             1.0
         } else {
             1.0 - 0.5 * (t - 0.75)
-        }.clamp(0.0, 1.0);
-        
+        }
+        .clamp(0.0, 1.0);
+
         let g = if t < 0.125 {
             0.1663 * t / 0.125
         } else if t < 0.375 {
@@ -620,16 +652,18 @@ impl ColorMap {
             0.7079 + (0.9839 - 0.7079) * (t - 0.375) / 0.25
         } else {
             0.9839 * (1.0 - (t - 0.625) / 0.375)
-        }.clamp(0.0, 1.0);
-        
+        }
+        .clamp(0.0, 1.0);
+
         let b = if t < 0.25 {
             0.5 + 0.5 * t / 0.25
         } else if t < 0.5 {
             1.0
         } else {
             1.0 - 2.0 * (t - 0.5)
-        }.clamp(0.0, 1.0);
-        
+        }
+        .clamp(0.0, 1.0);
+
         Vec3::new(r, g, b)
     }
 

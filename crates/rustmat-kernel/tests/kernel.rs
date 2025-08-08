@@ -139,7 +139,7 @@ fn test_unsupported_syntax_errors() {
     let test_cases = vec![
         ("if x > 0; y = 1; end", ExecutionStatus::Error), // Greater than not implemented yet
         ("result = matrix(1)", ExecutionStatus::Error),   // Indexing not supported yet
-        // Range with step is now supported: ("x = 1:2:5", ExecutionStatus::Error),
+                                                          // Range with step is now supported: ("x = 1:2:5", ExecutionStatus::Error),
     ];
 
     for (code, expected_status) in test_cases {

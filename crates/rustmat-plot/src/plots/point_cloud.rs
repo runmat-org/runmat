@@ -290,11 +290,14 @@ impl PointCloudPlot {
 
     /// Generate complete render data for the graphics pipeline
     pub fn render_data(&mut self) -> RenderData {
-        println!("DEBUG: PointCloudPlot::render_data() called with {} points", self.positions.len());
-        
+        println!(
+            "DEBUG: PointCloudPlot::render_data() called with {} points",
+            self.positions.len()
+        );
+
         let vertices = self.generate_vertices().clone();
         let vertex_count = vertices.len();
-        
+
         println!("DEBUG: Generated {} vertices for point cloud", vertex_count);
 
         let mut material = Material::default();

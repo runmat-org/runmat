@@ -6,11 +6,10 @@
 #[cfg(feature = "gui")]
 pub mod controls;
 
-
 pub mod native_window;
-pub mod single_window_manager; // V8-caliber single window management
 #[cfg(feature = "gui")]
 pub mod plot_overlay;
+pub mod single_window_manager; // V8-caliber single window management
 pub mod thread_manager; // Robust thread management
 #[cfg(feature = "gui")]
 pub mod widgets;
@@ -35,15 +34,11 @@ pub use thread_manager::{
     register_main_thread, show_plot_global, GuiErrorCode, GuiOperationResult, GuiThreadManager,
 };
 
-
-
 // Native window exports
 pub use native_window::{
     initialize_native_window, is_native_window_available, show_plot_native_window,
     NativeWindowManager, NativeWindowResult,
 };
-
-
 
 // Single window manager exports
 pub use single_window_manager::{is_window_available, show_plot_sequential};

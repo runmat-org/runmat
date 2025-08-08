@@ -1,9 +1,9 @@
 //! Input/Output operations for RustMat runtime
-//! 
+//!
 //! This module provides MATLAB-compatible I/O functions like fprintf, disp, etc.
 
-use rustmat_macros::runtime_builtin;
 use regex::Regex;
+use rustmat_macros::runtime_builtin;
 use std::sync::{Mutex, OnceLock};
 
 /// Display a string to the console (MATLAB fprintf with single string argument)
@@ -11,7 +11,9 @@ use std::sync::{Mutex, OnceLock};
 pub fn fprintf_string_builtin(format_str: String) -> Result<f64, String> {
     print!("{}", format_str);
     use std::io::{self, Write};
-    io::stdout().flush().map_err(|e| format!("Failed to flush stdout: {}", e))?;
+    io::stdout()
+        .flush()
+        .map_err(|e| format!("Failed to flush stdout: {}", e))?;
     Ok(format_str.len() as f64) // fprintf returns number of characters written
 }
 
@@ -34,16 +36,22 @@ pub fn fprintf_format_builtin(format_str: String, value: f64) -> Result<f64, Str
     } else {
         format_str.replace("\\n", "\n")
     };
-    
+
     print!("{}", output);
     use std::io::{self, Write};
-    io::stdout().flush().map_err(|e| format!("Failed to flush stdout: {}", e))?;
+    io::stdout()
+        .flush()
+        .map_err(|e| format!("Failed to flush stdout: {}", e))?;
     Ok(output.len() as f64)
 }
 
 /// Format and display string with two numeric arguments
 #[runtime_builtin(name = "fprintf")]
-pub fn fprintf_format2_builtin(format_str: String, value1: f64, value2: f64) -> Result<f64, String> {
+pub fn fprintf_format2_builtin(
+    format_str: String,
+    value1: f64,
+    value2: f64,
+) -> Result<f64, String> {
     // Replace two placeholders in order using a regex
     let fmt = Regex::new(r"%(?P<prec>\.\d+)?(?P<spec>[df])").unwrap();
     let mut output = format_str;
@@ -65,7 +73,9 @@ pub fn fprintf_format2_builtin(format_str: String, value1: f64, value2: f64) -> 
     output = output.replace("\\n", "\n");
     print!("{}", output);
     use std::io::{self, Write};
-    io::stdout().flush().map_err(|e| format!("Failed to flush stdout: {}", e))?;
+    io::stdout()
+        .flush()
+        .map_err(|e| format!("Failed to flush stdout: {}", e))?;
     Ok(output.len() as f64)
 }
 
@@ -100,7 +110,7 @@ pub fn tic_builtin() -> Result<f64, String> {
 pub fn toc_builtin() -> Result<f64, String> {
     let timer = TIMER_START.get_or_init(|| Mutex::new(None));
     let start_time = timer.lock().map_err(|_| "Failed to acquire timer lock")?;
-    
+
     match *start_time {
         Some(start) => {
             let elapsed = start.elapsed().as_secs_f64();
@@ -113,41 +123,41 @@ pub fn toc_builtin() -> Result<f64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_fprintf() {
         let result = fprintf_string_builtin("Hello, world!".to_string());
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 13.0);
     }
-    
+
     #[test]
     fn test_disp_string() {
         let result = disp_string_builtin("Test message".to_string());
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_disp_number() {
         let result = disp_number_builtin(3.14159);
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_tic_toc() {
         // Test tic
         let result = tic_builtin();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0.0);
-        
+
         // Small delay
         std::thread::sleep(std::time::Duration::from_millis(10));
-        
+
         // Test toc
         let result = toc_builtin();
         assert!(result.is_ok());
         let elapsed = result.unwrap();
         assert!(elapsed >= 0.01); // At least 10ms
-        assert!(elapsed < 1.0);    // Less than 1 second
+        assert!(elapsed < 1.0); // Less than 1 second
     }
 }

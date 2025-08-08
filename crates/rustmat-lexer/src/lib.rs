@@ -123,7 +123,10 @@ pub struct SpannedToken {
 }
 
 pub fn tokenize(input: &str) -> Vec<Token> {
-    tokenize_detailed(input).into_iter().map(|t| t.token).collect()
+    tokenize_detailed(input)
+        .into_iter()
+        .map(|t| t.token)
+        .collect()
 }
 
 pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
@@ -134,7 +137,12 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
             Ok(tok) => {
                 let s = lex.slice().to_string();
                 let span = lex.span();
-                out.push(SpannedToken { token: tok, lexeme: s, start: span.start, end: span.end });
+                out.push(SpannedToken {
+                    token: tok,
+                    lexeme: s,
+                    start: span.start,
+                    end: span.end,
+                });
             }
             Err(_) => {
                 let s = lex.slice();
@@ -168,7 +176,12 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                     };
                     let start = span.start + off;
                     let end = start + ch.len_utf8();
-                    out.push(SpannedToken { token, lexeme: ch.to_string(), start, end });
+                    out.push(SpannedToken {
+                        token,
+                        lexeme: ch.to_string(),
+                        start,
+                        end,
+                    });
                 }
             }
         }

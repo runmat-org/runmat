@@ -254,24 +254,36 @@ pub enum Type {
 impl Type {
     /// Create a matrix type with unknown dimensions
     pub fn matrix() -> Self {
-        Type::Matrix { rows: None, cols: None }
+        Type::Matrix {
+            rows: None,
+            cols: None,
+        }
     }
-    
+
     /// Create a matrix type with known dimensions
     pub fn matrix_with_dims(rows: usize, cols: usize) -> Self {
-        Type::Matrix { rows: Some(rows), cols: Some(cols) }
+        Type::Matrix {
+            rows: Some(rows),
+            cols: Some(cols),
+        }
     }
-    
+
     /// Create a cell array type with unknown element type
     pub fn cell() -> Self {
-        Type::Cell { element_type: None, length: None }
+        Type::Cell {
+            element_type: None,
+            length: None,
+        }
     }
-    
+
     /// Create a cell array type with known element type
     pub fn cell_of(element_type: Type) -> Self {
-        Type::Cell { element_type: Some(Box::new(element_type)), length: None }
+        Type::Cell {
+            element_type: Some(Box::new(element_type)),
+            length: None,
+        }
     }
-    
+
     /// Check if this type is compatible with another type
     pub fn is_compatible_with(&self, other: &Type) -> bool {
         match (self, other) {
@@ -281,7 +293,7 @@ impl Type {
             (a, b) => a == b,
         }
     }
-    
+
     /// Get the most specific common type between two types
     pub fn unify(&self, other: &Type) -> Type {
         match (self, other) {
@@ -292,7 +304,7 @@ impl Type {
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
     }
-    
+
     /// Infer type from a Value
     pub fn from_value(value: &Value) -> Type {
         match value {
@@ -300,9 +312,9 @@ impl Type {
             Value::Num(_) => Type::Num,
             Value::Bool(_) => Type::Bool,
             Value::String(_) => Type::String,
-            Value::Matrix(m) => Type::Matrix { 
-                rows: Some(m.rows), 
-                cols: Some(m.cols) 
+            Value::Matrix(m) => Type::Matrix {
+                rows: Some(m.rows),
+                cols: Some(m.cols),
             },
             Value::Cell(cells) => {
                 if cells.is_empty() {
@@ -310,9 +322,9 @@ impl Type {
                 } else {
                     // Infer element type from first element
                     let element_type = Type::from_value(&cells[0]);
-                    Type::Cell { 
-                        element_type: Some(Box::new(element_type)), 
-                        length: Some(cells.len()) 
+                    Type::Cell {
+                        element_type: Some(Box::new(element_type)),
+                        length: Some(cells.len()),
                     }
                 }
             }
@@ -357,7 +369,11 @@ pub struct Constant {
 
 impl std::fmt::Debug for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Constant {{ name: {:?}, value: {:?} }}", self.name, self.value)
+        write!(
+            f,
+            "Constant {{ name: {:?}, value: {:?} }}",
+            self.name, self.value
+        )
     }
 }
 
@@ -381,11 +397,18 @@ fn format_number_short_g(value: f64) -> String {
         return "NaN".to_string();
     }
     if value.is_infinite() {
-        return if value.is_sign_negative() { "-Inf" } else { "Inf" }.to_string();
+        return if value.is_sign_negative() {
+            "-Inf"
+        } else {
+            "Inf"
+        }
+        .to_string();
     }
     // Normalize -0.0 to 0
     let mut v = value;
-    if v == 0.0 { v = 0.0; }
+    if v == 0.0 {
+        v = 0.0;
+    }
 
     let abs = v.abs();
     if abs == 0.0 {
@@ -438,7 +461,9 @@ fn format_number_short_g(value: f64) -> String {
         }
         s.truncate(end);
     }
-    if s.is_empty() || s == "-0" { s = "0".to_string(); }
+    if s.is_empty() || s == "-0" {
+        s = "0".to_string();
+    }
     s
 }
 
@@ -453,7 +478,9 @@ impl fmt::Display for Value {
             Value::Cell(items) => {
                 write!(f, "{{")?;
                 for (idx, item) in items.iter().enumerate() {
-                    if idx > 0 { write!(f, ", ")?; }
+                    if idx > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", item)?;
                 }
                 write!(f, "}}")

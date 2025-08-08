@@ -67,8 +67,7 @@ impl VectorExporter {
     /// Export figure to SVG file
     pub fn export_svg<P: AsRef<Path>>(&self, figure: &mut Figure, path: P) -> Result<(), String> {
         let svg_content = self.render_to_svg(figure)?;
-        std::fs::write(path, svg_content)
-            .map_err(|e| format!("Failed to write SVG file: {e}"))?;
+        std::fs::write(path, svg_content).map_err(|e| format!("Failed to write SVG file: {e}"))?;
         println!("DEBUG: SVG export completed successfully");
         Ok(())
     }
@@ -99,7 +98,8 @@ impl VectorExporter {
                 &mut svg,
                 r#"  <rect width="100%" height="100%" fill="{}"/>"#,
                 self.color_to_hex(&self.settings.background_color)
-            ).map_err(|e| format!("SVG write error: {e}"))?;
+            )
+            .map_err(|e| format!("SVG write error: {e}"))?;
         }
 
         // Add metadata if requested
@@ -112,22 +112,30 @@ impl VectorExporter {
 
         // Render each plot element using the same render data
         // TODO: Implement proper figure element iteration once Figure API is finalized
-        writeln!(&mut svg, "  <!-- Plot data will be rendered here -->").map_err(|e| format!("SVG write error: {e}"))?;
-        
+        writeln!(&mut svg, "  <!-- Plot data will be rendered here -->")
+            .map_err(|e| format!("SVG write error: {e}"))?;
+
         // Note: add_render_data_to_svg and related methods are part of the public API
         // and will be used once the Figure iteration is implemented
 
         // SVG footer
         writeln!(&mut svg, "</svg>").map_err(|e| format!("SVG write error: {e}"))?;
 
-        println!("DEBUG: SVG render completed, {} characters generated", svg.len());
+        println!(
+            "DEBUG: SVG render completed, {} characters generated",
+            svg.len()
+        );
         Ok(svg)
     }
 
     /// Add render data to SVG using same pipeline data
     /// Note: Will be used when Figure iteration is implemented
     #[allow(dead_code)]
-    fn add_render_data_to_svg(&self, svg: &mut String, render_data: &RenderData) -> Result<(), String> {
+    fn add_render_data_to_svg(
+        &self,
+        svg: &mut String,
+        render_data: &RenderData,
+    ) -> Result<(), String> {
         match render_data.pipeline_type {
             crate::core::PipelineType::Lines => {
                 self.add_lines_to_svg(svg, render_data)?;
@@ -154,15 +162,15 @@ impl VectorExporter {
 
         // Convert vertices to SVG path
         writeln!(svg, "  <g>").map_err(|e| format!("SVG write error: {e}"))?;
-        
+
         for chunk in render_data.vertices.chunks(2) {
             if chunk.len() == 2 {
                 let start = &chunk[0];
                 let end = &chunk[1];
-                
+
                 let start_screen = self.world_to_screen(start.position);
                 let end_screen = self.world_to_screen(end.position);
-                
+
                 writeln!(
                     svg,
                     r#"    <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}"/>"#,
@@ -172,10 +180,11 @@ impl VectorExporter {
                     end_screen[1],
                     self.color_to_hex(&start.color),
                     self.settings.stroke_width
-                ).map_err(|e| format!("SVG write error: {e}"))?;
+                )
+                .map_err(|e| format!("SVG write error: {e}"))?;
             }
         }
-        
+
         writeln!(svg, "  </g>").map_err(|e| format!("SVG write error: {e}"))?;
         Ok(())
     }
@@ -184,11 +193,11 @@ impl VectorExporter {
     #[allow(dead_code)]
     fn add_points_to_svg(&self, svg: &mut String, render_data: &RenderData) -> Result<(), String> {
         writeln!(svg, "  <g>").map_err(|e| format!("SVG write error: {e}"))?;
-        
+
         for vertex in &render_data.vertices {
             let screen_pos = self.world_to_screen(vertex.position);
             let radius = self.settings.stroke_width * 2.0;
-            
+
             writeln!(
                 svg,
                 r#"    <circle cx="{}" cy="{}" r="{}" fill="{}"/>"#,
@@ -196,35 +205,44 @@ impl VectorExporter {
                 screen_pos[1],
                 radius,
                 self.color_to_hex(&vertex.color)
-            ).map_err(|e| format!("SVG write error: {e}"))?;
+            )
+            .map_err(|e| format!("SVG write error: {e}"))?;
         }
-        
+
         writeln!(svg, "  </g>").map_err(|e| format!("SVG write error: {e}"))?;
         Ok(())
     }
 
     /// Add triangle data to SVG
     #[allow(dead_code)]
-    fn add_triangles_to_svg(&self, svg: &mut String, render_data: &RenderData) -> Result<(), String> {
+    fn add_triangles_to_svg(
+        &self,
+        svg: &mut String,
+        render_data: &RenderData,
+    ) -> Result<(), String> {
         writeln!(svg, "  <g>").map_err(|e| format!("SVG write error: {e}"))?;
-        
+
         for triangle in render_data.vertices.chunks(3) {
             if triangle.len() == 3 {
                 let p1 = self.world_to_screen(triangle[0].position);
                 let p2 = self.world_to_screen(triangle[1].position);
                 let p3 = self.world_to_screen(triangle[2].position);
-                
+
                 writeln!(
                     svg,
                     r#"    <polygon points="{},{} {},{} {},{}" fill="{}"/>"#,
-                    p1[0], p1[1],
-                    p2[0], p2[1],
-                    p3[0], p3[1],
+                    p1[0],
+                    p1[1],
+                    p2[0],
+                    p2[1],
+                    p3[0],
+                    p3[1],
                     self.color_to_hex(&triangle[0].color)
-                ).map_err(|e| format!("SVG write error: {e}"))?;
+                )
+                .map_err(|e| format!("SVG write error: {e}"))?;
             }
         }
-        
+
         writeln!(svg, "  </g>").map_err(|e| format!("SVG write error: {e}"))?;
         Ok(())
     }

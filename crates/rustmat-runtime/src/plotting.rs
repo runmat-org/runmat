@@ -59,13 +59,16 @@ fn interactive_export(figure: &mut Figure) -> Result<String, String> {
     // Use platform-optimal GUI system for best compatibility
     let figure_clone = figure.clone();
 
-    // Try platform-optimal GUI system 
+    // Try platform-optimal GUI system
     match rustmat_plot::show_interactive_platform_optimal(figure_clone) {
         Ok(result) => Ok(result),
         Err(e) => {
             // Return the actual error instead of silently falling back to broken static export
             // This will force us to fix the real GPU rendering issues
-            Err(format!("Interactive plotting failed: {}. Please check GPU/GUI system setup.", e))
+            Err(format!(
+                "Interactive plotting failed: {}. Please check GPU/GUI system setup.",
+                e
+            ))
         }
     }
 }
@@ -135,8 +138,16 @@ fn static_export(figure: &mut Figure, filename: &str) -> Result<String, String> 
         }
         Some(PlotElement::PointCloud(point_cloud)) => {
             // For static export, render point cloud as 2D projection (X-Y view)
-            let x_data: Vec<f64> = point_cloud.positions.iter().map(|pos| pos.x as f64).collect();
-            let y_data: Vec<f64> = point_cloud.positions.iter().map(|pos| pos.y as f64).collect();
+            let x_data: Vec<f64> = point_cloud
+                .positions
+                .iter()
+                .map(|pos| pos.x as f64)
+                .collect();
+            let y_data: Vec<f64> = point_cloud
+                .positions
+                .iter()
+                .map(|pos| pos.y as f64)
+                .collect();
 
             rustmat_plot::plot_scatter(
                 &x_data,
@@ -329,21 +340,24 @@ fn scatter3_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
         .zip(z_data.iter())
         .map(|((&x, &y), &z)| glam::Vec3::new(x as f32, y as f32, z as f32))
         .collect();
-    
+
     // Create high-performance point cloud
     let point_cloud = PointCloudPlot::new(positions)
-        .with_default_color(glam::Vec4::new(1.0, 0.6, 0.2, 1.0))  // Orange
-        .with_default_size(8.0)  // Larger size for cube effect
-        .with_point_style(PointStyle::Square)  // Square points for cubic appearance
-        .with_colormap(ColorMap::Hot)  // Hot colormap for orange gradient
+        .with_default_color(glam::Vec4::new(1.0, 0.6, 0.2, 1.0)) // Orange
+        .with_default_size(8.0) // Larger size for cube effect
+        .with_point_style(PointStyle::Square) // Square points for cubic appearance
+        .with_colormap(ColorMap::Hot) // Hot colormap for orange gradient
         .with_label("3D Point Cloud");
 
-    println!("DEBUG: PointCloudPlot created successfully with {} points", point_cloud.len());
+    println!(
+        "DEBUG: PointCloudPlot created successfully with {} points",
+        point_cloud.len()
+    );
 
     // Create figure for 3D visualization and display it
     let mut figure = Figure::new()
         .with_title("High-Performance 3D Point Cloud")
-        .with_labels("X", "Y");  // Note: 3D Z-axis support to be added
+        .with_labels("X", "Y"); // Note: 3D Z-axis support to be added
 
     // Add the point cloud to the figure
     figure.add_point_cloud_plot(point_cloud);

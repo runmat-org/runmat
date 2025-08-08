@@ -19,8 +19,8 @@ impl<'window> PlotWindow<'window> {
     /// Create a new interactive plot window
     pub async fn new(config: WindowConfig) -> Result<Self, Box<dyn std::error::Error>> {
         // Create a new EventLoop (assumes this is the only EventLoop creation)
-        let event_loop = EventLoop::new()
-            .map_err(|e| format!("Failed to create EventLoop: {}", e))?;
+        let event_loop =
+            EventLoop::new().map_err(|e| format!("Failed to create EventLoop: {}", e))?;
         let window = WindowBuilder::new()
             .with_title(&config.title)
             .with_inner_size(PhysicalSize::new(config.width, config.height))

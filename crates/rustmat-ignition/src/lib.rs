@@ -36,10 +36,10 @@ pub enum Instr {
     CallBuiltin(String, usize),
     CreateMatrix(usize, usize),
     CreateMatrixDynamic(usize), // Number of rows, each row can have variable elements
-    CreateRange(bool), // true if step is provided, false if start:end
-    Index(usize), // Number of indices
+    CreateRange(bool),          // true if step is provided, false if start:end
+    Index(usize),               // Number of indices
     Return,
-    ReturnValue, // Return with a value from the stack
+    ReturnValue,                 // Return with a value from the stack
     CallFunction(String, usize), // Function name and argument count
     // Scoping and call stack instructions
     EnterScope(usize), // Number of local variables to allocate
@@ -61,9 +61,9 @@ pub struct UserFunction {
 #[derive(Debug, Clone)]
 pub struct CallFrame {
     pub function_name: String,
-    pub return_address: usize, // Instruction pointer to return to
-    pub locals_start: usize,   // Start index in the locals array for this frame
-    pub locals_count: usize,   // Number of local variables for this frame
+    pub return_address: usize,   // Instruction pointer to return to
+    pub locals_start: usize,     // Start index in the locals array for this frame
+    pub locals_count: usize,     // Number of local variables for this frame
     pub expected_outputs: usize, // Number of return values expected
 }
 
@@ -93,7 +93,10 @@ pub fn compile(prog: &HirProgram) -> Result<Bytecode, String> {
 }
 
 /// Compile a program with pre-existing function definitions
-pub fn compile_with_functions(prog: &HirProgram, existing_functions: &HashMap<String, UserFunction>) -> Result<Bytecode, String> {
+pub fn compile_with_functions(
+    prog: &HirProgram,
+    existing_functions: &HashMap<String, UserFunction>,
+) -> Result<Bytecode, String> {
     let mut c = Compiler::new(prog);
     // Pre-populate with existing function definitions
     c.functions = existing_functions.clone();
@@ -104,8 +107,6 @@ pub fn compile_with_functions(prog: &HirProgram, existing_functions: &HashMap<St
         functions: c.functions,
     })
 }
-
-
 
 struct Compiler {
     instructions: Vec<Instr>,
@@ -198,7 +199,10 @@ impl Compiler {
                         visit_expr(arg, max);
                     }
                 }
-                HirExprKind::Number(_) | HirExprKind::String(_) | HirExprKind::Constant(_) | HirExprKind::Colon => {
+                HirExprKind::Number(_)
+                | HirExprKind::String(_)
+                | HirExprKind::Constant(_)
+                | HirExprKind::Colon => {
                     // No variables here
                 }
             }
@@ -451,7 +455,7 @@ impl Compiler {
                         _ => {}
                     }
                 }
-                
+
                 fn visit_stmt_for_vars(stmt: &HirStmt, max: &mut usize) {
                     match stmt {
                         HirStmt::ExprStmt(expr) => visit_expr_for_vars(expr, max),
@@ -461,7 +465,12 @@ impl Compiler {
                             }
                             visit_expr_for_vars(expr, max);
                         }
-                        HirStmt::If { cond, then_body, elseif_blocks, else_body } => {
+                        HirStmt::If {
+                            cond,
+                            then_body,
+                            elseif_blocks,
+                            else_body,
+                        } => {
                             visit_expr_for_vars(cond, max);
                             for stmt in then_body {
                                 visit_stmt_for_vars(stmt, max);
@@ -499,7 +508,7 @@ impl Compiler {
                         HirStmt::Break | HirStmt::Continue | HirStmt::Return => {}
                     }
                 }
-                
+
                 for stmt in body {
                     visit_stmt_for_vars(stmt, &mut max_local_var);
                 }
@@ -527,7 +536,7 @@ impl Compiler {
             HirExprKind::String(s) => {
                 // Strip quotes from string literal for storage
                 let clean_string = if s.starts_with('\'') && s.ends_with('\'') {
-                    s[1..s.len()-1].to_string()
+                    s[1..s.len() - 1].to_string()
                 } else {
                     s.clone()
                 };
@@ -606,7 +615,7 @@ impl Compiler {
                 for arg in args {
                     self.compile_expr(arg)?;
                 }
-                
+
                 // Check if this is a user-defined function first
                 if self.functions.contains_key(name) {
                     self.emit(Instr::CallFunction(name.clone(), args.len()));
@@ -616,10 +625,17 @@ impl Compiler {
             }
             HirExprKind::Matrix(matrix_data) => {
                 let rows = matrix_data.len();
-                
+
                 // Check if any element is non-literal (variable, function call, etc.)
                 let has_non_literals = matrix_data.iter().any(|row| {
-                    row.iter().any(|expr| !matches!(expr.kind, HirExprKind::Number(_) | HirExprKind::String(_) | HirExprKind::Constant(_)))
+                    row.iter().any(|expr| {
+                        !matches!(
+                            expr.kind,
+                            HirExprKind::Number(_)
+                                | HirExprKind::String(_)
+                                | HirExprKind::Constant(_)
+                        )
+                    })
                 });
 
                 if has_non_literals {
@@ -640,26 +656,26 @@ impl Compiler {
                 } else {
                     // Use traditional matrix creation for literal values
                     let cols = if rows > 0 { matrix_data[0].len() } else { 0 };
-                    
+
                     // Compile all matrix elements onto the stack in row-major order
                     for row in matrix_data {
                         for element in row {
                             self.compile_expr(element)?;
                         }
                     }
-                    
+
                     self.emit(Instr::CreateMatrix(rows, cols));
                 }
             }
             HirExprKind::Index(base, indices) => {
                 // Compile the base expression (the array/matrix)
                 self.compile_expr(base)?;
-                
+
                 // Compile all index expressions
                 for index in indices {
                     self.compile_expr(index)?;
                 }
-                
+
                 // Emit index instruction with number of indices
                 self.emit(Instr::Index(indices.len()));
             }
@@ -675,16 +691,19 @@ impl Compiler {
     }
 }
 
-pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> Result<Vec<Value>, String> {
+pub fn interpret_with_vars(
+    bytecode: &Bytecode,
+    initial_vars: &mut [Value],
+) -> Result<Vec<Value>, String> {
     let mut stack: Vec<Value> = Vec::new();
     let mut vars = initial_vars.to_vec();
-    
+
     // Ensure vars is large enough for the bytecode requirements
     if vars.len() < bytecode.var_count {
         vars.resize(bytecode.var_count, Value::Num(0.0));
     }
     let mut pc: usize = 0;
-    
+
     // Initialize execution context for proper function call handling
     let mut context = ExecutionContext {
         call_stack: Vec::new(),
@@ -728,7 +747,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 let val = stack.pop().ok_or("stack underflow")?;
                 if let Some(current_frame) = context.call_stack.last() {
                     let local_index = current_frame.locals_start + offset;
-                    
+
                     // Ensure locals array is large enough
                     while context.locals.len() <= local_index {
                         context.locals.push(Value::Num(0.0));
@@ -769,7 +788,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
             Instr::ElemMul => element_binary(&mut stack, rustmat_runtime::elementwise_mul)?,
             Instr::ElemDiv => element_binary(&mut stack, rustmat_runtime::elementwise_div)?,
             Instr::ElemPow => element_binary(&mut stack, rustmat_runtime::elementwise_pow)?,
-            Instr::ElemLeftDiv => element_binary(&mut stack, |a, b| rustmat_runtime::elementwise_div(b, a))?,
+            Instr::ElemLeftDiv => {
+                element_binary(&mut stack, |a, b| rustmat_runtime::elementwise_div(b, a))?
+            }
             Instr::LessEqual => {
                 let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                 let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
@@ -822,64 +843,78 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
             }
             Instr::CallFunction(name, arg_count) => {
                 // Get the function definition
-                let func = bytecode.functions.get(&name)
+                let func = bytecode
+                    .functions
+                    .get(&name)
                     .ok_or_else(|| format!("undefined function: {}", name))?
                     .clone();
-                
+
                 // Validate argument count - MATLAB requires exact match
                 if arg_count != func.params.len() {
                     return Err(format!(
                         "Function '{}' expects {} arguments, got {} - Not enough input arguments",
-                        name, func.params.len(), arg_count
+                        name,
+                        func.params.len(),
+                        arg_count
                     ));
                 }
-                
+
                 // Pop arguments from stack
                 let mut args = Vec::new();
                 for _ in 0..arg_count {
                     args.push(stack.pop().ok_or("stack underflow")?);
                 }
                 args.reverse(); // Arguments were pushed in reverse order
-                
+
                 // Create complete variable remapping that includes all variables referenced in the function body
-                let var_map = rustmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
+                let var_map = rustmat_hir::remapping::create_complete_function_var_map(
+                    &func.params,
+                    &func.outputs,
+                    &func.body,
+                );
                 let local_var_count = var_map.len();
-                
+
                 // Remap the function body to use local variable indices
-                let remapped_body = rustmat_hir::remapping::remap_function_body(&func.body, &var_map);
-                
+                let remapped_body =
+                    rustmat_hir::remapping::remap_function_body(&func.body, &var_map);
+
                 // Execute function with proper parameter binding and isolated scope
                 let func_vars_count = local_var_count.max(func.params.len());
                 let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-                
+
                 // Bind parameters to function's local variables
                 for (i, _param_id) in func.params.iter().enumerate() {
                     if i < args.len() && i < func_vars.len() {
                         func_vars[i] = args[i].clone();
                     }
                 }
-                
+
                 // Populate function's local variables with global variable values for variables it references
                 // This allows functions to access global workspace variables (MATLAB behavior)
                 for (original_var_id, local_var_id) in &var_map {
                     let local_index = local_var_id.0;
                     let global_index = original_var_id.0;
-                    
+
                     // Only populate if it's not already set by parameter binding and if global variable exists
                     if local_index < func_vars.len() && global_index < vars.len() {
                         // Don't overwrite parameter values, but populate other referenced variables
-                        let is_parameter = func.params.iter().any(|param_id| param_id == original_var_id);
+                        let is_parameter = func
+                            .params
+                            .iter()
+                            .any(|param_id| param_id == original_var_id);
                         if !is_parameter {
                             func_vars[local_index] = vars[global_index].clone();
                         }
                     }
                 }
-                
+
                 // Execute the function in its own isolated execution context
-                let func_program = rustmat_hir::HirProgram { body: remapped_body };
+                let func_program = rustmat_hir::HirProgram {
+                    body: remapped_body,
+                };
                 let func_bytecode = compile_with_functions(&func_program, &bytecode.functions)?;
                 let func_result_vars = interpret_function(&func_bytecode, func_vars)?;
-                
+
                 // Return the output variable value (first output variable)
                 if let Some(output_var_id) = func.outputs.first() {
                     // Use the remapped local index instead of the original VarId
@@ -891,7 +926,6 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         stack.push(Value::Num(0.0)); // Default if output variable not found
                     }
                 } else {
-
                     stack.push(Value::Num(0.0)); // Default if no output variable
                 }
             }
@@ -915,14 +949,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
             Instr::CreateMatrixDynamic(num_rows) => {
                 // Dynamic matrix creation with concatenation support
                 let mut row_lengths = Vec::new();
-                
+
                 // Pop row lengths (in reverse order since they're pushed last)
                 for _ in 0..num_rows {
                     let row_len: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                     row_lengths.push(row_len as usize);
                 }
                 row_lengths.reverse(); // Correct the order
-                
+
                 // Now pop elements according to row structure (in reverse order)
                 let mut rows_data = Vec::new();
                 for &row_len in row_lengths.iter().rev() {
@@ -933,10 +967,10 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                     row_values.reverse(); // Correct the order within row
                     rows_data.push(row_values);
                 }
-                
+
                 // Reverse rows to get correct order
                 rows_data.reverse();
-                
+
                 // Use the concatenation logic to create the matrix
                 let result = rustmat_runtime::create_matrix_from_values(&rows_data)?;
                 stack.push(result);
@@ -947,14 +981,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                     let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                     let step: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                     let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                    
+
                     let range_result = rustmat_runtime::create_range(start, Some(step), end)?;
                     stack.push(range_result);
                 } else {
                     // Stack: start, end
                     let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                     let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                    
+
                     let range_result = rustmat_runtime::create_range(start, None, end)?;
                     stack.push(range_result);
                 }
@@ -968,10 +1002,10 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                     indices.push(index_val);
                 }
                 indices.reverse(); // Correct the order
-                
+
                 // Pop the base array/matrix
                 let base = stack.pop().ok_or("stack underflow")?;
-                
+
                 // Perform the indexing operation using centralized function
                 let result = rustmat_runtime::perform_indexing(&base, &indices)?;
                 stack.push(result);
@@ -986,12 +1020,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 } else {
                     // Return from function - restore previous call frame
                     let frame = context.call_stack.pop().unwrap();
-                    
+
                     // Clean up local variables
                     for _ in 0..frame.locals_count {
                         context.locals.pop();
                     }
-                    
+
                     // Return to caller
                     pc = frame.return_address;
                     continue;
@@ -999,7 +1033,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
             }
             Instr::ReturnValue => {
                 let return_value = stack.pop().ok_or("stack underflow")?;
-                
+
                 if context.call_stack.is_empty() {
                     // Return from main program with value
                     stack.push(return_value);
@@ -1007,15 +1041,15 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 } else {
                     // Return from function with value
                     let frame = context.call_stack.pop().unwrap();
-                    
+
                     // Clean up local variables
                     for _ in 0..frame.locals_count {
                         context.locals.pop();
                     }
-                    
+
                     // Push return value for caller
                     stack.push(return_value);
-                    
+
                     // Return to caller
                     pc = frame.return_address;
                     continue;
@@ -1042,7 +1076,7 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
 
     // Register GC roots for stack and variables (RAII cleanup)
     let _gc_context = InterpretContext::new(&stack, &vars)?;
-    
+
     while pc < bytecode.instructions.len() {
         match bytecode.instructions[pc].clone() {
             Instr::LoadConst(c) => stack.push(Value::Num(c)),
@@ -1056,10 +1090,14 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
                 vars[i] = val;
             }
             // Function-local variables use the same LoadVar/StoreVar for simplicity
-            Instr::LoadLocal(_) => return Err("LoadLocal not supported in function context".to_string()),
-            Instr::StoreLocal(_) => return Err("StoreLocal not supported in function context".to_string()),
-            Instr::EnterScope(_) => {}, // No-op in function context
-            Instr::ExitScope(_) => {},  // No-op in function context
+            Instr::LoadLocal(_) => {
+                return Err("LoadLocal not supported in function context".to_string())
+            }
+            Instr::StoreLocal(_) => {
+                return Err("StoreLocal not supported in function context".to_string())
+            }
+            Instr::EnterScope(_) => {} // No-op in function context
+            Instr::ExitScope(_) => {}  // No-op in function context
             Instr::Add => element_binary(&mut stack, rustmat_runtime::elementwise_add)?,
             Instr::Sub => element_binary(&mut stack, rustmat_runtime::elementwise_sub)?,
             Instr::Mul => element_binary(&mut stack, rustmat_runtime::elementwise_mul)?,
@@ -1074,7 +1112,9 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
             Instr::ElemMul => element_binary(&mut stack, rustmat_runtime::elementwise_mul)?,
             Instr::ElemDiv => element_binary(&mut stack, rustmat_runtime::elementwise_div)?,
             Instr::ElemPow => element_binary(&mut stack, rustmat_runtime::elementwise_pow)?,
-            Instr::ElemLeftDiv => element_binary(&mut stack, |a, b| rustmat_runtime::elementwise_div(b, a))?,
+            Instr::ElemLeftDiv => {
+                element_binary(&mut stack, |a, b| rustmat_runtime::elementwise_div(b, a))?
+            }
             Instr::LessEqual => {
                 let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                 let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
@@ -1128,32 +1168,41 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
             Instr::CallFunction(name, arg_count) => {
                 // Recursive function calls within functions
                 // Get the function definition from the global function registry
-                let func = bytecode.functions.get(&name)
+                let func = bytecode
+                    .functions
+                    .get(&name)
                     .ok_or_else(|| format!("undefined function: {}", name))?
                     .clone();
-                
+
                 // Validate argument count - MATLAB requires exact match
                 if arg_count != func.params.len() {
                     return Err(format!(
                         "Function '{}' expects {} arguments, got {} - Not enough input arguments",
-                        name, func.params.len(), arg_count
+                        name,
+                        func.params.len(),
+                        arg_count
                     ));
                 }
-                
+
                 // Pop arguments from stack
                 let mut args = Vec::new();
                 for _ in 0..arg_count {
                     args.push(stack.pop().ok_or("stack underflow")?);
                 }
                 args.reverse(); // Arguments were pushed in reverse order
-                
+
                 // Create complete variable remapping that includes all variables referenced in the function body
-                let var_map = rustmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
+                let var_map = rustmat_hir::remapping::create_complete_function_var_map(
+                    &func.params,
+                    &func.outputs,
+                    &func.body,
+                );
                 let local_var_count = var_map.len();
-                
+
                 // Remap the function body to use local variable indices
-                let remapped_body = rustmat_hir::remapping::remap_function_body(&func.body, &var_map);
-                
+                let remapped_body =
+                    rustmat_hir::remapping::remap_function_body(&func.body, &var_map);
+
                 // Create function variable space and bind parameters
                 let func_vars_count = local_var_count.max(func.params.len());
                 let mut func_vars = vec![Value::Num(0.0); func_vars_count];
@@ -1162,12 +1211,14 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
                         func_vars[i] = args[i].clone();
                     }
                 }
-                
+
                 // Recursively call the function
-                let func_program = rustmat_hir::HirProgram { body: remapped_body };
+                let func_program = rustmat_hir::HirProgram {
+                    body: remapped_body,
+                };
                 let func_bytecode = compile_with_functions(&func_program, &bytecode.functions)?;
                 let func_result_vars = interpret_function(&func_bytecode, func_vars)?;
-                
+
                 // Return the output variable value (first output variable)
                 if let Some(output_var_id) = func.outputs.first() {
                     // Use the remapped local index instead of the original VarId
@@ -1179,7 +1230,6 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
                         stack.push(Value::Num(0.0)); // Default if output variable not found
                     }
                 } else {
-
                     stack.push(Value::Num(0.0)); // Default if no output variable
                 }
             }
@@ -1203,14 +1253,14 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
             Instr::CreateMatrixDynamic(num_rows) => {
                 // Dynamic matrix creation with concatenation support
                 let mut row_lengths = Vec::new();
-                
+
                 // Pop row lengths (in reverse order since they're pushed last)
                 for _ in 0..num_rows {
                     let row_len: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                     row_lengths.push(row_len as usize);
                 }
                 row_lengths.reverse(); // Correct the order
-                
+
                 // Now pop elements according to row structure (in reverse order)
                 let mut rows_data = Vec::new();
                 for &row_len in row_lengths.iter().rev() {
@@ -1221,10 +1271,10 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
                     row_values.reverse(); // Correct the order within row
                     rows_data.push(row_values);
                 }
-                
+
                 // Reverse rows to get correct order
                 rows_data.reverse();
-                
+
                 // Use the concatenation logic to create the matrix
                 let result = rustmat_runtime::create_matrix_from_values(&rows_data)?;
                 stack.push(result);
@@ -1235,14 +1285,14 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
                     let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                     let step: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                     let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                    
+
                     let range_result = rustmat_runtime::create_range(start, Some(step), end)?;
                     stack.push(range_result);
                 } else {
                     // Stack: start, end
                     let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
                     let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                    
+
                     let range_result = rustmat_runtime::create_range(start, None, end)?;
                     stack.push(range_result);
                 }
@@ -1256,10 +1306,10 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
                     indices.push(index_val);
                 }
                 indices.reverse(); // Correct the order
-                
+
                 // Pop the base array/matrix
                 let base = stack.pop().ok_or("stack underflow")?;
-                
+
                 // Perform the indexing operation using centralized function
                 let result = rustmat_runtime::perform_indexing(&base, &indices)?;
                 stack.push(result);

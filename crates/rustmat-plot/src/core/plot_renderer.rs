@@ -213,9 +213,11 @@ impl PlotRenderer {
                 *right = 4.0;
                 *bottom = -2.0;
                 *top = 4.0;
-                
-                println!("CAMERA: Set orthographic bounds: left={}, right={}, bottom={}, top={}", 
-                         *left, *right, *bottom, *top);
+
+                println!(
+                    "CAMERA: Set orthographic bounds: left={}, right={}, bottom={}, top={}",
+                    *left, *right, *bottom, *top
+                );
             }
 
             // Center camera to look at data center
@@ -271,7 +273,7 @@ impl PlotRenderer {
 
                     render_items.push((render_data, vertex_buffer));
                     total_vertices += render_data.vertices.len();
-                    
+
                     // Count triangles based on pipeline type
                     match render_data.pipeline_type {
                         crate::core::PipelineType::Triangles => {
@@ -323,7 +325,11 @@ impl PlotRenderer {
         // Render all items
         for (render_data, vertex_buffer) in &render_items {
             let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
-            println!("RENDER: Using {:?} pipeline for {} vertices", render_data.pipeline_type, render_data.vertices.len());
+            println!(
+                "RENDER: Using {:?} pipeline for {} vertices",
+                render_data.pipeline_type,
+                render_data.vertices.len()
+            );
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -548,7 +554,10 @@ impl PlotRenderer {
             if let Some(index_buffer) = index_buffer {
                 render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 if let Some(indices) = &render_data.indices {
-                    println!("RENDER: Drawing {} indices with triangle pipeline", indices.len());
+                    println!(
+                        "RENDER: Drawing {} indices with triangle pipeline",
+                        indices.len()
+                    );
                     render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
                 }
             } else {

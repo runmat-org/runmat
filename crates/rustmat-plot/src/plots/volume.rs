@@ -10,7 +10,7 @@ use glam::{Vec3, Vec4};
 pub struct VolumePlot {
     /// 3D volume data (values at 3D grid points)
     pub volume_data: Vec<Vec<Vec<f64>>>, // volume_data[x][y][z]
-    
+
     /// Grid dimensions and spacing
     pub dimensions: (usize, usize, usize), // (nx, ny, nz)
     pub spacing: Vec3, // Grid spacing in world coordinates
@@ -20,16 +20,16 @@ pub struct VolumePlot {
     pub opacity: f32,
     pub color_map: VolumeColorMap,
     pub iso_value: Option<f64>, // For isosurface extraction
-    
+
     /// Transfer function for opacity mapping
     pub opacity_transfer: Vec<(f64, f32)>, // (value, opacity) pairs
-    pub color_transfer: Vec<(f64, Vec4)>,  // (value, color) pairs
+    pub color_transfer: Vec<(f64, Vec4)>, // (value, color) pairs
 
     /// Rendering settings
     pub ray_step_size: f32,
     pub max_steps: u32,
     pub lighting_enabled: bool,
-    
+
     /// Metadata
     pub label: Option<String>,
     pub visible: bool,
@@ -168,16 +168,18 @@ impl VolumePlot {
     /// Generate vertices for volume rendering (bounding box for raycasting)
     fn generate_vertices(&mut self) -> &Vec<Vertex> {
         if self.dirty || self.vertices.is_none() {
-            println!("DEBUG: Generating volume vertices for {} x {} x {} grid", 
-                     self.dimensions.0, self.dimensions.1, self.dimensions.2);
+            println!(
+                "DEBUG: Generating volume vertices for {} x {} x {} grid",
+                self.dimensions.0, self.dimensions.1, self.dimensions.2
+            );
 
             let mut vertices = Vec::new();
             let bounds = self.bounds();
-            
+
             // Generate bounding box vertices for ray casting entry/exit points
             let min = bounds.min;
             let max = bounds.max;
-            
+
             // 8 vertices of the bounding box
             let positions = [
                 Vec3::new(min.x, min.y, min.z), // 0
@@ -195,14 +197,14 @@ impl VolumePlot {
                     position: pos.to_array(),
                     normal: [0.0, 0.0, 1.0], // Will be computed in shader
                     color: [1.0, 1.0, 1.0, self.opacity],
-                    tex_coords: [
-                        pos.x / (max.x - min.x),
-                        pos.y / (max.y - min.y),
-                    ],
+                    tex_coords: [pos.x / (max.x - min.x), pos.y / (max.y - min.y)],
                 });
             }
 
-            println!("DEBUG: Generated {} vertices for volume bounding box", vertices.len());
+            println!(
+                "DEBUG: Generated {} vertices for volume bounding box",
+                vertices.len()
+            );
             self.vertices = Some(vertices);
             self.dirty = false;
         }
@@ -213,21 +215,16 @@ impl VolumePlot {
     fn generate_indices(&mut self) -> &Vec<u32> {
         if self.dirty || self.indices.is_none() {
             println!("DEBUG: Generating volume indices");
-            
+
             // Cube faces (2 triangles per face)
             let indices = vec![
                 // Front face
-                0, 1, 2,  0, 2, 3,
-                // Back face  
-                4, 6, 5,  4, 7, 6,
-                // Left face
-                0, 3, 7,  0, 7, 4,
-                // Right face
-                1, 5, 6,  1, 6, 2,
-                // Bottom face
-                0, 4, 5,  0, 5, 1,
-                // Top face
-                3, 2, 6,  3, 6, 7,
+                0, 1, 2, 0, 2, 3, // Back face
+                4, 6, 5, 4, 7, 6, // Left face
+                0, 3, 7, 0, 7, 4, // Right face
+                1, 5, 6, 1, 6, 2, // Bottom face
+                0, 4, 5, 0, 5, 1, // Top face
+                3, 2, 6, 3, 6, 7,
             ];
 
             println!("DEBUG: Generated {} indices for volume", indices.len());
@@ -238,13 +235,19 @@ impl VolumePlot {
 
     /// Generate complete render data for the graphics pipeline
     pub fn render_data(&mut self) -> RenderData {
-        println!("DEBUG: VolumePlot::render_data() called for {} x {} x {} volume", 
-                 self.dimensions.0, self.dimensions.1, self.dimensions.2);
-        
+        println!(
+            "DEBUG: VolumePlot::render_data() called for {} x {} x {} volume",
+            self.dimensions.0, self.dimensions.1, self.dimensions.2
+        );
+
         let vertices = self.generate_vertices().clone();
         let indices = self.generate_indices().clone();
-        
-        println!("DEBUG: Volume render data: {} vertices, {} indices", vertices.len(), indices.len());
+
+        println!(
+            "DEBUG: Volume render data: {} vertices, {} indices",
+            vertices.len(),
+            indices.len()
+        );
 
         let mut material = Material::default();
         material.albedo = Vec4::new(1.0, 1.0, 1.0, self.opacity);
@@ -271,10 +274,10 @@ impl VolumePlot {
     /// Get volume statistics for debugging
     pub fn statistics(&self) -> VolumeStatistics {
         let voxel_count = self.dimensions.0 * self.dimensions.1 * self.dimensions.2;
-        
+
         let mut min_val = f64::INFINITY;
         let mut max_val = f64::NEG_INFINITY;
-        
+
         for plane in &self.volume_data {
             for row in plane {
                 for &val in row {
@@ -294,10 +297,17 @@ impl VolumePlot {
 
     /// Estimate memory usage in bytes
     pub fn estimated_memory_usage(&self) -> usize {
-        let data_size = self.dimensions.0 * self.dimensions.1 * self.dimensions.2 * std::mem::size_of::<f64>();
-        let vertices_size = self.vertices.as_ref().map_or(0, |v| v.len() * std::mem::size_of::<Vertex>());
-        let indices_size = self.indices.as_ref().map_or(0, |i| i.len() * std::mem::size_of::<u32>());
-        
+        let data_size =
+            self.dimensions.0 * self.dimensions.1 * self.dimensions.2 * std::mem::size_of::<f64>();
+        let vertices_size = self
+            .vertices
+            .as_ref()
+            .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>());
+        let indices_size = self
+            .indices
+            .as_ref()
+            .map_or(0, |i| i.len() * std::mem::size_of::<u32>());
+
         data_size + vertices_size + indices_size
     }
 }

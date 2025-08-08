@@ -5,13 +5,16 @@ fn transpose_after_ident_then_semicolon() {
     let input = "B = A';";
     let tokens = tokenize(input);
     // Expect: Ident(B), Assign, Ident(A), Transpose, Semicolon
-    assert_eq!(tokens, vec![
-        Token::Ident,
-        Token::Assign,
-        Token::Ident,
-        Token::Transpose,
-        Token::Semicolon,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Ident,
+            Token::Assign,
+            Token::Ident,
+            Token::Transpose,
+            Token::Semicolon,
+        ]
+    );
 }
 
 #[test]
@@ -19,13 +22,16 @@ fn simple_string_literal() {
     let input = "fprintf('done');";
     let tokens = tokenize(input);
     // Expect: Ident, LParen, Str, RParen, Semicolon
-    assert_eq!(tokens, vec![
-        Token::Ident,
-        Token::LParen,
-        Token::Str,
-        Token::RParen,
-        Token::Semicolon,
-    ]);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Ident,
+            Token::LParen,
+            Token::Str,
+            Token::RParen,
+            Token::Semicolon,
+        ]
+    );
 }
 
 #[test]

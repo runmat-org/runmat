@@ -72,10 +72,13 @@ impl Default for PlotOptions {
 }
 
 /// **UNIFIED PLOTTING FUNCTION** - One path for all plot types
-/// 
+///
 /// - Interactive mode: Shows GPU-accelerated window
 /// - Static mode: Renders same GPU pipeline to PNG file
-pub fn show_plot_unified(figure: plots::Figure, output_path: Option<&str>) -> Result<String, String> {
+pub fn show_plot_unified(
+    figure: plots::Figure,
+    output_path: Option<&str>,
+) -> Result<String, String> {
     match output_path {
         Some(path) => {
             // Static export: Render using same GPU pipeline and save to file
@@ -89,7 +92,10 @@ pub fn show_plot_unified(figure: plots::Figure, output_path: Option<&str>) -> Re
             }
             #[cfg(not(feature = "gui"))]
             {
-                Err("GUI feature not enabled. Build with --features gui for interactive plotting.".to_string())
+                Err(
+                    "GUI feature not enabled. Build with --features gui for interactive plotting."
+                        .to_string(),
+                )
             }
         }
     }
@@ -141,7 +147,12 @@ pub fn plot_line(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> R
 }
 
 /// Create a scatter plot - unified pipeline
-pub fn plot_scatter(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -> Result<(), String> {
+pub fn plot_scatter(
+    xs: &[f64],
+    ys: &[f64],
+    path: &str,
+    _options: PlotOptions,
+) -> Result<(), String> {
     if xs.len() != ys.len() {
         return Err("input length mismatch".into());
     }
@@ -167,7 +178,12 @@ pub fn plot_scatter(xs: &[f64], ys: &[f64], path: &str, _options: PlotOptions) -
 }
 
 /// Create a bar chart - unified pipeline
-pub fn plot_bar(labels: &[String], values: &[f64], path: &str, _options: PlotOptions) -> Result<(), String> {
+pub fn plot_bar(
+    labels: &[String],
+    values: &[f64],
+    path: &str,
+    _options: PlotOptions,
+) -> Result<(), String> {
     if labels.len() != values.len() {
         return Err("labels and values length mismatch".into());
     }
@@ -189,7 +205,12 @@ pub fn plot_bar(labels: &[String], values: &[f64], path: &str, _options: PlotOpt
 }
 
 /// Create a histogram - unified pipeline
-pub fn plot_histogram(data: &[f64], bins: usize, path: &str, _options: PlotOptions) -> Result<(), String> {
+pub fn plot_histogram(
+    data: &[f64],
+    bins: usize,
+    path: &str,
+    _options: PlotOptions,
+) -> Result<(), String> {
     let histogram = plots::Histogram::new(data.to_vec(), bins)
         .map_err(|e| format!("Failed to create histogram: {}", e))?
         .with_label("Frequency")

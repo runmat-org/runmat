@@ -159,7 +159,6 @@ struct Cli {
     plot_backend: Option<PlotBackend>,
 
     // config_file is now handled by the config field above
-
     /// Generate sample configuration file
     #[arg(long)]
     generate_config: bool,
@@ -515,8 +514,6 @@ async fn main() -> Result<()> {
         // Register this thread as the main thread for GUI operations
         rustmat_plot::register_main_thread();
 
-
-
         // Initialize native window system (handles macOS main thread requirements)
         match rustmat_plot::gui::initialize_native_window() {
             Ok(()) => {
@@ -578,13 +575,14 @@ async fn main() -> Result<()> {
 fn load_configuration(cli: &Cli) -> Result<RustMatConfig> {
     // Check if config file was explicitly provided via CLI (not just env var)
     // We can detect this by checking if RUSTMAT_CONFIG env var matches the cli.config value
-    let config_from_env = std::env::var("RUSTMAT_CONFIG").ok()
+    let config_from_env = std::env::var("RUSTMAT_CONFIG")
+        .ok()
         .map(|path| PathBuf::from(path));
-    
+
     if let Some(config_file) = &cli.config {
         // If config matches env var, it came from environment - be graceful
         let is_from_env = config_from_env.as_ref() == Some(config_file);
-        
+
         if config_file.exists() {
             info!("Loading configuration from: {}", config_file.display());
             return ConfigLoader::load_from_file(config_file);
@@ -797,7 +795,10 @@ async fn execute_repl(config: &RustMatConfig) -> Result<()> {
     // Use rustyline for better REPL experience
     use std::io::{self, Write};
 
-    println!("RustMat v{} by Dystr (https://dystr.com)", env!("CARGO_PKG_VERSION"));
+    println!(
+        "RustMat v{} by Dystr (https://dystr.com)",
+        env!("CARGO_PKG_VERSION")
+    );
     println!("High-performance MATLAB/Octave runtime with JIT compilation and GC");
     println!();
 
@@ -1806,18 +1807,21 @@ async fn install_jupyter_kernel() -> Result<()> {
     info!("Installing RustMat as a Jupyter kernel");
 
     // Get the path to the current executable
-    let current_exe = std::env::current_exe()
-        .context("Failed to get current executable path")?;
+    let current_exe = std::env::current_exe().context("Failed to get current executable path")?;
 
     // Find Jupyter kernel directory
-    let kernel_dir = find_jupyter_kernel_dir()
-        .context("Failed to find Jupyter kernel directory")?;
+    let kernel_dir =
+        find_jupyter_kernel_dir().context("Failed to find Jupyter kernel directory")?;
 
     let rustmat_kernel_dir = kernel_dir.join("rustmat");
 
     // Create kernel directory
-    fs::create_dir_all(&rustmat_kernel_dir)
-        .with_context(|| format!("Failed to create kernel directory: {}", rustmat_kernel_dir.display()))?;
+    fs::create_dir_all(&rustmat_kernel_dir).with_context(|| {
+        format!(
+            "Failed to create kernel directory: {}",
+            rustmat_kernel_dir.display()
+        )
+    })?;
 
     // Create kernel.json
     let kernel_json = format!(
@@ -1837,8 +1841,12 @@ async fn install_jupyter_kernel() -> Result<()> {
     );
 
     let kernel_json_path = rustmat_kernel_dir.join("kernel.json");
-    fs::write(&kernel_json_path, kernel_json)
-        .with_context(|| format!("Failed to write kernel.json to {}", kernel_json_path.display()))?;
+    fs::write(&kernel_json_path, kernel_json).with_context(|| {
+        format!(
+            "Failed to write kernel.json to {}",
+            kernel_json_path.display()
+        )
+    })?;
 
     // Create logo files (optional - we'll create simple text-based ones for now)
     create_kernel_logos(&rustmat_kernel_dir)?;
@@ -1896,7 +1904,9 @@ fn find_jupyter_kernel_dir() -> Result<PathBuf> {
         {
             if let Ok(appdata) = std::env::var("APPDATA") {
                 let windows_kernels = PathBuf::from(appdata).join("jupyter/kernels");
-                if windows_kernels.exists() || windows_kernels.parent().map_or(false, |p| p.exists()) {
+                if windows_kernels.exists()
+                    || windows_kernels.parent().map_or(false, |p| p.exists())
+                {
                     return Ok(windows_kernels);
                 }
             }
@@ -1907,18 +1917,23 @@ fn find_jupyter_kernel_dir() -> Result<PathBuf> {
         return Ok(default_kernels);
     }
 
-    Err(anyhow::anyhow!("Could not determine Jupyter kernel directory. Please install Jupyter first."))
+    Err(anyhow::anyhow!(
+        "Could not determine Jupyter kernel directory. Please install Jupyter first."
+    ))
 }
 
 /// Create simple kernel logos
 fn create_kernel_logos(kernel_dir: &std::path::Path) -> Result<()> {
     // For now, we'll skip logo creation since it requires image processing
     // In a full implementation, you'd want to include actual PNG logos
-    
+
     // Create a simple text file that indicates logos could be added
     let logo_info = kernel_dir.join("logo-readme.txt");
-    fs::write(logo_info, "RustMat kernel logos can be added here:\n- logo-32x32.png\n- logo-64x64.png")
-        .context("Failed to create logo info file")?;
-    
+    fs::write(
+        logo_info,
+        "RustMat kernel logos can be added here:\n- logo-32x32.png\n- logo-64x64.png",
+    )
+    .context("Failed to create logo info file")?;
+
     Ok(())
 }

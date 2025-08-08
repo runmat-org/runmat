@@ -190,23 +190,23 @@ impl PlotOverlay {
                     // Placeholder for Dystr logo (32x32 square)
                     let logo_size = egui::Vec2::splat(32.0);
                     let logo_rect = ui.allocate_exact_size(logo_size, egui::Sense::click()).0;
-                    
+
                     // Draw placeholder logo background
                     ui.painter().rect_filled(
                         logo_rect,
                         4.0, // rounded corners
-                        Color32::from_rgb(100, 100, 100)
+                        Color32::from_rgb(100, 100, 100),
                     );
-                    
+
                     // Draw "D" placeholder text in the logo area
                     ui.painter().text(
                         logo_rect.center(),
                         Align2::CENTER_CENTER,
                         "D",
                         FontId::proportional(20.0),
-                        Color32::WHITE
+                        Color32::WHITE,
                     );
-                    
+
                     ui.vertical(|ui| {
                         ui.heading("RustMat");
                         ui.horizontal(|ui| {
@@ -497,7 +497,7 @@ impl PlotOverlay {
     /// Render the Dystr information modal
     fn render_dystr_modal(&mut self, ctx: &Context) -> bool {
         let mut consumed_input = false;
-        
+
         egui::Window::new("About Dystr")
             .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .collapsible(false)
@@ -505,46 +505,46 @@ impl PlotOverlay {
             .default_width(400.0)
             .show(ctx, |ui| {
                 consumed_input = true;
-                
+
                 ui.vertical_centered(|ui| {
                     ui.add_space(10.0);
-                    
+
                     // Dystr logo placeholder (larger for modal)
                     let logo_size = egui::Vec2::splat(64.0);
                     let logo_rect = ui.allocate_exact_size(logo_size, egui::Sense::hover()).0;
-                    
+
                     ui.painter().rect_filled(
                         logo_rect,
-                        8.0, // rounded corners
-                        Color32::from_rgb(60, 130, 200) // Dystr brand color placeholder
+                        8.0,                             // rounded corners
+                        Color32::from_rgb(60, 130, 200), // Dystr brand color placeholder
                     );
-                    
+
                     ui.painter().text(
                         logo_rect.center(),
                         Align2::CENTER_CENTER,
                         "D",
                         FontId::proportional(40.0),
-                        Color32::WHITE
+                        Color32::WHITE,
                     );
-                    
+
                     ui.add_space(15.0);
-                    
+
                     ui.heading("Welcome to RustMat");
                     ui.add_space(10.0);
-                    
+
                     ui.label("RustMat is a high-performance MATLAB-compatible");
                     ui.label("numerical computing platform, built as part of");
                     ui.label("the Dystr computation ecosystem.");
-                    
+
                     ui.add_space(15.0);
-                    
+
                     ui.label("🚀 V8-inspired JIT compilation");
                     ui.label("⚡ BLAS/LAPACK acceleration");
                     ui.label("🎯 Full MATLAB compatibility");
                     ui.label("🔬 Advanced plotting & visualization");
-                    
+
                     ui.add_space(20.0);
-                    
+
                     ui.horizontal(|ui| {
                         if ui.button("Visit dystr.com").clicked() {
                             // Open dystr.com in browser
@@ -552,12 +552,12 @@ impl PlotOverlay {
                                 eprintln!("Failed to open browser: {}", e);
                             }
                         }
-                        
+
                         if ui.button("Close").clicked() {
                             self.show_dystr_modal = false;
                         }
                     });
-                    
+
                     ui.add_space(10.0);
                 });
             });

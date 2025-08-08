@@ -146,7 +146,7 @@ fn colon_operator_with_step() {
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
     assert!(result.is_ok());
-    // Should create range [1, 3, 5] 
+    // Should create range [1, 3, 5]
 }
 
 #[test]
@@ -340,31 +340,51 @@ fn test_turbine_control_flow_pattern() {
 #[test]
 fn test_function_parameter_binding() {
     // Test: function y = add_numbers(a, b); y = a + b; end
-    let ast = parse("function y = add_numbers(a, b); y = a + b; end; result = add_numbers(10, 20);").unwrap();
+    let ast =
+        parse("function y = add_numbers(a, b); y = a + b; end; result = add_numbers(10, 20);")
+            .unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
-    assert!(result.is_ok(), "Function with parameters should work: {:?}", result);
+
+    assert!(
+        result.is_ok(),
+        "Function with parameters should work: {:?}",
+        result
+    );
     let vars = result.unwrap();
-    
+
     // The result should be in one of the variables (exact index depends on HIR variable assignment)
-    let found_result = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 30.0));
-    assert!(found_result.is_some(), "Function should compute 10 + 20 = 30, but found variables: {:?}", vars);
+    let found_result = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 30.0));
+    assert!(
+        found_result.is_some(),
+        "Function should compute 10 + 20 = 30, but found variables: {:?}",
+        vars
+    );
 }
 
 #[test]
 fn test_function_local_variables() {
     // Test: function y = compute(x); temp = x * 2; y = temp + 5; end
-    let ast = parse("function y = compute(x); temp = x * 2; y = temp + 5; end; result = compute(7);").unwrap();
+    let ast =
+        parse("function y = compute(x); temp = x * 2; y = temp + 5; end; result = compute(7);")
+            .unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     assert!(result.is_ok(), "Function with local variables should work");
     let vars = result.unwrap();
-    
+
     // The result should be in one of the variables (exact index depends on HIR variable assignment)
-    let found_result = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 19.0));
-    assert!(found_result.is_some(), "Function should compute 7 * 2 + 5 = 19, but found variables: {:?}", vars);
+    let found_result = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 19.0));
+    assert!(
+        found_result.is_some(),
+        "Function should compute 7 * 2 + 5 = 19, but found variables: {:?}",
+        vars
+    );
 }
 
 #[test]
@@ -373,34 +393,61 @@ fn test_function_recursive_calls() {
     let ast = parse("function y = factorial(n); if n <= 1; y = 1; else; y = n * factorial(n - 1); end; end; result = factorial(5);").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     assert!(result.is_ok(), "Recursive function should work");
     let vars = result.unwrap();
-    
+
     // The result should be in one of the variables (exact index depends on HIR variable assignment)
-    let found_result = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 120.0));
-    assert!(found_result.is_some(), "Function should compute 5! = 120, but found variables: {:?}", vars);
+    let found_result = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 120.0));
+    assert!(
+        found_result.is_some(),
+        "Function should compute 5! = 120, but found variables: {:?}",
+        vars
+    );
 }
 
 #[test]
 fn test_function_multiple_calls() {
     // Test: Multiple calls to same function with different parameters
-    let ast = parse("function y = double(x); y = x * 2; end; a = double(5); b = double(10); c = double(15);").unwrap();
+    let ast = parse(
+        "function y = double(x); y = x * 2; end; a = double(5); b = double(10); c = double(15);",
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     assert!(result.is_ok(), "Multiple function calls should work");
     let vars = result.unwrap();
-    
+
     // Check all three results (exact indices depend on HIR variable assignment)
-    let found_a = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 10.0));
-    assert!(found_a.is_some(), "First call should be 5 * 2 = 10, but found variables: {:?}", vars);
-    
-    let found_b = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 20.0));
-    assert!(found_b.is_some(), "Second call should be 10 * 2 = 20, but found variables: {:?}", vars);
-    
-    let found_c = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 30.0));
-    assert!(found_c.is_some(), "Third call should be 15 * 2 = 30, but found variables: {:?}", vars);
+    let found_a = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 10.0));
+    assert!(
+        found_a.is_some(),
+        "First call should be 5 * 2 = 10, but found variables: {:?}",
+        vars
+    );
+
+    let found_b = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 20.0));
+    assert!(
+        found_b.is_some(),
+        "Second call should be 10 * 2 = 20, but found variables: {:?}",
+        vars
+    );
+
+    let found_c = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 30.0));
+    assert!(
+        found_c.is_some(),
+        "Third call should be 15 * 2 = 30, but found variables: {:?}",
+        vars
+    );
 }
 
 #[test]
@@ -409,31 +456,52 @@ fn test_function_with_control_flow() {
     let ast = parse("function y = abs_value(x); if x < 0; y = -x; else; y = x; end; end; pos = abs_value(42); neg = abs_value(-17);").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     assert!(result.is_ok(), "Function with control flow should work");
     let vars = result.unwrap();
-    
+
     // Check both results (exact indices depend on HIR variable assignment)
-    let found_pos = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 42.0));
-    assert!(found_pos.is_some(), "abs_value(42) should be 42, but found variables: {:?}", vars);
-    
-    let found_neg = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 17.0));
-    assert!(found_neg.is_some(), "abs_value(-17) should be 17, but found variables: {:?}", vars);
+    let found_pos = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 42.0));
+    assert!(
+        found_pos.is_some(),
+        "abs_value(42) should be 42, but found variables: {:?}",
+        vars
+    );
+
+    let found_neg = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 17.0));
+    assert!(
+        found_neg.is_some(),
+        "abs_value(-17) should be 17, but found variables: {:?}",
+        vars
+    );
 }
 
 #[test]
 fn test_function_with_loops() {
     // Test: function y = sum_to_n(n); y = 0; for i = 1:n; y = y + i; end; end
-    let ast = parse("function y = sum_to_n(n); y = 0; for i = 1:n; y = y + i; end; end; result = sum_to_n(10);").unwrap();
+    let ast = parse(
+        "function y = sum_to_n(n); y = 0; for i = 1:n; y = y + i; end; end; result = sum_to_n(10);",
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     assert!(result.is_ok(), "Function with loops should work");
     let vars = result.unwrap();
-    
+
     // The result should be in one of the variables (exact index depends on HIR variable assignment)
-    let found_result = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 55.0));
-    assert!(found_result.is_some(), "sum_to_n(10) should be 55, but found variables: {:?}", vars);
+    let found_result = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 55.0));
+    assert!(
+        found_result.is_some(),
+        "sum_to_n(10) should be 55, but found variables: {:?}",
+        vars
+    );
 }
 
 #[test]
@@ -442,12 +510,18 @@ fn test_nested_function_calls() {
     let ast = parse("function y = add(a, b); y = a + b; end; function y = multiply_and_add(x); y = add(x * 2, x * 3); end; result = multiply_and_add(4);").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
-    assert!(result.is_ok(), "Nested function calls should work: {:?}", result.as_ref().err());
+
+    assert!(
+        result.is_ok(),
+        "Nested function calls should work: {:?}",
+        result.as_ref().err()
+    );
     let vars = result.unwrap();
-    
+
     // The result should be in one of the variables (exact index depends on HIR variable assignment)
-    let found_result = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 20.0));
+    let found_result = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 20.0));
     assert!(found_result.is_some(), "multiply_and_add(4) should be 20 (add(4*2, 4*3) = add(8, 12) = 20), but found variables: {:?}", vars);
 }
 
@@ -457,17 +531,29 @@ fn test_function_variable_isolation() {
     let ast = parse("global_var = 100; function y = test_isolation(x); global_var = x; y = global_var; end; result = test_isolation(42); final_global = global_var;").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     assert!(result.is_ok(), "Function variable isolation should work");
     let vars = result.unwrap();
-    
+
     // Check that function returned 42 (exact index depends on HIR variable assignment)
-    let found_result = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 42.0));
-    assert!(found_result.is_some(), "Function should return 42, but found variables: {:?}", vars);
-    
+    let found_result = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 42.0));
+    assert!(
+        found_result.is_some(),
+        "Function should return 42, but found variables: {:?}",
+        vars
+    );
+
     // Check that global variable is unchanged (should still be 100)
-    let found_global = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 100.0));
-    assert!(found_global.is_some(), "Global variable should remain 100, but found variables: {:?}", vars);
+    let found_global = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 100.0));
+    assert!(
+        found_global.is_some(),
+        "Global variable should remain 100, but found variables: {:?}",
+        vars
+    );
 }
 
 // === NEGATIVE TESTS ===
@@ -478,11 +564,14 @@ fn test_undefined_function_call() {
     let ast = parse("result = nonexistent_function(42);").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     assert!(result.is_err(), "Calling undefined function should error");
     let error_msg = result.unwrap_err();
-    assert!(error_msg.contains("undefined function") || error_msg.contains("nonexistent_function"), 
-           "Error should mention undefined function, got: {}", error_msg);
+    assert!(
+        error_msg.contains("undefined function") || error_msg.contains("nonexistent_function"),
+        "Error should mention undefined function, got: {}",
+        error_msg
+    );
 }
 
 #[test]
@@ -491,13 +580,17 @@ fn test_function_wrong_argument_count() {
     let ast = parse("function y = add_two(a, b); y = a + b; end; result = add_two(5);").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     // MATLAB requires exact argument count - should fail with "Not enough input arguments"
-    assert!(result.is_err(), "Function with missing parameters should fail in MATLAB");
+    assert!(
+        result.is_err(),
+        "Function with missing parameters should fail in MATLAB"
+    );
     let error_msg = format!("{:?}", result.unwrap_err());
     assert!(
         error_msg.contains("argument") || error_msg.contains("parameter"),
-        "Error should mention argument/parameter mismatch, got: {}", error_msg
+        "Error should mention argument/parameter mismatch, got: {}",
+        error_msg
     );
 }
 
@@ -509,13 +602,23 @@ fn test_function_no_parameters() {
     let ast = parse("function y = get_constant(); y = 42; end; result = get_constant();").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
-    assert!(result.is_ok(), "Function with no parameters should work: {:?}", result);
+
+    assert!(
+        result.is_ok(),
+        "Function with no parameters should work: {:?}",
+        result
+    );
     let vars = result.unwrap();
-    
+
     // The result should be in one of the variables (exact index depends on HIR variable assignment)
-    let found_result = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 42.0));
-    assert!(found_result.is_some(), "Function should return 42, but found variables: {:?}", vars);
+    let found_result = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 42.0));
+    assert!(
+        found_result.is_some(),
+        "Function should return 42, but found variables: {:?}",
+        vars
+    );
 }
 
 #[test]
@@ -524,10 +627,10 @@ fn test_function_empty_body() {
     let ast = parse("function y = empty_function(x); end; result = empty_function(123);").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     assert!(result.is_ok(), "Function with empty body should work");
     let vars = result.unwrap();
-    
+
     // Should return default value 0.0
     if let Value::Num(value) = &vars[0] {
         assert_eq!(*value, 0.0, "Empty function should return 0.0");
@@ -542,11 +645,17 @@ fn test_function_deep_recursion() {
     let ast = parse("function y = countdown(n); y = n; end; result = countdown(10);").unwrap();
     let hir = lower(&ast).unwrap();
     let result = execute(&hir);
-    
+
     assert!(result.is_ok(), "Deep recursion should work");
     let vars = result.unwrap();
-    
+
     // The result should be in one of the variables (exact index depends on HIR variable assignment)
-    let found_result = vars.iter().find(|v| matches!(v, Value::Num(n) if *n == 10.0));
-    assert!(found_result.is_some(), "countdown(10) should return 10, but found variables: {:?}", vars);
+    let found_result = vars
+        .iter()
+        .find(|v| matches!(v, Value::Num(n) if *n == 10.0));
+    assert!(
+        found_result.is_some(),
+        "countdown(10) should return 10, but found variables: {:?}",
+        vars
+    );
 }

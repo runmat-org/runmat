@@ -40,13 +40,13 @@ pub fn show_plot_sequential(figure: Figure) -> Result<String, String> {
 /// Internal function that actually creates and runs the window
 fn show_plot_internal(figure: Figure) -> Result<String, String> {
     use crate::gui::PlotWindow;
-    
+
     // Create window directly on the current thread (main thread)
     let config = WindowConfig::default();
-    
+
     // Use existing runtime or create one if none exists
     let handle = tokio::runtime::Handle::try_current();
-    
+
     match handle {
         Ok(handle) => {
             // Use existing runtime
@@ -55,13 +55,16 @@ fn show_plot_internal(figure: Figure) -> Result<String, String> {
                     let mut window = PlotWindow::new(config)
                         .await
                         .map_err(|e| format!("Failed to create plot window: {}", e))?;
-                    
+
                     // Set the figure data
                     window.set_figure(figure);
-                    
+
                     // Run the window (this will consume the EventLoop)
-                    window.run().await.map_err(|e| format!("Window execution failed: {}", e))?;
-                    
+                    window
+                        .run()
+                        .await
+                        .map_err(|e| format!("Window execution failed: {}", e))?;
+
                     Ok("Plot window closed successfully".to_string())
                 })
             })
@@ -70,18 +73,21 @@ fn show_plot_internal(figure: Figure) -> Result<String, String> {
             // No runtime available, create one
             let rt = tokio::runtime::Runtime::new()
                 .map_err(|e| format!("Failed to create async runtime: {}", e))?;
-                
+
             rt.block_on(async {
                 let mut window = PlotWindow::new(config)
                     .await
                     .map_err(|e| format!("Failed to create plot window: {}", e))?;
-                
+
                 // Set the figure data
                 window.set_figure(figure);
-                
+
                 // Run the window (this will consume the EventLoop)
-                window.run().await.map_err(|e| format!("Window execution failed: {}", e))?;
-                
+                window
+                    .run()
+                    .await
+                    .map_err(|e| format!("Window execution failed: {}", e))?;
+
                 Ok("Plot window closed successfully".to_string())
             })
         }

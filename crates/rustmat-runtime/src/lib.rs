@@ -41,18 +41,18 @@ pub use lapack::*;
 /// Returns an error if no builtin with that name and compatible arguments is found.
 pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
     let mut matching_builtins = Vec::new();
-    
+
     // Collect all builtins with the matching name
     for b in builtin_functions() {
         if b.name == name {
             matching_builtins.push(b);
         }
     }
-    
+
     if matching_builtins.is_empty() {
         return Err(format!("unknown builtin `{name}`"));
     }
-    
+
     // Try each builtin until one succeeds
     let mut last_error = String::new();
     for builtin in matching_builtins {
@@ -62,9 +62,14 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             Err(e) => last_error = e,
         }
     }
-    
+
     // If none succeeded, return the last error
-    Err(format!("No matching overload for `{}` with {} args: {}", name, args.len(), last_error))
+    Err(format!(
+        "No matching overload for `{}` with {} args: {}",
+        name,
+        args.len(),
+        last_error
+    ))
 }
 
 // Common mathematical functions that tests expect

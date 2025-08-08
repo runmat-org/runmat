@@ -125,58 +125,87 @@ impl JupyterPlottingManager {
         // Generate content based on output format
         match self.config.output_format {
             OutputFormat::HTML => {
-                let html_content = self.backend.display_figure(figure)
+                let html_content = self
+                    .backend
+                    .display_figure(figure)
                     .map_err(|e| KernelError::Execution(format!("HTML generation failed: {e}")))?;
-                
+
                 data.insert("text/html".to_string(), JsonValue::String(html_content));
-                metadata.insert("text/html".to_string(), JsonValue::Object({
-                    let mut meta = serde_json::Map::new();
-                    meta.insert("isolated".to_string(), JsonValue::Bool(true));
-                    meta.insert("width".to_string(), JsonValue::Number(self.config.image_width.into()));
-                    meta.insert("height".to_string(), JsonValue::Number(self.config.image_height.into()));
-                    meta
-                }));
+                metadata.insert(
+                    "text/html".to_string(),
+                    JsonValue::Object({
+                        let mut meta = serde_json::Map::new();
+                        meta.insert("isolated".to_string(), JsonValue::Bool(true));
+                        meta.insert(
+                            "width".to_string(),
+                            JsonValue::Number(self.config.image_width.into()),
+                        );
+                        meta.insert(
+                            "height".to_string(),
+                            JsonValue::Number(self.config.image_height.into()),
+                        );
+                        meta
+                    }),
+                );
             }
             OutputFormat::PNG => {
-                let png_content = self.backend.display_figure(figure)
+                let png_content = self
+                    .backend
+                    .display_figure(figure)
                     .map_err(|e| KernelError::Execution(format!("PNG generation failed: {e}")))?;
-                
+
                 data.insert("text/html".to_string(), JsonValue::String(png_content));
             }
             OutputFormat::SVG => {
-                let svg_content = self.backend.display_figure(figure)
+                let svg_content = self
+                    .backend
+                    .display_figure(figure)
                     .map_err(|e| KernelError::Execution(format!("SVG generation failed: {e}")))?;
-                
+
                 data.insert("image/svg+xml".to_string(), JsonValue::String(svg_content));
-                metadata.insert("image/svg+xml".to_string(), JsonValue::Object({
-                    let mut meta = serde_json::Map::new();
-                    meta.insert("isolated".to_string(), JsonValue::Bool(true));
-                    meta
-                }));
+                metadata.insert(
+                    "image/svg+xml".to_string(),
+                    JsonValue::Object({
+                        let mut meta = serde_json::Map::new();
+                        meta.insert("isolated".to_string(), JsonValue::Bool(true));
+                        meta
+                    }),
+                );
             }
             OutputFormat::Base64 => {
-                let base64_content = self.backend.display_figure(figure)
-                    .map_err(|e| KernelError::Execution(format!("Base64 generation failed: {e}")))?;
-                
+                let base64_content = self.backend.display_figure(figure).map_err(|e| {
+                    KernelError::Execution(format!("Base64 generation failed: {e}"))
+                })?;
+
                 data.insert("text/html".to_string(), JsonValue::String(base64_content));
             }
             OutputFormat::PlotlyJSON => {
-                let plotly_content = self.backend.display_figure(figure)
-                    .map_err(|e| KernelError::Execution(format!("Plotly generation failed: {e}")))?;
-                
+                let plotly_content = self.backend.display_figure(figure).map_err(|e| {
+                    KernelError::Execution(format!("Plotly generation failed: {e}"))
+                })?;
+
                 data.insert("text/html".to_string(), JsonValue::String(plotly_content));
-                metadata.insert("text/html".to_string(), JsonValue::Object({
-                    let mut meta = serde_json::Map::new();
-                    meta.insert("isolated".to_string(), JsonValue::Bool(true));
-                    meta
-                }));
+                metadata.insert(
+                    "text/html".to_string(),
+                    JsonValue::Object({
+                        let mut meta = serde_json::Map::new();
+                        meta.insert("isolated".to_string(), JsonValue::Bool(true));
+                        meta
+                    }),
+                );
             }
         }
 
         // Add RustMat metadata
         let mut transient = HashMap::new();
-        transient.insert("rustmat_plot_id".to_string(), JsonValue::String(format!("plot_{}", self.plot_counter)));
-        transient.insert("rustmat_version".to_string(), JsonValue::String("0.0.1".to_string()));
+        transient.insert(
+            "rustmat_plot_id".to_string(),
+            JsonValue::String(format!("plot_{}", self.plot_counter)),
+        );
+        transient.insert(
+            "rustmat_version".to_string(),
+            JsonValue::String("0.0.1".to_string()),
+        );
 
         Ok(DisplayData {
             data,
@@ -204,7 +233,7 @@ impl JupyterPlottingManager {
     /// Update configuration
     pub fn update_config(&mut self, config: JupyterPlottingConfig) {
         self.config = config;
-        
+
         // Update backend format if needed
         self.backend = match self.config.output_format {
             OutputFormat::HTML => JupyterBackend::with_format(OutputFormat::HTML),
@@ -225,7 +254,7 @@ impl JupyterPlottingManager {
         // Simple cleanup: remove oldest plots
         let mut plot_ids: Vec<String> = self.active_plots.keys().cloned().collect();
         plot_ids.sort();
-        
+
         while self.active_plots.len() > self.config.max_plots {
             if let Some(oldest_id) = plot_ids.first() {
                 self.active_plots.remove(oldest_id);
@@ -237,25 +266,37 @@ impl JupyterPlottingManager {
     }
 
     /// Handle plot function calls from MATLAB code
-    pub fn handle_plot_function(&mut self, function_name: &str, args: &[JsonValue]) -> Result<Option<DisplayData>> {
-        println!("DEBUG: Handling plot function '{}' with {} args", function_name, args.len());
+    pub fn handle_plot_function(
+        &mut self,
+        function_name: &str,
+        args: &[JsonValue],
+    ) -> Result<Option<DisplayData>> {
+        println!(
+            "DEBUG: Handling plot function '{}' with {} args",
+            function_name,
+            args.len()
+        );
 
         // Create appropriate plot based on function name
         let mut figure = Figure::new();
-        
+
         match function_name {
             "plot" => {
                 if args.len() >= 2 {
                     // Extract x and y data from arguments
                     let x_data = self.extract_numeric_array(&args[0])?;
                     let y_data = self.extract_numeric_array(&args[1])?;
-                    
+
                     if x_data.len() == y_data.len() {
                         let line_plot = rustmat_plot::plots::LinePlot::new(x_data, y_data)
-                            .map_err(|e| KernelError::Execution(format!("Failed to create line plot: {e}")))?;
+                            .map_err(|e| {
+                                KernelError::Execution(format!("Failed to create line plot: {e}"))
+                            })?;
                         figure.add_line_plot(line_plot);
                     } else {
-                        return Err(KernelError::Execution("X and Y data must have the same length".to_string()));
+                        return Err(KernelError::Execution(
+                            "X and Y data must have the same length".to_string(),
+                        ));
                     }
                 }
             }
@@ -263,21 +304,24 @@ impl JupyterPlottingManager {
                 if args.len() >= 2 {
                     let x_data = self.extract_numeric_array(&args[0])?;
                     let y_data = self.extract_numeric_array(&args[1])?;
-                    
+
                     if x_data.len() == y_data.len() {
                         let scatter_plot = rustmat_plot::plots::ScatterPlot::new(x_data, y_data)
                             .map_err(|e| KernelError::Execution(e))?;
                         figure.add_scatter_plot(scatter_plot);
                     } else {
-                        return Err(KernelError::Execution("X and Y data must have the same length".to_string()));
+                        return Err(KernelError::Execution(
+                            "X and Y data must have the same length".to_string(),
+                        ));
                     }
                 }
             }
             "bar" => {
                 if args.len() >= 1 {
                     let y_data = self.extract_numeric_array(&args[0])?;
-                    let x_labels: Vec<String> = (0..y_data.len()).map(|i| format!("{}", i)).collect();
-                    
+                    let x_labels: Vec<String> =
+                        (0..y_data.len()).map(|i| format!("{}", i)).collect();
+
                     let bar_chart = rustmat_plot::plots::BarChart::new(x_labels, y_data)
                         .map_err(|e| KernelError::Execution(e))?;
                     figure.add_bar_chart(bar_chart);
@@ -286,19 +330,22 @@ impl JupyterPlottingManager {
             "hist" => {
                 if args.len() >= 1 {
                     let data = self.extract_numeric_array(&args[0])?;
-                    let bins = if args.len() > 1 { 
-                        self.extract_number(&args[1])? as usize 
-                    } else { 
-                        20 
+                    let bins = if args.len() > 1 {
+                        self.extract_number(&args[1])? as usize
+                    } else {
+                        20
                     };
-                    
+
                     let histogram = rustmat_plot::plots::Histogram::new(data, bins)
                         .map_err(|e| KernelError::Execution(e))?;
                     figure.add_histogram(histogram);
                 }
             }
             _ => {
-                return Err(KernelError::Execution(format!("Unknown plot function: {}", function_name)));
+                return Err(KernelError::Execution(format!(
+                    "Unknown plot function: {}",
+                    function_name
+                )));
             }
         }
 
@@ -317,7 +364,9 @@ impl JupyterPlottingManager {
                     } else if let Some(num) = item.as_i64() {
                         result.push(num as f64);
                     } else {
-                        return Err(KernelError::Execution("Array must contain only numbers".to_string()));
+                        return Err(KernelError::Execution(
+                            "Array must contain only numbers".to_string(),
+                        ));
                     }
                 }
                 Ok(result)
@@ -329,16 +378,18 @@ impl JupyterPlottingManager {
                     Err(KernelError::Execution("Invalid number format".to_string()))
                 }
             }
-            _ => Err(KernelError::Execution("Expected array or number".to_string())),
+            _ => Err(KernelError::Execution(
+                "Expected array or number".to_string(),
+            )),
         }
     }
 
     /// Extract single number from JSON value
     fn extract_number(&self, value: &JsonValue) -> Result<f64> {
         match value {
-            JsonValue::Number(num) => {
-                num.as_f64().ok_or_else(|| KernelError::Execution("Invalid number format".to_string()))
-            }
+            JsonValue::Number(num) => num
+                .as_f64()
+                .ok_or_else(|| KernelError::Execution("Invalid number format".to_string())),
             _ => Err(KernelError::Execution("Expected number".to_string())),
         }
     }
@@ -353,8 +404,12 @@ impl Default for JupyterPlottingManager {
 /// Extension trait for ExecutionEngine to add Jupyter plotting support
 pub trait JupyterPlottingExtension {
     /// Handle plot functions with automatic Jupyter display
-    fn handle_jupyter_plot(&mut self, function_name: &str, args: &[JsonValue]) -> Result<Option<DisplayData>>;
-    
+    fn handle_jupyter_plot(
+        &mut self,
+        function_name: &str,
+        args: &[JsonValue],
+    ) -> Result<Option<DisplayData>>;
+
     /// Get the plotting manager
     fn plotting_manager(&mut self) -> &mut JupyterPlottingManager;
 }
@@ -377,7 +432,7 @@ mod tests {
     #[test]
     fn test_config_update() {
         let mut manager = JupyterPlottingManager::new();
-        
+
         let new_config = JupyterPlottingConfig {
             output_format: OutputFormat::SVG,
             auto_display: false,
@@ -386,7 +441,7 @@ mod tests {
             image_width: 1024,
             image_height: 768,
         };
-        
+
         manager.update_config(new_config.clone());
         assert_eq!(manager.config.output_format, OutputFormat::SVG);
         assert!(!manager.config.auto_display);
@@ -397,13 +452,13 @@ mod tests {
     fn test_plot_management() {
         let mut manager = JupyterPlottingManager::new();
         let figure = Figure::new().with_title("Test Plot");
-        
+
         // Register a plot
         let display_data = manager.register_plot(figure).unwrap();
         assert!(display_data.is_some());
         assert_eq!(manager.active_plots.len(), 1);
         assert_eq!(manager.list_plots().len(), 1);
-        
+
         // Clear plots
         manager.clear_plots();
         assert_eq!(manager.active_plots.len(), 0);
@@ -413,13 +468,13 @@ mod tests {
     #[test]
     fn test_extract_numeric_array() {
         let manager = JupyterPlottingManager::new();
-        
+
         let json_array = JsonValue::Array(vec![
             JsonValue::Number(serde_json::Number::from(1)),
             JsonValue::Number(serde_json::Number::from(2)),
             JsonValue::Number(serde_json::Number::from(3)),
         ]);
-        
+
         let result = manager.extract_numeric_array(&json_array).unwrap();
         assert_eq!(result, vec![1.0, 2.0, 3.0]);
     }
@@ -427,20 +482,22 @@ mod tests {
     #[test]
     fn test_plot_function_handling() {
         let mut manager = JupyterPlottingManager::new();
-        
+
         let x_data = JsonValue::Array(vec![
             JsonValue::Number(serde_json::Number::from(1)),
             JsonValue::Number(serde_json::Number::from(2)),
             JsonValue::Number(serde_json::Number::from(3)),
         ]);
-        
+
         let y_data = JsonValue::Array(vec![
             JsonValue::Number(serde_json::Number::from(2)),
             JsonValue::Number(serde_json::Number::from(4)),
             JsonValue::Number(serde_json::Number::from(6)),
         ]);
-        
-        let result = manager.handle_plot_function("plot", &[x_data, y_data]).unwrap();
+
+        let result = manager
+            .handle_plot_function("plot", &[x_data, y_data])
+            .unwrap();
         assert!(result.is_some());
         assert_eq!(manager.active_plots.len(), 1);
     }

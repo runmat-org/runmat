@@ -15,7 +15,9 @@ pub mod server;
 
 pub use connection::ConnectionInfo;
 pub use execution::ExecutionEngine;
-pub use jupyter_plotting::{JupyterPlottingManager, JupyterPlottingConfig, DisplayData, JupyterPlottingExtension};
+pub use jupyter_plotting::{
+    DisplayData, JupyterPlottingConfig, JupyterPlottingExtension, JupyterPlottingManager,
+};
 pub use protocol::{ExecuteReply, ExecuteRequest, JupyterMessage, MessageType};
 pub use server::KernelServer;
 

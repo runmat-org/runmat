@@ -26,16 +26,16 @@ pub enum BinOp {
     LeftDiv,
     Colon,
     // Element-wise operations
-    ElemMul,  // .*
-    ElemDiv,  // ./
-    ElemPow,  // .^
+    ElemMul,     // .*
+    ElemDiv,     // ./
+    ElemPow,     // .^
     ElemLeftDiv, // .\
     // Comparison operations
-    Equal,       // ==
-    NotEqual,    // ~=
-    Less,        // <
-    LessEqual,   // <=
-    Greater,     // >
+    Equal,        // ==
+    NotEqual,     // ~=
+    Less,         // <
+    LessEqual,    // <=
+    Greater,      // >
     GreaterEqual, // >=
 }
 
@@ -111,10 +111,18 @@ pub fn parse(input: &str) -> Result<Program, ParseError> {
                 expected: None,
             });
         }
-        tokens.push(TokenInfo { token: t.token, lexeme: t.lexeme, position: t.start });
+        tokens.push(TokenInfo {
+            token: t.token,
+            lexeme: t.lexeme,
+            position: t.start,
+        });
     }
 
-    let mut parser = Parser { tokens, pos: 0, input: input.to_string() };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        input: input.to_string(),
+    };
     parser.parse_program()
 }
 
@@ -125,7 +133,11 @@ pub fn parse_simple(input: &str) -> Result<Program, String> {
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Parse error at position {}: {}", self.position, self.message)?;
+        write!(
+            f,
+            "Parse error at position {}: {}",
+            self.position, self.message
+        )?;
         if let Some(found) = &self.found_token {
             write!(f, " (found: '{}')", found)?;
         }
@@ -173,14 +185,14 @@ impl Parser {
         }
         Ok(Program { body })
     }
-    
+
     fn error(&self, message: &str) -> ParseError {
         let (position, found_token) = if let Some(token_info) = self.tokens.get(self.pos) {
             (token_info.position, Some(token_info.lexeme.clone()))
         } else {
             (self.input.len(), None)
         };
-        
+
         ParseError {
             message: message.to_string(),
             position,
@@ -188,14 +200,14 @@ impl Parser {
             expected: None,
         }
     }
-    
+
     fn error_with_expected(&self, message: &str, expected: &str) -> ParseError {
         let (position, found_token) = if let Some(token_info) = self.tokens.get(self.pos) {
             (token_info.position, Some(token_info.lexeme.clone()))
         } else {
             (self.input.len(), None)
         };
-        
+
         ParseError {
             message: message.to_string(),
             position,
@@ -203,8 +215,6 @@ impl Parser {
             expected: Some(expected.to_string()),
         }
     }
-    
-
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match self.peek_token() {
@@ -228,7 +238,10 @@ impl Parser {
                 if self.peek_token() == Some(&Token::Ident)
                     && self.peek_token_at(1) == Some(&Token::Assign)
                 {
-                    let name = self.next().ok_or_else(|| self.error("expected identifier"))?.lexeme;
+                    let name = self
+                        .next()
+                        .ok_or_else(|| self.error("expected identifier"))?
+                        .lexeme;
                     if !self.consume(&Token::Assign) {
                         return Err(self.error_with_expected("expected assignment operator", "'='"));
                     }
@@ -405,8 +418,10 @@ impl Parser {
                     // Provide detailed error message about what token was unexpected
                     let token_desc = match info.token {
                         Token::Semicolon => "semicolon ';' (statement separator)",
-                        Token::Comma => "comma ',' (list separator)", 
-                        Token::RParen => "closing parenthesis ')' (no matching opening parenthesis)",
+                        Token::Comma => "comma ',' (list separator)",
+                        Token::RParen => {
+                            "closing parenthesis ')' (no matching opening parenthesis)"
+                        }
                         Token::RBracket => "closing bracket ']' (no matching opening bracket)",
                         Token::If => "keyword 'if' (expected in statement context)",
                         Token::For => "keyword 'for' (expected in statement context)",
@@ -416,7 +431,12 @@ impl Parser {
                         Token::Equal => "equality operator '==' (expected in comparison context)",
                         Token::Assign => "assignment operator '=' (expected in assignment context)",
                         Token::Error => "invalid character or symbol",
-                        _ => return Err(format!("unexpected token '{}' in expression context", info.lexeme)),
+                        _ => {
+                            return Err(format!(
+                                "unexpected token '{}' in expression context",
+                                info.lexeme
+                            ))
+                        }
                     };
                     Err(format!("unexpected {} in expression context", token_desc))
                 }

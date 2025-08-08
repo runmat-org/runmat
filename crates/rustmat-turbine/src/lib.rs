@@ -9,7 +9,7 @@
 
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{default_libcall_names, Linkage, Module, FuncId};
+use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use log::{debug, error, info, warn};
 use rustmat_builtins::Value;
 use rustmat_gc::gc_allocate;
@@ -244,7 +244,10 @@ pub extern "C" fn rustmat_value_neg(a_ptr: *const Value) -> *mut Value {
 
 /// Element-wise multiplication
 #[no_mangle]
-pub extern "C" fn rustmat_value_elementwise_mul(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+pub extern "C" fn rustmat_value_elementwise_mul(
+    a_ptr: *const Value,
+    b_ptr: *const Value,
+) -> *mut Value {
     if a_ptr.is_null() || b_ptr.is_null() {
         return std::ptr::null_mut();
     }
@@ -268,7 +271,10 @@ pub extern "C" fn rustmat_value_elementwise_mul(a_ptr: *const Value, b_ptr: *con
 
 /// Element-wise division
 #[no_mangle]
-pub extern "C" fn rustmat_value_elementwise_div(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+pub extern "C" fn rustmat_value_elementwise_div(
+    a_ptr: *const Value,
+    b_ptr: *const Value,
+) -> *mut Value {
     if a_ptr.is_null() || b_ptr.is_null() {
         return std::ptr::null_mut();
     }
@@ -292,7 +298,10 @@ pub extern "C" fn rustmat_value_elementwise_div(a_ptr: *const Value, b_ptr: *con
 
 /// Element-wise power
 #[no_mangle]
-pub extern "C" fn rustmat_value_elementwise_pow(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+pub extern "C" fn rustmat_value_elementwise_pow(
+    a_ptr: *const Value,
+    b_ptr: *const Value,
+) -> *mut Value {
     if a_ptr.is_null() || b_ptr.is_null() {
         return std::ptr::null_mut();
     }
@@ -316,7 +325,10 @@ pub extern "C" fn rustmat_value_elementwise_pow(a_ptr: *const Value, b_ptr: *con
 
 /// Element-wise left division
 #[no_mangle]
-pub extern "C" fn rustmat_value_elementwise_leftdiv(a_ptr: *const Value, b_ptr: *const Value) -> *mut Value {
+pub extern "C" fn rustmat_value_elementwise_leftdiv(
+    a_ptr: *const Value,
+    b_ptr: *const Value,
+) -> *mut Value {
     if a_ptr.is_null() || b_ptr.is_null() {
         return std::ptr::null_mut();
     }
@@ -467,10 +479,10 @@ fn declare_host_call_in_module<M: Module>(module: &mut M) -> FuncId {
     // Use pointer-sized types (works on both aarch64 and x86_64)
     let iptr = module.target_config().pointer_type();
 
-    sig.params.push(AbiParam::new(iptr));        // func_name_ptr
-    sig.params.push(AbiParam::new(iptr));        // args_ptr
-    sig.params.push(AbiParam::new(types::I32));  // arg_count
-    sig.params.push(AbiParam::new(iptr));        // result_ptr
+    sig.params.push(AbiParam::new(iptr)); // func_name_ptr
+    sig.params.push(AbiParam::new(iptr)); // args_ptr
+    sig.params.push(AbiParam::new(types::I32)); // arg_count
+    sig.params.push(AbiParam::new(iptr)); // result_ptr
     sig.returns.push(AbiParam::new(types::I32)); // return code
 
     // Note: module.make_signature() already sets the default call conv for the target
@@ -490,7 +502,9 @@ pub struct RuntimeContext {
 }
 
 impl RuntimeContext {
-    pub fn new(functions: std::collections::HashMap<String, rustmat_ignition::UserFunction>) -> Self {
+    pub fn new(
+        functions: std::collections::HashMap<String, rustmat_ignition::UserFunction>,
+    ) -> Self {
         Self {
             function_definitions: functions,
         }
@@ -554,7 +568,10 @@ pub extern "C" fn rustmat_call_user_function(
         // Convert arguments from f64 array
         let args = if arg_count > 0 && !args_ptr.is_null() {
             let args_slice = std::slice::from_raw_parts(args_ptr as *const f64, arg_count as usize);
-            args_slice.iter().map(|&f| Value::Num(f)).collect::<Vec<_>>()
+            args_slice
+                .iter()
+                .map(|&f| Value::Num(f))
+                .collect::<Vec<_>>()
         } else {
             Vec::new()
         };
@@ -569,8 +586,12 @@ pub extern "C" fn rustmat_call_user_function(
             );
             return -5; // Error: Wrong argument count
         }
-        
-        debug!("JIT RUNTIME: Executing function {} with {} arguments", func_name, args.len());
+
+        debug!(
+            "JIT RUNTIME: Executing function {} with {} arguments",
+            func_name,
+            args.len()
+        );
 
         // Execute function using Ignition interpreter with proper variable isolation
         match execute_user_function_isolated(function_def, &args, &context.function_definitions) {
@@ -600,7 +621,11 @@ fn execute_user_function_isolated(
     all_functions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>,
 ) -> Result<Value> {
     // Create complete variable remapping that includes all variables referenced in the function body
-    let var_map = rustmat_hir::remapping::create_complete_function_var_map(&function_def.params, &function_def.outputs, &function_def.body);
+    let var_map = rustmat_hir::remapping::create_complete_function_var_map(
+        &function_def.params,
+        &function_def.outputs,
+        &function_def.body,
+    );
     let local_var_count = var_map.len();
 
     // Remap the function body to use local variable indices
@@ -609,7 +634,7 @@ fn execute_user_function_isolated(
     // Create function variable space and bind parameters
     let func_vars_count = local_var_count.max(function_def.params.len());
     let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-    
+
     // Bind parameters to function's local variables
     for (i, _param_id) in function_def.params.iter().enumerate() {
         if i < args.len() && i < func_vars.len() {
@@ -618,13 +643,15 @@ fn execute_user_function_isolated(
     }
 
     // Execute the function using Ignition interpreter
-    let func_program = rustmat_hir::HirProgram { body: remapped_body };
+    let func_program = rustmat_hir::HirProgram {
+        body: remapped_body,
+    };
     let func_bytecode = rustmat_ignition::compile_with_functions(&func_program, all_functions)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {}", e)))?;
-    
+
     let func_result_vars = rustmat_ignition::interpret_with_vars(&func_bytecode, &mut func_vars)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {}", e)))?;
-    
+
     // Copy back the modified variables
     func_vars = func_result_vars;
 
@@ -632,11 +659,14 @@ fn execute_user_function_isolated(
     if let Some(output_var_id) = function_def.outputs.first() {
         // Use the remapped local index instead of the original VarId
         let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
-        
+
         if local_output_index < func_vars.len() {
             Ok(func_vars[local_output_index].clone())
         } else {
-            Err(TurbineError::ExecutionError(format!("Output variable index {} out of bounds", local_output_index)))
+            Err(TurbineError::ExecutionError(format!(
+                "Output variable index {} out of bounds",
+                local_output_index
+            )))
         }
     } else {
         // No explicit output variable, return the last variable or 0
@@ -769,10 +799,10 @@ impl TurbineEngine {
 
         // Create the JIT module
         let mut module = JITModule::new(builder);
-        
+
         // Declare the external function on the module using the expert's pattern
         let rustmat_call_user_function_id = declare_host_call_in_module(&mut module);
-        
+
         let ctx = module.make_context();
 
         let engine = Self {
@@ -788,8 +818,6 @@ impl TurbineEngine {
         info!("Turbine JIT engine initialized successfully for {target_triple}");
         Ok(engine)
     }
-
-
 
     /// Check if the current platform supports JIT compilation
     pub fn is_jit_supported() -> bool {
@@ -886,13 +914,13 @@ impl TurbineEngine {
     pub fn execute_compiled(&mut self, hash: u64, vars: &mut [Value]) -> Result<i32> {
         self.execute_compiled_with_functions(hash, vars, &std::collections::HashMap::new())
     }
-    
+
     /// Execute compiled function with access to function definitions for user function calls
     pub fn execute_compiled_with_functions(
-        &mut self, 
-        hash: u64, 
+        &mut self,
+        hash: u64,
         vars: &mut [Value],
-        functions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>
+        functions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>,
     ) -> Result<i32> {
         let func = self
             .cache
@@ -923,7 +951,7 @@ impl TurbineEngine {
         // Note: Using Box::leak to create a 'static reference - this is safe for our use case
         // but in production we'd want a more sophisticated lifetime management
         let static_context = Box::leak(Box::new(runtime_context));
-        
+
         // Execute the JIT compiled function
         let result = unsafe {
             if func.ptr.is_null() {
@@ -937,10 +965,10 @@ impl TurbineEngine {
             let jit_fn: extern "C" fn(*mut f64, usize) -> i32 = std::mem::transmute(func.ptr);
 
             let exec_result = jit_fn(f64_vars.as_mut_ptr(), f64_vars.len());
-            
+
             // Clear runtime context after execution
             clear_runtime_context();
-            
+
             exec_result
         };
 
@@ -992,15 +1020,13 @@ impl TurbineEngine {
 
         // Fallback to the main Ignition interpreter which supports all features
         debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
-        
+
         // Use the main Ignition interpreter which has full feature support
         match rustmat_ignition::interpret_with_vars(bytecode, vars) {
             Ok(_) => Ok((0, false)), // false indicates interpreter was used, vars are updated in-place
             Err(e) => Err(TurbineError::ExecutionError(e)),
         }
     }
-
-
 
     /// Get compilation statistics
     pub fn stats(&self) -> TurbineStats {
@@ -1166,7 +1192,7 @@ unsafe impl Sync for CompiledFunction {}
 /// These functions provide the bridge between JIT-compiled code and the RustMat runtime
 
 /// Runtime builtin dispatcher for f64-returning functions
-/// 
+///
 /// # Arguments
 /// * `name_ptr` - Pointer to function name string
 /// * `name_len` - Length of function name string  
@@ -1219,7 +1245,13 @@ pub extern "C" fn runtime_builtin_f64_dispatch(
     match rustmat_runtime::call_builtin(name, &value_args) {
         Ok(rustmat_builtins::Value::Num(result)) => result,
         Ok(rustmat_builtins::Value::Int(result)) => result as f64,
-        Ok(rustmat_builtins::Value::Bool(result)) => if result { 1.0 } else { 0.0 },
+        Ok(rustmat_builtins::Value::Bool(result)) => {
+            if result {
+                1.0
+            } else {
+                0.0
+            }
+        }
         Ok(_) => {
             log::warn!("Builtin function '{}' returned non-numeric result", name);
             0.0

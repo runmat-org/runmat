@@ -7,7 +7,7 @@ use crate::{Result, TurbineError};
 use cranelift::prelude::*;
 use cranelift_codegen::ir::ValueDef;
 use cranelift_jit::JITModule;
-use cranelift_module::{Module, FuncId};
+use cranelift_module::{FuncId, Module};
 use rustmat_ignition::Instr;
 use std::collections::{BTreeSet, HashMap};
 
@@ -228,7 +228,16 @@ impl BytecodeCompiler {
         }
 
         // Compile with proper control flow graph
-        Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, vars_ptr, function_definitions, module, rustmat_call_user_function_id)?;
+        Self::compile_with_cfg(
+            &mut builder,
+            &mut stack,
+            instructions,
+            &cfg,
+            vars_ptr,
+            function_definitions,
+            module,
+            rustmat_call_user_function_id,
+        )?;
 
         // Seal all blocks (including entry block which is in cfg.blocks)
         for (&_pc, basic_block) in &cfg.blocks {
@@ -282,7 +291,9 @@ impl BytecodeCompiler {
                     }
                     Instr::LoadString(_) => {
                         // Strings cannot be compiled to JIT - fall back to interpreter
-                        return Err(TurbineError::ExecutionError("String operations not supported in JIT mode".to_string()));
+                        return Err(TurbineError::ExecutionError(
+                            "String operations not supported in JIT mode".to_string(),
+                        ));
                     }
                     Instr::LoadVar(idx) => {
                         let idx_val = builder.ins().iconst(types::I64, *idx as i64);
@@ -332,7 +343,9 @@ impl BytecodeCompiler {
                     }
                     Instr::Transpose => {
                         // Matrix transpose is complex - fall back to interpreter
-                        return Err(TurbineError::ExecutionError("Matrix transpose not supported in JIT mode".to_string()));
+                        return Err(TurbineError::ExecutionError(
+                            "Matrix transpose not supported in JIT mode".to_string(),
+                        ));
                     }
                     Instr::ElemMul => {
                         let (a, b) = local_stack.pop_two()?;
@@ -408,13 +421,13 @@ impl BytecodeCompiler {
                     Instr::CreateMatrixDynamic(num_rows) => {
                         // Dynamic matrix creation - fall back to runtime for complex concatenation
                         let mut rows_data = Vec::new();
-                        
+
                         for _ in 0..*num_rows {
                             // Pop row length
                             let row_len_val = local_stack.pop()?;
                             let row_len = Self::extract_f64_from_value(builder, row_len_val)
                                 .map_err(|e| TurbineError::ExecutionError(e))?;
-                            
+
                             // Pop row elements
                             let mut row_values = Vec::new();
                             for _ in 0..(row_len as usize) {
@@ -424,27 +437,29 @@ impl BytecodeCompiler {
                             rows_data.push(row_values);
                         }
                         rows_data.reverse();
-                        
-                                            let result = Self::call_runtime_create_matrix_dynamic(builder, &rows_data);
-                    local_stack.push(result);
-                }
-                Instr::CreateRange(has_step) => {
-                    if *has_step {
-                        // Call runtime create_range with step
-                        let end = local_stack.pop()?;
-                        let step = local_stack.pop()?;
-                        let start = local_stack.pop()?;
-                        let result = Self::call_runtime_create_range_with_step(builder, start, step, end);
-                        local_stack.push(result);
-                    } else {
-                        // Call runtime create_range without step
-                        let end = local_stack.pop()?;
-                        let start = local_stack.pop()?;
-                        let result = Self::call_runtime_create_range(builder, start, end);
+
+                        let result = Self::call_runtime_create_matrix_dynamic(builder, &rows_data);
                         local_stack.push(result);
                     }
-                }
-                Instr::Index(num_indices) => {
+                    Instr::CreateRange(has_step) => {
+                        if *has_step {
+                            // Call runtime create_range with step
+                            let end = local_stack.pop()?;
+                            let step = local_stack.pop()?;
+                            let start = local_stack.pop()?;
+                            let result = Self::call_runtime_create_range_with_step(
+                                builder, start, step, end,
+                            );
+                            local_stack.push(result);
+                        } else {
+                            // Call runtime create_range without step
+                            let end = local_stack.pop()?;
+                            let start = local_stack.pop()?;
+                            let result = Self::call_runtime_create_range(builder, start, end);
+                            local_stack.push(result);
+                        }
+                    }
+                    Instr::Index(num_indices) => {
                         // High-performance direct indexing implementation
                         let mut indices = Vec::new();
                         for _ in 0..*num_indices {
@@ -514,8 +529,15 @@ impl BytecodeCompiler {
                             args.push(local_stack.pop()?);
                         }
                         args.reverse();
-                        
-                        let result = Self::call_user_function_jit(builder, module, rustmat_call_user_function_id, func_name, &args, function_definitions)?;
+
+                        let result = Self::call_user_function_jit(
+                            builder,
+                            module,
+                            rustmat_call_user_function_id,
+                            func_name,
+                            &args,
+                            function_definitions,
+                        )?;
                         local_stack.push(result);
                     }
                     Instr::LoadLocal(offset) => {
@@ -584,8 +606,6 @@ impl BytecodeCompiler {
         Ok(())
     }
 
-
-
     // Runtime interface functions for f64 operations
 
     fn call_runtime_add_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
@@ -603,21 +623,24 @@ impl BytecodeCompiler {
         function_definitions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>,
     ) -> Result<Value> {
         // Look up the function definition
-        let function_def = function_definitions.get(func_name)
-            .ok_or_else(|| TurbineError::ExecutionError(format!("Unknown function: {}", func_name)))?;
-        
+        let function_def = function_definitions.get(func_name).ok_or_else(|| {
+            TurbineError::ExecutionError(format!("Unknown function: {}", func_name))
+        })?;
+
         // Validate argument count
         if args.len() != function_def.params.len() {
             return Err(TurbineError::ExecutionError(format!(
-                "Function {} expects {} arguments, got {}", 
-                func_name, function_def.params.len(), args.len()
+                "Function {} expects {} arguments, got {}",
+                func_name,
+                function_def.params.len(),
+                args.len()
             )));
         }
-        
+
         // For JIT compilation of user-defined functions, we need to call a runtime function
         // that can handle the recursive compilation and execution of the specific function.
         // This provides proper isolation and allows for nested function calls.
-        
+
         // Prepare arguments array
         let args_slot = if !args.is_empty() {
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -626,19 +649,19 @@ impl BytecodeCompiler {
                 8, // alignment for f64
             ));
             let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
-            
+
             // Store arguments
             for (i, &arg) in args.iter().enumerate() {
                 let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
                 let arg_addr = builder.ins().iadd(args_ptr, offset);
                 builder.ins().store(MemFlags::new(), arg, arg_addr, 0);
             }
-            
+
             Some((args_ptr, slot))
         } else {
             None
         };
-        
+
         // Prepare function name as C string
         let func_name_bytes = func_name.as_bytes();
         let name_slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -647,7 +670,7 @@ impl BytecodeCompiler {
             1,
         ));
         let name_ptr = builder.ins().stack_addr(types::I64, name_slot, 0);
-        
+
         // Store function name with null terminator
         for (i, &byte) in func_name_bytes.iter().enumerate() {
             let offset = builder.ins().iconst(types::I64, i as i64);
@@ -656,18 +679,22 @@ impl BytecodeCompiler {
             builder.ins().store(MemFlags::new(), byte_val, byte_addr, 0);
         }
         // Null terminator
-        let null_offset = builder.ins().iconst(types::I64, func_name_bytes.len() as i64);
+        let null_offset = builder
+            .ins()
+            .iconst(types::I64, func_name_bytes.len() as i64);
         let null_addr = builder.ins().iadd(name_ptr, null_offset);
         let null_val = builder.ins().iconst(types::I8, 0);
         builder.ins().store(MemFlags::new(), null_val, null_addr, 0);
-        
+
         // Use the expert's pattern: declare_func_in_func to get a valid FuncRef
-        let runtime_fn = module.declare_func_in_func(rustmat_call_user_function_id, &mut builder.func);
-        
+        let runtime_fn =
+            module.declare_func_in_func(rustmat_call_user_function_id, &mut builder.func);
+
         // Allocate space for the result (f64)
-        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
+        let result_slot =
+            builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
         let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
-        
+
         let call_args = if let Some((args_ptr, _)) = args_slot {
             vec![
                 name_ptr,
@@ -683,41 +710,45 @@ impl BytecodeCompiler {
                 result_ptr,
             ]
         };
-        
+
         let call = builder.ins().call(runtime_fn, &call_args);
         let status = builder.inst_results(call)[0]; // i32 status code
-        
+
         // Check status for error handling - if non-zero, we have an error
         let zero = builder.ins().iconst(types::I32, 0);
         let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
-        
+
         // Create blocks for error and success paths
         let error_block = builder.create_block();
         let success_block = builder.create_block();
         let after_block = builder.create_block();
-        
-        builder.ins().brif(is_error, error_block, &[], success_block, &[]);
-        
+
+        builder
+            .ins()
+            .brif(is_error, error_block, &[], success_block, &[]);
+
         // Error block: return 0.0 to indicate error (keeps variable unchanged)
         builder.switch_to_block(error_block);
         let error_result = builder.ins().f64const(0.0);
         builder.ins().jump(after_block, &[error_result]);
-        
+
         // Success block: load the actual result
         builder.switch_to_block(success_block);
-        let success_result = builder.ins().load(types::F64, MemFlags::new(), result_ptr, 0);
+        let success_result = builder
+            .ins()
+            .load(types::F64, MemFlags::new(), result_ptr, 0);
         builder.ins().jump(after_block, &[success_result]);
-        
+
         // After block: get the final result
         builder.switch_to_block(after_block);
         builder.append_block_param(after_block, types::F64);
         let result = builder.block_params(after_block)[0];
-        
+
         // Seal all blocks
         builder.seal_block(error_block);
         builder.seal_block(success_block);
         builder.seal_block(after_block);
-        
+
         Ok(result)
     }
 
@@ -736,10 +767,10 @@ impl BytecodeCompiler {
     fn call_runtime_pow_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
         // Simplified power implementation for JIT - handles common cases efficiently
         // Complex power operations are delegated to the interpreter
-        
+
         // For common integer exponents, use optimized implementations
         // For general case, provide a simple approximation or delegate to interpreter
-        
+
         // Simple implementation: return a * a for most cases (placeholder)
         // In a complete implementation, this would handle integer exponents efficiently
         // and delegate complex cases to the interpreter
@@ -793,64 +824,94 @@ impl BytecodeCompiler {
     }
 
     // Element-wise operations that handle both scalars and matrices
-    fn call_runtime_elementwise_mul_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
+    fn call_runtime_elementwise_mul_static(
+        builder: &mut FunctionBuilder,
+        a: Value,
+        b: Value,
+    ) -> Value {
         Self::call_extern_binary_function(builder, "rustmat_value_elementwise_mul", a, b)
     }
 
-    fn call_runtime_elementwise_div_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
+    fn call_runtime_elementwise_div_static(
+        builder: &mut FunctionBuilder,
+        a: Value,
+        b: Value,
+    ) -> Value {
         Self::call_extern_binary_function(builder, "rustmat_value_elementwise_div", a, b)
     }
 
-    fn call_runtime_elementwise_pow_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
+    fn call_runtime_elementwise_pow_static(
+        builder: &mut FunctionBuilder,
+        a: Value,
+        b: Value,
+    ) -> Value {
         Self::call_extern_binary_function(builder, "rustmat_value_elementwise_pow", a, b)
     }
 
-    fn call_runtime_elementwise_leftdiv_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
+    fn call_runtime_elementwise_leftdiv_static(
+        builder: &mut FunctionBuilder,
+        a: Value,
+        b: Value,
+    ) -> Value {
         Self::call_extern_binary_function(builder, "rustmat_value_elementwise_leftdiv", a, b)
     }
 
     /// Compile high-performance matrix indexing with bounds checking
     /// Generates optimized native code for direct memory access
-    fn compile_matrix_indexing(builder: &mut FunctionBuilder, base: Value, indices: &[Value]) -> std::result::Result<Value, String> {
+    fn compile_matrix_indexing(
+        builder: &mut FunctionBuilder,
+        base: Value,
+        indices: &[Value],
+    ) -> std::result::Result<Value, String> {
         // Get the matrix data pointer and metadata
         let matrix_ptr = Self::extract_matrix_data_ptr(builder, base)?;
         let matrix_rows = Self::extract_matrix_rows(builder, base)?;
         let matrix_cols = Self::extract_matrix_cols(builder, base)?;
         let matrix_data = Self::extract_matrix_data_len(builder, base)?;
-        
+
         match indices.len() {
             1 => {
                 // Linear indexing: A(i) - convert 1-based to 0-based and bounds check
                 let index = indices[0];
                 let index_f64 = Self::value_to_f64(builder, index)?;
                 let index_i64 = builder.ins().fcvt_to_sint(types::I64, index_f64);
-                
+
                 // Convert from 1-based to 0-based indexing
                 let one = builder.ins().iconst(types::I64, 1);
                 let zero_based_index = builder.ins().isub(index_i64, one);
-                
+
                 // Bounds checking: 0 <= index < data_len
                 let zero = builder.ins().iconst(types::I64, 0);
-                let bounds_low = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, zero_based_index, zero);
-                let bounds_high = builder.ins().icmp(IntCC::UnsignedLessThan, zero_based_index, matrix_data);
+                let bounds_low =
+                    builder
+                        .ins()
+                        .icmp(IntCC::SignedGreaterThanOrEqual, zero_based_index, zero);
+                let bounds_high =
+                    builder
+                        .ins()
+                        .icmp(IntCC::UnsignedLessThan, zero_based_index, matrix_data);
                 let bounds_valid = builder.ins().band(bounds_low, bounds_high);
-                
+
                 // Create bounds check branch
                 let bounds_ok_block = builder.create_block();
                 let bounds_fail_block = builder.create_block();
-                builder.ins().brif(bounds_valid, bounds_ok_block, &[], bounds_fail_block, &[]);
-                
+                builder
+                    .ins()
+                    .brif(bounds_valid, bounds_ok_block, &[], bounds_fail_block, &[]);
+
                 // Bounds failure block - trap
                 builder.switch_to_block(bounds_fail_block);
                 builder.ins().trap(TrapCode::unwrap_user(0)); // Index out of bounds
-                
+
                 // Bounds success block - perform the indexing
                 builder.switch_to_block(bounds_ok_block);
                 let element_size = builder.ins().iconst(types::I64, 8); // f64 is 8 bytes
                 let offset = builder.ins().imul(zero_based_index, element_size);
                 let element_ptr = builder.ins().iadd(matrix_ptr, offset);
-                let value = builder.ins().load(types::F64, MemFlags::trusted(), element_ptr, 0);
-                
+                let value = builder
+                    .ins()
+                    .load(types::F64, MemFlags::trusted(), element_ptr, 0);
+
                 // Convert f64 to Value::Num
                 Self::f64_to_value_num(builder, value)
             }
@@ -858,83 +919,115 @@ impl BytecodeCompiler {
                 // 2D indexing: A(i,j) - convert row,col to linear index with bounds checking
                 let row_index = indices[0];
                 let col_index = indices[1];
-                
+
                 let row_f64 = Self::value_to_f64(builder, row_index)?;
                 let col_f64 = Self::value_to_f64(builder, col_index)?;
                 let row_i64 = builder.ins().fcvt_to_sint(types::I64, row_f64);
                 let col_i64 = builder.ins().fcvt_to_sint(types::I64, col_f64);
-                
+
                 // Convert from 1-based to 0-based
                 let one = builder.ins().iconst(types::I64, 1);
                 let row_zero_based = builder.ins().isub(row_i64, one);
                 let col_zero_based = builder.ins().isub(col_i64, one);
-                
+
                 // Bounds checking: 0 <= row < matrix_rows && 0 <= col < matrix_cols
                 let zero = builder.ins().iconst(types::I64, 0);
-                let row_bounds_low = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, row_zero_based, zero);
-                let row_bounds_high = builder.ins().icmp(IntCC::UnsignedLessThan, row_zero_based, matrix_rows);
-                let col_bounds_low = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, col_zero_based, zero);
-                let col_bounds_high = builder.ins().icmp(IntCC::UnsignedLessThan, col_zero_based, matrix_cols);
-                
+                let row_bounds_low =
+                    builder
+                        .ins()
+                        .icmp(IntCC::SignedGreaterThanOrEqual, row_zero_based, zero);
+                let row_bounds_high =
+                    builder
+                        .ins()
+                        .icmp(IntCC::UnsignedLessThan, row_zero_based, matrix_rows);
+                let col_bounds_low =
+                    builder
+                        .ins()
+                        .icmp(IntCC::SignedGreaterThanOrEqual, col_zero_based, zero);
+                let col_bounds_high =
+                    builder
+                        .ins()
+                        .icmp(IntCC::UnsignedLessThan, col_zero_based, matrix_cols);
+
                 let row_bounds = builder.ins().band(row_bounds_low, row_bounds_high);
                 let col_bounds = builder.ins().band(col_bounds_low, col_bounds_high);
                 let bounds_valid = builder.ins().band(row_bounds, col_bounds);
-                
+
                 // Create bounds check branch
                 let bounds_ok_block = builder.create_block();
                 let bounds_fail_block = builder.create_block();
-                builder.ins().brif(bounds_valid, bounds_ok_block, &[], bounds_fail_block, &[]);
-                
+                builder
+                    .ins()
+                    .brif(bounds_valid, bounds_ok_block, &[], bounds_fail_block, &[]);
+
                 // Bounds failure block
                 builder.switch_to_block(bounds_fail_block);
                 builder.ins().trap(TrapCode::unwrap_user(0)); // Index out of bounds
-                
+
                 // Bounds success block - calculate linear index: row * cols + col
                 builder.switch_to_block(bounds_ok_block);
                 let linear_index = builder.ins().imul(row_zero_based, matrix_cols);
                 let linear_index = builder.ins().iadd(linear_index, col_zero_based);
-                
+
                 let element_size = builder.ins().iconst(types::I64, 8);
                 let offset = builder.ins().imul(linear_index, element_size);
                 let element_ptr = builder.ins().iadd(matrix_ptr, offset);
-                let value = builder.ins().load(types::F64, MemFlags::trusted(), element_ptr, 0);
-                
+                let value = builder
+                    .ins()
+                    .load(types::F64, MemFlags::trusted(), element_ptr, 0);
+
                 Self::f64_to_value_num(builder, value)
             }
-            _ => {
-                Err("Unsupported number of indices in JIT compiler".to_string())
-            }
+            _ => Err("Unsupported number of indices in JIT compiler".to_string()),
         }
     }
 
     /// Extract matrix data pointer from Value::Matrix
-    fn extract_matrix_data_ptr(builder: &mut FunctionBuilder, matrix_value: Value) -> std::result::Result<Value, String> {
+    fn extract_matrix_data_ptr(
+        builder: &mut FunctionBuilder,
+        matrix_value: Value,
+    ) -> std::result::Result<Value, String> {
         // This assumes the Value is a pointer to a Matrix struct
         // The Matrix struct layout: data_ptr, rows, cols
         // We need to load the data pointer (first field)
         let matrix_ptr = matrix_value; // Assume this is already a pointer to Matrix
-        let data_ptr = builder.ins().load(types::I64, MemFlags::trusted(), matrix_ptr, 0);
+        let data_ptr = builder
+            .ins()
+            .load(types::I64, MemFlags::trusted(), matrix_ptr, 0);
         Ok(data_ptr)
     }
 
     /// Extract matrix rows from Value::Matrix
-    fn extract_matrix_rows(builder: &mut FunctionBuilder, matrix_value: Value) -> std::result::Result<Value, String> {
+    fn extract_matrix_rows(
+        builder: &mut FunctionBuilder,
+        matrix_value: Value,
+    ) -> std::result::Result<Value, String> {
         let matrix_ptr = matrix_value;
         // Rows is the second field (offset 8 bytes after data pointer)
-        let rows = builder.ins().load(types::I64, MemFlags::trusted(), matrix_ptr, 8);
+        let rows = builder
+            .ins()
+            .load(types::I64, MemFlags::trusted(), matrix_ptr, 8);
         Ok(rows)
     }
 
     /// Extract matrix columns from Value::Matrix  
-    fn extract_matrix_cols(builder: &mut FunctionBuilder, matrix_value: Value) -> std::result::Result<Value, String> {
+    fn extract_matrix_cols(
+        builder: &mut FunctionBuilder,
+        matrix_value: Value,
+    ) -> std::result::Result<Value, String> {
         let matrix_ptr = matrix_value;
         // Cols is the third field (offset 16 bytes after data pointer)
-        let cols = builder.ins().load(types::I64, MemFlags::trusted(), matrix_ptr, 16);
+        let cols = builder
+            .ins()
+            .load(types::I64, MemFlags::trusted(), matrix_ptr, 16);
         Ok(cols)
     }
 
     /// Extract matrix data length from Value::Matrix
-    fn extract_matrix_data_len(builder: &mut FunctionBuilder, matrix_value: Value) -> std::result::Result<Value, String> {
+    fn extract_matrix_data_len(
+        builder: &mut FunctionBuilder,
+        matrix_value: Value,
+    ) -> std::result::Result<Value, String> {
         // Data length = rows * cols
         let rows = Self::extract_matrix_rows(builder, matrix_value)?;
         let cols = Self::extract_matrix_cols(builder, matrix_value)?;
@@ -943,18 +1036,24 @@ impl BytecodeCompiler {
     }
 
     /// Convert Value to f64 (assumes Value::Num)
-    fn value_to_f64(_builder: &mut FunctionBuilder, value: Value) -> std::result::Result<Value, String> {
+    fn value_to_f64(
+        _builder: &mut FunctionBuilder,
+        value: Value,
+    ) -> std::result::Result<Value, String> {
         // In the RustMat system, stack values in the JIT are already f64 primitives
         // The Value enum conversion happens at the interpreter boundary
         // This function validates that we have a numeric value and returns it directly
-        
+
         // For production: we assume the JIT compiler only operates on validated numeric values
         // Type checking has already been done in HIR phase
         Ok(value)
     }
 
     /// Convert f64 to Value::Num
-    fn f64_to_value_num(_builder: &mut FunctionBuilder, f64_val: Value) -> std::result::Result<Value, String> {
+    fn f64_to_value_num(
+        _builder: &mut FunctionBuilder,
+        f64_val: Value,
+    ) -> std::result::Result<Value, String> {
         // In the JIT context, we work directly with f64 primitives on the Cranelift stack
         // The conversion to Value::Num happens at runtime boundaries
         // This is a performance optimization - JIT operates on raw f64, not boxed Values
@@ -962,11 +1061,14 @@ impl BytecodeCompiler {
     }
 
     /// Extract f64 value from a Value (for runtime calls)
-    fn extract_f64_from_value(builder: &mut FunctionBuilder, cranelift_value: Value) -> std::result::Result<f64, String> {
+    fn extract_f64_from_value(
+        builder: &mut FunctionBuilder,
+        cranelift_value: Value,
+    ) -> std::result::Result<f64, String> {
         // In the JIT context, Cranelift Values are compile-time representations
         // We cannot extract runtime f64 values at compile time
         // This function should only be called for constant values
-        
+
         // For dynamic values, we generate code that performs the extraction at runtime
         // For constants, we extract them via the constant pool
         match builder.func.dfg.value_def(cranelift_value) {
@@ -981,10 +1083,13 @@ impl BytecodeCompiler {
     }
 
     /// Call runtime for dynamic matrix creation
-    fn call_runtime_create_matrix_dynamic(builder: &mut FunctionBuilder, rows_data: &[Vec<Value>]) -> Value {
+    fn call_runtime_create_matrix_dynamic(
+        builder: &mut FunctionBuilder,
+        rows_data: &[Vec<Value>],
+    ) -> Value {
         // Simplified matrix creation for JIT - complex matrix operations are
         // delegated to the interpreter which has full GC and type system support
-        
+
         // For JIT compilation, return a null pointer - the interpreter will handle
         // actual matrix creation when this code path is taken
         let _rows_count = rows_data.len();
@@ -995,7 +1100,7 @@ impl BytecodeCompiler {
     fn call_runtime_create_range(builder: &mut FunctionBuilder, start: Value, end: Value) -> Value {
         // Simplified range creation for JIT - complex range operations are
         // delegated to the interpreter which has full type system support
-        
+
         let _start = start;
         let _end = end;
         // Return null pointer - interpreter will handle actual range creation
@@ -1003,7 +1108,12 @@ impl BytecodeCompiler {
     }
 
     /// Call runtime for range creation with step (start:step:end)
-    fn call_runtime_create_range_with_step(builder: &mut FunctionBuilder, start: Value, step: Value, end: Value) -> Value {
+    fn call_runtime_create_range_with_step(
+        builder: &mut FunctionBuilder,
+        start: Value,
+        step: Value,
+        end: Value,
+    ) -> Value {
         // Simplified range creation for JIT - delegate to interpreter
         let _start = start;
         let _step = step;
@@ -1013,7 +1123,12 @@ impl BytecodeCompiler {
     }
 
     /// High-performance binary operations optimized for computational workloads
-    fn call_extern_binary_function(builder: &mut FunctionBuilder, func_name: &str, a: Value, b: Value) -> Value {
+    fn call_extern_binary_function(
+        builder: &mut FunctionBuilder,
+        func_name: &str,
+        a: Value,
+        b: Value,
+    ) -> Value {
         // Implement critical binary operations using native CPU instructions
         // for maximum performance in computational workflows
         match func_name {
@@ -1096,7 +1211,7 @@ impl BytecodeCompiler {
     }
 
     /// Call runtime builtin function that returns f64 (scalars, comparisons, etc.)
-    /// 
+    ///
     /// This implementation provides direct JIT compilation of builtin functions
     /// for maximum performance, avoiding external function call overhead.
     fn call_runtime_builtin_f64_impl(
@@ -1105,9 +1220,9 @@ impl BytecodeCompiler {
         args: &[Value],
     ) -> Value {
         // HYBRID TIERED APPROACH: Inline fast operations, delegate complex ones
-        // 
+        //
         // This generalizes well across platforms and follows V8-inspired architecture:
-        // - Tier 1: Fast inline operations for maximum JIT performance  
+        // - Tier 1: Fast inline operations for maximum JIT performance
         // - Tier 2: Fallback to interpreter for complex/rare operations
         //
         // Benefits:
@@ -1115,55 +1230,27 @@ impl BytecodeCompiler {
         // - Maximum performance for hot code paths
         // - Clean architectural separation
         // - Platform independent
-        
+
         match name {
             // Tier 1: Inline the most performance-critical operations using Cranelift instructions
-            "abs" if args.len() == 1 => {
-                builder.ins().fabs(args[0])
-            }
-            "sqrt" if args.len() == 1 => {
-                builder.ins().sqrt(args[0])
-            }
-            "max" if args.len() == 2 => {
-                builder.ins().fmax(args[0], args[1])
-            }
-            "min" if args.len() == 2 => {
-                builder.ins().fmin(args[0], args[1])
-            }
-            "floor" if args.len() == 1 => {
-                builder.ins().floor(args[0])
-            }
-            "ceil" if args.len() == 1 => {
-                builder.ins().ceil(args[0])
-            }
-            "round" if args.len() == 1 => {
-                builder.ins().nearest(args[0])
-            }
-            "trunc" if args.len() == 1 => {
-                builder.ins().trunc(args[0])
-            }
-            
+            "abs" if args.len() == 1 => builder.ins().fabs(args[0]),
+            "sqrt" if args.len() == 1 => builder.ins().sqrt(args[0]),
+            "max" if args.len() == 2 => builder.ins().fmax(args[0], args[1]),
+            "min" if args.len() == 2 => builder.ins().fmin(args[0], args[1]),
+            "floor" if args.len() == 1 => builder.ins().floor(args[0]),
+            "ceil" if args.len() == 1 => builder.ins().ceil(args[0]),
+            "round" if args.len() == 1 => builder.ins().nearest(args[0]),
+            "trunc" if args.len() == 1 => builder.ins().trunc(args[0]),
+
             // Tier 2: High-precision mathematical functions with sophisticated implementations
             // These rival libm performance while avoiding external function calls
-            "sin" if args.len() == 1 => {
-                Self::compile_sin_optimized(builder, args[0])
-            }
-            "cos" if args.len() == 1 => {
-                Self::compile_cos_optimized(builder, args[0])
-            }
-            "tan" if args.len() == 1 => {
-                Self::compile_tan_optimized(builder, args[0])
-            }
-            "exp" if args.len() == 1 => {
-                Self::compile_exp_optimized(builder, args[0])
-            }
-            "log" if args.len() == 1 => {
-                Self::compile_log_optimized(builder, args[0])
-            }
-            "pow" if args.len() == 2 => {
-                Self::compile_pow_optimized(builder, args[0], args[1])
-            }
-            
+            "sin" if args.len() == 1 => Self::compile_sin_optimized(builder, args[0]),
+            "cos" if args.len() == 1 => Self::compile_cos_optimized(builder, args[0]),
+            "tan" if args.len() == 1 => Self::compile_tan_optimized(builder, args[0]),
+            "exp" if args.len() == 1 => Self::compile_exp_optimized(builder, args[0]),
+            "log" if args.len() == 1 => Self::compile_log_optimized(builder, args[0]),
+            "pow" if args.len() == 2 => Self::compile_pow_optimized(builder, args[0], args[1]),
+
             _ => {
                 // For unrecognized functions, return a neutral value
                 // The interpreter will handle these cases with full precision
@@ -1178,14 +1265,12 @@ impl BytecodeCompiler {
         name: &str,
         args: &[Value],
     ) -> Value {
-
-
         // MATRIX OPERATIONS: Simplified JIT implementation
         //
         // For matrix operations in JIT code, we provide simplified implementations
         // that handle the most common cases efficiently. Complex matrix operations
         // are delegated to the interpreter which has full access to the runtime.
-        
+
         match name {
             "zeros" | "ones" | "eye" => {
                 // Matrix creation functions return null pointers in JIT context
@@ -1323,10 +1408,10 @@ impl BytecodeCompiler {
         let x7 = builder.ins().fmul(x5, x2);
         let x9 = builder.ins().fmul(x7, x2);
 
-        let c1 = builder.ins().f64const(-1.0 / 6.0);           // -1/3!
-        let c2 = builder.ins().f64const(1.0 / 120.0);          // 1/5!
-        let c3 = builder.ins().f64const(-1.0 / 5040.0);        // -1/7!
-        let c4 = builder.ins().f64const(1.0 / 362880.0);       // 1/9!
+        let c1 = builder.ins().f64const(-1.0 / 6.0); // -1/3!
+        let c2 = builder.ins().f64const(1.0 / 120.0); // 1/5!
+        let c3 = builder.ins().f64const(-1.0 / 5040.0); // -1/7!
+        let c4 = builder.ins().f64const(1.0 / 362880.0); // 1/9!
 
         let term1 = reduced_x;
         let term2 = builder.ins().fmul(x3, c1);
@@ -1359,11 +1444,13 @@ impl BytecodeCompiler {
     fn compile_exp_optimized(builder: &mut FunctionBuilder, x: Value) -> Value {
         // Handle special cases
         let one = builder.ins().f64const(1.0);
-        
+
         // For small x, use 1 + x (first order approximation)
         let abs_x = builder.ins().fabs(x);
         let small_threshold = builder.ins().f64const(1e-10);
-        let is_small = builder.ins().fcmp(FloatCC::LessThan, abs_x, small_threshold);
+        let is_small = builder
+            .ins()
+            .fcmp(FloatCC::LessThan, abs_x, small_threshold);
         let small_result = builder.ins().fadd(one, x);
 
         // For normal range, use optimized polynomial
@@ -1373,10 +1460,10 @@ impl BytecodeCompiler {
         let x4 = builder.ins().fmul(x3, x);
         let x5 = builder.ins().fmul(x4, x);
 
-        let c1 = builder.ins().f64const(0.5);           // 1/2!
-        let c2 = builder.ins().f64const(1.0 / 6.0);     // 1/3!
-        let c3 = builder.ins().f64const(1.0 / 24.0);    // 1/4!
-        let c4 = builder.ins().f64const(1.0 / 120.0);   // 1/5!
+        let c1 = builder.ins().f64const(0.5); // 1/2!
+        let c2 = builder.ins().f64const(1.0 / 6.0); // 1/3!
+        let c3 = builder.ins().f64const(1.0 / 24.0); // 1/4!
+        let c4 = builder.ins().f64const(1.0 / 120.0); // 1/5!
 
         let term1 = one;
         let term2 = x;
@@ -1400,19 +1487,19 @@ impl BytecodeCompiler {
         // Handle edge cases: log(1) = 0, log(x) undefined for x <= 0
         let zero = builder.ins().f64const(0.0);
         let one = builder.ins().f64const(1.0);
-        
+
         // Check if x = 1 (common case)
         let is_one = builder.ins().fcmp(FloatCC::Equal, x, one);
-        
+
         // For x near 1, use series: log(1+u) ≈ u - u²/2 + u³/3 - u⁴/4
         let u = builder.ins().fsub(x, one);
         let u2 = builder.ins().fmul(u, u);
         let u3 = builder.ins().fmul(u2, u);
         let u4 = builder.ins().fmul(u3, u);
 
-        let c1 = builder.ins().f64const(-0.5);      // -1/2
+        let c1 = builder.ins().f64const(-0.5); // -1/2
         let c2 = builder.ins().f64const(1.0 / 3.0); // 1/3
-        let c3 = builder.ins().f64const(-0.25);     // -1/4
+        let c3 = builder.ins().f64const(-0.25); // -1/4
 
         let term1 = u;
         let term2 = builder.ins().fmul(u2, c1);
@@ -1436,10 +1523,10 @@ impl BytecodeCompiler {
         // Handle common cases efficiently
         // pow(x, 0) = 1
         let exp_is_zero = builder.ins().fcmp(FloatCC::Equal, exponent, zero);
-        
+
         // pow(x, 1) = x
         let exp_is_one = builder.ins().fcmp(FloatCC::Equal, exponent, one);
-        
+
         // pow(x, 2) = x * x
         let exp_is_two = builder.ins().fcmp(FloatCC::Equal, exponent, two);
         let x_squared = builder.ins().fmul(base, base);

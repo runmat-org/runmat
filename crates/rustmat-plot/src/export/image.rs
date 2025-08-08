@@ -51,7 +51,7 @@ impl Default for ImageExportSettings {
         Self {
             width: 800,
             height: 600,
-            samples: 4, // 4x MSAA
+            samples: 4,                             // 4x MSAA
             background_color: [1.0, 1.0, 1.0, 1.0], // White background
             quality: 0.95,
             include_metadata: true,
@@ -93,9 +93,14 @@ impl ImageExporter {
     }
 
     /// Export figure to PNG file (placeholder implementation)
-    pub async fn export_png<P: AsRef<Path>>(&self, _figure: &mut crate::plots::Figure, path: P) -> Result<(), String> {
+    pub async fn export_png<P: AsRef<Path>>(
+        &self,
+        _figure: &mut crate::plots::Figure,
+        path: P,
+    ) -> Result<(), String> {
         // TODO: Implement actual rendering pipeline integration
-        let placeholder_data = vec![255u8; (self.settings.width * self.settings.height * 4) as usize];
+        let placeholder_data =
+            vec![255u8; (self.settings.width * self.settings.height * 4) as usize];
         self.save_png(&placeholder_data, path).await
     }
 
@@ -103,12 +108,9 @@ impl ImageExporter {
     async fn save_png<P: AsRef<Path>>(&self, data: &[u8], path: P) -> Result<(), String> {
         use image::{ImageBuffer, Rgba};
 
-        let image = ImageBuffer::<Rgba<u8>, _>::from_raw(
-            self.settings.width,
-            self.settings.height,
-            data,
-        )
-        .ok_or("Failed to create image buffer")?;
+        let image =
+            ImageBuffer::<Rgba<u8>, _>::from_raw(self.settings.width, self.settings.height, data)
+                .ok_or("Failed to create image buffer")?;
 
         image
             .save(path)

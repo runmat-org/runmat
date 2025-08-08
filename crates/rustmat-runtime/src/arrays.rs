@@ -13,14 +13,14 @@ fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Matrix, String> {
     if n < 1 {
         return Err("Number of points must be positive".to_string());
     }
-    
+
     if n == 1 {
         return Ok(Matrix::new(vec![x2], 1, 1)?);
     }
-    
+
     let n_usize = n as usize;
     let mut data = Vec::with_capacity(n_usize);
-    
+
     if n == 2 {
         data.push(x1);
         data.push(x2);
@@ -32,7 +32,7 @@ fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Matrix, String> {
         // Ensure the last point is exactly x2 to avoid floating point errors
         data[n_usize - 1] = x2;
     }
-    
+
     Ok(Matrix::new(data, 1, n_usize)?)
 }
 
@@ -43,10 +43,10 @@ fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Matrix, String> {
     if n < 1 {
         return Err("Number of points must be positive".to_string());
     }
-    
+
     let n_usize = n as usize;
     let mut data = Vec::with_capacity(n_usize);
-    
+
     if n == 1 {
         data.push(10.0_f64.powf(b));
     } else {
@@ -56,7 +56,7 @@ fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Matrix, String> {
             data.push(10.0_f64.powf(log_val));
         }
     }
-    
+
     Ok(Matrix::new(data, 1, n_usize)?)
 }
 
@@ -89,12 +89,12 @@ fn eye_builtin(n: i32) -> Result<Matrix, String> {
     }
     let n_usize = n as usize;
     let mut data = vec![0.0; n_usize * n_usize];
-    
+
     // Set diagonal elements to 1
     for i in 0..n_usize {
         data[i * n_usize + i] = 1.0;
     }
-    
+
     Ok(Matrix::new(data, n_usize, n_usize)?)
 }
 
@@ -105,16 +105,16 @@ fn rand_builtin(m: i32, n: i32) -> Result<Matrix, String> {
     if m < 0 || n < 0 {
         return Err("Matrix dimensions must be non-negative".to_string());
     }
-    
+
     let rows = m as usize;
     let cols = n as usize;
     let total_elements = rows * cols;
-    
+
     // Use a simple linear congruential generator for reproducible results
     // This is not cryptographically secure but suitable for basic mathematical operations
     static mut SEED: u64 = 1;
     let mut data = Vec::with_capacity(total_elements);
-    
+
     unsafe {
         for _ in 0..total_elements {
             SEED = SEED.wrapping_mul(1103515245).wrapping_add(12345);
@@ -122,7 +122,7 @@ fn rand_builtin(m: i32, n: i32) -> Result<Matrix, String> {
             data.push(random_val);
         }
     }
-    
+
     Ok(Matrix::new(data, rows, cols)?)
 }
 
@@ -133,11 +133,11 @@ fn fill_builtin(value: f64, m: i32, n: i32) -> Result<Matrix, String> {
     if m < 0 || n < 0 {
         return Err("Matrix dimensions must be non-negative".to_string());
     }
-    
+
     let rows = m as usize;
     let cols = n as usize;
     let data = vec![value; rows * cols];
-    
+
     Ok(Matrix::new(data, rows, cols)?)
 }
 
@@ -148,38 +148,40 @@ fn randn_builtin(m: i32, n: i32) -> Result<Matrix, String> {
     if m < 0 || n < 0 {
         return Err("Matrix dimensions must be non-negative".to_string());
     }
-    
+
     let rows = m as usize;
     let cols = n as usize;
     let total_elements = rows * cols;
-    
+
     // Simple approximation of normal distribution using central limit theorem
     // Generate 12 uniform random numbers and sum them, then subtract 6
     // This approximates a normal distribution with mean=0, std=1
     use std::sync::Mutex;
     use std::sync::OnceLock;
-    
+
     static SEED: OnceLock<Mutex<u64>> = OnceLock::new();
     let seed_mutex = SEED.get_or_init(|| Mutex::new(1));
-    
+
     let mut data = Vec::with_capacity(total_elements);
-    
+
     for _ in 0..total_elements {
-        let mut seed_guard = seed_mutex.lock().map_err(|_| "Failed to acquire RNG lock")?;
+        let mut seed_guard = seed_mutex
+            .lock()
+            .map_err(|_| "Failed to acquire RNG lock")?;
         let mut sum = 0.0;
-        
+
         // Generate 12 uniform random numbers using linear congruential generator
         for _ in 0..12 {
             *seed_guard = seed_guard.wrapping_mul(1103515245).wrapping_add(12345);
             let uniform = ((*seed_guard >> 16) & 0x7fff) as f64 / 32768.0;
             sum += uniform;
         }
-        
+
         // Apply central limit theorem transformation: N(0,1) ≈ sum(12 uniform) - 6
         let normal_val = sum - 6.0;
         data.push(normal_val);
     }
-    
+
     Ok(Matrix::new(data, rows, cols)?)
 }
 
@@ -197,15 +199,15 @@ fn range_builtin(start: f64, step: f64, stop: f64) -> Result<Matrix, String> {
     if step == 0.0 {
         return Err("Step size cannot be zero".to_string());
     }
-    
+
     if (step > 0.0 && start > stop) || (step < 0.0 && start < stop) {
         // Empty range
         return Ok(Matrix::new(vec![], 1, 0)?);
     }
-    
+
     let mut data = Vec::new();
     let mut current = start;
-    
+
     if step > 0.0 {
         while current <= stop + f64::EPSILON {
             data.push(current);
@@ -217,7 +219,7 @@ fn range_builtin(start: f64, step: f64, stop: f64) -> Result<Matrix, String> {
             current += step;
         }
     }
-    
+
     let len = data.len();
     Ok(Matrix::new(data, 1, len)?)
 }
@@ -234,31 +236,31 @@ fn meshgrid_builtin(x: Matrix, y: Matrix) -> Result<Matrix, String> {
     if y.rows != 1 && y.cols != 1 {
         return Err("Input y must be a vector".to_string());
     }
-    
+
     let x_vec = &x.data;
     let y_vec = &y.data;
     let nx = x_vec.len();
     let ny = y_vec.len();
-    
+
     // Create X matrix (repeated rows)
     let mut x_data = Vec::with_capacity(nx * ny);
     for _ in 0..ny {
         x_data.extend_from_slice(x_vec);
     }
-    
+
     Ok(Matrix::new(x_data, ny, nx)?)
 }
 
 /// Create a range vector (equivalent to start:end or start:step:end in MATLAB)
 pub fn create_range(start: f64, step: Option<f64>, end: f64) -> Result<Value, String> {
     let step = step.unwrap_or(1.0);
-    
+
     if step == 0.0 {
         return Err("Range step cannot be zero".to_string());
     }
-    
+
     let mut values = Vec::new();
-    
+
     if step > 0.0 {
         let mut current = start;
         while current <= end + f64::EPSILON {
@@ -272,12 +274,12 @@ pub fn create_range(start: f64, step: Option<f64>, end: f64) -> Result<Value, St
             current += step;
         }
     }
-    
+
     if values.is_empty() {
         // Return empty matrix for invalid ranges
         return Ok(Value::Matrix(Matrix::new(vec![], 0, 0)?));
     }
-    
+
     // Create a row vector (1 x n)
     let cols = values.len();
     let matrix = Matrix::new(values, 1, cols)?;
@@ -339,7 +341,7 @@ mod tests {
         assert_eq!(result.data[0], 1.0); // (0,0)
         assert_eq!(result.data[4], 1.0); // (1,1)
         assert_eq!(result.data[8], 1.0); // (2,2)
-        // Check off-diagonal elements
+                                         // Check off-diagonal elements
         assert_eq!(result.data[1], 0.0); // (0,1)
         assert_eq!(result.data[3], 0.0); // (1,0)
     }

@@ -185,18 +185,21 @@ impl JupyterBackend {
         use crate::export::ImageExporter;
 
         let output_path = format!("/tmp/rustmat_plot_{}.png", Self::generate_plot_id());
-        
+
         // Use our high-performance GPU export system
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|e| format!("Failed to create async runtime: {e}"))?;
-            
+
         runtime.block_on(async {
-            let exporter = ImageExporter::new().await
+            let exporter = ImageExporter::new()
+                .await
                 .map_err(|e| format!("Failed to create image exporter: {e}"))?;
-            
-            exporter.export_png(figure, &output_path).await
+
+            exporter
+                .export_png(figure, &output_path)
+                .await
                 .map_err(|e| format!("Failed to export PNG: {e}"))?;
-            
+
             Ok::<(), String>(())
         })?;
 
@@ -234,27 +237,30 @@ impl JupyterBackend {
 
         // Create temporary file for PNG export
         let temp_path = format!("/tmp/rustmat_base64_{}.png", Self::generate_plot_id());
-        
+
         // Export PNG first
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|e| format!("Failed to create async runtime: {e}"))?;
-            
+
         runtime.block_on(async {
-            let exporter = ImageExporter::new().await
+            let exporter = ImageExporter::new()
+                .await
                 .map_err(|e| format!("Failed to create image exporter: {e}"))?;
-            
-            exporter.export_png(figure, &temp_path).await
+
+            exporter
+                .export_png(figure, &temp_path)
+                .await
                 .map_err(|e| format!("Failed to export PNG: {e}"))?;
-            
+
             Ok::<(), String>(())
         })?;
 
         // Read PNG data and encode as base64
-        let png_data = std::fs::read(&temp_path)
-            .map_err(|e| format!("Failed to read PNG file: {e}"))?;
-        
+        let png_data =
+            std::fs::read(&temp_path).map_err(|e| format!("Failed to read PNG file: {e}"))?;
+
         let base64_data = base64_encode(&png_data);
-        
+
         // Clean up temporary file
         let _ = std::fs::remove_file(&temp_path);
 
@@ -388,24 +394,31 @@ pub enum KernelType {
 
 /// Simple base64 encoding using standard library
 fn base64_encode(data: &[u8]) -> String {
-    
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
-    
+
     for chunk in data.chunks(3) {
         let mut buf = [0u8; 3];
         for (i, &byte) in chunk.iter().enumerate() {
             buf[i] = byte;
         }
-        
+
         let b = ((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32);
-        
+
         result.push(CHARS[((b >> 18) & 63) as usize] as char);
         result.push(CHARS[((b >> 12) & 63) as usize] as char);
-        result.push(if chunk.len() > 1 { CHARS[((b >> 6) & 63) as usize] as char } else { '=' });
-        result.push(if chunk.len() > 2 { CHARS[(b & 63) as usize] as char } else { '=' });
+        result.push(if chunk.len() > 1 {
+            CHARS[((b >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        result.push(if chunk.len() > 2 {
+            CHARS[(b & 63) as usize] as char
+        } else {
+            '='
+        });
     }
-    
+
     result
 }
 

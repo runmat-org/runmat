@@ -160,37 +160,25 @@ impl BarChart {
 
             // Create rectangle vertices for this bar (4 vertices per bar)
             let vertex_offset = vertices.len() as u32;
-            
+
             // Bottom left
-            vertices.push(Vertex::new(
-                Vec3::new(left, bottom, 0.0),
-                self.color,
-            ));
-            
+            vertices.push(Vertex::new(Vec3::new(left, bottom, 0.0), self.color));
+
             // Bottom right
-            vertices.push(Vertex::new(
-                Vec3::new(right, bottom, 0.0),
-                self.color,
-            ));
-            
+            vertices.push(Vertex::new(Vec3::new(right, bottom, 0.0), self.color));
+
             // Top right
-            vertices.push(Vertex::new(
-                Vec3::new(right, top, 0.0),
-                self.color,
-            ));
-            
+            vertices.push(Vertex::new(Vec3::new(right, top, 0.0), self.color));
+
             // Top left
-            vertices.push(Vertex::new(
-                Vec3::new(left, top, 0.0),
-                self.color,
-            ));
+            vertices.push(Vertex::new(Vec3::new(left, top, 0.0), self.color));
 
             // Create indices for two triangles per bar (6 indices per bar)
             // Triangle 1: bottom-left, bottom-right, top-right
             indices.push(vertex_offset + 0);
             indices.push(vertex_offset + 1);
             indices.push(vertex_offset + 2);
-            
+
             // Triangle 2: bottom-left, top-right, top-left
             indices.push(vertex_offset + 0);
             indices.push(vertex_offset + 2);
@@ -239,7 +227,7 @@ impl BarChart {
             index_count: Some(indices.len()),
             instance_count: 1,
         };
-        
+
         RenderData {
             pipeline_type: PipelineType::Triangles,
             vertices,

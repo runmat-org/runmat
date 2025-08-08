@@ -3,7 +3,6 @@ use log::{debug, info, warn};
 use rustmat_builtins::Value;
 use rustmat_gc::{gc_configure, gc_stats, GcConfig};
 
-
 use rustmat_lexer::tokenize;
 use rustmat_parser::parse;
 use rustmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
@@ -160,9 +159,17 @@ impl ReplEngine {
         }
 
         // Lower to HIR with existing variable and function context
-        let lowering_result = rustmat_hir::lower_with_full_context(&ast, &self.variable_names, &self.function_definitions)
-            .map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?;
-        let (hir, updated_vars, updated_functions) = (lowering_result.hir, lowering_result.variables, lowering_result.functions);
+        let lowering_result = rustmat_hir::lower_with_full_context(
+            &ast,
+            &self.variable_names,
+            &self.function_definitions,
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?;
+        let (hir, updated_vars, updated_functions) = (
+            lowering_result.hir,
+            lowering_result.variables,
+            lowering_result.functions,
+        );
         if self.verbose {
             debug!("HIR generated successfully");
         }
@@ -180,9 +187,12 @@ impl ReplEngine {
 
         // Prepare variable array with existing values before execution
         self.prepare_variable_array_for_execution(&bytecode, &updated_vars);
-        
+
         if self.verbose {
-            debug!("Variable array after preparation: {:?}", self.variable_array);
+            debug!(
+                "Variable array after preparation: {:?}",
+                self.variable_array
+            );
             debug!("Updated variable mapping: {:?}", updated_vars);
             debug!("Bytecode instructions: {:?}", bytecode.instructions);
         }
@@ -263,27 +273,32 @@ impl ReplEngine {
                     bytecode.var_count
                 );
             }
-            
+
             // For expressions, modify bytecode to store result in a temp variable instead of using stack
             let mut execution_bytecode = bytecode.clone();
             if is_expression_stmt && !execution_bytecode.instructions.is_empty() {
                 execution_bytecode.instructions.pop(); // Remove the Pop instruction
-                
+
                 // Add StoreVar instruction to store the result in a temporary variable
                 let temp_var_id = execution_bytecode.var_count;
-                execution_bytecode.instructions.push(rustmat_ignition::Instr::StoreVar(temp_var_id));
+                execution_bytecode
+                    .instructions
+                    .push(rustmat_ignition::Instr::StoreVar(temp_var_id));
                 execution_bytecode.var_count += 1; // Expand variable count for temp variable
-                
+
                 // Ensure our variable array can hold the temporary variable
                 if self.variable_array.len() <= temp_var_id {
                     self.variable_array.resize(temp_var_id + 1, Value::Num(0.0));
                 }
-                
+
                 if self.verbose {
-                    debug!("Modified expression bytecode, new instructions: {:?}", execution_bytecode.instructions);
+                    debug!(
+                        "Modified expression bytecode, new instructions: {:?}",
+                        execution_bytecode.instructions
+                    );
                 }
             }
-            
+
             match self.interpret_with_context(&execution_bytecode) {
                 Ok(results) => {
                     // Only increment interpreter_fallback if JIT wasn't attempted
@@ -293,20 +308,23 @@ impl ReplEngine {
                     if self.verbose {
                         debug!("Interpreter results: {:?}", results);
                     }
-                    
+
                     // For expressions, get the result from the temporary variable
                     if is_expression_stmt && !execution_bytecode.instructions.is_empty() {
                         let temp_var_id = execution_bytecode.var_count - 1; // The temp variable we added
                         if temp_var_id < self.variable_array.len() {
                             result_value = Some(self.variable_array[temp_var_id].clone());
                             if self.verbose {
-                                debug!("Expression result from temp var {}: {:?}", temp_var_id, result_value);
+                                debug!(
+                                    "Expression result from temp var {}: {:?}",
+                                    temp_var_id, result_value
+                                );
                             }
                         }
                     } else {
                         result_value = results.into_iter().last();
                     }
-                    
+
                     if self.verbose {
                         debug!("Final result_value: {:?}", result_value);
                     }
@@ -418,15 +436,24 @@ impl ReplEngine {
     }
 
     /// Convert stored HIR function definitions to UserFunction format for compilation
-    fn convert_hir_functions_to_user_functions(&self) -> HashMap<String, rustmat_ignition::UserFunction> {
+    fn convert_hir_functions_to_user_functions(
+        &self,
+    ) -> HashMap<String, rustmat_ignition::UserFunction> {
         let mut user_functions = HashMap::new();
-        
+
         for (name, hir_stmt) in &self.function_definitions {
-            if let rustmat_hir::HirStmt::Function { name: func_name, params, outputs, body } = hir_stmt {
+            if let rustmat_hir::HirStmt::Function {
+                name: func_name,
+                params,
+                outputs,
+                body,
+            } = hir_stmt
+            {
                 // Use the existing HIR utilities to calculate variable count
-                let var_map = rustmat_hir::remapping::create_complete_function_var_map(params, outputs, body);
+                let var_map =
+                    rustmat_hir::remapping::create_complete_function_var_map(params, outputs, body);
                 let max_local_var = var_map.len();
-                
+
                 let user_func = rustmat_ignition::UserFunction {
                     name: func_name.clone(),
                     params: params.clone(),
@@ -437,7 +464,7 @@ impl ReplEngine {
                 user_functions.insert(name.clone(), user_func);
             }
         }
-        
+
         user_functions
     }
 

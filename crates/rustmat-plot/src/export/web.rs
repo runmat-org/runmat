@@ -87,7 +87,11 @@ impl WebExporter {
     }
 
     /// Export figure to interactive HTML file (placeholder implementation)
-    pub fn export_html<P: AsRef<Path>>(&mut self, _figure: &mut crate::plots::Figure, path: P) -> Result<(), String> {
+    pub fn export_html<P: AsRef<Path>>(
+        &mut self,
+        _figure: &mut crate::plots::Figure,
+        path: P,
+    ) -> Result<(), String> {
         let html_content = self.render_to_html()?;
         std::fs::write(path, html_content)
             .map_err(|e| format!("Failed to write HTML file: {e}"))?;
@@ -134,12 +138,19 @@ impl WebExporter {
     </script>
 </body>
 </html>"#,
-            widget_id, self.settings.width, self.settings.height,
-            widget_id, self.settings.width, self.settings.height,
+            widget_id,
+            self.settings.width,
+            self.settings.height,
+            widget_id,
+            self.settings.width,
+            self.settings.height,
             widget_id
         );
 
-        println!("DEBUG: HTML widget render completed, {} characters generated", html.len());
+        println!(
+            "DEBUG: HTML widget render completed, {} characters generated",
+            html.len()
+        );
         Ok(html)
     }
 

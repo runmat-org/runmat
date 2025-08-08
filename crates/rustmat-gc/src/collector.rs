@@ -3,9 +3,9 @@
 //! Implements mark-and-sweep collection for generational garbage collection,
 //! with optimizations for RustMat's value types and usage patterns.
 
-use std::collections::HashSet;
 use crate::{GcConfig, GcPtr, GcStats, GenerationalAllocator, Result};
 use rustmat_builtins::Value;
+use std::collections::HashSet;
 use std::time::Instant;
 
 /// Mark-and-sweep garbage collector

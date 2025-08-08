@@ -253,19 +253,19 @@ fn gamma_builtin(x: f64) -> Result<f64, String> {
     if x <= 0.0 {
         return Err("Gamma function undefined for non-positive integers".to_string());
     }
-    
+
     // Stirling's approximation for large x
     if x > 10.0 {
         let term1 = (2.0 * std::f64::consts::PI / x).sqrt();
         let term2 = (x / std::f64::consts::E).powf(x);
         return Ok(term1 * term2);
     }
-    
+
     // For smaller values, use recursive relation Γ(x+1) = x * Γ(x)
     if x < 1.0 {
         return Ok(gamma_builtin(x + 1.0)? / x);
     }
-    
+
     // Simple approximation for 1 <= x <= 10
     let mut result = 1.0;
     let mut n = x;
@@ -273,7 +273,7 @@ fn gamma_builtin(x: f64) -> Result<f64, String> {
         n -= 1.0;
         result *= n;
     }
-    
+
     Ok(result)
 }
 
@@ -282,16 +282,16 @@ fn factorial_builtin(n: i32) -> Result<f64, String> {
     if n < 0 {
         return Err("Factorial undefined for negative numbers".to_string());
     }
-    
+
     if n > 170 {
         return Err("Factorial overflow for n > 170".to_string());
     }
-    
+
     let mut result = 1.0;
     for i in 2..=n {
         result *= i as f64;
     }
-    
+
     Ok(result)
 }
 
@@ -315,12 +315,11 @@ fn std_builtin(matrix: Matrix) -> Result<f64, String> {
     if matrix.data.len() < 2 {
         return Err("Need at least 2 elements to compute standard deviation".to_string());
     }
-    
+
     let mean = matrix.data.iter().sum::<f64>() / matrix.data.len() as f64;
-    let variance = matrix.data.iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f64>() / (matrix.data.len() - 1) as f64;
-    
+    let variance = matrix.data.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
+        / (matrix.data.len() - 1) as f64;
+
     Ok(variance.sqrt())
 }
 
@@ -329,18 +328,19 @@ fn var_builtin(matrix: Matrix) -> Result<f64, String> {
     if matrix.data.len() < 2 {
         return Err("Need at least 2 elements to compute variance".to_string());
     }
-    
+
     let mean = matrix.data.iter().sum::<f64>() / matrix.data.len() as f64;
-    let variance = matrix.data.iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f64>() / (matrix.data.len() - 1) as f64;
-    
+    let variance = matrix.data.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
+        / (matrix.data.len() - 1) as f64;
+
     Ok(variance)
 }
 
 #[runtime_builtin(name = "min")]
 fn min_vector_builtin(matrix: Matrix) -> Result<f64, String> {
-    matrix.data.iter()
+    matrix
+        .data
+        .iter()
         .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .copied()
         .ok_or_else(|| "Cannot find minimum of empty matrix".to_string())
@@ -348,7 +348,9 @@ fn min_vector_builtin(matrix: Matrix) -> Result<f64, String> {
 
 #[runtime_builtin(name = "max")]
 fn max_vector_builtin(matrix: Matrix) -> Result<f64, String> {
-    matrix.data.iter()
+    matrix
+        .data
+        .iter()
         .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .copied()
         .ok_or_else(|| "Cannot find maximum of empty matrix".to_string())

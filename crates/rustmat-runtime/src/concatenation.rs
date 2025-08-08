@@ -50,7 +50,7 @@ pub fn vcat_matrices(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
 
     // Copy all elements from matrix A first
     new_data.extend_from_slice(&a.data);
-    
+
     // Then copy all elements from matrix B
     new_data.extend_from_slice(&b.data);
 
@@ -203,7 +203,7 @@ mod tests {
     fn test_hcat_matrices() {
         let a = Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
         let b = Matrix::new(vec![5.0, 6.0], 2, 1).unwrap();
-        
+
         let result = hcat_matrices(&a, &b).unwrap();
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 3);
@@ -214,7 +214,7 @@ mod tests {
     fn test_vcat_matrices() {
         let a = Matrix::new(vec![1.0, 2.0], 1, 2).unwrap();
         let b = Matrix::new(vec![3.0, 4.0], 1, 2).unwrap();
-        
+
         let result = vcat_matrices(&a, &b).unwrap();
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 2);
@@ -225,7 +225,7 @@ mod tests {
     fn test_hcat_values_scalars() {
         let values = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
         let result = hcat_values(&values).unwrap();
-        
+
         if let Value::Matrix(m) = result {
             assert_eq!(m.rows, 1);
             assert_eq!(m.cols, 3);
@@ -239,7 +239,7 @@ mod tests {
     fn test_vcat_values_scalars() {
         let values = vec![Value::Num(1.0), Value::Num(2.0)];
         let result = vcat_values(&values).unwrap();
-        
+
         if let Value::Matrix(m) = result {
             assert_eq!(m.rows, 2);
             assert_eq!(m.cols, 1);

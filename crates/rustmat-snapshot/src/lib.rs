@@ -75,7 +75,8 @@ pub struct BuiltinRegistry {
 
     /// Function dispatch table (runtime-generated)
     #[serde(skip)]
-    pub dispatch_table: Arc<RwLock<Vec<fn(&[rustmat_builtins::Value]) -> Result<rustmat_builtins::Value, String>>>>,
+    pub dispatch_table:
+        Arc<RwLock<Vec<fn(&[rustmat_builtins::Value]) -> Result<rustmat_builtins::Value, String>>>>,
 }
 
 /// Metadata for a builtin function
