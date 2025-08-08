@@ -86,6 +86,47 @@ pub fn matrix_transpose(a: &Matrix) -> Matrix {
     Matrix::new(data, a.cols, a.rows).unwrap() // Always valid
 }
 
+/// Matrix power: C = A^n (for positive integer n)
+/// This computes A * A * ... * A (n times) via repeated multiplication
+pub fn matrix_power(a: &Matrix, n: i32) -> Result<Matrix, String> {
+    if a.rows != a.cols {
+        return Err(format!(
+            "Matrix must be square for matrix power: {}x{}",
+            a.rows, a.cols
+        ));
+    }
+
+    if n < 0 {
+        return Err("Negative matrix powers not supported yet".to_string());
+    }
+
+    if n == 0 {
+        // A^0 = I (identity matrix)
+        return Ok(matrix_eye(a.rows));
+    }
+
+    if n == 1 {
+        // A^1 = A
+        return Ok(a.clone());
+    }
+
+    // Compute A^n via repeated multiplication
+    // Use binary exponentiation for efficiency
+    let mut result = matrix_eye(a.rows);
+    let mut base = a.clone();
+    let mut exp = n as u32;
+
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = matrix_mul(&result, &base)?;
+        }
+        base = matrix_mul(&base, &base)?;
+        exp /= 2;
+    }
+
+    Ok(result)
+}
+
 /// Create identity matrix
 pub fn matrix_eye(n: usize) -> Matrix {
     let mut data = vec![0.0; n * n];

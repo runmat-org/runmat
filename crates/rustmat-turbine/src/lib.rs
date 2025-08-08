@@ -198,13 +198,10 @@ pub extern "C" fn rustmat_value_pow(a_ptr: *const Value, b_ptr: *const Value) ->
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        let result = match (a, b) {
-            (Value::Num(x), Value::Num(y)) => Value::Num(x.powf(*y)),
-            (Value::Int(x), Value::Int(y)) => Value::Num((*x as f64).powf(*y as f64)),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x.powf(*y as f64)),
-            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64).powf(*y)),
-            _ => {
-                error!("Unsupported power: {a:?} ^ {b:?}");
+        let result = match rustmat_runtime::power(a, b) {
+            Ok(value) => value,
+            Err(e) => {
+                error!("Power operation failed: {e}");
                 return std::ptr::null_mut();
             }
         };
@@ -226,11 +223,10 @@ pub extern "C" fn rustmat_value_neg(a_ptr: *const Value) -> *mut Value {
     unsafe {
         let a = &*a_ptr;
 
-        let result = match a {
-            Value::Num(x) => Value::Num(-x),
-            Value::Int(x) => Value::Int(-x),
-            _ => {
-                error!("Unsupported negation: -{a:?}");
+        let result = match rustmat_runtime::elementwise_neg(a) {
+            Ok(value) => value,
+            Err(e) => {
+                error!("Negation failed: {e}");
                 return std::ptr::null_mut();
             }
         };

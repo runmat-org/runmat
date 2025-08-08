@@ -778,8 +778,12 @@ pub fn interpret_with_vars(
             Instr::Sub => element_binary(&mut stack, rustmat_runtime::elementwise_sub)?,
             Instr::Mul => element_binary(&mut stack, rustmat_runtime::elementwise_mul)?,
             Instr::Div => element_binary(&mut stack, rustmat_runtime::elementwise_div)?,
-            Instr::Pow => binary(&mut stack, |a, b| a.powf(b))?,
-            Instr::Neg => unary(&mut stack, |a| -a)?,
+            Instr::Pow => element_binary(&mut stack, rustmat_runtime::power)?,
+            Instr::Neg => {
+                let value = stack.pop().ok_or("stack underflow")?;
+                let result = rustmat_runtime::elementwise_neg(&value)?;
+                stack.push(result);
+            }
             Instr::Transpose => {
                 let value = stack.pop().ok_or("stack underflow")?;
                 let result = rustmat_runtime::transpose(value)?;
@@ -1102,8 +1106,12 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
             Instr::Sub => element_binary(&mut stack, rustmat_runtime::elementwise_sub)?,
             Instr::Mul => element_binary(&mut stack, rustmat_runtime::elementwise_mul)?,
             Instr::Div => element_binary(&mut stack, rustmat_runtime::elementwise_div)?,
-            Instr::Pow => binary(&mut stack, |a, b| a.powf(b))?,
-            Instr::Neg => unary(&mut stack, |a| -a)?,
+            Instr::Pow => element_binary(&mut stack, rustmat_runtime::power)?,
+            Instr::Neg => {
+                let value = stack.pop().ok_or("stack underflow")?;
+                let result = rustmat_runtime::elementwise_neg(&value)?;
+                stack.push(result);
+            }
             Instr::Transpose => {
                 let value = stack.pop().ok_or("stack underflow")?;
                 let result = rustmat_runtime::transpose(value)?;
@@ -1326,25 +1334,6 @@ fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<V
     }
 
     Ok(vars)
-}
-
-fn binary<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
-where
-    F: Fn(f64, f64) -> f64,
-{
-    let b: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-    let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-    stack.push(Value::Num(f(a, b)));
-    Ok(())
-}
-
-fn unary<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
-where
-    F: Fn(f64) -> f64,
-{
-    let a: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-    stack.push(Value::Num(f(a)));
-    Ok(())
 }
 
 fn element_binary<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>

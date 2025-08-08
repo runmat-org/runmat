@@ -4,6 +4,22 @@
 //! These operations work element-by-element on matrices and support scalar broadcasting.
 
 use rustmat_builtins::{Matrix, Value};
+use crate::matrix::{matrix_power};
+
+/// Element-wise negation: -A
+/// Supports scalars and matrices
+pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
+    match a {
+        Value::Num(x) => Ok(Value::Num(-x)),
+        Value::Int(x) => Ok(Value::Int(-x)),
+        Value::Bool(b) => Ok(Value::Bool(!b)), // Boolean negation
+        Value::Matrix(m) => {
+            let data: Vec<f64> = m.data.iter().map(|x| -x).collect();
+            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+        }
+        _ => Err(format!("Negation not supported for type: -{a:?}")),
+    }
+}
 
 /// Element-wise multiplication: A .* B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
@@ -271,6 +287,40 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
 
         _ => Err(format!(
             "Element-wise division not supported for types: {a:?} ./ {b:?}"
+        )),
+    }
+}
+
+/// Regular power operation: A ^ B  
+/// For matrices, this is matrix exponentiation (A^n where n is integer)
+/// For scalars, this is regular exponentiation
+pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
+    match (a, b) {
+        // Scalar cases - same as elementwise
+        (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x.powf(*y))),
+        (Value::Int(x), Value::Num(y)) => Ok(Value::Num((*x as f64).powf(*y))),
+        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x.powf(*y as f64))),
+        (Value::Int(x), Value::Int(y)) => Ok(Value::Num((*x as f64).powf(*y as f64))),
+
+        // Matrix^scalar case - matrix exponentiation
+        (Value::Matrix(m), Value::Num(s)) => {
+            // Check if scalar is an integer for matrix power
+            if s.fract() == 0.0 {
+                let n = *s as i32;
+                let result = matrix_power(m, n)?;
+                Ok(Value::Matrix(result))
+            } else {
+                Err("Matrix power requires integer exponent".to_string())
+            }
+        }
+        (Value::Matrix(m), Value::Int(s)) => {
+            let result = matrix_power(m, *s)?;
+            Ok(Value::Matrix(result))
+        }
+
+        // Other cases not supported for regular matrix power
+        _ => Err(format!(
+            "Power operation not supported for types: {a:?} ^ {b:?}"
         )),
     }
 }
