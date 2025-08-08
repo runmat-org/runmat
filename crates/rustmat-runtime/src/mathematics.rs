@@ -156,6 +156,37 @@ fn pow_builtin(base: f64, exponent: f64) -> Result<f64, String> {
     Ok(base.powf(exponent))
 }
 
+// Basic math functions
+
+#[runtime_builtin(name = "abs")]
+fn abs_builtin(x: f64) -> Result<f64, String> {
+    Ok(x.abs())
+}
+
+#[runtime_builtin(name = "abs")]
+fn abs_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+    let data: Vec<f64> = x.data.iter().map(|&val| val.abs()).collect();
+    Ok(Matrix::new(data, x.rows, x.cols)?)
+}
+
+#[runtime_builtin(name = "exp")]
+fn exp_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+    let data: Vec<f64> = x.data.iter().map(|&val| val.exp()).collect();
+    Ok(Matrix::new(data, x.rows, x.cols)?)
+}
+
+#[runtime_builtin(name = "log")]
+fn log_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+    let data: Vec<f64> = x.data.iter().map(|&val| val.ln()).collect();
+    Ok(Matrix::new(data, x.rows, x.cols)?)
+}
+
+#[runtime_builtin(name = "sqrt")]
+fn sqrt_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+    let data: Vec<f64> = x.data.iter().map(|&val| val.sqrt()).collect();
+    Ok(Matrix::new(data, x.rows, x.cols)?)
+}
+
 // Rounding and related functions
 
 #[runtime_builtin(name = "round")]

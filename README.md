@@ -267,34 +267,6 @@ Rapid prototyping without<br/>expensive toolchain costs
 </table>
 </div>
 
-> *"We migrated our signal processing pipeline from MATLAB to RustMat and saw 3x performance improvements while eliminating $50k/year in license fees."*  
-> — **Dr. Sarah Chen, Robotics Startup CTO**
-
-> *"RustMat lets our students focus on learning algorithms instead of worrying about software licenses."*  
-> — **Prof. Michael Rodriguez, Stanford Engineering**
-
----
-
-## 🗺️ Roadmap
-
-### 🎯 Version 0.2 (Q2 2025)
-- [ ] **WebAssembly backend** for browser deployment
-- [ ] **GPU compute kernels** for massive parallelization  
-- [ ] **Package manager** for community libraries
-- [ ] **VS Code extension** with syntax highlighting and debugging
-
-### 🚀 Version 0.3 (Q3 2025)
-- [ ] **Simulink compatibility** for model-based design
-- [ ] **Parallel computing** with multi-core matrix operations
-- [ ] **Cloud deployment** tools and containers
-- [ ] **Advanced debugger** with time-travel debugging
-
-### 🌟 Long-term Vision
-- [ ] **Complete MATLAB compatibility** (90%+ of language features)
-- [ ] **Industry-standard certification** for safety-critical applications
-- [ ] **Visual programming interface** like Simulink
-- [ ] **AI/ML integration** with modern frameworks
-
 ---
 
 ## 🤝 Join the Revolution

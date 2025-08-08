@@ -1,4 +1,4 @@
-use rustmat_parser::{parse, BinOp, Expr, Program, Stmt, UnOp};
+use rustmat_parser::{parse_simple as parse, BinOp, Expr, Program, Stmt, UnOp};
 
 #[test]
 fn parse_expression() {

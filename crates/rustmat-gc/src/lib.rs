@@ -627,41 +627,6 @@ where
     result
 }
 
-// Legacy compatibility types
-pub struct GarbageCollector {
-    gc: Arc<HighPerformanceGC>,
-}
-
-impl GarbageCollector {
-    pub fn new() -> Self {
-        Self {
-            gc: Arc::clone(&GC),
-        }
-    }
-
-    pub fn allocate(&mut self, value: Value) -> Result<GcPtr<Value>> {
-        self.gc.allocate(value)
-    }
-
-    pub fn collect_minor(&mut self) -> Result<usize> {
-        self.gc.collect_minor()
-    }
-
-    pub fn collect_major(&mut self) -> Result<usize> {
-        self.gc.collect_major()
-    }
-
-    pub fn stats(&self) -> GcStats {
-        self.gc.stats()
-    }
-}
-
-impl Default for GarbageCollector {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

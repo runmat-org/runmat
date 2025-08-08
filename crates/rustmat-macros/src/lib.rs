@@ -60,6 +60,19 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     }
     let param_len = param_idents.len();
+    
+    // Infer parameter types for BuiltinFunction
+    let inferred_param_types: Vec<proc_macro2::TokenStream> = param_types
+        .iter()
+        .map(infer_builtin_type)
+        .collect();
+    
+    // Infer return type for BuiltinFunction
+    let inferred_return_type = match &func.sig.output {
+        syn::ReturnType::Default => quote! { rustmat_builtins::Type::Void },
+        syn::ReturnType::Type(_, ty) => infer_builtin_type(ty),
+    };
+    
     // Generate wrapper ident
     let wrapper_ident = format_ident!("__rt_wrap_{}", ident);
 
@@ -84,14 +97,15 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let register = quote! {
-        const _: () = {
-            rustmat_builtins::inventory::submit! {
-                rustmat_builtins::Builtin {
-                    name: #name_str,
-                    func: #wrapper_ident as rustmat_builtins::BuiltinFn,
-                }
-            }
-        };
+        rustmat_builtins::inventory::submit! {
+            rustmat_builtins::BuiltinFunction::new(
+                #name_str,
+                "Runtime builtin function",
+                vec![#(#inferred_param_types),*],
+                #inferred_return_type,
+                #wrapper_ident
+            )
+        }
     };
 
     TokenStream::from(quote! {
@@ -167,4 +181,119 @@ pub fn runtime_constant(args: TokenStream, input: TokenStream) -> TokenStream {
         #item
         #register
     })
+}
+
+/// Smart type inference from Rust types to our enhanced Type enum
+fn infer_builtin_type(ty: &syn::Type) -> proc_macro2::TokenStream {
+    use syn::Type;
+    
+    match ty {
+        // Basic primitive types
+        Type::Path(type_path) => {
+            if let Some(ident) = type_path.path.get_ident() {
+                match ident.to_string().as_str() {
+                    "i32" | "i64" | "isize" => quote! { rustmat_builtins::Type::Int },
+                    "f32" | "f64" => quote! { rustmat_builtins::Type::Num },
+                    "bool" => quote! { rustmat_builtins::Type::Bool },
+                    "String" => quote! { rustmat_builtins::Type::String },
+                    _ => infer_complex_type(type_path),
+                }
+            } else {
+                infer_complex_type(type_path)
+            }
+        }
+        
+        // Reference types like &str, &Value, &Matrix
+        Type::Reference(type_ref) => {
+            match type_ref.elem.as_ref() {
+                Type::Path(type_path) => {
+                    if let Some(ident) = type_path.path.get_ident() {
+                        match ident.to_string().as_str() {
+                            "str" => quote! { rustmat_builtins::Type::String },
+                            _ => infer_builtin_type(&type_ref.elem),
+                        }
+                    } else {
+                        infer_builtin_type(&type_ref.elem)
+                    }
+                }
+                _ => infer_builtin_type(&type_ref.elem),
+            }
+        }
+        
+        // Slice types like &[Value], &[f64]
+        Type::Slice(type_slice) => {
+            let element_type = infer_builtin_type(&type_slice.elem);
+            quote! { rustmat_builtins::Type::Cell { 
+                element_type: Some(Box::new(#element_type)), 
+                length: None 
+            } }
+        }
+        
+        // Array types like [f64; N]
+        Type::Array(type_array) => {
+            let element_type = infer_builtin_type(&type_array.elem);
+            // Try to extract length if it's a literal
+            if let syn::Expr::Lit(expr_lit) = &type_array.len {
+                if let syn::Lit::Int(lit_int) = &expr_lit.lit {
+                    if let Ok(length) = lit_int.base10_parse::<usize>() {
+                        return quote! { rustmat_builtins::Type::Cell { 
+                            element_type: Some(Box::new(#element_type)), 
+                            length: Some(#length) 
+                        } };
+                    }
+                }
+            }
+            // Fallback to unknown length
+            quote! { rustmat_builtins::Type::Cell { 
+                element_type: Some(Box::new(#element_type)), 
+                length: None 
+            } }
+        }
+        
+        // Generic or complex types
+        _ => quote! { rustmat_builtins::Type::Unknown },
+    }
+}
+
+/// Infer types for complex path types like Result<T, E>, Option<T>, Matrix, Value
+fn infer_complex_type(type_path: &syn::TypePath) -> proc_macro2::TokenStream {
+    let path_str = quote! { #type_path }.to_string();
+    
+    // Handle common patterns
+    if path_str.contains("Matrix") {
+        quote! { rustmat_builtins::Type::matrix() }
+    } else if path_str.contains("Value") {
+        quote! { rustmat_builtins::Type::Unknown } // Value can be anything
+    } else if path_str.starts_with("Result") {
+        // Extract the Ok type from Result<T, E>
+        if let syn::PathArguments::AngleBracketed(angle_bracketed) = &type_path.path.segments.last().unwrap().arguments {
+            if let Some(syn::GenericArgument::Type(ty)) = angle_bracketed.args.first() {
+                return infer_builtin_type(ty);
+            }
+        }
+        quote! { rustmat_builtins::Type::Unknown }
+    } else if path_str.starts_with("Option") {
+        // Extract the Some type from Option<T>
+        if let syn::PathArguments::AngleBracketed(angle_bracketed) = &type_path.path.segments.last().unwrap().arguments {
+            if let Some(syn::GenericArgument::Type(ty)) = angle_bracketed.args.first() {
+                return infer_builtin_type(ty);
+            }
+        }
+        quote! { rustmat_builtins::Type::Unknown }
+    } else if path_str.starts_with("Vec") {
+        // Extract element type from Vec<T>
+        if let syn::PathArguments::AngleBracketed(angle_bracketed) = &type_path.path.segments.last().unwrap().arguments {
+            if let Some(syn::GenericArgument::Type(ty)) = angle_bracketed.args.first() {
+                let element_type = infer_builtin_type(ty);
+                return quote! { rustmat_builtins::Type::Cell { 
+                    element_type: Some(Box::new(#element_type)), 
+                    length: None 
+                } };
+            }
+        }
+        quote! { rustmat_builtins::Type::cell() }
+    } else {
+        // Unknown type
+        quote! { rustmat_builtins::Type::Unknown }
+    }
 }

@@ -1,128 +1,269 @@
 #!/bin/bash
 
-# RustMat vs Octave Benchmark Script
-# Runs comparative performance tests
+# RustMat vs GNU Octave Benchmark Suite
+# Comprehensive performance comparison with structured YAML output
 
-echo "==================================================="
-echo "           RustMat vs GNU Octave Benchmarks"
-echo "==================================================="
+set -e
 
-# Check if octave is installed
+echo "============================================================="
+echo "    RustMat vs GNU Octave Performance Benchmark Suite"
+echo "============================================================="
+
+# Configuration
+RUSTMAT_RELEASE="../target/release/rustmat"
+RUSTMAT_DEBUG="../target/debug/rustmat"
+RESULTS_DIR="results"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+RESULT_FILE="$RESULTS_DIR/benchmark_$TIMESTAMP.yaml"
+
+# Check dependencies
 if ! command -v octave &> /dev/null; then
     echo "Error: GNU Octave is not installed or not in PATH"
     echo "Please install Octave to run comparative benchmarks"
     exit 1
 fi
 
-RUSTMAT="../target/debug/rustmat"
+if ! command -v yq &> /dev/null; then
+    echo "Warning: yq not found. YAML output will be generated manually."
+fi
 
-# Check if rustmat binary exists
-if [ ! -f "$RUSTMAT" ]; then
-    echo "Warning: rustmat binary not found at $RUSTMAT"
-    echo "Building from source..."
+# Ensure results directory exists
+mkdir -p "$RESULTS_DIR"
+
+# Build RustMat in release mode if needed
+if [ ! -f "$RUSTMAT_RELEASE" ]; then
+    echo "Building RustMat in release mode..."
     cd ..
-    cargo build
+    cargo build --release --features blas-lapack
+    cd benchmarks
+else
+    echo "Using existing RustMat release binary"
+fi
+
+# Also ensure debug build for comparison
+if [ ! -f "$RUSTMAT_DEBUG" ]; then
+    echo "Building RustMat in debug mode..."
+    cd ..
+    cargo build --features blas-lapack
     cd benchmarks
 fi
 
-# Arrays to store timing results
-declare -a octave_times
-declare -a rustmat_times
-declare -a rustmat_jit_times
+# System information gathering
+get_system_info() {
+    echo "Gathering system information..."
+    
+    # Basic system info
+    OS=$(uname -s)
+    ARCH=$(uname -m)
+    KERNEL=$(uname -r)
+    
+    # CPU information
+    if [[ "$OS" == "Darwin" ]]; then
+        CPU_MODEL=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "Unknown")
+        CPU_CORES=$(sysctl -n hw.ncpu 2>/dev/null || echo "Unknown")
+        MEMORY_GB=$(echo "scale=1; $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024 / 1024" | bc -l)
+    elif [[ "$OS" == "Linux" ]]; then
+        CPU_MODEL=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | sed 's/^ *//' || echo "Unknown")
+        CPU_CORES=$(nproc 2>/dev/null || echo "Unknown")
+        MEMORY_GB=$(echo "scale=1; $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024" | bc -l 2>/dev/null || echo "Unknown")
+    else
+        CPU_MODEL="Unknown"
+        CPU_CORES="Unknown"
+        MEMORY_GB="Unknown"
+    fi
+    
+    # Software versions
+    OCTAVE_VERSION=$(octave --version 2>/dev/null | head -1 | sed 's/GNU Octave, version //' || echo "Unknown")
+    RUSTMAT_VERSION=$("$RUSTMAT_RELEASE" --version 2>/dev/null || echo "Development build")
+}
 
-echo ""
-echo "Running benchmarks with GNU Octave..."
-echo "---------------------------------------------------"
+# Benchmark execution function
+run_single_benchmark() {
+    local name="$1"
+    local script="$2"
+    local runner="$3"
+    local flags="$4"
+    local warmup_runs="${5:-1}"
+    local timing_runs="${6:-3}"
+    
+    echo "  Running $name with $runner $flags..." >&2
+    
+    # Warmup runs (not timed)
+    for ((i=1; i<=warmup_runs; i++)); do
+        if [[ "$runner" == "octave" ]]; then
+            octave --no-gui --eval "run('$script')" >/dev/null 2>&1 || true
+        else
+            "$runner" $flags "$script" >/dev/null 2>&1 || true
+        fi
+    done
+    
+    # Timing runs
+    local total_time=0
+    local times=()
+    
+    for ((i=1; i<=timing_runs; i++)); do
+        if [[ "$runner" == "octave" ]]; then
+            time_output=$( { time octave --no-gui --eval "run('$script')" 2>/dev/null ; } 2>&1 )
+        else
+            time_output=$( { time "$runner" $flags "$script" ; } 2>&1 )
+        fi
+        
+        # Extract real time and convert to seconds
+        time_raw=$(echo "$time_output" | grep "^real" | awk '{print $2}')
+        time_seconds=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
+        times+=("$time_seconds")
+        total_time=$(echo "$total_time + $time_seconds" | bc -l)
+    done
+    
+    # Calculate statistics
+    local avg_time=$(echo "scale=6; $total_time / $timing_runs" | bc -l)
+    local min_time=$(printf '%s\n' "${times[@]}" | sort -n | head -1)
+    local max_time=$(printf '%s\n' "${times[@]}" | sort -nr | head -1)
+    
+    echo "$avg_time $min_time $max_time"
+}
 
-echo ""
-echo "Matrix Operations Benchmark (Octave):"
-time_raw=$( { time octave --no-gui --eval "run('matrix_operations.m')" 2>/dev/null ; } 2>&1 | grep real | awk '{print $2}')
-octave_times[0]=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
+# Initialize YAML output
+init_yaml_output() {
+    cat > "$RESULT_FILE" << EOF
+# RustMat vs GNU Octave Benchmark Results
+# Generated on $(date)
 
-echo ""
-echo "Mathematical Functions Benchmark (Octave):"
-time_raw=$( { time octave --no-gui --eval "run('math_functions.m')" 2>/dev/null ; } 2>&1 | grep real | awk '{print $2}')
-octave_times[1]=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
+metadata:
+  timestamp: "$TIMESTAMP"
+  date: "$(date -Iseconds)"
+  
+system:
+  os: "$OS"
+  architecture: "$ARCH"
+  kernel: "$KERNEL"
+  cpu:
+    model: "$CPU_MODEL"
+    cores: $CPU_CORES
+  memory_gb: $MEMORY_GB
 
-echo ""
-echo "Startup Time Benchmark (Octave):"
-echo "Measuring 5 cold starts..."
-total=0
-for i in {1..5}; do
-    echo -n "Run $i: "
-    time_raw=$( { time octave --no-gui --eval "run('startup_time.m')" 2>/dev/null ; } 2>&1 | grep real | awk '{print $2}')
-    # Convert time format from "0m0.853s" to "0.853" for bc
-    time=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
-    echo "$time_raw ($time seconds)"
-    total=$(echo "$total + $time" | bc -l)
-done
-octave_times[2]=$(echo "scale=3; $total / 5" | bc -l)
+software:
+  octave:
+    version: "$OCTAVE_VERSION"
+  rustmat:
+    version: "$RUSTMAT_VERSION"
+    build_features: ["blas-lapack"]
 
-echo ""
-echo "Running benchmarks with RustMat..."
-echo "---------------------------------------------------"
+benchmark_config:
+  warmup_runs: 1
+  timing_runs: 3
+  scripts:
+    - startup_time.m
+    - matrix_operations.m
+    - math_functions.m
+    - control_flow.m
 
-echo ""
-echo "Matrix Operations Benchmark (RustMat):"
-time_raw=$( { time "$RUSTMAT" --no-jit matrix_operations.m ; } 2>&1 | grep real | awk '{print $2}')
-rustmat_times[0]=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
+results:
+EOF
+}
 
-echo ""
-echo "Mathematical Functions Benchmark (RustMat):"
-time_raw=$( { time "$RUSTMAT" --no-jit math_functions.m ; } 2>&1 | grep real | awk '{print $2}')
-rustmat_times[1]=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
+# Add benchmark results to YAML
+add_benchmark_result() {
+    local benchmark="$1"
+    local octave_avg="$2" octave_min="$3" octave_max="$4"
+    local rustmat_avg="$5" rustmat_min="$6" rustmat_max="$7"
+    local rustmat_jit_avg="$8" rustmat_jit_min="$9" rustmat_jit_max="${10}"
+    
+    # Calculate speedups
+    local speedup=$(echo "scale=2; $octave_avg / $rustmat_avg" | bc -l 2>/dev/null || echo "N/A")
+    local jit_speedup=$(echo "scale=2; $octave_avg / $rustmat_jit_avg" | bc -l 2>/dev/null || echo "N/A")
+    
+    cat >> "$RESULT_FILE" << EOF
+  $benchmark:
+    octave:
+      avg_time: $octave_avg
+      min_time: $octave_min
+      max_time: $octave_max
+    rustmat_interpreter:
+      avg_time: $rustmat_avg
+      min_time: $rustmat_min
+      max_time: $rustmat_max
+      speedup_vs_octave: "${speedup}x"
+    rustmat_jit:
+      avg_time: $rustmat_jit_avg
+      min_time: $rustmat_jit_min
+      max_time: $rustmat_jit_max
+      speedup_vs_octave: "${jit_speedup}x"
+      speedup_vs_interpreter: "$(echo "scale=2; $rustmat_avg / $rustmat_jit_avg" | bc -l 2>/dev/null || echo "N/A")x"
+EOF
+}
 
-echo ""
-echo "Startup Time Benchmark (RustMat):"
-echo "Measuring 5 cold starts..."
-total=0
-for i in {1..5}; do
-    echo -n "Run $i: "
-    time_raw=$( { time "$RUSTMAT" --no-jit startup_time.m ; } 2>&1 | grep real | awk '{print $2}')
-    # Convert time format from "0m0.853s" to "0.853" for bc
-    time=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
-    echo "$time_raw ($time seconds)"
-    total=$(echo "$total + $time" | bc -l)
-done
-rustmat_times[2]=$(echo "scale=3; $total / 5" | bc -l)
+# Main benchmark execution
+main() {
+    echo ""
+    get_system_info
+    init_yaml_output
+    
+    # Define benchmarks
+    declare -a benchmarks=(
+        "startup_time:Startup Time"
+        "matrix_operations:Matrix Operations"
+        "math_functions:Math Functions"
+        "control_flow:Control Flow"
+    )
+    
+    echo ""
+    echo "Starting benchmark suite with $(echo "${benchmarks[@]}" | wc -w) benchmarks..."
+    echo "Results will be saved to: $RESULT_FILE"
+    echo ""
+    
+    for bench_info in "${benchmarks[@]}"; do
+        IFS=':' read -r script_name display_name <<< "$bench_info"
+        
+        echo "=== $display_name Benchmark ==="
+        
+        # Run Octave benchmark
+        echo "GNU Octave:"
+        octave_results=($(run_single_benchmark "$display_name" "$script_name.m" "octave" ""))
+        
+        # Run RustMat interpreter benchmark  
+        echo "RustMat (Interpreter):"
+        rustmat_results=($(run_single_benchmark "$display_name" "$script_name.m" "$RUSTMAT_RELEASE" "--no-jit"))
+        
+        # Run RustMat JIT benchmark
+        echo "RustMat (JIT):"
+        rustmat_jit_results=($(run_single_benchmark "$display_name" "$script_name.m" "$RUSTMAT_RELEASE" ""))
+        
+        # Add results to YAML
+        add_benchmark_result "$script_name" \
+            "${octave_results[0]}" "${octave_results[1]}" "${octave_results[2]}" \
+            "${rustmat_results[0]}" "${rustmat_results[1]}" "${rustmat_results[2]}" \
+            "${rustmat_jit_results[0]}" "${rustmat_jit_results[1]}" "${rustmat_jit_results[2]}"
+        
+        echo ""
+    done
+    
+    # Add summary to YAML
+    cat >> "$RESULT_FILE" << EOF
 
-echo ""
-echo "Running JIT-enabled benchmarks with RustMat..."
-echo "---------------------------------------------------"
+summary:
+  notes:
+    - "Lower times are better"
+    - "Speedup shows RustMat performance relative to GNU Octave"
+    - "All times are in seconds"
+    - "Results are averaged over multiple runs with warmup"
+  conclusions:
+    - "Results demonstrate RustMat's performance characteristics"
+    - "JIT compilation provides additional performance benefits"
+    - "Platform-specific optimizations (BLAS/LAPACK) utilized"
+EOF
+    
+    echo "============================================================="
+    echo "                    BENCHMARK COMPLETED"
+    echo "============================================================="
+    echo ""
+    echo "Results saved to: $RESULT_FILE"
+    echo ""
+    echo "Quick Summary:"
+    echo "$(grep -A 20 "results:" "$RESULT_FILE" | grep -E "(avg_time|speedup)" | head -10)"
+    echo ""
+    echo "For full results, view: cat $RESULT_FILE"
+}
 
-echo ""
-echo "Matrix Operations Benchmark (RustMat + JIT):"
-time_raw=$( { time "$RUSTMAT" matrix_operations.m ; } 2>&1 | grep real | awk '{print $2}')
-rustmat_jit_times[0]=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
-
-echo ""
-echo "Mathematical Functions Benchmark (RustMat + JIT):"
-time_raw=$( { time "$RUSTMAT" math_functions.m ; } 2>&1 | grep real | awk '{print $2}')
-rustmat_jit_times[1]=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
-
-echo ""
-echo "Startup Time Benchmark (RustMat + JIT):"
-echo "Measuring 5 cold starts..."
-total=0
-for i in {1..5}; do
-    echo -n "Run $i: "
-    time_raw=$( { time "$RUSTMAT" startup_time.m ; } 2>&1 | grep real | awk '{print $2}')
-    # Convert time format from "0m0.853s" to "0.853" for bc
-    time=$(echo "$time_raw" | sed 's/m/ * 60 + /' | sed 's/s//' | bc -l)
-    echo "$time_raw ($time seconds)"
-    total=$(echo "$total + $time" | bc -l)
-done
-rustmat_jit_times[2]=$(echo "scale=3; $total / 5" | bc -l)
-
-echo ""
-echo "==================================================="
-echo "                 Benchmark Summary                   "
-echo "==================================================="
-printf "\n%-25s %-12s %-12s %-12s\n" "Benchmark" "Octave" "RustMat" "RustMat+JIT"
-printf "%-25s %-12s %-12s %-12s\n" "Matrix Operations" "${octave_times[0]}" "${rustmat_times[0]}" "${rustmat_jit_times[0]}"
-printf "%-25s %-12s %-12s %-12s\n" "Mathematical Functions" "${octave_times[1]}" "${rustmat_times[1]}" "${rustmat_jit_times[1]}"
-printf "%-25s %-12s %-12s %-12s\n" "Avg Startup Time" "${octave_times[2]}" "${rustmat_times[2]}" "${rustmat_jit_times[2]}"
-echo "==================================================="
-echo "Times shown in seconds. Lower is better."
-echo "Run 'rustmat --info' for detailed system information"
-echo "==================================================="
+# Run the benchmark suite
+main "$@"

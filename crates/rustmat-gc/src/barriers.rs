@@ -7,7 +7,6 @@
 use rustmat_builtins::Value;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
-// Removed unused Result import
 
 /// Write barrier implementation for generational GC
 pub struct WriteBarrier {

@@ -9,12 +9,12 @@
 
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{default_libcall_names, Linkage, Module};
+use cranelift_module::{default_libcall_names, Linkage, Module, FuncId};
 use log::{debug, error, info, warn};
 use rustmat_builtins::Value;
 use rustmat_gc::gc_allocate;
 use rustmat_ignition::{Bytecode, Instr};
-use std::boxed::Box;
+
 use target_lexicon::Triple;
 use thiserror::Error;
 
@@ -459,6 +459,191 @@ pub extern "C" fn rustmat_store_var(
     }
 }
 
+/// Declare the host runtime function on the module (done once during engine init)
+fn declare_host_call_in_module<M: Module>(module: &mut M) -> FuncId {
+    // Create signature that EXACTLY matches our extern "C" function
+    let mut sig = module.make_signature();
+
+    // Use pointer-sized types (works on both aarch64 and x86_64)
+    let iptr = module.target_config().pointer_type();
+
+    sig.params.push(AbiParam::new(iptr));        // func_name_ptr
+    sig.params.push(AbiParam::new(iptr));        // args_ptr
+    sig.params.push(AbiParam::new(types::I32));  // arg_count
+    sig.params.push(AbiParam::new(iptr));        // result_ptr
+    sig.returns.push(AbiParam::new(types::I32)); // return code
+
+    // Note: module.make_signature() already sets the default call conv for the target
+
+    // Declare it as an import on the Module
+    module
+        .declare_function("rustmat_call_user_function", Linkage::Import, &sig)
+        .expect("declare host func")
+}
+
+/// Global context for JIT function calls
+/// This provides access to function definitions during runtime calls
+static mut RUNTIME_CONTEXT: Option<&'static RuntimeContext> = None;
+
+pub struct RuntimeContext {
+    pub function_definitions: std::collections::HashMap<String, rustmat_ignition::UserFunction>,
+}
+
+impl RuntimeContext {
+    pub fn new(functions: std::collections::HashMap<String, rustmat_ignition::UserFunction>) -> Self {
+        Self {
+            function_definitions: functions,
+        }
+    }
+}
+
+/// Set the runtime context for JIT function calls
+/// This should be called before executing JIT-compiled code that calls user functions
+pub unsafe fn set_runtime_context(context: &'static RuntimeContext) {
+    RUNTIME_CONTEXT = Some(context);
+}
+
+/// Clear the runtime context
+pub unsafe fn clear_runtime_context() {
+    RUNTIME_CONTEXT = None;
+}
+
+/// Runtime function for executing user-defined functions from JIT code
+/// This enables recursive compilation: JIT code can call other user functions
+#[no_mangle]
+pub extern "C" fn rustmat_call_user_function(
+    func_name_ptr: *const u8,
+    args_ptr: *const u8,
+    arg_count: i32,
+    result_ptr: *mut u8,
+) -> i32 {
+    if func_name_ptr.is_null() || result_ptr.is_null() {
+        error!("Invalid function name or result pointer");
+        return -1; // Error: Invalid pointers
+    }
+
+    unsafe {
+        // Get runtime context
+        let context = match RUNTIME_CONTEXT {
+            Some(ctx) => ctx,
+            None => {
+                error!("Runtime context not set for user function calls");
+                return -2; // Error: No context
+            }
+        };
+
+        // Convert C string to Rust string
+        let func_name_cstr = std::ffi::CStr::from_ptr(func_name_ptr as *const i8);
+        let func_name = match func_name_cstr.to_str() {
+            Ok(name) => name,
+            Err(_) => {
+                error!("Invalid function name encoding");
+                return -3; // Error: Invalid encoding
+            }
+        };
+
+        // Look up function definition
+        let function_def = match context.function_definitions.get(func_name) {
+            Some(def) => def,
+            None => {
+                error!("Unknown user function: {}", func_name);
+                return -4; // Error: Function not found
+            }
+        };
+
+        // Convert arguments from f64 array
+        let args = if arg_count > 0 && !args_ptr.is_null() {
+            let args_slice = std::slice::from_raw_parts(args_ptr as *const f64, arg_count as usize);
+            args_slice.iter().map(|&f| Value::Num(f)).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        // Validate argument count - MATLAB requires exact match unless function uses nargin
+        if args.len() != function_def.params.len() {
+            error!(
+                "JIT RUNTIME: Function {} expects {} arguments, got {} - MATLAB requires exact match",
+                func_name,
+                function_def.params.len(),
+                args.len()
+            );
+            return -5; // Error: Wrong argument count
+        }
+        
+        debug!("JIT RUNTIME: Executing function {} with {} arguments", func_name, args.len());
+
+        // Execute function using Ignition interpreter with proper variable isolation
+        match execute_user_function_isolated(function_def, &args, &context.function_definitions) {
+            Ok(result) => {
+                // Write result to result_ptr
+                *(result_ptr as *mut f64) = match result {
+                    Value::Num(n) => n,
+                    _ => {
+                        error!("Function {} returned non-numeric value", func_name);
+                        return -6; // Error: Invalid return type
+                    }
+                };
+                0 // Success
+            }
+            Err(e) => {
+                error!("Error executing function {}: {}", func_name, e);
+                -7 // Error: Execution failed
+            }
+        }
+    }
+}
+
+/// Execute a user-defined function with access to global variables using Ignition interpreter
+fn execute_user_function_isolated(
+    function_def: &rustmat_ignition::UserFunction,
+    args: &[Value],
+    all_functions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>,
+) -> Result<Value> {
+    // Create complete variable remapping that includes all variables referenced in the function body
+    let var_map = rustmat_hir::remapping::create_complete_function_var_map(&function_def.params, &function_def.outputs, &function_def.body);
+    let local_var_count = var_map.len();
+
+    // Remap the function body to use local variable indices
+    let remapped_body = rustmat_hir::remapping::remap_function_body(&function_def.body, &var_map);
+
+    // Create function variable space and bind parameters
+    let func_vars_count = local_var_count.max(function_def.params.len());
+    let mut func_vars = vec![Value::Num(0.0); func_vars_count];
+    
+    // Bind parameters to function's local variables
+    for (i, _param_id) in function_def.params.iter().enumerate() {
+        if i < args.len() && i < func_vars.len() {
+            func_vars[i] = args[i].clone();
+        }
+    }
+
+    // Execute the function using Ignition interpreter
+    let func_program = rustmat_hir::HirProgram { body: remapped_body };
+    let func_bytecode = rustmat_ignition::compile_with_functions(&func_program, all_functions)
+        .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {}", e)))?;
+    
+    let func_result_vars = rustmat_ignition::interpret_with_vars(&func_bytecode, &mut func_vars)
+        .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {}", e)))?;
+    
+    // Copy back the modified variables
+    func_vars = func_result_vars;
+
+    // Return the output variable value (first output variable)
+    if let Some(output_var_id) = function_def.outputs.first() {
+        // Use the remapped local index instead of the original VarId
+        let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
+        
+        if local_output_index < func_vars.len() {
+            Ok(func_vars[local_output_index].clone())
+        } else {
+            Err(TurbineError::ExecutionError(format!("Output variable index {} out of bounds", local_output_index)))
+        }
+    } else {
+        // No explicit output variable, return the last variable or 0
+        Ok(func_vars.last().cloned().unwrap_or(Value::Num(0.0)))
+    }
+}
+
 /// The main JIT compilation engine
 pub struct TurbineEngine {
     module: JITModule,
@@ -467,6 +652,7 @@ pub struct TurbineEngine {
     profiler: HotspotProfiler,
     target_isa: codegen::isa::OwnedTargetIsa,
     compiler: BytecodeCompiler,
+    rustmat_call_user_function_id: FuncId,
 }
 
 /// A compiled function ready for execution
@@ -575,66 +761,18 @@ impl TurbineEngine {
         // Create JIT builder with the ISA
         let mut builder = JITBuilder::with_isa(target_isa.clone(), default_libcall_names());
 
-        // Configure symbol resolution for cross-platform compatibility
-        builder.symbol_lookup_fn(Box::new(|name| {
-            debug!("Symbol lookup requested for: {name}");
-
-            // Provide symbol lookup for mathematical functions and runtime calls
-            match name {
-                // Math library functions that might be used by JIT compiled code
-                "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2" => {
-                    // In a complete implementation, these would link to actual math library functions
-                    debug!("Math function {name} requested but not available for linking");
-                    None
-                }
-                "exp" | "log" | "log10" | "log2" | "ln" => {
-                    debug!("Math function {name} requested but not available for linking");
-                    None
-                }
-                "sqrt" | "cbrt" | "pow" | "powf" => {
-                    debug!("Math function {name} requested but not available for linking");
-                    None
-                }
-                "floor" | "ceil" | "round" | "trunc" | "fabs" => {
-                    debug!("Math function {name} requested but not available for linking");
-                    None
-                }
-                "fmin" | "fmax" | "fmod" | "remainder" => {
-                    debug!("Math function {name} requested but not available for linking");
-                    None
-                }
-
-                // RustMat runtime functions
-                "rustmat_call_builtin_f64" => {
-                    debug!("Providing runtime builtin dispatcher for f64 functions");
-                    Some(runtime_builtin_f64_dispatch as *const u8)
-                }
-                "rustmat_call_builtin_matrix" => {
-                    debug!("Providing runtime builtin dispatcher for matrix functions");
-                    Some(runtime_builtin_matrix_dispatch as *const u8)
-                }
-                "rustmat_create_matrix" => {
-                    debug!("Providing runtime matrix constructor");
-                    Some(runtime_create_matrix as *const u8)
-                }
-
-                // Memory management functions
-                "malloc" | "free" | "calloc" | "realloc" => {
-                    debug!(
-                        "Memory management function {name} requested but not available for linking"
-                    );
-                    None
-                }
-
-                _ => {
-                    debug!("Unknown symbol {name} requested");
-                    None
-                }
-            }
-        }));
+        // Register symbols using the expert's recommended approach
+        builder.symbol(
+            "rustmat_call_user_function",
+            rustmat_call_user_function as *const u8,
+        );
 
         // Create the JIT module
-        let module = JITModule::new(builder);
+        let mut module = JITModule::new(builder);
+        
+        // Declare the external function on the module using the expert's pattern
+        let rustmat_call_user_function_id = declare_host_call_in_module(&mut module);
+        
         let ctx = module.make_context();
 
         let engine = Self {
@@ -644,6 +782,7 @@ impl TurbineEngine {
             profiler: HotspotProfiler::new(),
             target_isa,
             compiler: BytecodeCompiler::new(),
+            rustmat_call_user_function_id,
         };
 
         info!("Turbine JIT engine initialized successfully for {target_triple}");
@@ -713,6 +852,9 @@ impl TurbineEngine {
             &bytecode.instructions,
             &mut func,
             bytecode.var_count,
+            &bytecode.functions,
+            &mut self.module,
+            self.rustmat_call_user_function_id,
         )?;
 
         // Compile to machine code
@@ -742,6 +884,16 @@ impl TurbineEngine {
 
     /// Execute compiled function
     pub fn execute_compiled(&mut self, hash: u64, vars: &mut [Value]) -> Result<i32> {
+        self.execute_compiled_with_functions(hash, vars, &std::collections::HashMap::new())
+    }
+    
+    /// Execute compiled function with access to function definitions for user function calls
+    pub fn execute_compiled_with_functions(
+        &mut self, 
+        hash: u64, 
+        vars: &mut [Value],
+        functions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>
+    ) -> Result<i32> {
         let func = self
             .cache
             .get(hash)
@@ -766,16 +918,30 @@ impl TurbineEngine {
             }
         }
 
+        // Set up runtime context for user function calls
+        let runtime_context = RuntimeContext::new(functions.clone());
+        // Note: Using Box::leak to create a 'static reference - this is safe for our use case
+        // but in production we'd want a more sophisticated lifetime management
+        let static_context = Box::leak(Box::new(runtime_context));
+        
         // Execute the JIT compiled function
         let result = unsafe {
             if func.ptr.is_null() {
                 return Err(TurbineError::InvalidFunctionPointer);
             }
 
+            // Set runtime context for JIT function calls
+            set_runtime_context(static_context);
+
             // Cast function pointer to correct signature: fn(*mut f64, usize) -> i32
             let jit_fn: extern "C" fn(*mut f64, usize) -> i32 = std::mem::transmute(func.ptr);
 
-            jit_fn(f64_vars.as_mut_ptr(), f64_vars.len())
+            let exec_result = jit_fn(f64_vars.as_mut_ptr(), f64_vars.len());
+            
+            // Clear runtime context after execution
+            clear_runtime_context();
+            
+            exec_result
         };
 
         // Convert results back to Value array
@@ -798,10 +964,10 @@ impl TurbineEngine {
     ) -> Result<(i32, bool)> {
         let hash = self.calculate_bytecode_hash(bytecode);
 
-        // If function is compiled, execute it
+        // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
             return self
-                .execute_compiled(hash, vars)
+                .execute_compiled_with_functions(hash, vars, &bytecode.functions)
                 .map(|result| (result, true));
         }
 
@@ -811,7 +977,7 @@ impl TurbineEngine {
                 Ok(_) => {
                     info!("Bytecode compiled successfully, executing JIT version");
                     return self
-                        .execute_compiled(hash, vars)
+                        .execute_compiled_with_functions(hash, vars, &bytecode.functions)
                         .map(|result| (result, true));
                 }
                 Err(e) => {
@@ -824,346 +990,17 @@ impl TurbineEngine {
         // Record execution for profiling
         self.profiler.record_execution(hash);
 
-        // Fallback to interpreter
-        debug!("Executing bytecode in interpreter mode");
-        // Create a proper variable array with current state and execute with ignition interpreter
-        let mut interpreter_vars = vars.to_vec();
-
-        // Ensure interpreter_vars is large enough for the bytecode
-        if interpreter_vars.len() < bytecode.var_count {
-            interpreter_vars.resize(bytecode.var_count, Value::Num(0.0));
-        }
-
-        match Self::interpret_with_vars(bytecode, &mut interpreter_vars) {
-            Ok(_) => {
-                // Copy back only the variables that exist in the original vars array
-                for (i, interpreter_val) in interpreter_vars.iter().enumerate() {
-                    if i < vars.len() {
-                        vars[i] = interpreter_val.clone();
-                    }
-                }
-                Ok((0, false)) // false indicates interpreter was used
-            }
+        // Fallback to the main Ignition interpreter which supports all features
+        debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
+        
+        // Use the main Ignition interpreter which has full feature support
+        match rustmat_ignition::interpret_with_vars(bytecode, vars) {
+            Ok(_) => Ok((0, false)), // false indicates interpreter was used, vars are updated in-place
             Err(e) => Err(TurbineError::ExecutionError(e)),
         }
     }
 
-    /// Internal interpreter that preserves variable state (similar to REPL's custom interpreter)
-    fn interpret_with_vars(
-        bytecode: &Bytecode,
-        vars: &mut Vec<Value>,
-    ) -> std::result::Result<Vec<Value>, String> {
-        use rustmat_ignition::Instr;
-        use std::convert::TryInto;
 
-        let mut stack: Vec<Value> = Vec::new();
-        let mut pc: usize = 0;
-
-        while pc < bytecode.instructions.len() {
-            match &bytecode.instructions[pc] {
-                Instr::LoadConst(c) => stack.push(Value::Num(*c)),
-                Instr::LoadString(s) => stack.push(Value::String(s.clone())),
-                Instr::LoadVar(i) => {
-                    if *i < vars.len() {
-                        stack.push(vars[*i].clone())
-                    } else {
-                        stack.push(Value::Num(0.0))
-                    }
-                }
-                Instr::StoreVar(i) => {
-                    let val = stack.pop().ok_or("stack underflow".to_string())?;
-                    if *i >= vars.len() {
-                        vars.resize(i + 1, Value::Num(0.0));
-                    }
-                    vars[*i] = val;
-                }
-                Instr::Add => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(a + b));
-                }
-                Instr::Sub => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(a - b));
-                }
-                Instr::Mul => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(a * b));
-                }
-                Instr::Div => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(a / b));
-                }
-                Instr::Pow => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(a.powf(b)));
-                }
-                Instr::Neg => {
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(-a));
-                }
-                Instr::ElemMul => {
-                    let b = stack.pop().ok_or("stack underflow".to_string())?;
-                    let a = stack.pop().ok_or("stack underflow".to_string())?;
-                    let result = rustmat_runtime::elementwise_mul(&a, &b)
-                        .map_err(|e| format!("Element-wise multiplication error: {}", e))?;
-                    stack.push(result);
-                }
-                Instr::ElemDiv => {
-                    let b = stack.pop().ok_or("stack underflow".to_string())?;
-                    let a = stack.pop().ok_or("stack underflow".to_string())?;
-                    let result = rustmat_runtime::elementwise_div(&a, &b)
-                        .map_err(|e| format!("Element-wise division error: {}", e))?;
-                    stack.push(result);
-                }
-                Instr::ElemPow => {
-                    let b = stack.pop().ok_or("stack underflow".to_string())?;
-                    let a = stack.pop().ok_or("stack underflow".to_string())?;
-                    let result = rustmat_runtime::elementwise_pow(&a, &b)
-                        .map_err(|e| format!("Element-wise power error: {}", e))?;
-                    stack.push(result);
-                }
-                Instr::ElemLeftDiv => {
-                    let b = stack.pop().ok_or("stack underflow".to_string())?;
-                    let a = stack.pop().ok_or("stack underflow".to_string())?;
-                    let result = rustmat_runtime::elementwise_div(&b, &a)
-                        .map_err(|e| format!("Element-wise left division error: {}", e))?;
-                    stack.push(result);
-                }
-                Instr::Less => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(if a < b { 1.0 } else { 0.0 }));
-                }
-                Instr::LessEqual => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(if a <= b { 1.0 } else { 0.0 }));
-                }
-                Instr::Greater => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(if a > b { 1.0 } else { 0.0 }));
-                }
-                Instr::GreaterEqual => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(if a >= b { 1.0 } else { 0.0 }));
-                }
-                Instr::Equal => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(if (a - b).abs() < f64::EPSILON {
-                        1.0
-                    } else {
-                        0.0
-                    }));
-                }
-                Instr::NotEqual => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    stack.push(Value::Num(if (a - b).abs() >= f64::EPSILON {
-                        1.0
-                    } else {
-                        0.0
-                    }));
-                }
-                Instr::Jump(target) => {
-                    pc = *target;
-                    continue;
-                }
-                Instr::JumpIfFalse(target) => {
-                    let cond: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                        .try_into()
-                        .map_err(|e: String| e)?;
-                    if cond == 0.0 {
-                        pc = *target;
-                        continue;
-                    }
-                }
-                Instr::Return => {
-                    break;
-                }
-                Instr::Pop => {
-                    stack.pop().ok_or("stack underflow".to_string())?;
-                }
-                Instr::CallBuiltin(name, arg_count) => {
-                    // For builtin functions, use the runtime dispatcher
-                    let mut args = Vec::new();
-                    for _ in 0..*arg_count {
-                        args.push(stack.pop().ok_or("stack underflow".to_string())?);
-                    }
-                    args.reverse(); // Arguments are popped in reverse order
-
-                    // Call the runtime dispatcher
-                    match rustmat_runtime::call_builtin(name, &args) {
-                        Ok(result) => stack.push(result),
-                        Err(e) => return Err(format!("Builtin function '{name}' failed: {e}")),
-                    }
-                }
-                Instr::CreateMatrix(rows, cols) => {
-                    let total_elements = rows * cols;
-                    let mut elements = Vec::new();
-
-                    for _ in 0..total_elements {
-                        let val: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                            .try_into()
-                            .map_err(|e: String| e)?;
-                        elements.push(val);
-                    }
-                    elements.reverse(); // Elements are popped in reverse order
-
-                    // Create matrix using the runtime
-                    match rustmat_builtins::Matrix::new(elements, *rows, *cols) {
-                        Ok(matrix) => stack.push(Value::Matrix(matrix)),
-                        Err(e) => return Err(format!("Matrix creation failed: {e}")),
-                    }
-                }
-                Instr::CreateMatrixDynamic(num_rows) => {
-                    // Dynamic matrix creation with concatenation support
-                    let mut row_lengths = Vec::new();
-                    
-                    // Pop row lengths (in reverse order since they're pushed last)
-                    for _ in 0..*num_rows {
-                        let row_len: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                            .try_into()
-                            .map_err(|e: String| e)?;
-                        row_lengths.push(row_len as usize);
-                    }
-                    row_lengths.reverse(); // Correct the order
-                    
-                    // Now pop elements according to row structure (in reverse order)
-                    let mut rows_data = Vec::new();
-                    for &row_len in row_lengths.iter().rev() {
-                        let mut row_values = Vec::new();
-                        for _ in 0..row_len {
-                            row_values.push(stack.pop().ok_or("stack underflow".to_string())?);
-                        }
-                        row_values.reverse(); // Correct the order within row
-                        rows_data.push(row_values);
-                    }
-                    
-                    // Reverse rows to get correct order
-                    rows_data.reverse();
-                    
-                    // Use the concatenation logic to create the matrix
-                    let result = match rustmat_runtime::create_matrix_from_values(&rows_data) {
-                        Ok(val) => val,
-                        Err(e) => return Err(e),
-                    };
-                    stack.push(result);
-                }
-                Instr::CreateRange(has_step) => {
-                    if *has_step {
-                        // Stack: start, step, end
-                        let end: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                            .try_into()
-                            .map_err(|e: String| e)?;
-                        let step: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                            .try_into()
-                            .map_err(|e: String| e)?;
-                        let start: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                            .try_into()
-                            .map_err(|e: String| e)?;
-                        
-                        let range_result = match rustmat_runtime::create_range(start, Some(step), end) {
-                            Ok(val) => val,
-                            Err(e) => return Err(e),
-                        };
-                        stack.push(range_result);
-                    } else {
-                        // Stack: start, end
-                        let end: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                            .try_into()
-                            .map_err(|e: String| e)?;
-                        let start: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                            .try_into()
-                            .map_err(|e: String| e)?;
-                        
-                        let range_result = match rustmat_runtime::create_range(start, None, end) {
-                            Ok(val) => val,
-                            Err(e) => return Err(e),
-                        };
-                        stack.push(range_result);
-                    }
-                }
-                Instr::Index(num_indices) => {
-                    // Pop indices from stack (in reverse order)
-                    let mut indices = Vec::new();
-                    for _ in 0..*num_indices {
-                        let index_val: f64 = (&stack.pop().ok_or("stack underflow".to_string())?)
-                            .try_into()
-                            .map_err(|e: String| e)?;
-                        indices.push(index_val);
-                    }
-                    indices.reverse(); // Correct the order
-                    
-                    // Pop the base array/matrix
-                    let base = stack.pop().ok_or("stack underflow".to_string())?;
-                    
-                    // Use the centralized indexing function
-                    let result = match rustmat_runtime::perform_indexing(&base, &indices) {
-                        Ok(val) => val,
-                        Err(e) => return Err(e),
-                    };
-                    stack.push(result);
-                }
-            }
-            pc += 1;
-        }
-
-        Ok(vars.clone())
-    }
 
     /// Get compilation statistics
     pub fn stats(&self) -> TurbineStats {
@@ -1231,6 +1068,7 @@ impl TurbineEngine {
                 Instr::Div => "Div".hash(&mut hasher),
                 Instr::Pow => "Pow".hash(&mut hasher),
                 Instr::Neg => "Neg".hash(&mut hasher),
+                Instr::Transpose => "Transpose".hash(&mut hasher),
                 Instr::ElemMul => "ElemMul".hash(&mut hasher),
                 Instr::ElemDiv => "ElemDiv".hash(&mut hasher),
                 Instr::ElemPow => "ElemPow".hash(&mut hasher),
@@ -1273,6 +1111,28 @@ impl TurbineEngine {
                     num_indices.hash(&mut hasher);
                 }
                 Instr::Return => "Return".hash(&mut hasher),
+                Instr::CallFunction(name, argc) => {
+                    "CallFunction".hash(&mut hasher);
+                    name.hash(&mut hasher);
+                    argc.hash(&mut hasher);
+                }
+                Instr::LoadLocal(offset) => {
+                    "LoadLocal".hash(&mut hasher);
+                    offset.hash(&mut hasher);
+                }
+                Instr::StoreLocal(offset) => {
+                    "StoreLocal".hash(&mut hasher);
+                    offset.hash(&mut hasher);
+                }
+                Instr::EnterScope(count) => {
+                    "EnterScope".hash(&mut hasher);
+                    count.hash(&mut hasher);
+                }
+                Instr::ExitScope(count) => {
+                    "ExitScope".hash(&mut hasher);
+                    count.hash(&mut hasher);
+                }
+                Instr::ReturnValue => "ReturnValue".hash(&mut hasher),
             }
         }
 

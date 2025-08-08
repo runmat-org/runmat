@@ -379,7 +379,7 @@ impl SnapshotBuilder {
     fn build_builtin_registry(&self) -> SnapshotResult<BuiltinRegistry> {
         log::info!("Building builtin function registry");
 
-        let builtins = rustmat_builtins::builtins();
+        let builtins = rustmat_builtins::builtin_functions();
         let mut name_index = HashMap::new();
         let mut functions = Vec::new();
         let mut dispatch_table = Vec::new();
@@ -391,7 +391,7 @@ impl SnapshotBuilder {
             let metadata = self.analyze_builtin_function(builtin)?;
             functions.push(metadata);
 
-            dispatch_table.push(builtin.func);
+            dispatch_table.push(builtin.implementation);
 
             {
                 let mut stats = self.stats.write();
@@ -414,7 +414,7 @@ impl SnapshotBuilder {
     /// Analyze builtin function characteristics
     fn analyze_builtin_function(
         &self,
-        builtin: &rustmat_builtins::Builtin,
+        builtin: &rustmat_builtins::BuiltinFunction,
     ) -> SnapshotResult<BuiltinMetadata> {
         // Infer characteristics from function name
         let category = self.infer_builtin_category(builtin.name);
@@ -715,11 +715,13 @@ impl SnapshotBuilder {
                 rustmat_ignition::compile(&hir).unwrap_or_else(|_| rustmat_ignition::Bytecode {
                     instructions: Vec::new(),
                     var_count: 0,
+                    functions: std::collections::HashMap::new(),
                 })
             }
             Err(_) => rustmat_ignition::Bytecode {
                 instructions: Vec::new(),
                 var_count: 0,
+                functions: std::collections::HashMap::new(),
             },
         }
     }
@@ -1181,10 +1183,13 @@ mod tests {
         let config = SnapshotConfig::default();
         let builder = SnapshotBuilder::new(config);
 
-        let builtin = rustmat_builtins::Builtin {
-            name: "matmul",
-            func: |_| Ok(rustmat_builtins::Value::Num(0.0)),
-        };
+        let builtin = rustmat_builtins::BuiltinFunction::new(
+            "matmul",
+            "Test builtin function",
+            vec![],
+            rustmat_builtins::Type::Num,
+            |_| Ok(rustmat_builtins::Value::Num(0.0)),
+        );
 
         let metadata = builder.analyze_builtin_function(&builtin).unwrap();
         assert_eq!(metadata.name, "matmul");

@@ -374,7 +374,7 @@ impl SnapshotLoader {
     /// Initialize builtin function dispatch table
     fn initialize_builtin_dispatch(&self, registry: &crate::BuiltinRegistry) -> SnapshotResult<()> {
         // Get current builtins from runtime
-        let current_builtins = rustmat_builtins::builtins();
+        let current_builtins = rustmat_builtins::builtin_functions();
         let mut dispatch_table = Vec::with_capacity(registry.functions.len());
 
         // Build dispatch table by matching names
@@ -383,7 +383,7 @@ impl SnapshotLoader {
                 .iter()
                 .find(|b| b.name == function_meta.name)
             {
-                dispatch_table.push(builtin.func);
+                dispatch_table.push(builtin.implementation);
             } else {
                 log::warn!(
                     "Builtin function '{}' not found in current runtime",

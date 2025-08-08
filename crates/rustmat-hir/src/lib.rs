@@ -4,14 +4,8 @@ use rustmat_parser::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
-pub enum Type {
-    Scalar,
-    String,
-    Matrix,
-    Void,
-    Unknown,
-}
+// Re-export Type from builtins for consistency
+pub use rustmat_builtins::Type;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct VarId(pub usize);
@@ -72,6 +66,14 @@ pub struct HirProgram {
     pub body: Vec<HirStmt>,
 }
 
+/// Result of lowering AST to HIR with full context tracking
+#[derive(Debug, Clone)]
+pub struct LoweringResult {
+    pub hir: HirProgram,
+    pub variables: HashMap<String, usize>,
+    pub functions: HashMap<String, HirStmt>,
+}
+
 pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
     let mut ctx = Ctx::new();
     let body = ctx.lower_stmts(&prog.body)?;
@@ -83,6 +85,17 @@ pub fn lower_with_context(
     prog: &AstProgram,
     existing_vars: &HashMap<String, usize>,
 ) -> Result<(HirProgram, HashMap<String, usize>), String> {
+    let empty_functions = HashMap::new();
+    let result = lower_with_full_context(prog, existing_vars, &empty_functions)?;
+    Ok((result.hir, result.variables))
+}
+
+/// Lower AST to HIR with existing variable and function context for REPL
+pub fn lower_with_full_context(
+    prog: &AstProgram,
+    existing_vars: &HashMap<String, usize>,
+    existing_functions: &HashMap<String, HirStmt>,
+) -> Result<LoweringResult, String> {
     let mut ctx = Ctx::new();
 
     // Pre-populate the context with existing variables
@@ -98,6 +111,11 @@ pub fn lower_with_context(
         }
     }
 
+    // Pre-populate the context with existing functions
+    for (name, func_stmt) in existing_functions {
+        ctx.functions.insert(name.clone(), func_stmt.clone());
+    }
+
     let body = ctx.lower_stmts(&prog.body)?;
 
     // Extract all variable bindings (both existing and newly defined)
@@ -106,7 +124,245 @@ pub fn lower_with_context(
         all_vars.insert(name.clone(), var_id.0);
     }
 
-    Ok((HirProgram { body }, all_vars))
+    Ok(LoweringResult {
+        hir: HirProgram { body },
+        variables: all_vars,
+        functions: ctx.functions,
+    })
+}
+
+/// Variable remapping utilities for function execution
+/// These functions remap VarIds in HIR to create local variable contexts
+pub mod remapping {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Remap VarIds in HIR statements to create a local variable context for function execution
+    pub fn remap_function_body(body: &[HirStmt], var_map: &HashMap<VarId, VarId>) -> Vec<HirStmt> {
+        body.iter().map(|stmt| remap_stmt(stmt, var_map)).collect()
+    }
+
+    /// Remap VarIds in a single HIR statement
+    pub fn remap_stmt(stmt: &HirStmt, var_map: &HashMap<VarId, VarId>) -> HirStmt {
+        match stmt {
+            HirStmt::ExprStmt(expr) => HirStmt::ExprStmt(remap_expr(expr, var_map)),
+            HirStmt::Assign(var_id, expr) => {
+                let new_var_id = var_map.get(var_id).copied().unwrap_or(*var_id);
+                HirStmt::Assign(new_var_id, remap_expr(expr, var_map))
+            }
+            HirStmt::If { cond, then_body, elseif_blocks, else_body } => {
+                HirStmt::If {
+                    cond: remap_expr(cond, var_map),
+                    then_body: remap_function_body(then_body, var_map),
+                    elseif_blocks: elseif_blocks.iter().map(|(c, b)| (remap_expr(c, var_map), remap_function_body(b, var_map))).collect(),
+                    else_body: else_body.as_ref().map(|b| remap_function_body(b, var_map)),
+                }
+            }
+            HirStmt::While { cond, body } => {
+                HirStmt::While {
+                    cond: remap_expr(cond, var_map),
+                    body: remap_function_body(body, var_map),
+                }
+            }
+            HirStmt::For { var, expr, body } => {
+                let new_var = var_map.get(var).copied().unwrap_or(*var);
+                HirStmt::For {
+                    var: new_var,
+                    expr: remap_expr(expr, var_map),
+                    body: remap_function_body(body, var_map),
+                }
+            }
+            HirStmt::Break | HirStmt::Continue | HirStmt::Return => stmt.clone(),
+            HirStmt::Function { .. } => stmt.clone(), // Functions shouldn't be nested in our current implementation
+        }
+    }
+
+    /// Remap VarIds in a HIR expression
+    pub fn remap_expr(expr: &HirExpr, var_map: &HashMap<VarId, VarId>) -> HirExpr {
+        let new_kind = match &expr.kind {
+            HirExprKind::Var(var_id) => {
+                let new_var_id = var_map.get(var_id).copied().unwrap_or(*var_id);
+                HirExprKind::Var(new_var_id)
+            }
+            HirExprKind::Unary(op, e) => HirExprKind::Unary(*op, Box::new(remap_expr(e, var_map))),
+            HirExprKind::Binary(left, op, right) => {
+                HirExprKind::Binary(Box::new(remap_expr(left, var_map)), *op, Box::new(remap_expr(right, var_map)))
+            }
+            HirExprKind::Matrix(rows) => {
+                HirExprKind::Matrix(rows.iter().map(|row| row.iter().map(|e| remap_expr(e, var_map)).collect()).collect())
+            }
+            HirExprKind::Index(base, indices) => {
+                HirExprKind::Index(Box::new(remap_expr(base, var_map)), indices.iter().map(|i| remap_expr(i, var_map)).collect())
+            }
+            HirExprKind::Range(start, step, end) => {
+                HirExprKind::Range(
+                    Box::new(remap_expr(start, var_map)),
+                    step.as_ref().map(|s| Box::new(remap_expr(s, var_map))),
+                    Box::new(remap_expr(end, var_map)),
+                )
+            }
+            HirExprKind::FuncCall(name, args) => {
+                HirExprKind::FuncCall(name.clone(), args.iter().map(|a| remap_expr(a, var_map)).collect())
+            }
+            HirExprKind::Number(_) | HirExprKind::String(_) | HirExprKind::Constant(_) | HirExprKind::Colon => expr.kind.clone(),
+        };
+        HirExpr { kind: new_kind, ty: expr.ty.clone() }
+    }
+
+    /// Collect all variable IDs referenced in a function body
+    pub fn collect_function_variables(body: &[HirStmt]) -> std::collections::HashSet<VarId> {
+        let mut vars = std::collections::HashSet::new();
+        
+        for stmt in body {
+            collect_stmt_variables(stmt, &mut vars);
+        }
+        
+        vars
+    }
+    
+    fn collect_stmt_variables(stmt: &HirStmt, vars: &mut std::collections::HashSet<VarId>) {
+        match stmt {
+            HirStmt::ExprStmt(expr) => collect_expr_variables(expr, vars),
+            HirStmt::Assign(var_id, expr) => {
+                vars.insert(*var_id);
+                collect_expr_variables(expr, vars);
+            }
+            HirStmt::If { cond, then_body, elseif_blocks, else_body } => {
+                collect_expr_variables(cond, vars);
+                for stmt in then_body {
+                    collect_stmt_variables(stmt, vars);
+                }
+                for (cond_expr, body) in elseif_blocks {
+                    collect_expr_variables(cond_expr, vars);
+                    for stmt in body {
+                        collect_stmt_variables(stmt, vars);
+                    }
+                }
+                if let Some(body) = else_body {
+                    for stmt in body {
+                        collect_stmt_variables(stmt, vars);
+                    }
+                }
+            }
+            HirStmt::While { cond, body } => {
+                collect_expr_variables(cond, vars);
+                for stmt in body {
+                    collect_stmt_variables(stmt, vars);
+                }
+            }
+            HirStmt::For { var, expr, body } => {
+                vars.insert(*var);
+                collect_expr_variables(expr, vars);
+                for stmt in body {
+                    collect_stmt_variables(stmt, vars);
+                }
+            }
+            HirStmt::Break | HirStmt::Continue | HirStmt::Return => {}
+            HirStmt::Function { .. } => {} // Nested functions not supported
+        }
+    }
+    
+    fn collect_expr_variables(expr: &HirExpr, vars: &mut std::collections::HashSet<VarId>) {
+        match &expr.kind {
+            HirExprKind::Var(var_id) => {
+                vars.insert(*var_id);
+            }
+            HirExprKind::Unary(_, e) => collect_expr_variables(e, vars),
+            HirExprKind::Binary(left, _, right) => {
+                collect_expr_variables(left, vars);
+                collect_expr_variables(right, vars);
+            }
+            HirExprKind::Matrix(rows) => {
+                for row in rows {
+                    for e in row {
+                        collect_expr_variables(e, vars);
+                    }
+                }
+            }
+            HirExprKind::Index(base, indices) => {
+                collect_expr_variables(base, vars);
+                for idx in indices {
+                    collect_expr_variables(idx, vars);
+                }
+            }
+            HirExprKind::Range(start, step, end) => {
+                collect_expr_variables(start, vars);
+                if let Some(step_expr) = step {
+                    collect_expr_variables(step_expr, vars);
+                }
+                collect_expr_variables(end, vars);
+            }
+            HirExprKind::FuncCall(_, args) => {
+                for arg in args {
+                    collect_expr_variables(arg, vars);
+                }
+            }
+            HirExprKind::Number(_) | HirExprKind::String(_) | HirExprKind::Constant(_) | HirExprKind::Colon => {}
+        }
+    }
+
+    /// Create a variable mapping for function execution
+    /// Maps function parameters, outputs, and all referenced variables to local indices starting from 0
+    pub fn create_function_var_map(
+        params: &[VarId], 
+        outputs: &[VarId]
+    ) -> HashMap<VarId, VarId> {
+        let mut var_map = HashMap::new();
+        let mut local_var_index = 0;
+        
+        // Map parameters to local indices first (they have priority)
+        for param_id in params {
+            var_map.insert(*param_id, VarId(local_var_index));
+            local_var_index += 1;
+        }
+        
+        // Map output variables to local indices
+        for output_id in outputs {
+            if !var_map.contains_key(output_id) {
+                var_map.insert(*output_id, VarId(local_var_index));
+                local_var_index += 1;
+            }
+        }
+        
+        var_map
+    }
+    
+    /// Create a variable mapping for function execution that includes all variables referenced in the body
+    pub fn create_complete_function_var_map(
+        params: &[VarId], 
+        outputs: &[VarId],
+        body: &[HirStmt]
+    ) -> HashMap<VarId, VarId> {
+        let mut var_map = HashMap::new();
+        let mut local_var_index = 0;
+        
+        // Collect all variables referenced in the function body
+        let all_vars = collect_function_variables(body);
+        
+        // Map parameters to local indices first (they have priority)
+        for param_id in params {
+            var_map.insert(*param_id, VarId(local_var_index));
+            local_var_index += 1;
+        }
+        
+        // Map output variables to local indices
+        for output_id in outputs {
+            if !var_map.contains_key(output_id) {
+                var_map.insert(*output_id, VarId(local_var_index));
+                local_var_index += 1;
+            }
+        }
+        
+        // Map any other variables referenced in the body
+        for var_id in &all_vars {
+            if !var_map.contains_key(var_id) {
+                var_map.insert(*var_id, VarId(local_var_index));
+                local_var_index += 1;
+            }
+        }
+        
+        var_map
+    }
 }
 
 struct Scope {
@@ -118,6 +374,7 @@ struct Ctx {
     scopes: Vec<Scope>,
     var_types: Vec<Type>,
     next_var: usize,
+    functions: HashMap<String, HirStmt>, // Track user-defined functions
 }
 
 impl Ctx {
@@ -129,6 +386,7 @@ impl Ctx {
             }],
             var_types: Vec::new(),
             next_var: 0,
+            functions: HashMap::new(),
         }
     }
 
@@ -172,7 +430,15 @@ impl Ctx {
 
     fn is_builtin_function(&self, name: &str) -> bool {
         // Check if name is a registered builtin function
-        rustmat_builtins::builtins().iter().any(|b| b.name == name)
+        rustmat_builtins::builtin_functions().iter().any(|b| b.name == name)
+    }
+
+    fn is_user_defined_function(&self, name: &str) -> bool {
+        self.functions.contains_key(name)
+    }
+
+    fn is_function(&self, name: &str) -> bool {
+        self.is_user_defined_function(name) || self.is_builtin_function(name)
     }
 
     fn lower_stmts(&mut self, stmts: &[AstStmt]) -> Result<Vec<HirStmt>, String> {
@@ -189,7 +455,7 @@ impl Ctx {
                 };
                 let value = self.lower_expr(expr)?;
                 if id.0 < self.var_types.len() {
-                    self.var_types[id.0] = value.ty;
+                    self.var_types[id.0] = value.ty.clone();
                 }
                 Ok(HirStmt::Assign(id, value))
             }
@@ -248,12 +514,18 @@ impl Ctx {
                     outputs.iter().map(|o| self.define(o.clone())).collect();
                 let body_hir = self.lower_stmts(body)?;
                 self.pop_scope();
-                Ok(HirStmt::Function {
+                
+                let func_stmt = HirStmt::Function {
                     name: name.clone(),
                     params: param_ids,
                     outputs: output_ids,
                     body: body_hir,
-                })
+                };
+                
+                // Register the function in the context for future calls
+                self.functions.insert(name.clone(), func_stmt.clone());
+                
+                Ok(func_stmt)
             }
         }
     }
@@ -261,22 +533,22 @@ impl Ctx {
     fn lower_expr(&mut self, expr: &AstExpr) -> Result<HirExpr, String> {
         use parser::Expr::*;
         let (kind, ty) = match expr {
-            Number(n) => (HirExprKind::Number(n.clone()), Type::Scalar),
+            Number(n) => (HirExprKind::Number(n.clone()), Type::Num),
             String(s) => (HirExprKind::String(s.clone()), Type::String),
             Ident(name) => {
                 // First check if it's a built-in constant
                 if self.is_constant(name) {
-                    (HirExprKind::Constant(name.clone()), Type::Scalar)
+                    (HirExprKind::Constant(name.clone()), Type::Num)
                 } else if let Some(id) = self.lookup(name) {
                     let ty = if id.0 < self.var_types.len() {
-                        self.var_types[id.0]
+                        self.var_types[id.0].clone()
                     } else {
                         Type::Unknown
                     };
                     (HirExprKind::Var(id), ty)
-                } else if self.is_builtin_function(name) {
+                } else if self.is_function(name) {
                     // Treat bare identifier as function call with no arguments (MATLAB style)
-                    let return_type = Self::infer_function_return_type(name, &[]);
+                    let return_type = self.infer_function_return_type(name, &[]);
                     (HirExprKind::FuncCall(name.clone(), vec![]), return_type)
                 } else {
                     return Err(format!("undefined variable `{name}`"));
@@ -284,14 +556,14 @@ impl Ctx {
             }
             Unary(op, e) => {
                 let inner = self.lower_expr(e)?;
-                let ty = inner.ty;
+                let ty = inner.ty.clone();
                 (HirExprKind::Unary(*op, Box::new(inner)), ty)
             }
             Binary(a, op, b) => {
                 let left = self.lower_expr(a)?;
-                let left_ty = left.ty;
+                let left_ty = left.ty.clone();
                 let right = self.lower_expr(b)?;
-                let right_ty = right.ty;
+                let right_ty = right.ty.clone();
                 let ty = match op {
                     BinOp::Add
                     | BinOp::Sub
@@ -299,10 +571,10 @@ impl Ctx {
                     | BinOp::Div
                     | BinOp::Pow
                     | BinOp::LeftDiv => {
-                        if matches!(left_ty, Type::Matrix) || matches!(right_ty, Type::Matrix) {
-                            Type::Matrix
+                        if matches!(left_ty, Type::Matrix { .. }) || matches!(right_ty, Type::Matrix { .. }) {
+                            Type::matrix()
                         } else {
-                            Type::Scalar
+                            Type::Num
                         }
                     }
                     // Element-wise operations preserve the matrix type if either operand is a matrix
@@ -310,13 +582,20 @@ impl Ctx {
                     | BinOp::ElemDiv
                     | BinOp::ElemPow
                     | BinOp::ElemLeftDiv => {
-                        if matches!(left_ty, Type::Matrix) || matches!(right_ty, Type::Matrix) {
-                            Type::Matrix
+                        if matches!(left_ty, Type::Matrix { .. }) || matches!(right_ty, Type::Matrix { .. }) {
+                            Type::matrix()
                         } else {
-                            Type::Scalar
+                            Type::Num
                         }
                     }
-                    BinOp::Colon => Type::Matrix,
+                    // Comparison operations always return boolean (represented as Num for now)
+                    BinOp::Equal
+                    | BinOp::NotEqual
+                    | BinOp::Less
+                    | BinOp::LessEqual
+                    | BinOp::Greater
+                    | BinOp::GreaterEqual => Type::Bool,
+                    BinOp::Colon => Type::matrix(),
                 };
                 (
                     HirExprKind::Binary(Box::new(left), *op, Box::new(right)),
@@ -333,7 +612,7 @@ impl Ctx {
                 if let Some(var_id) = self.lookup(name) {
                     // This is array indexing: variable(indices)
                     let var_ty = if var_id.0 < self.var_types.len() {
-                        self.var_types[var_id.0]
+                        self.var_types[var_id.0].clone()
                     } else {
                         Type::Unknown
                     };
@@ -342,15 +621,11 @@ impl Ctx {
                         ty: var_ty,
                     };
                     // Array indexing returns scalar for single element, matrix for slices
-                    let index_result_type = if arg_exprs.len() == 1 {
-                        Type::Scalar // Single element access A(i) returns scalar
-                    } else {
-                        Type::Scalar // 2D access A(i,j) also returns scalar
-                    };
+                    let index_result_type = Type::Num; // Both A(i) and A(i,j) return scalar
                     (HirExprKind::Index(Box::new(var_expr), arg_exprs), index_result_type)
                 } else {
                     // This is a function call - determine return type based on function
-                    let return_type = Self::infer_function_return_type(name, &arg_exprs);
+                    let return_type = self.infer_function_return_type(name, &arg_exprs);
                     (HirExprKind::FuncCall(name.clone(), arg_exprs), return_type)
                 }
             }
@@ -363,14 +638,14 @@ impl Ctx {
                     }
                     hir_rows.push(hir_row);
                 }
-                (HirExprKind::Matrix(hir_rows), Type::Matrix)
+                (HirExprKind::Matrix(hir_rows), Type::matrix())
             }
             Index(expr, indices) => {
                 let base = self.lower_expr(expr)?;
                 let idx_exprs: Result<Vec<_>, _> =
                     indices.iter().map(|i| self.lower_expr(i)).collect();
                 let idx_exprs = idx_exprs?;
-                let ty = base.ty; // Indexing preserves base type for now
+                let ty = base.ty.clone(); // Indexing preserves base type for now
                 (HirExprKind::Index(Box::new(base), idx_exprs), ty)
             }
             Range(start, step, end) => {
@@ -383,61 +658,49 @@ impl Ctx {
                         step_hir.map(Box::new),
                         Box::new(end_hir),
                     ),
-                    Type::Matrix,
+                    Type::matrix(),
                 )
             }
-            Colon => (HirExprKind::Colon, Type::Matrix),
+            Colon => (HirExprKind::Colon, Type::matrix()),
         };
         Ok(HirExpr { kind, ty })
     }
 
     /// Infer the return type of a function call based on the function name and arguments
-    fn infer_function_return_type(func_name: &str, args: &[HirExpr]) -> Type {
-        match func_name {
-            // Array generation functions - always return Matrix
-            "linspace" | "logspace" | "zeros" | "ones" | "eye" | "rand" | "range" | "meshgrid" => Type::Matrix,
-            
-            // Mathematical functions that can work element-wise
-            "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | 
-            "asinh" | "acosh" | "atanh" | "ln" | "exp" | "exp2" | "exp10" |
-            "round" | "floor" | "ceil" | "trunc" | "fract" | "sign" | "gamma" | "factorial" |
-            "real" | "imag" | "angle" => {
-                // If any argument is a matrix, return matrix (element-wise operation)
-                if args.iter().any(|arg| matches!(arg.ty, Type::Matrix)) {
-                    Type::Matrix
-                } else {
-                    Type::Scalar
-                }
+    fn infer_function_return_type(&self, func_name: &str, args: &[HirExpr]) -> Type {
+        // First check if it's a user-defined function
+        if let Some(HirStmt::Function { outputs, body, .. }) = self.functions.get(func_name) {
+            // Analyze the function body to infer the output type
+            return self.infer_user_function_return_type(outputs, body, args);
+        }
+        
+        // Check builtin functions using the proper signature system
+        let builtin_functions = rustmat_builtins::builtin_functions();
+        for builtin in builtin_functions {
+            if builtin.name == func_name {
+                return builtin.return_type.clone();
             }
-            
-            // Statistical functions - return scalar for matrices, preserve type for scalars
-            "sum" | "mean" | "std" | "var" | "min" | "max" => {
-                if args.len() == 1 && matches!(args[0].ty, Type::Matrix) {
-                    Type::Scalar // sum([1,2,3]) = 6
-                } else if args.len() >= 2 {
-                    Type::Scalar // min(a,b) = scalar
-                } else {
-                    Type::Scalar // Default to scalar
-                }
-            }
-            
-            // Binary operations between scalars
-            "pow" | "atan2" if args.len() == 2 => {
-                if args.iter().any(|arg| matches!(arg.ty, Type::Matrix)) {
-                    Type::Matrix // Element-wise if any operand is matrix
-                } else {
-                    Type::Scalar
-                }
-            }
-            
-            // Fill function creates matrix of specified size
-            "fill" => Type::Matrix,
-            
-            // Constants and special functions are scalars
-            "pi" | "e" | "inf" | "nan" | "eps" | "sqrt2" | "log2" | "log10" => Type::Scalar,
-            
-            // Default: assume scalar return
-            _ => Type::Scalar,
+        }
+        
+        // No builtin function found with proper signature
+        Type::Unknown
+    }
+    
+    /// Analyze user-defined function body to infer return type
+    fn infer_user_function_return_type(
+        &self, 
+        outputs: &[VarId], 
+        _body: &[HirStmt], 
+        _args: &[HirExpr]
+    ) -> Type {
+        // For now, return Unknown for user-defined functions
+        // TODO: Implement proper type inference by analyzing the function body
+        // We could track variable assignments and infer types from expressions
+        if outputs.is_empty() {
+            Type::Void
+        } else {
+            Type::Unknown // Conservative default until we implement full type analysis
         }
     }
+
 }

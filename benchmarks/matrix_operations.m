@@ -1,48 +1,36 @@
-% Matrix Operations Benchmark
-% Tests basic matrix arithmetic performance
-
 function run_matrix_benchmark()
-    fprintf('Running matrix operations benchmark...\n');
+    fprintf('=== Matrix Operations Benchmark ===\n');
     
-    % Test matrix sizes
-    sizes = [100, 500, 1000];
-    operations = {'addition', 'multiplication', 'transpose', 'inverse'};
-    
-    for i = 1:length(sizes)
-        n = sizes(i);
-        fprintf('\n=== Matrix size: %dx%d ===\n', n, n);
+    sizes = [100, 300, 500];
+    for s = 1:length(sizes)
+        n = sizes(s);
+        fprintf('\nMatrix size: %d\n', n);
         
-        % Generate test matrices
         A = randn(n, n);
         B = randn(n, n);
         
-        % Matrix addition
         tic;
         C = A + B;
         add_time = toc;
-        fprintf('Addition: %.4f seconds\n', add_time);
+        fprintf('  Addition time: %.6f\n', add_time);
         
-        % Matrix multiplication
         tic;
         D = A * B;
         mult_time = toc;
-        fprintf('Multiplication: %.4f seconds\n', mult_time);
+        fprintf('  Multiplication time: %.6f\n', mult_time);
         
-        % Matrix transpose
         tic;
         E = A';
         transpose_time = toc;
-        fprintf('Transpose: %.4f seconds\n', transpose_time);
+        fprintf('  Transpose time: %.6f\n', transpose_time);
         
-        % Matrix inverse (only for smaller matrices)
-        if n <= 500
-            tic;
-            F = inv(A);
-            inv_time = toc;
-            fprintf('Inverse: %.4f seconds\n', inv_time);
-        end
+        tic;
+        F = A * 2.0;
+        scalar_time = toc;
+        fprintf('  Scalar multiplication time: %.6f\n', scalar_time);
     end
+    
+    fprintf('\nMatrix benchmark completed.\n');
 end
 
-% Run the benchmark
 run_matrix_benchmark();

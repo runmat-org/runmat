@@ -14,7 +14,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting interactive plot window...");
 
     // Launch interactive window with default configuration
-    rustmat_plot::show_interactive().await?;
+    let figure = rustmat_plot::plots::Figure::new()
+        .with_title("Interactive Demo")
+        .with_labels("X", "Y")
+        .with_grid(true);
+    
+    let result = rustmat_plot::show_interactive_platform_optimal(figure)?;
+    println!("Interactive plot result: {}", result);
 
     Ok(())
 }

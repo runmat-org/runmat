@@ -1,70 +1,47 @@
 % Mathematical Functions Benchmark
-% Tests performance of common mathematical operations
+% Tests performance of common mathematical operations on large arrays
 
 function run_math_benchmark()
-    fprintf('Running mathematical functions benchmark...\n');
+    fprintf('=== Mathematical Functions Benchmark ===\n');
     
-    % Test data sizes
-    sizes = [10000, 100000, 1000000];
-    
-    for i = 1:length(sizes)
-        n = sizes(i);
-        fprintf('\n=== Array size: %d elements ===\n', n);
-        
+    % Test multiple array sizes
+    sizes = [50000, 200000, 500000];
+    for s = 1:length(sizes)
+        n = sizes(s);
+        fprintf('\nArray size: %d elements\n', n);
+
         % Generate test data
         x = randn(1, n);
-        y = randn(1, n);
-        
-        % Trigonometric functions
-        tic;
-        result1 = sin(x);
-        sin_time = toc;
-        fprintf('sin(): %.4f seconds\n', sin_time);
-        
-        tic;
-        result2 = cos(x);
-        cos_time = toc;
-        fprintf('cos(): %.4f seconds\n', cos_time);
-        
-        tic;
-        result3 = tan(x);
-        tan_time = toc;
-        fprintf('tan(): %.4f seconds\n', tan_time);
-        
-        % Exponential and logarithmic
-        x_pos = abs(x) + 1; % Ensure positive for log
-        
-        tic;
-        result4 = exp(x);
-        exp_time = toc;
-        fprintf('exp(): %.4f seconds\n', exp_time);
-        
-        tic;
-        result5 = log(x_pos);
-        log_time = toc;
-        fprintf('log(): %.4f seconds\n', log_time);
-        
-        tic;
-        result6 = sqrt(x_pos);
-        sqrt_time = toc;
-        fprintf('sqrt(): %.4f seconds\n', sqrt_time);
-        
-        % Statistical functions
-        tic;
-        result7 = sum(x);
-        sum_time = toc;
-        fprintf('sum(): %.4f seconds\n', sum_time);
-        
-        tic;
-        result8 = mean(x);
-        mean_time = toc;
-        fprintf('mean(): %.4f seconds\n', mean_time);
-        
-        tic;
-        result9 = std(x);
-        std_time = toc;
-        fprintf('std(): %.4f seconds\n', std_time);
+        x_pos = abs(x) + 1; % Ensure positive for log/sqrt
+
+        % Trigonometric functions (test JIT mathematical implementations)
+        tic; result_sin = sin(x); sin_time = toc;
+        fprintf('  sin() time: %.6f\n', sin_time);
+
+        tic; result_cos = cos(x); cos_time = toc;
+        fprintf('  cos() time: %.6f\n', cos_time);
+
+        tic; result_exp = exp(x); exp_time = toc;
+        fprintf('  exp() time: %.6f\n', exp_time);
+
+        tic; result_log = log(x_pos); log_time = toc;
+        fprintf('  log() time: %.6f\n', log_time);
+
+        tic; result_sqrt = sqrt(x_pos); sqrt_time = toc;
+        fprintf('  sqrt() time: %.6f\n', sqrt_time);
+
+        % Statistical functions (test runtime builtin integration)
+        tic; result_sum = sum(x); sum_time = toc;
+        fprintf('  sum() time: %.6f\n', sum_time);
+
+        tic; result_mean = mean(x); mean_time = toc;
+        fprintf('  mean() time: %.6f\n', mean_time);
+
+        tic; result_std = std(x); std_time = toc;
+        fprintf('  std() time: %.6f\n', std_time);
     end
+    
+    fprintf('\nMathematical functions benchmark completed.\n');
 end
 
 % Run the benchmark

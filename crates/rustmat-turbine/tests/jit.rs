@@ -1,10 +1,11 @@
 use cranelift::prelude::isa::CallConv;
-use rustmat_builtins::Value;
+use rustmat_builtins::{Value, Type};
 use rustmat_ignition::{Bytecode, Instr};
 use rustmat_turbine::{
     CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, ThreadSafeFunctionCache,
     TurbineEngine,
 };
+use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
@@ -288,6 +289,7 @@ fn test_bytecode_compilation() {
             Instr::StoreVar(0),
         ],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     // Initially should not compile (not hot)
@@ -348,6 +350,7 @@ fn test_complex_bytecode_compilation() {
             Instr::CreateMatrix(2, 2), // Create 2x2 matrix from stack
         ],
         var_count: 2,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -394,6 +397,7 @@ fn test_control_flow_compilation() {
             Instr::Return,
         ],
         var_count: 2,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -462,6 +466,7 @@ fn test_nested_control_flow() {
             Instr::StoreVar(1),
         ],
         var_count: 2,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -512,6 +517,7 @@ fn test_execute_or_compile() {
             Instr::StoreVar(0),
         ],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     let mut vars = vec![Value::Num(0.0)];
@@ -561,6 +567,7 @@ fn test_engine_reset() {
     let bytecode = Bytecode {
         instructions: vec![Instr::LoadConst(1.0), Instr::StoreVar(0)],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     // Make it hot and compile
@@ -591,16 +598,19 @@ fn test_bytecode_hashing() {
     let bytecode1 = Bytecode {
         instructions: vec![Instr::LoadConst(1.0), Instr::Add],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     let bytecode2 = Bytecode {
         instructions: vec![Instr::LoadConst(1.0), Instr::Add],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     let bytecode3 = Bytecode {
         instructions: vec![Instr::LoadConst(2.0), Instr::Add],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     // Same bytecode should produce same hash
@@ -635,6 +645,7 @@ fn test_error_handling() {
     let bytecode = Bytecode {
         instructions: vec![Instr::LoadConst(1.0)],
         var_count: 0,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -734,6 +745,7 @@ fn test_large_function_compilation() {
     let bytecode = Bytecode {
         instructions,
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -780,6 +792,7 @@ fn test_stats_accuracy() {
     let bytecode = Bytecode {
         instructions: vec![Instr::LoadConst(1.0), Instr::StoreVar(0)],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -827,6 +840,7 @@ fn test_jit_arithmetic_compilation() {
             Instr::Return,
         ],
         var_count: 4,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -873,6 +887,7 @@ fn test_runtime_interface_implementation() {
             Instr::StoreVar(0),
         ],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -926,6 +941,7 @@ fn test_runtime_functions_available() {
             Instr::StoreVar(0),
         ],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash1 = engine.calculate_bytecode_hash(&bytecode_with_builtin);
@@ -951,6 +967,7 @@ fn test_runtime_functions_available() {
             Instr::StoreVar(0),
         ],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash2 = engine.calculate_bytecode_hash(&bytecode_with_matrix);
@@ -974,6 +991,7 @@ fn test_runtime_functions_available() {
             Instr::StoreVar(0),
         ],
         var_count: 1,
+        functions: std::collections::HashMap::new(),
     };
 
     let hash3 = engine.calculate_bytecode_hash(&bytecode_with_pow);
@@ -987,4 +1005,791 @@ fn test_runtime_functions_available() {
         compile_result3.is_ok(),
         "Should compile power operations with libm runtime interface"
     );
+}
+
+#[test]
+fn test_jit_user_function_fallback() {
+    // Test: User-defined functions should fallback to interpreter correctly
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // Create bytecode with user function definition and call
+    use std::collections::HashMap;
+    let mut functions = HashMap::new();
+    functions.insert("double".to_string(), rustmat_ignition::UserFunction {
+        name: "double".to_string(),
+        params: vec![rustmat_hir::VarId(0)],
+        outputs: vec![rustmat_hir::VarId(1)],
+        body: vec![
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(1),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Binary(
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                        rustmat_parser::BinOp::Mul,
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Number("2".to_string()),
+                            ty: Type::Num,
+                        }),
+                    ),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 2,
+    });
+    
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(5.0),  // Load argument
+            Instr::CallFunction("double".to_string(), 1),  // Call function
+            Instr::StoreVar(0),     // Store result
+        ],
+        var_count: 1,
+        functions,
+    };
+    
+    let mut vars = vec![Value::Num(0.0)];
+    
+    // Execute - should fallback to interpreter for function calls
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(result.is_ok(), "Function execution should work via interpreter fallback");
+    
+    let (status, used_jit) = result.unwrap();
+    assert_eq!(status, 0, "Execution should succeed");
+    assert_eq!(used_jit, false, "Should use interpreter fallback for functions");
+    
+    // Check result
+    if let Value::Num(value) = &vars[0] {
+        assert_eq!(*value, 10.0, "double(5) should equal 10");
+    } else {
+        panic!("Result should be Num(10.0), got {:?}", vars[0]);
+    }
+}
+
+#[test]
+fn test_jit_function_variable_preservation() {
+    // Test: Variables should be preserved across JIT/interpreter transitions
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // First execute some JIT code to set variables
+    let jit_bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(42.0),
+            Instr::StoreVar(0),
+            Instr::LoadConst(100.0),
+            Instr::StoreVar(1),
+        ],
+        var_count: 2,
+        functions: HashMap::new(),
+    };
+    
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    
+    // Execute JIT code
+    let result1 = engine.execute_or_compile(&jit_bytecode, &mut vars);
+    assert!(result1.is_ok(), "JIT code should execute");
+    
+    // Verify variables are set
+    assert_eq!(vars[0], Value::Num(42.0));
+    assert_eq!(vars[1], Value::Num(100.0));
+    
+    // Now execute function code that uses those variables
+    let mut functions = HashMap::new();
+    functions.insert("add_globals".to_string(), rustmat_ignition::UserFunction {
+        name: "add_globals".to_string(),
+        params: vec![],
+        outputs: vec![rustmat_hir::VarId(2)],
+        body: vec![
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(2),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Binary(
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                        rustmat_parser::BinOp::Add,
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(1)),
+                            ty: Type::Num,
+                        }),
+                    ),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 3,
+    });
+    
+    let function_bytecode = Bytecode {
+        instructions: vec![
+            Instr::CallFunction("add_globals".to_string(), 0),
+            Instr::StoreVar(2),
+        ],
+        var_count: 3,
+        functions,
+    };
+    
+    // Extend vars array
+    vars.push(Value::Num(0.0));
+    
+    // Execute function code (should preserve existing variables)
+    let result2 = engine.execute_or_compile(&function_bytecode, &mut vars);
+    assert!(result2.is_ok(), "Function code should execute");
+    
+    // Verify original variables are preserved and result is computed
+    assert_eq!(vars[0], Value::Num(42.0), "Original variable 0 should be preserved");
+    assert_eq!(vars[1], Value::Num(100.0), "Original variable 1 should be preserved");
+    assert_eq!(vars[2], Value::Num(142.0), "Function should compute 42 + 100 = 142");
+}
+
+#[test]
+fn test_jit_mixed_execution_patterns() {
+    // Test: Mix of JIT-compiled code and function calls
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // Define a function
+    let mut functions = HashMap::new();
+    functions.insert("square".to_string(), rustmat_ignition::UserFunction {
+        name: "square".to_string(),
+        params: vec![rustmat_hir::VarId(0)],
+        outputs: vec![rustmat_hir::VarId(1)],
+        body: vec![
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(1),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Binary(
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                        rustmat_parser::BinOp::Mul,
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                    ),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 2,
+    });
+    
+    // Bytecode that mixes arithmetic (JIT-able) with function calls (interpreter)
+    let mixed_bytecode = Bytecode {
+        instructions: vec![
+            // JIT-able: x = 5
+            Instr::LoadConst(5.0),
+            Instr::StoreVar(0),
+            
+            // JIT-able: y = x + 3 = 8
+            Instr::LoadVar(0),
+            Instr::LoadConst(3.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+            
+            // Function call: z = square(y) = 64
+            Instr::LoadVar(1),
+            Instr::CallFunction("square".to_string(), 1),
+            Instr::StoreVar(2),
+            
+            // JIT-able: result = z + 10 = 74
+            Instr::LoadVar(2),
+            Instr::LoadConst(10.0),
+            Instr::Add,
+            Instr::StoreVar(3),
+        ],
+        var_count: 4,
+        functions,
+    };
+    
+    let mut vars = vec![Value::Num(0.0); 4];
+    
+    // Execute mixed code
+    let result = engine.execute_or_compile(&mixed_bytecode, &mut vars);
+    assert!(result.is_ok(), "Mixed execution should work");
+    
+    // Verify results
+    assert_eq!(vars[0], Value::Num(5.0), "x should be 5");
+    assert_eq!(vars[1], Value::Num(8.0), "y should be 8");
+    assert_eq!(vars[2], Value::Num(64.0), "z should be square(8) = 64");
+    assert_eq!(vars[3], Value::Num(74.0), "result should be 64 + 10 = 74");
+}
+
+#[test]
+fn test_jit_function_compilation_attempts() {
+    // Test: JIT compiler should handle function-related instructions gracefully
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // Bytecode with function instructions (should not crash JIT compiler)
+    let function_instructions_bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(42.0),
+            Instr::LoadLocal(0),      // Should be handled gracefully
+            Instr::StoreLocal(1),     // Should be handled gracefully
+            Instr::EnterScope(5),     // Should be handled gracefully
+            Instr::ExitScope(5),      // Should be handled gracefully
+            Instr::CallFunction("test".to_string(), 1),  // Should trigger fallback
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+        functions: HashMap::new(),
+    };
+    
+    // Should not crash when trying to compile function instructions
+    let _compile_result = engine.compile_bytecode(&function_instructions_bytecode);
+    // May succeed or fail depending on implementation, but should not crash
+    
+    let mut vars = vec![Value::Num(0.0)];
+    
+    // Execution should work via interpreter fallback
+    let exec_result = engine.execute_or_compile(&function_instructions_bytecode, &mut vars);
+    // This will likely error due to undefined function, but should not crash
+    if exec_result.is_err() {
+        let error = exec_result.unwrap_err();
+        assert!(error.to_string().contains("test") || error.to_string().contains("undefined"), 
+               "Should get undefined function error, got: {}", error);
+    }
+}
+
+#[test]
+fn test_jit_engine_statistics_with_functions() {
+    // Test: Engine statistics should work correctly with function fallbacks
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // First execute some regular code that can be JIT compiled
+    let jit_bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(10.0),
+            Instr::LoadConst(20.0),
+            Instr::Add,
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+        functions: HashMap::new(),
+    };
+    
+    let mut vars = vec![Value::Num(0.0)];
+    
+    // Execute multiple times to make it hot (if implementation supports it)
+    for _ in 0..10 {
+        let _ = engine.execute_or_compile(&jit_bytecode, &mut vars);
+    }
+    
+    // Now execute function code
+    let mut functions = HashMap::new();
+    functions.insert("noop".to_string(), rustmat_ignition::UserFunction {
+        name: "noop".to_string(),
+        params: vec![],
+        outputs: vec![],
+        body: vec![],
+        local_var_count: 0,
+    });
+    
+    let function_bytecode = Bytecode {
+        instructions: vec![
+            Instr::CallFunction("noop".to_string(), 0),
+        ],
+        var_count: 1,
+        functions,
+    };
+    
+    let _ = engine.execute_or_compile(&function_bytecode, &mut vars);
+    
+    // Get statistics (should not crash)
+    let stats = engine.stats();
+    
+    // Verify stats structure exists (these fields are non-negative by type)
+    // Just verify we can access the fields without panicking
+    let _ = stats.compiled_functions;
+    let _ = stats.total_compilations; 
+    let _ = stats.cache_size;
+}
+
+#[test]
+fn test_jit_simple_function_compilation() {
+    // Test: Simple arithmetic function should compile to native JIT code
+    if !TurbineEngine::is_jit_supported() {
+        return; // Skip on unsupported platforms
+    }
+    
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // Create a simple function: double(x) = x * 2
+    let mut functions = HashMap::new();
+    functions.insert("double".to_string(), rustmat_ignition::UserFunction {
+        name: "double".to_string(),
+        params: vec![rustmat_hir::VarId(0)],
+        outputs: vec![rustmat_hir::VarId(1)],
+        body: vec![
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(1),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Binary(
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                        rustmat_parser::BinOp::Mul,
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Number("2".to_string()),
+                            ty: Type::Num,
+                        }),
+                    ),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 2,
+    });
+    
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(5.0),
+            Instr::CallFunction("double".to_string(), 1),
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+        functions,
+    };
+    
+    let mut vars = vec![Value::Num(0.0)];
+    
+    // Force compilation by making it hot
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+    
+    // Execute - should compile to JIT and run natively
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    
+    assert!(result.is_ok(), "Function execution should work: {:?}", result);
+    let (status, used_jit) = result.unwrap();
+    assert_eq!(status, 0, "Execution should succeed");
+    
+    // Check that the result is correct
+    if let Value::Num(n) = vars[0] {
+        assert!((n - 10.0).abs() < 1e-10, "double(5) should be 10.0, got {}", n);
+    } else {
+        panic!("Expected numeric result");
+    }
+    
+    // For simple arithmetic functions, JIT should succeed
+    // (JIT failure would still work via interpreter fallback)
+    println!("JIT used: {}", used_jit);
+}
+
+#[test]
+fn test_jit_nested_function_calls_compilation() {
+    // Test: Nested function calls should work with JIT compilation
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+    
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // Create two functions: add(a,b) = a + b, multiply_and_add(x) = add(x*2, x*3)
+    let mut functions = HashMap::new();
+    
+    functions.insert("add".to_string(), rustmat_ignition::UserFunction {
+        name: "add".to_string(),
+        params: vec![rustmat_hir::VarId(0), rustmat_hir::VarId(1)],
+        outputs: vec![rustmat_hir::VarId(2)],
+        body: vec![
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(2),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Binary(
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                        rustmat_parser::BinOp::Add,
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(1)),
+                            ty: Type::Num,
+                        }),
+                    ),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 3,
+    });
+    
+    functions.insert("multiply_and_add".to_string(), rustmat_ignition::UserFunction {
+        name: "multiply_and_add".to_string(),
+        params: vec![rustmat_hir::VarId(3)],
+        outputs: vec![rustmat_hir::VarId(4)],
+        body: vec![
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(4),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::FuncCall(
+                        "add".to_string(),
+                        vec![
+                            rustmat_hir::HirExpr {
+                                kind: rustmat_hir::HirExprKind::Binary(
+                                    Box::new(rustmat_hir::HirExpr {
+                                        kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(3)),
+                                        ty: Type::Num,
+                                    }),
+                                    rustmat_parser::BinOp::Mul,
+                                    Box::new(rustmat_hir::HirExpr {
+                                        kind: rustmat_hir::HirExprKind::Number("2".to_string()),
+                                        ty: Type::Num,
+                                    }),
+                                ),
+                                ty: Type::Num,
+                            },
+                            rustmat_hir::HirExpr {
+                                kind: rustmat_hir::HirExprKind::Binary(
+                                    Box::new(rustmat_hir::HirExpr {
+                                        kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(3)),
+                                        ty: Type::Num,
+                                    }),
+                                    rustmat_parser::BinOp::Mul,
+                                    Box::new(rustmat_hir::HirExpr {
+                                        kind: rustmat_hir::HirExprKind::Number("3".to_string()),
+                                        ty: Type::Num,
+                                    }),
+                                ),
+                                ty: Type::Num,
+                            },
+                        ]
+                    ),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 5,
+    });
+    
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(4.0),
+            Instr::CallFunction("multiply_and_add".to_string(), 1),
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+        functions,
+    };
+    
+    let mut vars = vec![Value::Num(0.0)];
+    
+    // Execute multiple times to potentially trigger JIT compilation
+    for _ in 0..15 {
+        let _ = engine.execute_or_compile(&bytecode, &mut vars);
+    }
+    
+    // Final execution
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(result.is_ok(), "Nested function execution should work: {:?}", result);
+    
+    // Check the result: multiply_and_add(4) = add(4*2, 4*3) = add(8, 12) = 20
+    if let Value::Num(n) = vars[0] {
+        assert!((n - 20.0).abs() < 1e-10, "multiply_and_add(4) should be 20.0, got {}", n);
+    } else {
+        panic!("Expected numeric result");
+    }
+}
+
+#[test]
+fn test_jit_function_parameter_validation() {
+    // Test: JIT compilation should validate function parameters correctly
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+    
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // Create a function that expects 2 parameters
+    let mut functions = HashMap::new();
+    functions.insert("add_two".to_string(), rustmat_ignition::UserFunction {
+        name: "add_two".to_string(),
+        params: vec![rustmat_hir::VarId(0), rustmat_hir::VarId(1)],
+        outputs: vec![rustmat_hir::VarId(2)],
+        body: vec![
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(2),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Binary(
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                        rustmat_parser::BinOp::Add,
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(1)),
+                            ty: Type::Num,
+                        }),
+                    ),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 3,
+    });
+    
+    // Test with wrong number of arguments (should fallback to interpreter which will handle the error)
+    let bytecode_wrong_args = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(5.0),
+            // Only 1 argument but function expects 2
+            Instr::CallFunction("add_two".to_string(), 1),
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+        functions: functions.clone(),
+    };
+    
+    let mut vars = vec![Value::Num(0.0)];
+    
+    // This should either fail during JIT compilation (and fallback to interpreter) 
+    // or fail in the interpreter - either way it should handle the error gracefully
+    let result = engine.execute_or_compile(&bytecode_wrong_args, &mut vars);
+    // We expect this to fail somewhere in the chain
+    assert!(result.is_err() || vars[0] == Value::Num(0.0), "Wrong argument count should be handled");
+    
+    // Test with correct number of arguments
+    let bytecode_correct = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(3.0),
+            Instr::LoadConst(7.0),
+            Instr::CallFunction("add_two".to_string(), 2),
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+        functions,
+    };
+    
+    let mut vars_correct = vec![Value::Num(0.0)];
+    let result_correct = engine.execute_or_compile(&bytecode_correct, &mut vars_correct);
+    assert!(result_correct.is_ok(), "Correct argument count should work");
+    
+    if let Value::Num(n) = vars_correct[0] {
+        assert!((n - 10.0).abs() < 1e-10, "add_two(3, 7) should be 10.0, got {}", n);
+    }
+}
+
+#[test]
+fn test_jit_function_variable_isolation() {
+    // Test: JIT compilation should maintain proper variable isolation
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+    
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // Create a function that uses local variables
+    let mut functions = HashMap::new();
+    functions.insert("isolate_test".to_string(), rustmat_ignition::UserFunction {
+        name: "isolate_test".to_string(),
+        params: vec![rustmat_hir::VarId(0)],
+        outputs: vec![rustmat_hir::VarId(1)],
+        body: vec![
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(1),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Binary(
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                        rustmat_parser::BinOp::Add,
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Number("42".to_string()),
+                            ty: Type::Num,
+                        }),
+                    ),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 2,
+    });
+    
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(100.0),
+            Instr::StoreVar(1), // Store in global var 1
+            Instr::LoadConst(8.0),
+            Instr::CallFunction("isolate_test".to_string(), 1),
+            Instr::StoreVar(0),
+        ],
+        var_count: 2,
+        functions,
+    };
+    
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(result.is_ok(), "Variable isolation test should work: {:?}", result);
+    
+    // Check results
+    if let Value::Num(n) = vars[0] {
+        assert!((n - 50.0).abs() < 1e-10, "isolate_test(8) should be 50.0, got {}", n);
+    }
+    if let Value::Num(n) = vars[1] {
+        assert!((n - 100.0).abs() < 1e-10, "Global variable should remain 100.0, got {}", n);
+    }
+}
+
+#[test]
+fn test_jit_function_compilation_performance() {
+    // Test: JIT compilation should provide performance benefits for hot functions
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+    
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // Create a computationally intensive function
+    let mut functions = HashMap::new();
+    functions.insert("compute_intensive".to_string(), rustmat_ignition::UserFunction {
+        name: "compute_intensive".to_string(),
+        params: vec![rustmat_hir::VarId(0)],
+        outputs: vec![rustmat_hir::VarId(1)],
+        body: vec![
+            // temp = x * x
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(2),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Binary(
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                        rustmat_parser::BinOp::Mul,
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                            ty: Type::Num,
+                        }),
+                    ),
+                    ty: Type::Num,
+                }
+            ),
+            // result = temp + temp
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(1),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Binary(
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(2)),
+                            ty: Type::Num,
+                        }),
+                        rustmat_parser::BinOp::Add,
+                        Box::new(rustmat_hir::HirExpr {
+                            kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(2)),
+                            ty: Type::Num,
+                        }),
+                    ),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 3,
+    });
+    
+    let bytecode = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(6.0),
+            Instr::CallFunction("compute_intensive".to_string(), 1),
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+        functions,
+    };
+    
+    let mut vars = vec![Value::Num(0.0)];
+    
+    // Execute many times to trigger JIT compilation
+    let mut jit_used_count = 0;
+    for _ in 0..50 {
+        let result = engine.execute_or_compile(&bytecode, &mut vars);
+        assert!(result.is_ok(), "Performance test should work");
+        
+        if let Ok((_, used_jit)) = result {
+            if used_jit {
+                jit_used_count += 1;
+            }
+        }
+    }
+    
+    // Check that the computation is correct: compute_intensive(6) = (6*6) + (6*6) = 72
+    if let Value::Num(n) = vars[0] {
+        assert!((n - 72.0).abs() < 1e-10, "compute_intensive(6) should be 72.0, got {}", n);
+    }
+    
+    // We don't strictly require JIT to be used (depends on heuristics), 
+    // but this test exercises the hot path
+    println!("JIT was used {} times out of 50 executions", jit_used_count);
+}
+
+#[test]
+fn test_jit_function_error_handling() {
+    // Test: JIT compilation should handle errors gracefully and fallback appropriately
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+    
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    
+    // Test calling undefined function
+    let bytecode_undefined = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(5.0),
+            Instr::CallFunction("undefined_function".to_string(), 1),
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+        functions: HashMap::new(),
+    };
+    
+    let mut vars = vec![Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode_undefined, &mut vars);
+    
+    // Should get an error about undefined function
+    assert!(result.is_err(), "Undefined function should cause error");
+    
+    // Test compilation that might fail and fallback to interpreter
+    let mut functions = HashMap::new();
+    functions.insert("simple".to_string(), rustmat_ignition::UserFunction {
+        name: "simple".to_string(),
+        params: vec![rustmat_hir::VarId(0)],
+        outputs: vec![rustmat_hir::VarId(1)],
+        body: vec![
+            rustmat_hir::HirStmt::Assign(
+                rustmat_hir::VarId(1),
+                rustmat_hir::HirExpr {
+                    kind: rustmat_hir::HirExprKind::Var(rustmat_hir::VarId(0)),
+                    ty: Type::Num,
+                }
+            )
+        ],
+        local_var_count: 2,
+    });
+    
+    let bytecode_simple = Bytecode {
+        instructions: vec![
+            Instr::LoadConst(42.0),
+            Instr::CallFunction("simple".to_string(), 1),
+            Instr::StoreVar(0),
+        ],
+        var_count: 1,
+        functions,
+    };
+    
+    let mut vars_simple = vec![Value::Num(0.0)];
+    let result_simple = engine.execute_or_compile(&bytecode_simple, &mut vars_simple);
+    
+    assert!(result_simple.is_ok(), "Simple function should work");
+    if let Value::Num(n) = vars_simple[0] {
+        assert!((n - 42.0).abs() < 1e-10, "simple(42) should be 42.0, got {}", n);
+    }
 }

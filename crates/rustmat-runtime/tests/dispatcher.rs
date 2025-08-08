@@ -1,4 +1,4 @@
-use rustmat_builtins::{builtins, Value};
+use rustmat_builtins::{builtin_functions, Value};
 use rustmat_macros::runtime_builtin;
 use rustmat_runtime::call_builtin;
 
@@ -15,6 +15,6 @@ fn call_registered_builtin() {
     } else {
         panic!();
     }
-    let names: Vec<&str> = builtins().into_iter().map(|b| b.name).collect();
+    let names: Vec<&str> = builtin_functions().into_iter().map(|b| b.name).collect();
     assert!(names.contains(&"double"));
 }

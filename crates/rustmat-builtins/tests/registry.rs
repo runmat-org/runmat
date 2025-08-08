@@ -1,4 +1,4 @@
-use rustmat_builtins::{builtins, Matrix, Value};
+use rustmat_builtins::{builtin_functions, Matrix, Value};
 use rustmat_macros::runtime_builtin;
 
 #[runtime_builtin(name = "add")]
@@ -23,7 +23,7 @@ fn str_length(s: String) -> Result<i32, String> {
 
 #[test]
 fn contains_registered_functions() {
-    let names: Vec<&str> = builtins().into_iter().map(|b| b.name).collect();
+    let names: Vec<&str> = builtin_functions().into_iter().map(|b| b.name).collect();
     assert!(names.contains(&"add"));
     assert!(names.contains(&"sub"));
     assert!(names.contains(&"matrix_sum"));

@@ -374,3 +374,75 @@ fn test_performance_degradation_detection() {
         }
     });
 }
+
+#[test]
+fn test_repl_function_definition_and_call_same_statement() {
+    gc_test_context(|| {
+        let mut engine = ReplEngine::new().unwrap();
+        
+        // Define and call function in the same statement (this should work)
+        let result = engine.execute("function y = double(x); y = x * 2; end; result = double(21)");
+        assert!(result.is_ok(), "Function definition and call should succeed");
+        
+        // The REPL now properly uses the shared Ignition interpreter with function support
+        let exec_result = result.unwrap();
+        if let Some(error) = &exec_result.error {
+            panic!("Function call failed with error: {}", error);
+        }
+        
+        // This verifies that our architectural fix (removing duplicate interpreter) works
+        // The function is defined and called within the same execution context
+    });
+}
+
+#[test]
+fn test_repl_function_persistence() {
+    gc_test_context(|| {
+        let mut engine = ReplEngine::new().unwrap();
+        
+        // Define function in one command
+        let result1 = engine.execute("function y = add(a, b); y = a + b; end");
+        assert!(result1.is_ok(), "Function definition should succeed");
+        
+        // Use function in another command
+        let result2 = engine.execute("x = add(10, 20)");
+        assert!(result2.is_ok(), "Function call should succeed");
+        
+        // Functions should persist across REPL commands
+        let exec_result = result2.unwrap();
+        if let Some(error) = &exec_result.error {
+            panic!("Function call failed with error: {}", error);
+        }
+    });
+}
+
+#[test]
+fn test_debug_function_context() {
+    gc_test_context(|| {
+        let mut engine = ReplEngine::new().unwrap();
+        
+        // First, just define a function 
+        let result1 = engine.execute("function y = test_func(x); y = x + 1; end");
+        println!("Function definition result: {:?}", result1);
+        assert!(result1.is_ok(), "Function definition should succeed");
+        
+        // Try to call a simple builtin to verify engine works
+        let result2 = engine.execute("builtin_test = abs(-5)");
+        println!("Builtin call result: {:?}", result2);
+        assert!(result2.is_ok(), "Builtin call should succeed");
+        
+        // Now try to call our user-defined function
+        let result3 = engine.execute("user_func_test = test_func(10)");
+        println!("User function call result: {:?}", result3);
+        
+        if let Err(e) = &result3 {
+            println!("Function call error: {}", e);
+        } else if let Ok(exec_result) = &result3 {
+            if let Some(error) = &exec_result.error {
+                println!("Execution error: {}", error);
+            } else {
+                println!("Function call succeeded!");
+            }
+        }
+    });
+}

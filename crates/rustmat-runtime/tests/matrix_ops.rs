@@ -1,4 +1,4 @@
-use rustmat_builtins::{builtins, Matrix, Value};
+use rustmat_builtins::{builtin_functions, Matrix, Value};
 use rustmat_runtime::{call_builtin, comparison::*, indexing::*, matrix::*};
 
 #[test]
@@ -112,7 +112,7 @@ fn test_row_column_access() {
 #[test]
 fn test_builtin_functions() {
     // Test that our new built-in functions are registered
-    let names: Vec<&str> = builtins().into_iter().map(|b| b.name).collect();
+    let names: Vec<&str> = builtin_functions().into_iter().map(|b| b.name).collect();
 
     assert!(names.contains(&"matrix_zeros"));
     assert!(names.contains(&"matrix_ones"));

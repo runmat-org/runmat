@@ -6,6 +6,8 @@
 use crate::{Result, TurbineError};
 use cranelift::prelude::*;
 use cranelift_codegen::ir::ValueDef;
+use cranelift_jit::JITModule;
+use cranelift_module::{Module, FuncId};
 use rustmat_ignition::Instr;
 use std::collections::{BTreeSet, HashMap};
 
@@ -196,6 +198,9 @@ impl BytecodeCompiler {
         instructions: &[Instr],
         func: &mut codegen::ir::Function,
         _var_count: usize,
+        function_definitions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>,
+        module: &mut JITModule,
+        rustmat_call_user_function_id: FuncId,
     ) -> Result<()> {
         let mut builder = FunctionBuilder::new(func, &mut self.builder_context);
 
@@ -223,7 +228,7 @@ impl BytecodeCompiler {
         }
 
         // Compile with proper control flow graph
-        Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, vars_ptr)?;
+        Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, vars_ptr, function_definitions, module, rustmat_call_user_function_id)?;
 
         // Seal all blocks (including entry block which is in cfg.blocks)
         for (&_pc, basic_block) in &cfg.blocks {
@@ -240,6 +245,9 @@ impl BytecodeCompiler {
         instructions: &[Instr],
         cfg: &ControlFlowGraph,
         vars_ptr: Value,
+        function_definitions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>,
+        module: &mut JITModule,
+        rustmat_call_user_function_id: FuncId,
     ) -> Result<()> {
         // Get all blocks sorted by start PC for processing
         let mut sorted_blocks: Vec<_> = cfg.blocks.iter().collect();
@@ -321,6 +329,10 @@ impl BytecodeCompiler {
                         let val = local_stack.pop()?;
                         let result = Self::call_runtime_neg_static(builder, val);
                         local_stack.push(result);
+                    }
+                    Instr::Transpose => {
+                        // Matrix transpose is complex - fall back to interpreter
+                        return Err(TurbineError::ExecutionError("Matrix transpose not supported in JIT mode".to_string()));
                     }
                     Instr::ElemMul => {
                         let (a, b) = local_stack.pop_two()?;
@@ -495,6 +507,48 @@ impl BytecodeCompiler {
                             .brif(is_false, false_block, &[], true_block, &[]);
                         block_terminated = true;
                     }
+                    Instr::CallFunction(func_name, arg_count) => {
+                        // Compile user-defined function call to native code
+                        let mut args = Vec::new();
+                        for _ in 0..*arg_count {
+                            args.push(local_stack.pop()?);
+                        }
+                        args.reverse();
+                        
+                        let result = Self::call_user_function_jit(builder, module, rustmat_call_user_function_id, func_name, &args, function_definitions)?;
+                        local_stack.push(result);
+                    }
+                    Instr::LoadLocal(offset) => {
+                        // Load from local variable slot
+                        let offset_val = builder.ins().iconst(types::I64, *offset as i64);
+                        let element_size = builder.ins().iconst(types::I64, 8);
+                        let local_offset = builder.ins().imul(offset_val, element_size);
+                        let var_addr = builder.ins().iadd(vars_ptr, local_offset);
+                        let val = builder.ins().load(types::F64, MemFlags::new(), var_addr, 0);
+                        local_stack.push(val);
+                    }
+                    Instr::StoreLocal(offset) => {
+                        // Store to local variable slot
+                        let val = local_stack.pop()?;
+                        let offset_val = builder.ins().iconst(types::I64, *offset as i64);
+                        let element_size = builder.ins().iconst(types::I64, 8);
+                        let local_offset = builder.ins().imul(offset_val, element_size);
+                        let var_addr = builder.ins().iadd(vars_ptr, local_offset);
+                        builder.ins().store(MemFlags::new(), val, var_addr, 0);
+                    }
+                    Instr::EnterScope(_count) => {
+                        // Function scope entry - local variables managed through LoadLocal/StoreLocal
+                    }
+                    Instr::ExitScope(_count) => {
+                        // Function scope exit - cleanup handled by caller
+                    }
+                    Instr::ReturnValue => {
+                        // Return with value - for JIT, treat as normal return
+                        local_stack.pop()?; // Pop the return value
+                        let zero = builder.ins().iconst(types::I32, 0);
+                        builder.ins().return_(&[zero]);
+                        block_terminated = true;
+                    }
                 }
 
                 pc += 1;
@@ -530,281 +584,141 @@ impl BytecodeCompiler {
         Ok(())
     }
 
-    #[allow(dead_code)] // Legacy method kept for compatibility
-    fn compile_remaining_from_with_blocks(
-        builder: &mut FunctionBuilder,
-        stack: &mut StackSimulator,
-        instructions: &[Instr],
-        start_index: usize,
-        vars_ptr: Value,
-    ) -> Result<Vec<Block>> {
-        let mut created_blocks = Vec::new();
-        // Compile instructions starting from start_index
-        for (_i, instr) in instructions.iter().enumerate().skip(start_index) {
-            match instr {
-                Instr::LoadString(_) => {
-                    // Strings cannot be compiled to JIT - fall back to interpreter
-                    return Err(TurbineError::ExecutionError("String operations not supported in JIT mode".to_string()));
-                }
-                Instr::LoadConst(val) => {
-                    // Create f64 constant and push to stack
-                    let const_val = builder.ins().f64const(*val);
-                    stack.push(const_val);
-                }
-                Instr::LoadVar(idx) => {
-                    // Load f64 from vars_ptr[idx]
-                    let idx_val = builder.ins().iconst(types::I64, *idx as i64);
-                    let element_size = builder.ins().iconst(types::I64, 8); // size of f64
-                    let offset = builder.ins().imul(idx_val, element_size);
-                    let var_addr = builder.ins().iadd(vars_ptr, offset);
 
-                    // Load f64 from memory
-                    let val = builder.ins().load(types::F64, MemFlags::new(), var_addr, 0);
-                    stack.push(val);
-                }
-                Instr::StoreVar(idx) => {
-                    let val = stack.pop()?;
-
-                    // Store f64 to vars_ptr[idx]
-                    let idx_val = builder.ins().iconst(types::I64, *idx as i64);
-                    let element_size = builder.ins().iconst(types::I64, 8); // size of f64
-                    let offset = builder.ins().imul(idx_val, element_size);
-                    let var_addr = builder.ins().iadd(vars_ptr, offset);
-
-                    // Store f64 to memory
-                    builder.ins().store(MemFlags::new(), val, var_addr, 0);
-                }
-                Instr::Add => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_add_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Sub => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_sub_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Mul => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_mul_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Div => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_div_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Pow => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_pow_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Neg => {
-                    let val = stack.pop()?;
-                    let result = Self::call_runtime_neg_static(builder, val);
-                    stack.push(result);
-                }
-                Instr::ElemMul => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_elementwise_mul_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::ElemDiv => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_elementwise_div_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::ElemPow => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_elementwise_pow_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::ElemLeftDiv => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_elementwise_leftdiv_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::LessEqual => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_le_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Less => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_lt_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Greater => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_gt_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::GreaterEqual => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_ge_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::Equal => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_eq_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::NotEqual => {
-                    let (a, b) = stack.pop_two()?;
-                    let result = Self::call_runtime_ne_static(builder, a, b);
-                    stack.push(result);
-                }
-                Instr::CallBuiltin(name, arg_count) => {
-                    let mut args = Vec::new();
-                    for _ in 0..*arg_count {
-                        args.push(stack.pop()?);
-                    }
-                    args.reverse();
-
-                    let result = Self::call_runtime_builtin_static(builder, name, &args);
-                    stack.push(result);
-                }
-                Instr::CreateMatrix(rows, cols) => {
-                    let total_elements = rows * cols;
-                    let mut elements = Vec::new();
-
-                    for _ in 0..total_elements {
-                        elements.push(stack.pop()?);
-                    }
-                    elements.reverse();
-
-                    let result =
-                        Self::call_runtime_create_matrix_static(builder, *rows, *cols, &elements);
-                    stack.push(result);
-                }
-                Instr::CreateMatrixDynamic(num_rows) => {
-                    // Dynamic matrix creation - fall back to runtime for complex concatenation
-                    let mut rows_data = Vec::new();
-                    
-                    for _ in 0..*num_rows {
-                        // Pop row length
-                        let row_len_val = stack.pop()?;
-                        let row_len = Self::extract_f64_from_value(builder, row_len_val)
-                            .map_err(|e| TurbineError::ExecutionError(e))?;
-                        
-                        // Pop row elements
-                        let mut row_values = Vec::new();
-                        for _ in 0..(row_len as usize) {
-                            row_values.push(stack.pop()?);
-                        }
-                        row_values.reverse();
-                        rows_data.push(row_values);
-                    }
-                    rows_data.reverse();
-                    
-                    let result = Self::call_runtime_create_matrix_dynamic(builder, &rows_data);
-                    stack.push(result);
-                }
-                Instr::CreateRange(has_step) => {
-                    if *has_step {
-                        // Call runtime create_range with step
-                        let end = stack.pop()?;
-                        let step = stack.pop()?;
-                        let start = stack.pop()?;
-                        let result = Self::call_runtime_create_range_with_step(builder, start, step, end);
-                        stack.push(result);
-                    } else {
-                        // Call runtime create_range without step
-                        let end = stack.pop()?;
-                        let start = stack.pop()?;
-                        let result = Self::call_runtime_create_range(builder, start, end);
-                        stack.push(result);
-                    }
-                }
-                Instr::Index(num_indices) => {
-                    // High-performance direct indexing implementation
-                    let mut indices = Vec::new();
-                    for _ in 0..*num_indices {
-                        indices.push(stack.pop()?);
-                    }
-                    indices.reverse();
-                    let base = stack.pop()?;
-                    let result = Self::compile_matrix_indexing(builder, base, &indices)
-                        .map_err(|e| TurbineError::ExecutionError(e))?;
-                    stack.push(result);
-                }
-                Instr::Pop => {
-                    stack.pop()?;
-                }
-                Instr::Return => {
-                    let zero = builder.ins().iconst(types::I32, 0);
-                    builder.ins().return_(&[zero]);
-                    return Ok(created_blocks);
-                }
-                Instr::Jump(target) => {
-                    let target_block = builder.create_block();
-                    created_blocks.push(target_block);
-                    builder.ins().jump(target_block, &[]);
-                    builder.switch_to_block(target_block);
-
-                    if *target < instructions.len() {
-                        let mut remaining_blocks = Self::compile_remaining_from_with_blocks(
-                            builder,
-                            stack,
-                            instructions,
-                            *target,
-                            vars_ptr,
-                        )?;
-                        created_blocks.append(&mut remaining_blocks);
-                        return Ok(created_blocks);
-                    } else {
-                        let zero = builder.ins().iconst(types::I32, 0);
-                        builder.ins().return_(&[zero]);
-                        return Ok(created_blocks);
-                    }
-                }
-                Instr::JumpIfFalse(target) => {
-                    let condition = stack.pop()?;
-                    let zero = builder.ins().f64const(0.0);
-                    let is_false = builder.ins().fcmp(FloatCC::Equal, condition, zero);
-
-                    let false_block = builder.create_block();
-                    let true_block = builder.create_block();
-                    created_blocks.push(false_block);
-                    created_blocks.push(true_block);
-
-                    builder
-                        .ins()
-                        .brif(is_false, false_block, &[], true_block, &[]);
-
-                    // Compile false branch
-                    builder.switch_to_block(false_block);
-                    if *target < instructions.len() {
-                        let mut false_blocks = Self::compile_remaining_from_with_blocks(
-                            builder,
-                            &mut stack.clone(),
-                            instructions,
-                            *target,
-                            vars_ptr,
-                        )?;
-                        created_blocks.append(&mut false_blocks);
-                    } else {
-                        let zero = builder.ins().iconst(types::I32, 0);
-                        builder.ins().return_(&[zero]);
-                    }
-
-                    // Compile true branch (continue with next instruction)
-                    builder.switch_to_block(true_block);
-                    // Continue with next iteration
-                }
-            }
-        }
-
-        // If we reach the end without return, add one
-        let zero = builder.ins().iconst(types::I32, 0);
-        builder.ins().return_(&[zero]);
-        Ok(created_blocks)
-    }
 
     // Runtime interface functions for f64 operations
 
     fn call_runtime_add_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
         builder.ins().fadd(a, b)
+    }
+
+    /// Compile user-defined function call to native machine code
+    /// Uses recursive compilation: each function is compiled separately and called
+    fn call_user_function_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        rustmat_call_user_function_id: FuncId,
+        func_name: &str,
+        args: &[Value],
+        function_definitions: &std::collections::HashMap<String, rustmat_ignition::UserFunction>,
+    ) -> Result<Value> {
+        // Look up the function definition
+        let function_def = function_definitions.get(func_name)
+            .ok_or_else(|| TurbineError::ExecutionError(format!("Unknown function: {}", func_name)))?;
+        
+        // Validate argument count
+        if args.len() != function_def.params.len() {
+            return Err(TurbineError::ExecutionError(format!(
+                "Function {} expects {} arguments, got {}", 
+                func_name, function_def.params.len(), args.len()
+            )));
+        }
+        
+        // For JIT compilation of user-defined functions, we need to call a runtime function
+        // that can handle the recursive compilation and execution of the specific function.
+        // This provides proper isolation and allows for nested function calls.
+        
+        // Prepare arguments array
+        let args_slot = if !args.is_empty() {
+            let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                (args.len() * 8) as u32,
+                8, // alignment for f64
+            ));
+            let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
+            
+            // Store arguments
+            for (i, &arg) in args.iter().enumerate() {
+                let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
+                let arg_addr = builder.ins().iadd(args_ptr, offset);
+                builder.ins().store(MemFlags::new(), arg, arg_addr, 0);
+            }
+            
+            Some((args_ptr, slot))
+        } else {
+            None
+        };
+        
+        // Prepare function name as C string
+        let func_name_bytes = func_name.as_bytes();
+        let name_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (func_name_bytes.len() + 1) as u32, // +1 for null terminator
+            1,
+        ));
+        let name_ptr = builder.ins().stack_addr(types::I64, name_slot, 0);
+        
+        // Store function name with null terminator
+        for (i, &byte) in func_name_bytes.iter().enumerate() {
+            let offset = builder.ins().iconst(types::I64, i as i64);
+            let byte_addr = builder.ins().iadd(name_ptr, offset);
+            let byte_val = builder.ins().iconst(types::I8, byte as i64);
+            builder.ins().store(MemFlags::new(), byte_val, byte_addr, 0);
+        }
+        // Null terminator
+        let null_offset = builder.ins().iconst(types::I64, func_name_bytes.len() as i64);
+        let null_addr = builder.ins().iadd(name_ptr, null_offset);
+        let null_val = builder.ins().iconst(types::I8, 0);
+        builder.ins().store(MemFlags::new(), null_val, null_addr, 0);
+        
+        // Use the expert's pattern: declare_func_in_func to get a valid FuncRef
+        let runtime_fn = module.declare_func_in_func(rustmat_call_user_function_id, &mut builder.func);
+        
+        // Allocate space for the result (f64)
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        
+        let call_args = if let Some((args_ptr, _)) = args_slot {
+            vec![
+                name_ptr,
+                args_ptr,
+                builder.ins().iconst(types::I32, args.len() as i64), // i32 for arg_count
+                result_ptr,
+            ]
+        } else {
+            vec![
+                name_ptr,
+                builder.ins().iconst(types::I64, 0), // null args ptr
+                builder.ins().iconst(types::I32, 0), // args count (i32)
+                result_ptr,
+            ]
+        };
+        
+        let call = builder.ins().call(runtime_fn, &call_args);
+        let status = builder.inst_results(call)[0]; // i32 status code
+        
+        // Check status for error handling - if non-zero, we have an error
+        let zero = builder.ins().iconst(types::I32, 0);
+        let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
+        
+        // Create blocks for error and success paths
+        let error_block = builder.create_block();
+        let success_block = builder.create_block();
+        let after_block = builder.create_block();
+        
+        builder.ins().brif(is_error, error_block, &[], success_block, &[]);
+        
+        // Error block: return 0.0 to indicate error (keeps variable unchanged)
+        builder.switch_to_block(error_block);
+        let error_result = builder.ins().f64const(0.0);
+        builder.ins().jump(after_block, &[error_result]);
+        
+        // Success block: load the actual result
+        builder.switch_to_block(success_block);
+        let success_result = builder.ins().load(types::F64, MemFlags::new(), result_ptr, 0);
+        builder.ins().jump(after_block, &[success_result]);
+        
+        // After block: get the final result
+        builder.switch_to_block(after_block);
+        builder.append_block_param(after_block, types::F64);
+        let result = builder.block_params(after_block)[0];
+        
+        // Seal all blocks
+        builder.seal_block(error_block);
+        builder.seal_block(success_block);
+        builder.seal_block(after_block);
+        
+        Ok(result)
     }
 
     fn call_runtime_sub_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {

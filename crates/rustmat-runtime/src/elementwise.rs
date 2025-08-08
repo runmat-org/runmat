@@ -54,6 +54,104 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
     }
 }
 
+/// Element-wise addition: A + B
+/// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
+pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
+    match (a, b) {
+        // Scalar-scalar case
+        (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x + y)),
+        (Value::Int(x), Value::Num(y)) => Ok(Value::Num(*x as f64 + y)),
+        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x + (*y as f64))),
+        (Value::Int(x), Value::Int(y)) => Ok(Value::Num(*x as f64 + *y as f64)),
+        
+        // Matrix-scalar cases (broadcasting)
+        (Value::Matrix(m), Value::Num(s)) => {
+            let data: Vec<f64> = m.data.iter().map(|x| x + s).collect();
+            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+        }
+        (Value::Matrix(m), Value::Int(s)) => {
+            let scalar = *s as f64;
+            let data: Vec<f64> = m.data.iter().map(|x| x + scalar).collect();
+            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+        }
+        (Value::Num(s), Value::Matrix(m)) => {
+            let data: Vec<f64> = m.data.iter().map(|x| s + x).collect();
+            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+        }
+        (Value::Int(s), Value::Matrix(m)) => {
+            let scalar = *s as f64;
+            let data: Vec<f64> = m.data.iter().map(|x| scalar + x).collect();
+            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+        }
+        
+        // Matrix-matrix case
+        (Value::Matrix(m1), Value::Matrix(m2)) => {
+            if m1.rows != m2.rows || m1.cols != m2.cols {
+                return Err(format!(
+                    "Matrix dimensions must agree for addition: {}x{} + {}x{}",
+                    m1.rows, m1.cols, m2.rows, m2.cols
+                ));
+            }
+            let data: Vec<f64> = m1.data.iter()
+                .zip(m2.data.iter())
+                .map(|(x, y)| x + y)
+                .collect();
+            Ok(Value::Matrix(Matrix::new(data, m1.rows, m1.cols)?))
+        }
+        
+        _ => Err(format!("Addition not supported for types: {:?} + {:?}", a, b))
+    }
+}
+
+/// Element-wise subtraction: A - B
+/// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
+pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
+    match (a, b) {
+        // Scalar-scalar case
+        (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x - y)),
+        (Value::Int(x), Value::Num(y)) => Ok(Value::Num(*x as f64 - y)),
+        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x - (*y as f64))),
+        (Value::Int(x), Value::Int(y)) => Ok(Value::Num(*x as f64 - *y as f64)),
+        
+        // Matrix-scalar cases (broadcasting)
+        (Value::Matrix(m), Value::Num(s)) => {
+            let data: Vec<f64> = m.data.iter().map(|x| x - s).collect();
+            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+        }
+        (Value::Matrix(m), Value::Int(s)) => {
+            let scalar = *s as f64;
+            let data: Vec<f64> = m.data.iter().map(|x| x - scalar).collect();
+            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+        }
+        (Value::Num(s), Value::Matrix(m)) => {
+            let data: Vec<f64> = m.data.iter().map(|x| s - x).collect();
+            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+        }
+        (Value::Int(s), Value::Matrix(m)) => {
+            let scalar = *s as f64;
+            let data: Vec<f64> = m.data.iter().map(|x| scalar - x).collect();
+            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+        }
+        
+        // Matrix-matrix case
+        (Value::Matrix(m1), Value::Matrix(m2)) => {
+            if m1.rows != m2.rows || m1.cols != m2.cols {
+                return Err(format!(
+                    "Matrix dimensions must agree for subtraction: {}x{} - {}x{}",
+                    m1.rows, m1.cols, m2.rows, m2.cols
+                ));
+            }
+            let data: Vec<f64> = m1.data.iter()
+                .zip(m2.data.iter())
+                .map(|(x, y)| x - y)
+                .collect();
+            Ok(Value::Matrix(Matrix::new(data, m1.rows, m1.cols)?))
+        }
+        
+        _ => Err(format!("Subtraction not supported for types: {:?} - {:?}", a, b))
+    }
+}
+
 /// Element-wise division: A ./ B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {

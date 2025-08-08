@@ -1,4 +1,4 @@
-use logos::Logos;
+// use logos::Logos; // Not needed since we use rustmat_lexer::tokenize
 use rustmat_lexer::Token;
 use serde::{Deserialize, Serialize};
 
@@ -30,12 +30,20 @@ pub enum BinOp {
     ElemDiv,  // ./
     ElemPow,  // .^
     ElemLeftDiv, // .\
+    // Comparison operations
+    Equal,       // ==
+    NotEqual,    // ~=
+    Less,        // <
+    LessEqual,   // <=
+    Greater,     // >
+    GreaterEqual, // >=
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub enum UnOp {
     Plus,
     Minus,
+    Transpose,
 }
 
 #[derive(Debug, PartialEq)]
@@ -77,29 +85,84 @@ pub struct Program {
 struct TokenInfo {
     token: Token,
     lexeme: String,
+    position: usize,
 }
 
-pub fn parse(input: &str) -> Result<Program, String> {
-    let mut lexer = Token::lexer(input);
+#[derive(Debug)]
+pub struct ParseError {
+    pub message: String,
+    pub position: usize,
+    pub found_token: Option<String>,
+    pub expected: Option<String>,
+}
+
+pub fn parse(input: &str) -> Result<Program, ParseError> {
+    use rustmat_lexer::tokenize_detailed;
+
+    let toks = tokenize_detailed(input);
     let mut tokens = Vec::new();
-    while let Some(tok) = lexer.next() {
-        let token = tok.unwrap_or(Token::Error);
-        tokens.push(TokenInfo {
-            token,
-            lexeme: lexer.slice().to_string(),
-        });
+
+    for t in toks {
+        if matches!(t.token, Token::Error) {
+            return Err(ParseError {
+                message: format!("Invalid token: '{}'", t.lexeme),
+                position: t.start,
+                found_token: Some(t.lexeme),
+                expected: None,
+            });
+        }
+        tokens.push(TokenInfo { token: t.token, lexeme: t.lexeme, position: t.start });
     }
-    let mut parser = Parser { tokens, pos: 0 };
+
+    let mut parser = Parser { tokens, pos: 0, input: input.to_string() };
     parser.parse_program()
+}
+
+// For backward compatibility
+pub fn parse_simple(input: &str) -> Result<Program, String> {
+    parse(input).map_err(|e| format!("{}", e))
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Parse error at position {}: {}", self.position, self.message)?;
+        if let Some(found) = &self.found_token {
+            write!(f, " (found: '{}')", found)?;
+        }
+        if let Some(expected) = &self.expected {
+            write!(f, " (expected: {})", expected)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+impl From<String> for ParseError {
+    fn from(message: String) -> Self {
+        ParseError {
+            message,
+            position: 0,
+            found_token: None,
+            expected: None,
+        }
+    }
+}
+
+impl From<ParseError> for String {
+    fn from(error: ParseError) -> Self {
+        format!("{}", error)
+    }
 }
 
 struct Parser {
     tokens: Vec<TokenInfo>,
     pos: usize,
+    input: String,
 }
 
 impl Parser {
-    fn parse_program(&mut self) -> Result<Program, String> {
+    fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
         while self.pos < self.tokens.len() {
             if self.consume(&Token::Semicolon) {
@@ -110,12 +173,44 @@ impl Parser {
         }
         Ok(Program { body })
     }
+    
+    fn error(&self, message: &str) -> ParseError {
+        let (position, found_token) = if let Some(token_info) = self.tokens.get(self.pos) {
+            (token_info.position, Some(token_info.lexeme.clone()))
+        } else {
+            (self.input.len(), None)
+        };
+        
+        ParseError {
+            message: message.to_string(),
+            position,
+            found_token,
+            expected: None,
+        }
+    }
+    
+    fn error_with_expected(&self, message: &str, expected: &str) -> ParseError {
+        let (position, found_token) = if let Some(token_info) = self.tokens.get(self.pos) {
+            (token_info.position, Some(token_info.lexeme.clone()))
+        } else {
+            (self.input.len(), None)
+        };
+        
+        ParseError {
+            message: message.to_string(),
+            position,
+            found_token,
+            expected: Some(expected.to_string()),
+        }
+    }
+    
 
-    fn parse_stmt(&mut self) -> Result<Stmt, String> {
+
+    fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match self.peek_token() {
-            Some(Token::If) => self.parse_if(),
-            Some(Token::For) => self.parse_for(),
-            Some(Token::While) => self.parse_while(),
+            Some(Token::If) => self.parse_if().map_err(|e| e.into()),
+            Some(Token::For) => self.parse_for().map_err(|e| e.into()),
+            Some(Token::While) => self.parse_while().map_err(|e| e.into()),
             Some(Token::Break) => {
                 self.pos += 1;
                 Ok(Stmt::Break)
@@ -128,13 +223,15 @@ impl Parser {
                 self.pos += 1;
                 Ok(Stmt::Return)
             }
-            Some(Token::Function) => self.parse_function(),
+            Some(Token::Function) => self.parse_function().map_err(|e| e.into()),
             _ => {
                 if self.peek_token() == Some(&Token::Ident)
                     && self.peek_token_at(1) == Some(&Token::Assign)
                 {
-                    let name = self.next().unwrap().lexeme;
-                    self.consume(&Token::Assign);
+                    let name = self.next().ok_or_else(|| self.error("expected identifier"))?.lexeme;
+                    if !self.consume(&Token::Assign) {
+                        return Err(self.error_with_expected("expected assignment operator", "'='"));
+                    }
                     let expr = self.parse_expr()?;
                     Ok(Stmt::Assign(name, expr))
                 } else {
@@ -145,20 +242,39 @@ impl Parser {
         }
     }
 
-    fn parse_expr(&mut self) -> Result<Expr, String> {
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         self.parse_range()
     }
 
-    fn parse_range(&mut self) -> Result<Expr, String> {
-        let mut node = self.parse_add_sub()?;
+    fn parse_range(&mut self) -> Result<Expr, ParseError> {
+        let mut node = self.parse_comparison()?;
         if self.consume(&Token::Colon) {
-            let mid = self.parse_add_sub()?;
+            let mid = self.parse_comparison()?;
             if self.consume(&Token::Colon) {
-                let end = self.parse_add_sub()?;
+                let end = self.parse_comparison()?;
                 node = Expr::Range(Box::new(node), Some(Box::new(mid)), Box::new(end));
             } else {
                 node = Expr::Range(Box::new(node), None, Box::new(mid));
             }
+        }
+        Ok(node)
+    }
+
+    fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
+        let mut node = self.parse_add_sub()?;
+        loop {
+            let op = match self.peek_token() {
+                Some(Token::Equal) => BinOp::Equal,
+                Some(Token::NotEqual) => BinOp::NotEqual,
+                Some(Token::Less) => BinOp::Less,
+                Some(Token::LessEqual) => BinOp::LessEqual,
+                Some(Token::Greater) => BinOp::Greater,
+                Some(Token::GreaterEqual) => BinOp::GreaterEqual,
+                _ => break,
+            };
+            self.pos += 1; // consume op
+            let rhs = self.parse_add_sub()?;
+            node = Expr::Binary(Box::new(node), op, Box::new(rhs));
         }
         Ok(node)
     }
@@ -244,6 +360,9 @@ impl Parser {
                     return Err("expected ']'".into());
                 }
                 expr = Expr::Index(Box::new(expr), indices);
+            } else if self.consume(&Token::Transpose) {
+                // Matrix transpose (postfix operator)
+                expr = Expr::Unary(UnOp::Transpose, Box::new(expr));
             } else {
                 break;
             }
@@ -270,21 +389,39 @@ impl Parser {
                 Token::LParen => {
                     let expr = self.parse_expr()?;
                     if !self.consume(&Token::RParen) {
-                        return Err("expected ')'".into());
+                        return Err("expected ')' to close parentheses".into());
                     }
                     Ok(expr)
                 }
                 Token::LBracket => {
                     let matrix = self.parse_matrix()?;
                     if !self.consume(&Token::RBracket) {
-                        return Err("expected ']'".into());
+                        return Err("expected ']' to close matrix literal".into());
                     }
                     Ok(matrix)
                 }
                 Token::Colon => Ok(Expr::Colon),
-                _ => Err("unexpected token".into()),
+                _ => {
+                    // Provide detailed error message about what token was unexpected
+                    let token_desc = match info.token {
+                        Token::Semicolon => "semicolon ';' (statement separator)",
+                        Token::Comma => "comma ',' (list separator)", 
+                        Token::RParen => "closing parenthesis ')' (no matching opening parenthesis)",
+                        Token::RBracket => "closing bracket ']' (no matching opening bracket)",
+                        Token::If => "keyword 'if' (expected in statement context)",
+                        Token::For => "keyword 'for' (expected in statement context)",
+                        Token::While => "keyword 'while' (expected in statement context)",
+                        Token::Function => "keyword 'function' (expected in statement context)",
+                        Token::End => "keyword 'end' (no matching control structure)",
+                        Token::Equal => "equality operator '==' (expected in comparison context)",
+                        Token::Assign => "assignment operator '=' (expected in assignment context)",
+                        Token::Error => "invalid character or symbol",
+                        _ => return Err(format!("unexpected token '{}' in expression context", info.lexeme)),
+                    };
+                    Err(format!("unexpected {} in expression context", token_desc))
+                }
             },
-            None => Err("unexpected end of input".into()),
+            None => Err("unexpected end of input, expected expression".into()),
         }
     }
 
@@ -430,6 +567,7 @@ impl Parser {
             Some(TokenInfo {
                 token: Token::Ident,
                 lexeme,
+                ..
             }) => Ok(lexeme),
             _ => Err("expected identifier".into()),
         }

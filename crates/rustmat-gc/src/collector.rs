@@ -4,7 +4,6 @@
 //! with optimizations for RustMat's value types and usage patterns.
 
 use std::collections::HashSet;
-// Removed unused atomic imports
 use crate::{GcConfig, GcPtr, GcStats, GenerationalAllocator, Result};
 use rustmat_builtins::Value;
 use std::time::Instant;

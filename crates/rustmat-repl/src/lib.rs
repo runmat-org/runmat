@@ -2,8 +2,8 @@ use anyhow::Result;
 use log::{debug, info, warn};
 use rustmat_builtins::Value;
 use rustmat_gc::{gc_configure, gc_stats, GcConfig};
-use rustmat_hir::lower_with_context;
-use rustmat_ignition::compile;
+
+
 use rustmat_lexer::tokenize;
 use rustmat_parser::parse;
 use rustmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
@@ -27,6 +27,8 @@ pub struct ReplEngine {
     variable_array: Vec<Value>,
     /// Mapping from variable names to VarId indices
     variable_names: HashMap<String, usize>,
+    /// User-defined functions context for REPL sessions
+    function_definitions: HashMap<String, rustmat_hir::HirStmt>,
     /// Loaded snapshot for standard library preloading
     snapshot: Option<Arc<Snapshot>>,
 }
@@ -111,6 +113,7 @@ impl ReplEngine {
             variables: HashMap::new(),
             variable_array: Vec::new(),
             variable_names: HashMap::new(),
+            function_definitions: HashMap::new(),
             snapshot,
         })
     }
@@ -156,16 +159,18 @@ impl ReplEngine {
             debug!("AST: {ast:?}");
         }
 
-        // Lower to HIR with existing variable context
-        let (hir, updated_vars) = lower_with_context(&ast, &self.variable_names)
+        // Lower to HIR with existing variable and function context
+        let lowering_result = rustmat_hir::lower_with_full_context(&ast, &self.variable_names, &self.function_definitions)
             .map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?;
+        let (hir, updated_vars, updated_functions) = (lowering_result.hir, lowering_result.variables, lowering_result.functions);
         if self.verbose {
             debug!("HIR generated successfully");
         }
 
-        // Compile to bytecode
-        let bytecode =
-            compile(&hir).map_err(|e| anyhow::anyhow!("Failed to compile to bytecode: {}", e))?;
+        // Compile to bytecode with existing function definitions
+        let existing_functions = self.convert_hir_functions_to_user_functions();
+        let bytecode = rustmat_ignition::compile_with_functions(&hir, &existing_functions)
+            .map_err(|e| anyhow::anyhow!("Failed to compile to bytecode: {}", e))?;
         if self.verbose {
             debug!(
                 "Bytecode compiled: {} instructions",
@@ -275,9 +280,10 @@ impl ReplEngine {
         self.stats.average_execution_time_ms =
             self.stats.total_execution_time_ms as f64 / self.stats.total_executions as f64;
 
-        // Update variable names mapping if execution was successful
+        // Update variable names mapping and function definitions if execution was successful
         if error.is_none() {
             self.variable_names = updated_vars;
+            self.function_definitions = updated_functions;
         }
 
         if self.verbose {
@@ -325,304 +331,47 @@ impl ReplEngine {
                 .resize(bytecode.var_count, Value::Num(0.0));
         }
 
-        // Take ownership of the variable array temporarily to avoid borrowing issues
-        let mut vars = std::mem::take(&mut self.variable_array);
+        // Use the main Ignition interpreter which has full function and scoping support
+        match rustmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array) {
+            Ok(result) => {
+                // Update the variables HashMap for display purposes
+                self.variables.clear();
+                for (i, value) in self.variable_array.iter().enumerate() {
+                    if !matches!(value, Value::Num(0.0)) {
+                        // Only store non-zero values to avoid clutter
+                        self.variables.insert(format!("var_{i}"), value.clone());
+                    }
+                }
 
-        // Use the existing interpreter with stack result capture
-        let (result, stack_result) = Self::interpret_bytecode_static(bytecode, &mut vars)?;
+                Ok(result)
+            }
+            Err(e) => Err(e),
+        }
+    }
 
-        // Restore the variable array
-        self.variable_array = vars;
-
-        // Update the variables HashMap for display purposes
-        self.variables.clear();
-        for (i, value) in self.variable_array.iter().enumerate() {
-            if !matches!(value, Value::Num(0.0)) {
-                // Only store non-zero values to avoid clutter
-                self.variables.insert(format!("var_{i}"), value.clone());
+    /// Convert stored HIR function definitions to UserFunction format for compilation
+    fn convert_hir_functions_to_user_functions(&self) -> HashMap<String, rustmat_ignition::UserFunction> {
+        let mut user_functions = HashMap::new();
+        
+        for (name, hir_stmt) in &self.function_definitions {
+            if let rustmat_hir::HirStmt::Function { name: func_name, params, outputs, body } = hir_stmt {
+                // Use the existing HIR utilities to calculate variable count
+                let var_map = rustmat_hir::remapping::create_complete_function_var_map(params, outputs, body);
+                let max_local_var = var_map.len();
+                
+                let user_func = rustmat_ignition::UserFunction {
+                    name: func_name.clone(),
+                    params: params.clone(),
+                    outputs: outputs.clone(),
+                    body: body.clone(),
+                    local_var_count: max_local_var,
+                };
+                user_functions.insert(name.clone(), user_func);
             }
         }
-
-        // Prefer stack result over variable array result for expressions
-        let final_result = if let Some(stack_val) = stack_result {
-            vec![stack_val]
-        } else {
-            result
-        };
-
-        Ok(final_result)
+        
+        user_functions
     }
-
-    /// Internal static interpreter that accepts a mutable variable array
-    fn interpret_bytecode_static(
-        bytecode: &rustmat_ignition::Bytecode,
-        vars: &mut Vec<Value>,
-    ) -> Result<(Vec<Value>, Option<Value>), String> {
-        use rustmat_ignition::Instr;
-        use std::convert::TryInto;
-
-        let mut stack: Vec<Value> = Vec::new();
-        let mut pc: usize = 0;
-
-        // Check if the last instruction is Pop (indicating an expression statement that should return a value in REPL)
-        let skip_final_pop = if let Some(last_instr) = bytecode.instructions.last() {
-            matches!(last_instr, Instr::Pop)
-        } else {
-            false
-        };
-
-        while pc < bytecode.instructions.len() {
-            match &bytecode.instructions[pc] {
-                Instr::LoadConst(c) => stack.push(Value::Num(*c)),
-                Instr::LoadString(s) => stack.push(Value::String(s.clone())),
-                Instr::LoadVar(i) => {
-                    if *i < vars.len() {
-                        stack.push(vars[*i].clone())
-                    } else {
-                        stack.push(Value::Num(0.0))
-                    }
-                }
-                Instr::StoreVar(i) => {
-                    let val = stack.pop().ok_or("stack underflow")?;
-                    if *i >= vars.len() {
-                        vars.resize(i + 1, Value::Num(0.0));
-                    }
-                    vars[*i] = val;
-                }
-                Instr::Add => Self::binary_op(&mut stack, |a, b| a + b)?,
-                Instr::Sub => Self::binary_op(&mut stack, |a, b| a - b)?,
-                Instr::Mul => Self::binary_op(&mut stack, |a, b| a * b)?,
-                Instr::Div => Self::binary_op(&mut stack, |a, b| a / b)?,
-                Instr::Pow => Self::binary_op(&mut stack, |a, b| a.powf(b))?,
-                Instr::Neg => Self::unary_op(&mut stack, |a| -a)?,
-                Instr::ElemMul => Self::element_binary_op(&mut stack, rustmat_runtime::elementwise_mul)?,
-                Instr::ElemDiv => Self::element_binary_op(&mut stack, rustmat_runtime::elementwise_div)?,
-                Instr::ElemPow => Self::element_binary_op(&mut stack, rustmat_runtime::elementwise_pow)?,
-                Instr::ElemLeftDiv => Self::element_binary_op(&mut stack, |a, b| rustmat_runtime::elementwise_div(b, a))?,
-                Instr::CallBuiltin(name, argc) => {
-                    let mut args = Vec::new();
-                    for _ in 0..*argc {
-                        args.push(stack.pop().ok_or("stack underflow")?);
-                    }
-                    args.reverse(); // Fix argument order
-
-                    let result = rustmat_runtime::call_builtin(name, &args)
-                        .map_err(|e| format!("Builtin call failed: {e}"))?;
-                    stack.push(result);
-                }
-                Instr::CreateMatrix(rows, cols) => {
-                    let total_elements = rows * cols;
-                    let mut data = Vec::with_capacity(total_elements);
-
-                    for _ in 0..total_elements {
-                        let val: f64 = (&stack.pop().ok_or("stack underflow")?)
-                            .try_into()
-                            .map_err(|_| "Matrix element must be numeric")?;
-                        data.push(val);
-                    }
-
-                    data.reverse(); // Fix element order
-
-                    let matrix = rustmat_builtins::Matrix::new(data, *rows, *cols)
-                        .map_err(|e| format!("Matrix creation error: {e}"))?;
-                    stack.push(Value::Matrix(matrix));
-                }
-                Instr::LessEqual => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Right operand must be numeric")?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Left operand must be numeric")?;
-                    stack.push(Value::Num(if a <= b { 1.0 } else { 0.0 }));
-                }
-                Instr::Less => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Right operand must be numeric")?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Left operand must be numeric")?;
-                    stack.push(Value::Num(if a < b { 1.0 } else { 0.0 }));
-                }
-                Instr::Greater => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Right operand must be numeric")?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Left operand must be numeric")?;
-                    stack.push(Value::Num(if a > b { 1.0 } else { 0.0 }));
-                }
-                Instr::GreaterEqual => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Right operand must be numeric")?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Left operand must be numeric")?;
-                    stack.push(Value::Num(if a >= b { 1.0 } else { 0.0 }));
-                }
-                Instr::Equal => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Right operand must be numeric")?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Left operand must be numeric")?;
-                    stack.push(Value::Num(if (a - b).abs() < f64::EPSILON {
-                        1.0
-                    } else {
-                        0.0
-                    }));
-                }
-                Instr::NotEqual => {
-                    let b: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Right operand must be numeric")?;
-                    let a: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Left operand must be numeric")?;
-                    stack.push(Value::Num(if (a - b).abs() >= f64::EPSILON {
-                        1.0
-                    } else {
-                        0.0
-                    }));
-                }
-                Instr::JumpIfFalse(target) => {
-                    let val: f64 = (&stack.pop().ok_or("stack underflow")?)
-                        .try_into()
-                        .map_err(|_| "Condition must be numeric")?;
-                    if val == 0.0 {
-                        pc = *target;
-                        continue; // Skip the pc += 1 at the end
-                    }
-                }
-                Instr::Jump(target) => {
-                    pc = *target;
-                    continue; // Skip the pc += 1 at the end
-                }
-                Instr::Pop => {
-                    // Skip the final pop if it's the last instruction and we want to capture the expression result
-                    if !(skip_final_pop && pc == bytecode.instructions.len() - 1) {
-                        stack.pop();
-                    }
-                }
-                Instr::Index(num_indices) => {
-                    // Pop indices from stack (in reverse order)
-                    let mut indices = Vec::new();
-                    for _ in 0..*num_indices {
-                        let index_val: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                        indices.push(index_val);
-                    }
-                    indices.reverse(); // Correct the order
-                    
-                    // Pop the base array/matrix
-                    let base = stack.pop().ok_or("stack underflow")?;
-                    
-                    // Use the centralized indexing function
-                    let result = rustmat_runtime::perform_indexing(&base, &indices)?;
-                    stack.push(result);
-                }
-                Instr::CreateMatrixDynamic(num_rows) => {
-                    // Dynamic matrix creation with concatenation support
-                    let mut row_lengths = Vec::new();
-                    
-                    // Pop row lengths (in reverse order since they're pushed last)
-                    for _ in 0..*num_rows {
-                        let row_len: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                        row_lengths.push(row_len as usize);
-                    }
-                    row_lengths.reverse(); // Correct the order
-                    
-                    // Now pop elements according to row structure (in reverse order)
-                    let mut rows_data = Vec::new();
-                    for &row_len in row_lengths.iter().rev() {
-                        let mut row_values = Vec::new();
-                        for _ in 0..row_len {
-                            row_values.push(stack.pop().ok_or("stack underflow")?);
-                        }
-                        row_values.reverse(); // Correct the order within row
-                        rows_data.push(row_values);
-                    }
-                    
-                    // Reverse rows to get correct order
-                    rows_data.reverse();
-                    
-                    // Use the concatenation logic to create the matrix
-                    let result = rustmat_runtime::create_matrix_from_values(&rows_data)?;
-                    stack.push(result);
-                }
-                Instr::CreateRange(has_step) => {
-                    if *has_step {
-                        // Stack: start, step, end
-                        let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                        let step: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                        let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                        
-                        let range_result = rustmat_runtime::create_range(start, Some(step), end)?;
-                        stack.push(range_result);
-                    } else {
-                        // Stack: start, end
-                        let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                        let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                        
-                        let range_result = rustmat_runtime::create_range(start, None, end)?;
-                        stack.push(range_result);
-                    }
-                }
-                Instr::Return => break,
-            }
-            pc += 1;
-        }
-
-        // Return both variable array and stack top (if any) for expression results
-        let stack_result = stack.pop();
-        Ok((vars.clone(), stack_result))
-    }
-
-    /// Helper for binary operations
-    fn binary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
-    where
-        F: Fn(f64, f64) -> f64,
-    {
-        use std::convert::TryInto;
-        let b: f64 = (&stack.pop().ok_or("stack underflow")?)
-            .try_into()
-            .map_err(|_| "Right operand must be numeric")?;
-        let a: f64 = (&stack.pop().ok_or("stack underflow")?)
-            .try_into()
-            .map_err(|_| "Left operand must be numeric")?;
-        stack.push(Value::Num(f(a, b)));
-        Ok(())
-    }
-
-    /// Helper for unary operations
-    fn unary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
-    where
-        F: Fn(f64) -> f64,
-    {
-        use std::convert::TryInto;
-        let a: f64 = (&stack.pop().ok_or("stack underflow")?)
-            .try_into()
-            .map_err(|_| "Operand must be numeric")?;
-        stack.push(Value::Num(f(a)));
-        Ok(())
-    }
-
-    /// Helper for element-wise operations that can handle matrices
-    fn element_binary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
-    where
-        F: Fn(&Value, &Value) -> Result<Value, String>,
-    {
-        let b = stack.pop().ok_or("stack underflow")?;
-        let a = stack.pop().ok_or("stack underflow")?;
-        let result = f(&a, &b)?;
-            stack.push(result);
-    Ok(())
-}
-
-
 
     /// Configure garbage collector
     pub fn configure_gc(&self, config: GcConfig) -> Result<()> {

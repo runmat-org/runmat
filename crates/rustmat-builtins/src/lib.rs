@@ -188,16 +188,143 @@ impl TryFrom<&Value> for Vec<Value> {
     }
 }
 
-pub type BuiltinFn = fn(&[Value]) -> Result<Value, String>;
+use serde::{Deserialize, Serialize};
 
-pub struct Builtin {
-    pub name: &'static str,
-    pub func: BuiltinFn,
+/// Enhanced type system used throughout RustMat for HIR and builtin functions
+/// Designed to mirror Value variants for better type inference and LSP support
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub enum Type {
+    /// Integer number type
+    Int,
+    /// Floating-point number type  
+    Num,
+    /// Boolean type
+    Bool,
+    /// String type
+    String,
+    /// Matrix type with optional dimension information
+    Matrix {
+        /// Optional number of rows (None means unknown/dynamic)
+        rows: Option<usize>,
+        /// Optional number of columns (None means unknown/dynamic)
+        cols: Option<usize>,
+    },
+    /// Cell array type with optional element type information
+    Cell {
+        /// Optional element type (None means mixed/unknown)
+        element_type: Option<Box<Type>>,
+        /// Optional length (None means unknown/dynamic)
+        length: Option<usize>,
+    },
+    /// Function type with parameter and return types
+    Function {
+        /// Parameter types
+        params: Vec<Type>,
+        /// Return type
+        returns: Box<Type>,
+    },
+    /// Void type (no value)
+    Void,
+    /// Unknown type (for type inference)
+    Unknown,
+    /// Union type (multiple possible types)
+    Union(Vec<Type>),
 }
 
-impl std::fmt::Debug for Builtin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Builtin {{ name: {:?}, func: <fn> }}", self.name)
+impl Type {
+    /// Create a matrix type with unknown dimensions
+    pub fn matrix() -> Self {
+        Type::Matrix { rows: None, cols: None }
+    }
+    
+    /// Create a matrix type with known dimensions
+    pub fn matrix_with_dims(rows: usize, cols: usize) -> Self {
+        Type::Matrix { rows: Some(rows), cols: Some(cols) }
+    }
+    
+    /// Create a cell array type with unknown element type
+    pub fn cell() -> Self {
+        Type::Cell { element_type: None, length: None }
+    }
+    
+    /// Create a cell array type with known element type
+    pub fn cell_of(element_type: Type) -> Self {
+        Type::Cell { element_type: Some(Box::new(element_type)), length: None }
+    }
+    
+    /// Check if this type is compatible with another type
+    pub fn is_compatible_with(&self, other: &Type) -> bool {
+        match (self, other) {
+            (Type::Unknown, _) | (_, Type::Unknown) => true,
+            (Type::Int, Type::Num) | (Type::Num, Type::Int) => true, // Number compatibility
+            (Type::Matrix { .. }, Type::Matrix { .. }) => true, // Matrix compatibility regardless of dims
+            (a, b) => a == b,
+        }
+    }
+    
+    /// Get the most specific common type between two types
+    pub fn unify(&self, other: &Type) -> Type {
+        match (self, other) {
+            (Type::Unknown, t) | (t, Type::Unknown) => t.clone(),
+            (Type::Int, Type::Num) | (Type::Num, Type::Int) => Type::Num,
+            (Type::Matrix { .. }, Type::Matrix { .. }) => Type::matrix(), // Lose dimension info
+            (a, b) if a == b => a.clone(),
+            _ => Type::Union(vec![self.clone(), other.clone()]),
+        }
+    }
+    
+    /// Infer type from a Value
+    pub fn from_value(value: &Value) -> Type {
+        match value {
+            Value::Int(_) => Type::Int,
+            Value::Num(_) => Type::Num,
+            Value::Bool(_) => Type::Bool,
+            Value::String(_) => Type::String,
+            Value::Matrix(m) => Type::Matrix { 
+                rows: Some(m.rows), 
+                cols: Some(m.cols) 
+            },
+            Value::Cell(cells) => {
+                if cells.is_empty() {
+                    Type::cell()
+                } else {
+                    // Infer element type from first element
+                    let element_type = Type::from_value(&cells[0]);
+                    Type::Cell { 
+                        element_type: Some(Box::new(element_type)), 
+                        length: Some(cells.len()) 
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Simple builtin function definition using the unified type system
+#[derive(Debug, Clone)]
+pub struct BuiltinFunction {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub param_types: Vec<Type>,
+    pub return_type: Type,
+    pub implementation: fn(&[Value]) -> Result<Value, String>,
+}
+
+impl BuiltinFunction {
+    pub fn new(
+        name: &'static str,
+        description: &'static str,
+        param_types: Vec<Type>,
+        return_type: Type,
+        implementation: fn(&[Value]) -> Result<Value, String>,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            param_types,
+            return_type,
+            implementation,
+        }
     }
 }
 
@@ -214,11 +341,11 @@ impl std::fmt::Debug for Constant {
     }
 }
 
-inventory::collect!(Builtin);
+inventory::collect!(BuiltinFunction);
 inventory::collect!(Constant);
 
-pub fn builtins() -> Vec<&'static Builtin> {
-    inventory::iter::<Builtin>().collect()
+pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
+    inventory::iter::<BuiltinFunction>().collect()
 }
 
 pub fn constants() -> Vec<&'static Constant> {

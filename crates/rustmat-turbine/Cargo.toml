@@ -20,8 +20,8 @@ rustmat-ignition = { workspace = true }
 rustmat-builtins = { workspace = true }
 rustmat-runtime = { workspace = true }
 rustmat-gc = { workspace = true }
+rustmat-hir = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }
-rustmat-parser = { workspace = true }
-rustmat-hir = { workspace = true } 
+rustmat-parser = { workspace = true } 

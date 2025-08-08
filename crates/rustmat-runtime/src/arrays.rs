@@ -141,6 +141,55 @@ fn fill_builtin(value: f64, m: i32, n: i32) -> Result<Matrix, String> {
     Ok(Matrix::new(data, rows, cols)?)
 }
 
+/// Generate random matrix with normal distribution (mean=0, std=1)
+/// randn(m, n) creates an m×n matrix of normally distributed random numbers
+#[runtime_builtin(name = "randn")]
+fn randn_builtin(m: i32, n: i32) -> Result<Matrix, String> {
+    if m < 0 || n < 0 {
+        return Err("Matrix dimensions must be non-negative".to_string());
+    }
+    
+    let rows = m as usize;
+    let cols = n as usize;
+    let total_elements = rows * cols;
+    
+    // Simple approximation of normal distribution using central limit theorem
+    // Generate 12 uniform random numbers and sum them, then subtract 6
+    // This approximates a normal distribution with mean=0, std=1
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+    
+    static SEED: OnceLock<Mutex<u64>> = OnceLock::new();
+    let seed_mutex = SEED.get_or_init(|| Mutex::new(1));
+    
+    let mut data = Vec::with_capacity(total_elements);
+    
+    for _ in 0..total_elements {
+        let mut seed_guard = seed_mutex.lock().map_err(|_| "Failed to acquire RNG lock")?;
+        let mut sum = 0.0;
+        
+        // Generate 12 uniform random numbers using linear congruential generator
+        for _ in 0..12 {
+            *seed_guard = seed_guard.wrapping_mul(1103515245).wrapping_add(12345);
+            let uniform = ((*seed_guard >> 16) & 0x7fff) as f64 / 32768.0;
+            sum += uniform;
+        }
+        
+        // Apply central limit theorem transformation: N(0,1) ≈ sum(12 uniform) - 6
+        let normal_val = sum - 6.0;
+        data.push(normal_val);
+    }
+    
+    Ok(Matrix::new(data, rows, cols)?)
+}
+
+/// Get the length of the largest dimension of a matrix
+/// length(X) returns the size of the largest dimension of matrix X
+#[runtime_builtin(name = "length")]
+fn length_builtin(matrix: Matrix) -> Result<f64, String> {
+    Ok(matrix.rows.max(matrix.cols) as f64)
+}
+
 /// Generate range vector
 /// range(start, step, stop) creates a vector from start to stop with given step
 #[runtime_builtin(name = "range")]
