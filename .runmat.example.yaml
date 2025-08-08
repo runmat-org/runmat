@@ -1,0 +1,92 @@
+# RunMat Configuration File
+# Place this file as .runmat.yaml in your project root or home directory
+
+# Runtime configuration
+runtime:
+  # Execution timeout in seconds
+  timeout: 300
+  # Enable verbose output
+  verbose: false
+  # Snapshot file to preload (optional)
+  # snapshot_path: "/path/to/snapshot.bin"
+
+# JIT compiler configuration
+jit:
+  # Enable JIT compilation
+  enabled: true
+  # JIT compilation threshold (number of executions before JIT)
+  threshold: 10
+  # JIT optimization level: none, size, speed, aggressive
+  optimization_level: speed
+
+# Garbage collector configuration
+gc:
+  # GC preset: low-latency, high-throughput, low-memory, debug (optional)
+  # preset: low-latency
+  # Young generation size in MB (optional)
+  # young_size_mb: 64
+  # Number of GC threads (optional)
+  # threads: 4
+  # Enable GC statistics collection
+  collect_stats: false
+
+# Plotting configuration
+plotting:
+  # Plotting mode: auto, gui, headless, jupyter
+  mode: auto
+  # Force headless mode (overrides mode detection)
+  force_headless: false
+  # Default plot backend: auto, wgpu, static, web
+  backend: auto
+  
+  # GUI settings (when using GUI mode)
+  gui:
+    # Window dimensions
+    width: 1200
+    height: 800
+    # Enable VSync
+    vsync: true
+    # Start maximized
+    maximized: false
+  
+  # Export settings
+  export:
+    # Default export format: png, svg, pdf, html
+    format: png
+    # Default DPI for raster exports
+    dpi: 300
+    # Default output directory (optional)
+    # output_dir: "/path/to/plots"
+
+# Kernel configuration (for Jupyter)
+kernel:
+  # Default IP address
+  ip: "127.0.0.1"
+  # Authentication key (optional, auto-generated if not provided)
+  # key: "your-secret-key"
+  # Port configuration (optional, auto-assigned if not provided)
+  # ports:
+  #   shell: 5555
+  #   iopub: 5556
+  #   stdin: 5557
+  #   control: 5558
+  #   heartbeat: 5559
+
+# Logging configuration
+logging:
+  # Log level: error, warn, info, debug, trace
+  level: info
+  # Enable debug logging (overrides level)
+  debug: false
+  # Log file path (optional, logs to stderr if not provided)
+  # file: "/path/to/runmat.log"
+
+# Environment variable overrides:
+# RUSTMAT_CONFIG=path/to/config.yaml  - Override config file location
+# RUSTMAT_PLOT_MODE=headless          - Override plotting mode
+# RUSTMAT_JIT_ENABLE=false            - Disable JIT compilation
+# RUSTMAT_GC_PRESET=debug             - Override GC preset
+# RUSTMAT_DEBUG=true                  - Enable debug logging
+# 
+# See 'runmat config paths' for all possible config file locations
+# See 'runmat --help' for all available CLI options and environment variables

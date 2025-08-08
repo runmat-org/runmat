@@ -1,0 +1,30 @@
+[package]
+name = "runmat-kernel"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+zmq = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+runmat-hir = { workspace = true }
+runmat-ignition = { workspace = true }
+runmat-parser = { workspace = true }
+runmat-builtins = { workspace = true }
+runmat-runtime = { workspace = true }
+runmat-repl = { workspace = true }
+runmat-snapshot = { workspace = true }
+runmat-plot = { workspace = true }
+
+[features]
+default = ["jupyter"]
+jupyter = ["runmat-plot/jupyter", "runmat-runtime/jupyter"]
+
+[dev-dependencies]
+env_logger = { workspace = true }
+tempfile = "3" 

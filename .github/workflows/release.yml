@@ -28,50 +28,50 @@ jobs:
           - release_for: FreeBSD-x86_64
             os: ubuntu-20.04
             target: x86_64-unknown-freebsd
-            bin: rustmat
-            name: rustmat-FreeBSD-x86_64.tar.gz
+            bin: runmat
+            name: runmat-FreeBSD-x86_64.tar.gz
             command: build
 
           - release_for: Windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            bin: rustmat.exe
-            name: rustmat-Windows-x86_64.zip
+            bin: runmat.exe
+            name: runmat-Windows-x86_64.zip
             command: build
 
           - release_for: Windows-aarch64
             os: windows-latest
             target: aarch64-pc-windows-msvc
-            bin: rustmat.exe
-            name: rustmat-Windows-aarch64.zip
+            bin: runmat.exe
+            name: runmat-Windows-aarch64.zip
             command: build
 
           - release_for: macOS-x86_64
             os: macOS-latest
             target: x86_64-apple-darwin
-            bin: rustmat
-            name: rustmat-Darwin-x86_64.tar.gz
+            bin: runmat
+            name: runmat-Darwin-x86_64.tar.gz
             command: build
 
           - release_for: macOS-aarch64
             os: macOS-latest
             target: aarch64-apple-darwin
-            bin: rustmat
-            name: rustmat-Darwin-aarch64.tar.gz
+            bin: runmat
+            name: runmat-Darwin-aarch64.tar.gz
             command: build
 
           - release_for: Linux-x86_64
             os: ubuntu-20.04
             target: x86_64-unknown-linux-gnu
-            bin: rustmat
-            name: rustmat-Linux-x86_64.tar.gz
+            bin: runmat
+            name: runmat-Linux-x86_64.tar.gz
             command: build
 
           - release_for: Linux-aarch64
             os: ubuntu-20.04
             target: aarch64-unknown-linux-gnu
-            bin: rustmat
-            name: rustmat-Linux-aarch64.tar.gz
+            bin: runmat
+            name: runmat-Linux-aarch64.tar.gz
             command: build
 
     runs-on: ${{ matrix.platform.os }}
@@ -90,7 +90,7 @@ jobs:
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
-          args: "--locked --release --bin rustmat --features blas-lapack"
+          args: "--locked --release --bin runmat --features blas-lapack"
           strip: true
 
       - name: Package as archive
@@ -107,8 +107,8 @@ jobs:
       - name: Publish release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rustmat-${{ matrix.platform.release_for }}
-          path: "rustmat-*"
+          name: runmat-${{ matrix.platform.release_for }}
+          path: "runmat-*"
 
   create-release:
     name: Create Release
@@ -127,9 +127,9 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          name: RustMat ${{ github.event.inputs.version || github.ref_name }}
+          name: RunMat ${{ github.event.inputs.version || github.ref_name }}
           body: |
-            ## RustMat ${{ github.event.inputs.version || github.ref_name }}
+            ## RunMat ${{ github.event.inputs.version || github.ref_name }}
             
             High-performance MATLAB/Octave runtime with Jupyter kernel support.
             
@@ -138,10 +138,10 @@ jobs:
             #### Quick Install (Recommended)
             ```bash
             # Linux/macOS
-            curl -fsSL https://rustmat.com/install.sh | sh
+            curl -fsSL https://runmat.org/install.sh | sh
             
             # Windows (PowerShell)
-            iwr https://rustmat.com/install.ps1 | iex
+            iwr https://runmat.org/install.ps1 | iex
             ```
             
             #### Manual Installation
@@ -155,9 +155,9 @@ jobs:
             - Bug fixes and stability improvements
             
             ### Documentation
-            - [Getting Started](https://rustmat.com/docs/getting-started)
-            - [API Reference](https://rustmat.com/docs/api)
-            - [Examples](https://rustmat.com/docs/examples)
+            - [Getting Started](https://runmat.org/docs/getting-started)
+            - [API Reference](https://runmat.org/docs/api)
+            - [Examples](https://runmat.org/docs/examples)
           files: |
             artifacts/**/*
           draft: false

@@ -1,19 +1,19 @@
 [workspace]
 members = [
-    "crates/rustmat-lexer",
-    "crates/rustmat-parser",
-    "crates/rustmat-hir",
-    "crates/rustmat-ignition",
-    "crates/rustmat-plot",
-    "crates/rustmat-repl",
-    "crates/rustmat-macros",
-    "crates/rustmat-builtins",
-    "crates/rustmat-runtime",
-    "crates/rustmat-kernel",
-    "crates/rustmat-turbine",
-    "crates/rustmat-gc",
-    "crates/rustmat-snapshot",
-    "rustmat",
+    "crates/runmat-lexer",
+    "crates/runmat-parser",
+    "crates/runmat-hir",
+    "crates/runmat-ignition",
+    "crates/runmat-plot",
+    "crates/runmat-repl",
+    "crates/runmat-macros",
+    "crates/runmat-builtins",
+    "crates/runmat-runtime",
+    "crates/runmat-kernel",
+    "crates/runmat-turbine",
+    "crates/runmat-gc",
+    "crates/runmat-snapshot",
+    "runmat",
 ]
 resolver = "2"
 
@@ -43,16 +43,16 @@ cranelift-native = "0.115"
 target-lexicon = "0.12"
 
 # Internal workspace crates
-rustmat-lexer = { path = "crates/rustmat-lexer" }
-rustmat-parser = { path = "crates/rustmat-parser" }
-rustmat-hir = { path = "crates/rustmat-hir" }
-rustmat-ignition = { path = "crates/rustmat-ignition" }
-rustmat-plot = { path = "crates/rustmat-plot" }
-rustmat-repl = { path = "crates/rustmat-repl" }
-rustmat-macros = { path = "crates/rustmat-macros" }
-rustmat-builtins = { path = "crates/rustmat-builtins" }
-rustmat-runtime = { path = "crates/rustmat-runtime" }
-rustmat-kernel = { path = "crates/rustmat-kernel" }
-rustmat-turbine = { path = "crates/rustmat-turbine" }
-rustmat-gc = { path = "crates/rustmat-gc" }
-rustmat-snapshot = { path = "crates/rustmat-snapshot" }
+runmat-lexer = { path = "crates/runmat-lexer" }
+runmat-parser = { path = "crates/runmat-parser" }
+runmat-hir = { path = "crates/runmat-hir" }
+runmat-ignition = { path = "crates/runmat-ignition" }
+runmat-plot = { path = "crates/runmat-plot" }
+runmat-repl = { path = "crates/runmat-repl" }
+runmat-macros = { path = "crates/runmat-macros" }
+runmat-builtins = { path = "crates/runmat-builtins" }
+runmat-runtime = { path = "crates/runmat-runtime" }
+runmat-kernel = { path = "crates/runmat-kernel" }
+runmat-turbine = { path = "crates/runmat-turbine" }
+runmat-gc = { path = "crates/runmat-gc" }
+runmat-snapshot = { path = "crates/runmat-snapshot" }

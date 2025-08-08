@@ -1,4 +1,4 @@
-% RustMat MATLAB Language Coverage Demonstration
+% RunMat MATLAB Language Coverage Demonstration
 % This file showcases all currently implemented MATLAB features
 
 % === BASIC DATA TYPES ===

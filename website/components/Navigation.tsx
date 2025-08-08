@@ -25,7 +25,7 @@ export default function Navigation() {
         <div className="mr-4 hidden md:flex">
           <Link href="/" className="mr-6 flex items-center space-x-2">
             <div className="h-6 w-6 rounded" style={{background: 'linear-gradient(135deg, #3ea7fd 0%, #bb51ff 100%)'}} />
-            <span className="hidden font-bold sm:inline-block">RustMat</span>
+            <span className="hidden font-bold sm:inline-block">RunMat</span>
           </Link>
           <NavigationMenu>
             <NavigationMenuList>
@@ -72,13 +72,13 @@ export default function Navigation() {
           <div className="w-full flex-1 md:w-auto md:flex-none">
             <Link href="/" className="flex items-center space-x-2 md:hidden">
               <div className="h-6 w-6 rounded" style={{background: 'linear-gradient(135deg, #3ea7fd 0%, #bb51ff 100%)'}} />
-              <span className="font-bold">RustMat</span>
+              <span className="font-bold">RunMat</span>
             </Link>
           </div>
           <nav className="hidden md:flex items-center space-x-2">
             <Button variant="ghost" size="sm" asChild>
               <Link
-                href="https://github.com/rustmat/rustmat"
+                href="https://github.com/runmat-dev/runmat"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -131,7 +131,7 @@ export default function Navigation() {
               <div className="flex items-center space-x-2 pt-2">
                 <Button variant="outline" size="sm" asChild>
                   <Link
-                    href="https://github.com/rustmat/rustmat"
+                    href="https://github.com/runmat-dev/runmat"
                     target="_blank"
                     rel="noopener noreferrer"
                   >

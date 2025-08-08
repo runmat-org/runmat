@@ -1,4 +1,4 @@
-% RustMat Real Matrix Values Demo
+% RunMat Real Matrix Values Demo
 % Verifying that matrix compilation uses actual values
 
 % Test 1D matrices

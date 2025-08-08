@@ -1,0 +1,37 @@
+[package]
+name = "runmat-gc"
+version = "0.0.1"
+edition = "2021"
+description = "Generational garbage collector for RustMat with optional pointer compression"
+
+[dependencies]
+runmat-builtins = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = "0.12"
+num-traits = "0.2"
+once_cell = "1.19"
+num_cpus = "1.16"
+page_size = "0.6"
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+rand = "0.8"
+criterion = "0.5"
+runmat-ignition = { workspace = true }
+runmat-hir = { workspace = true }
+runmat-parser = { workspace = true }
+
+[features]
+default = []
+# Enable pointer compression (32-bit pointers on 64-bit platforms)
+pointer-compression = []
+# Enable extensive GC debugging and validation
+debug-gc = []
+# Enable GC performance profiling
+profile-gc = []
+
+# Benchmarks are optional
+# [[bench]]
+# name = "gc_bench"
+# harness = false

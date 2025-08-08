@@ -6,11 +6,11 @@ import Link from "next/link";
 import { BookOpen, Zap, Code, Cpu, Settings, Terminal } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "RustMat Documentation - Complete Guides and API Reference",
-  description: "Complete guides and API reference to get you started with RustMat. Learn installation, usage, MATLAB migration, and advanced features.",
+  title: "RunMat Documentation - Complete Guides and API Reference",
+  description: "Complete guides and API reference to get you started with RunMat. Learn installation, usage, MATLAB migration, and advanced features.",
   openGraph: {
-    title: "RustMat Documentation - Complete Guides and API Reference",
-    description: "Complete guides and API reference to get you started with RustMat.",
+    title: "RunMat Documentation - Complete Guides and API Reference",
+    description: "Complete guides and API reference to get you started with RunMat.",
     type: "website",
   },
 };
@@ -24,10 +24,10 @@ export default function DocsPage() {
             Documentation
           </Badge>
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
-            RustMat Documentation
+            RunMat Documentation
           </h1>
           <p className="mt-6 text-xl text-muted-foreground">
-            Complete guides and API reference to get you started with RustMat
+            Complete guides and API reference to get you started with RunMat
           </p>
         </div>
 
@@ -41,7 +41,7 @@ export default function DocsPage() {
                   <CardTitle>Getting Started</CardTitle>
                 </div>
                 <CardDescription>
-                  Quick start guide to install and run your first RustMat program
+                  Quick start guide to install and run your first RunMat program
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -61,7 +61,7 @@ export default function DocsPage() {
                   <CardTitle>How It Works</CardTitle>
                 </div>
                 <CardDescription>
-                  Deep dive into RustMat&apos;s architecture, JIT compilation, and performance
+                  Deep dive into RunMat&apos;s architecture, JIT compilation, and performance
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -100,7 +100,7 @@ export default function DocsPage() {
                 <CardTitle>MATLAB Migration</CardTitle>
               </div>
               <CardDescription>
-                Step-by-step guide to migrate your MATLAB projects to RustMat
+                Step-by-step guide to migrate your MATLAB projects to RunMat
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -118,7 +118,7 @@ export default function DocsPage() {
                 <CardTitle>Configuration</CardTitle>
               </div>
               <CardDescription>
-                Configure RustMat for optimal performance in your environment
+                Configure RunMat for optimal performance in your environment
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -152,13 +152,13 @@ export default function DocsPage() {
           <h2 className="mb-4 text-xl font-semibold">Quick Links</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Button variant="outline" size="sm" asChild>
-              <Link href="/download">Download RustMat</Link>
+              <Link href="/download">Download RunMat</Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link href="/blog/introducing-rustmat">Read Introduction</Link>
+              <Link href="/blog/introducing-runmat">Read Introduction</Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link href="https://github.com/rustmat/rustmat" target="_blank">
+              <Link href="https://github.com/runmat-dev/runmat" target="_blank">
                 View on GitHub
               </Link>
             </Button>

@@ -11,10 +11,10 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://rustmat.com'),
+  metadataBase: new URL('https://runmat.org'),
   title: {
-    default: "RustMat - High-Performance MATLAB/Octave Runtime in Rust",
-    template: "%s | RustMat"
+    default: "RunMat - High-Performance MATLAB/Octave Runtime in Rust",
+    template: "%s | RunMat"
   },
   description: "A modern, blazing-fast, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler, advanced garbage collection, and GPU-accelerated plotting. Free forever.",
   keywords: [
@@ -33,22 +33,22 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://rustmat.com',
-    siteName: 'RustMat',
-    title: 'RustMat - High-Performance MATLAB/Octave Runtime in Rust',
+    url: 'https://runmat.org',
+    siteName: 'RunMat',
+    title: 'RunMat - High-Performance MATLAB/Octave Runtime in Rust',
     description: 'A modern, blazing-fast, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler, advanced garbage collection, and GPU-accelerated plotting. Free forever.',
     images: [
       {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'RustMat - High-Performance MATLAB/Octave Runtime',
+        alt: 'RunMat - High-Performance MATLAB/Octave Runtime',
       }
     ]
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'RustMat - High-Performance MATLAB/Octave Runtime in Rust',
+    title: 'RunMat - High-Performance MATLAB/Octave Runtime in Rust',
     description: 'A modern, blazing-fast, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler.',
     images: ['/og-image.png'],
   },
@@ -80,7 +80,7 @@ export default function RootLayout({
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/site.webmanifest" />
-        <link rel="canonical" href="https://rustmat.com" />
+        <link rel="canonical" href="https://runmat.org" />
       </head>
       <body className={`${inter.className} antialiased`}>
         <ThemeProvider

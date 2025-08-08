@@ -1,0 +1,12 @@
+[package]
+name = "runmat-hir"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+runmat-parser = { workspace = true }
+runmat-builtins = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+runmat-lexer = { workspace = true }

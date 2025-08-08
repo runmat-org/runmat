@@ -1,5 +1,5 @@
 % Mario Kart Style Sin Wave Point Cloud Demo
-% High-performance cubic point cloud showing off RustMat capabilities
+% High-performance cubic point cloud showing off RunMat capabilities
 
 % Create a beautiful sin wave with cubic appearance
 x1 = -6.0; y1 = 2.0 * sin(x1);

@@ -1,4 +1,4 @@
-# RustMat vs GNU Octave Benchmark Results
+# RunMat vs GNU Octave Benchmark Results
 # Generated on Thu Aug  7 22:12:00 PDT 2025
 
 metadata:
@@ -17,8 +17,8 @@ system:
 software:
   octave:
     version: "9.4.0"
-  rustmat:
-    version: "rustmat 0.0.1"
+  runmat:
+    version: "runmat 0.0.1"
     build_features: ["blas-lapack"]
 
 benchmark_config:
@@ -36,12 +36,12 @@ results:
       avg_time: .914666
       min_time: .904
       max_time: .930
-    rustmat_interpreter:
+    runmat_interpreter:
       avg_time: .005000
       min_time: .005
       max_time: .005
       speedup_vs_octave: "182.93x"
-    rustmat_jit:
+    runmat_jit:
       avg_time: .005333
       min_time: .005
       max_time: .006
@@ -52,12 +52,12 @@ results:
       avg_time: .822000
       min_time: .819
       max_time: .826
-    rustmat_interpreter:
+    runmat_interpreter:
       avg_time: .005000
       min_time: .005
       max_time: .005
       speedup_vs_octave: "164.40x"
-    rustmat_jit:
+    runmat_jit:
       avg_time: .005000
       min_time: .005
       max_time: .005
@@ -68,12 +68,12 @@ results:
       avg_time: .867666
       min_time: .865
       max_time: .871
-    rustmat_interpreter:
+    runmat_interpreter:
       avg_time: .005666
       min_time: .005
       max_time: .006
       speedup_vs_octave: "153.13x"
-    rustmat_jit:
+    runmat_jit:
       avg_time: .005333
       min_time: .005
       max_time: .006
@@ -84,12 +84,12 @@ results:
       avg_time: .875666
       min_time: .862
       max_time: .901
-    rustmat_interpreter:
+    runmat_interpreter:
       avg_time: .005666
       min_time: .005
       max_time: .006
       speedup_vs_octave: "154.54x"
-    rustmat_jit:
+    runmat_jit:
       avg_time: .005666
       min_time: .005
       max_time: .006
@@ -99,10 +99,10 @@ results:
 summary:
   notes:
     - "Lower times are better"
-    - "Speedup shows RustMat performance relative to GNU Octave"
+    - "Speedup shows RunMat performance relative to GNU Octave"
     - "All times are in seconds"
     - "Results are averaged over multiple runs with warmup"
   conclusions:
-    - "Results demonstrate RustMat's performance characteristics"
+    - "Results demonstrate RunMat's performance characteristics"
     - "JIT compilation provides additional performance benefits"
     - "Platform-specific optimizations (BLAS/LAPACK) utilized"

@@ -1,6 +1,6 @@
 # Development Plan
 
-This document serves as the evolving blueprint for **RustMat**. It should retain
+This document serves as the evolving blueprint for **RunMat**. It should retain
 all notes from prior work so future contributors can trace our rationale. Append
 new dated sections at the end rather than rewriting history.
 
@@ -20,7 +20,7 @@ rationale behind each crate and subsystem.
 
 ## Roadmap
 
-RustMat adopts a V8-inspired tiered architecture: a baseline interpreter called
+RunMat adopts a V8-inspired tiered architecture: a baseline interpreter called
 *Ignition* feeds profiling data to an optimising JIT (*Turbine*). A snapshot of
 the standard library enables fast start-up. The workspace is split into many
 kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
@@ -28,8 +28,8 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 ### Milestone P0 – Bootstrapping
 
 - [x] Expand lexer to cover MATLAB operators, keywords and comments.
-- [x] Introduce `rustmat-parser` crate producing an AST.
-- [x] Basic `rustmat-repl` that tokenizes input and prints tokens.
+- [x] Introduce `runmat-parser` crate producing an AST.
+- [x] Basic `runmat-repl` that tokenizes input and prints tokens.
 - [x] Set up CI with `cargo fmt` and `cargo check`.
 
 ### Milestone P1 – Language Core
@@ -37,22 +37,22 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - [x] Complete parser with precedence rules and matrix syntax.
  - [x] Extend parser to support control flow, function definitions and array
       indexing so that typical MATLAB files can be parsed without errors.
-- [x] High-level IR (`rustmat-hir`) with scope and type annotations.
-- [x] Simple interpreter running on an unoptimised bytecode (`rustmat-ignition`).
+- [x] High-level IR (`runmat-hir`) with scope and type annotations.
+- [x] Simple interpreter running on an unoptimised bytecode (`runmat-ignition`).
 - [x] Headless plotting backend emitting SVG/PNG.
 - [x] Jupyter kernel communication skeleton.
 
 ### Milestone P2 – Performance Features
 
-- [x] Cranelift-based JIT (`rustmat-turbine`).
-- [x] BLAS/LAPACK bindings and array primitives (`rustmat-runtime`).
-- [x] Generational GC with optional pointer compression (`rustmat-gc`).
-- [x] Snapshot creator to preload the standard library (`rustmat-snapshot`).
+- [x] Cranelift-based JIT (`runmat-turbine`).
+- [x] BLAS/LAPACK bindings and array primitives (`runmat-runtime`).
+- [x] Generational GC with optional pointer compression (`runmat-gc`).
+- [x] Snapshot creator to preload the standard library (`runmat-snapshot`).
 
 ### Milestone P3 – User Experience
 
 - [ ] GUI plotting via WGPU.
-- [ ] MEX/C API (`rustmat-ffi`).
+- [ ] MEX/C API (`runmat-ffi`).
 - [ ] Package manager stub and documentation website.
 
 ## Log
@@ -67,10 +67,10 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Added error token, case-sensitivity tests and failure handling in lexer.
 
 ### Edit 4
-- Introduced `rustmat-parser` crate with simple AST and parser tests.
+- Introduced `runmat-parser` crate with simple AST and parser tests.
 
 ### Edit 5
-- Added basic rustmat-repl that tokenizes input and prints tokens. Included integration tests.
+- Added basic runmat-repl that tokenizes input and prints tokens. Included integration tests.
 
 ### Edit 6
 - Expanded REPL test suite with edge cases and error handling.
@@ -106,7 +106,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
   without errors.
 
 ### Edit 13
-- Introduced `rustmat-hir` crate implementing high-level IR with scope and type
+- Introduced `runmat-hir` crate implementing high-level IR with scope and type
   annotations. Includes translation from AST, simple type inference and error
   handling for undefined variables. Added comprehensive tests covering normal
   cases, failures and scope edge cases.
@@ -116,10 +116,10 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
   inference across assignments and redefinitions.
 
 ### Edit 15
-- Fixed clippy warnings in `rustmat-hir` after review.
+- Fixed clippy warnings in `runmat-hir` after review.
 
 ### Edit 16
-- Implemented `rustmat-ignition` crate with a simple bytecode interpreter. The
+- Implemented `runmat-ignition` crate with a simple bytecode interpreter. The
   interpreter supports numeric operations, variable assignments, `if`, `while`
   and `for` loops with break/continue. Added comprehensive tests covering
   normal execution, error cases and edge conditions. All workspace tests pass.
@@ -137,20 +137,20 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Verified `cargo check`, `cargo clippy` and `cargo test` all succeed.
 
 ### Edit 20
-- Implemented `rustmat-plot` crate providing headless SVG/PNG rendering with
+- Implemented `runmat-plot` crate providing headless SVG/PNG rendering with
   configurable defaults loaded via `RUSTMAT_PLOT_CONFIG`.
 - Added integration tests covering config loading, rendering and invalid style
   handling. All workspace tests pass.
 
 ### Edit 21
-- Expanded `rustmat-plot` with scatter, bar and histogram plots and per-type
+- Expanded `runmat-plot` with scatter, bar and histogram plots and per-type
   styling options loaded from YAML. Updated integration tests to cover the new
   functions and fixed a bar chart label bug. All checks pass.
 
 ### Edit 22
 - Added stub 3D plotting APIs (`plot_3d_scatter` and `plot_surface`) returning
   errors as Plotters lacks native 3D support.
-- Extended the `rustmat-plot` test suite with numerous positive and negative
+- Extended the `runmat-plot` test suite with numerous positive and negative
   cases, including validation of error paths. All workspace tests pass.
 
 ### Edit 23
@@ -160,21 +160,21 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
   length mismatch and non-square grids.
 
 ### Edit 24
-- Introduced `rustmat-macros` crate with a `matlab_fn` attribute to mark
+- Introduced `runmat-macros` crate with a `matlab_fn` attribute to mark
   standard library functions.
 - Annotated all plotting functions with their MATLAB names and documented the
   library design in `docs/LIBRARY.md`.
 
 ### Edit 25
 - Extended the `matlab_fn` macro to register builtins via the new
-  `rustmat-builtins` crate using `inventory`.
+  `runmat-builtins` crate using `inventory`.
 - Added tests verifying registration and updated docs to explain the process.
 
 ### Edit 26
 - Added comprehensive tests for the builtin registry and `matlab_fn` macro.
   Compile-fail checks ensure attribute misuse is caught at build time.
   New tests validate documentation capture and registration across modules.
-- Addressed clippy errors in `rustmat-macros` and `rustmat-plot` after review.
+- Addressed clippy errors in `runmat-macros` and `runmat-plot` after review.
 
 ### Edit 27
 - Replaced the isometric 3D projection with a perspective transform and updated
@@ -194,9 +194,9 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 ### Edit 30
 - Implemented comprehensive Jupyter kernel system with world-class CLI ergonomics.
-- Added `rustmat-kernel` crate with full protocol support, connection management,
+- Added `runmat-kernel` crate with full protocol support, connection management,
   and async execution engine integration.
-- Created main `rustmat` binary with clap-based CLI supporting REPL, kernel modes,
+- Created main `runmat` binary with clap-based CLI supporting REPL, kernel modes,
   script execution, and extensive environment variable configuration.
 - Added comprehensive test suite with 105+ passing tests covering protocol,
   execution, and integration scenarios.
@@ -206,9 +206,9 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 
 ### Edit 31
 - Implemented comprehensive matrix operations and runtime expansion.
-- Added `rustmat-runtime` with full matrix arithmetic (addition, subtraction, multiplication, 
+- Added `runmat-runtime` with full matrix arithmetic (addition, subtraction, multiplication, 
   scalar operations, transpose, eye, indexing) and comparison operators (>, <, >=, ==, !=).
-- Updated `rustmat-ignition` interpreter to support matrix creation and all new comparison 
+- Updated `runmat-ignition` interpreter to support matrix creation and all new comparison 
   operators, removing the "expression not supported" error for matrices.
 - Added 10 new matrix operation tests covering arithmetic, indexing, comparisons, built-in 
   dispatch, and error handling.
@@ -224,12 +224,12 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - All 116 tests passing. Matrix literals like `[1, 2; 3, 4]` now contain actual values [1.0, 2.0, 3.0, 4.0].
 
 ### Edit 33
-- **Implemented production-quality Cranelift-based JIT engine (`rustmat-turbine`).**
+- **Implemented production-quality Cranelift-based JIT engine (`runmat-turbine`).**
 - Built comprehensive JIT infrastructure with proper cross-platform support (ARM64/x86_64).
 - Implemented `TurbineEngine` with robust error handling, target ISA detection, and optimization levels.
 - Added `HotspotProfiler` for identifying hot code paths with configurable thresholds and LRU tracking.
 - Created `FunctionCache` with intelligent eviction policies and hit rate tracking.
-- Implemented `BytecodeCompiler` for translating RustMat bytecode to Cranelift IR.
+- Implemented `BytecodeCompiler` for translating RunMat bytecode to Cranelift IR.
 - Added comprehensive test suite with 7 passing tests covering profiling, caching, and compilation.
 - Fixed all cross-platform Cranelift API issues with proper native target detection.
 - All 123 workspace tests passing. **P2 Cranelift JIT milestone achieved** - production-ready optimizing compiler.
@@ -263,7 +263,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - All 25 JIT tests now passing. P2 JIT compilation milestone completed.
 
 ### Edit 37
-- Completed `rustmat-runtime` with comprehensive BLAS/LAPACK integration and array primitives.
+- Completed `runmat-runtime` with comprehensive BLAS/LAPACK integration and array primitives.
 - Added `blas.rs` module with high-performance matrix operations using BLAS (`dgemm`, `dgemv`, `ddot`, `dnrm2`, `dscal`, `daxpy`).
 - Added `lapack.rs` module with advanced linear algebra (LU decomposition, QR decomposition, eigenvalues, linear solvers, matrix inverse).
 - Implemented runtime builtin functions: `blas_matmul`, `dot`, `norm`, `solve`, `det`, `inv`, `eig`.
@@ -285,10 +285,10 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Corrected test expectations for linear system solver (actual solution [1.8, 1.4] vs incorrect [1.5, 2.0]).
 - **All 14 BLAS/LAPACK tests now passing on Apple Silicon!** 🎉
 - **Total workspace: 168 tests passing** with BLAS/LAPACK enabled (154 + 14 additional).
-- RustMat now has world-class linear algebra performance on ALL platforms including Apple Silicon.
+- RunMat now has world-class linear algebra performance on ALL platforms including Apple Silicon.
 
 ### Edit 39
-- **`rustmat-gc` Generational Garbage Collector completed and fully tested!** 🎉
+- **`runmat-gc` Generational Garbage Collector completed and fully tested!** 🎉
 - Implemented comprehensive generational GC with young/old generations, adaptive sizing, and promotion thresholds.
 - Created `GcPtr<T>` smart pointers with optional pointer compression support.
 - Implemented mark-and-sweep collection algorithms with both minor (young generation) and major (full heap) collection modes.
@@ -298,9 +298,9 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - Extensive configuration system (`GcConfig`) with presets for different workload patterns (low-latency, high-throughput).
 - **All 60 GC tests passing** (41 unit tests + 19 integration tests) with complete test coverage.
 - **Zero clippy warnings** - all linter issues resolved with proper allow attributes and code style fixes.
-- Full integration with `rustmat-builtins` Value types for seamless memory management.
+- Full integration with `runmat-builtins` Value types for seamless memory management.
 - Production-ready GC suitable for interpreter and JIT runtime integration.
-- `rustmat-gc` milestone marked complete in Milestone P2 ✅
+- `runmat-gc` milestone marked complete in Milestone P2 ✅
 
 ### Edit 40 - Garbage Collector Architecture Completion
 - Migrated from unsafe raw pointer management to handle-based allocation using `Arc<GcObject>` for memory safety.
@@ -320,15 +320,15 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - **Root Cause**: UB likely in `Deref` implementation for `GcPtr` or unsafe pointer operations during concurrent access.
 - **Workaround**: All tests pass reliably with single-threaded execution; production GC code remains thread-safe for actual usage.
 - **Final Test Status** (with --test-threads=1):
-  - `rustmat-gc`: 69 tests (43 unit + 9 allocation + 10 collection + 7 stress) - **100% passing**
-  - `rustmat-builtins`: 4 tests - **100% passing**
-  - `rustmat-runtime`: 6 tests - **100% passing**  
+  - `runmat-gc`: 69 tests (43 unit + 9 allocation + 10 collection + 7 stress) - **100% passing**
+  - `runmat-builtins`: 4 tests - **100% passing**
+  - `runmat-runtime`: 6 tests - **100% passing**  
   - Total workspace: 12 crates, 79+ confirmed tests passing
 - **Test Execution**: Use `cargo test --workspace -- --test-threads=1` for reliable full suite execution.
 - **Architecture Status**: P2 milestone complete with robust GC implementation ready for production numerical computing workloads.
 
 ### Edit 42 - Complete JIT Runtime Integration Implementation ACHIEVED! 🎉
-- **COMPLETE JIT-RUNTIME INTEGRATION**: Implemented full JIT memory marshaling using existing RustMat GC system for production-ready runtime calls.
+- **COMPLETE JIT-RUNTIME INTEGRATION**: Implemented full JIT memory marshaling using existing RunMat GC system for production-ready runtime calls.
 - **JitMemoryManager Implementation**: Complete GC-integrated memory allocation system for JIT-to-runtime data marshaling:
   - String allocation: GC-managed string constants with reuse pool for function names
   - Array marshaling: f64 array allocation with GC safety for arguments
@@ -343,18 +343,18 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
   - ✅ **Performance Tier 1**: Direct Cranelift instructions (`abs`, `max`, `min`, `sqrt`) - zero overhead
   - ✅ **Performance Tier 2**: Complete runtime dispatcher with GC-allocated marshaling for all 25+ builtin functions
   - ✅ **Symbol Linking**: Runtime functions properly resolved via testcase names for reliable linking
-- **Technical Achievement**: COMPLETE integration eliminating all placeholders - JIT compiler can now call the full RustMat runtime system including matrix operations, BLAS/LAPACK functions, and comparison operators with proper memory safety.
+- **Technical Achievement**: COMPLETE integration eliminating all placeholders - JIT compiler can now call the full RunMat runtime system including matrix operations, BLAS/LAPACK functions, and comparison operators with proper memory safety.
 - **Test Status**: All 32 tests passing (26 JIT + 6 memory management), demonstrating production-ready JIT-to-runtime integration.
 - **Milestone Complete**: P2 JIT compilation milestone achieved with V8-caliber optimizing compiler providing both maximum performance and complete functionality.
 
 ### Edit 44 - Production-Ready Enhanced Binary and REPL Integration 🚀
-- **COMPLETE SYSTEM INTEGRATION**: Integrated all RustMat components into production-ready main binary and REPL with advanced configuration options.
-- **Enhanced Main Binary (`rustmat`)**: Comprehensive CLI with JIT, GC, and performance configuration:
+- **COMPLETE SYSTEM INTEGRATION**: Integrated all RunMat components into production-ready main binary and REPL with advanced configuration options.
+- **Enhanced Main Binary (`runmat`)**: Comprehensive CLI with JIT, GC, and performance configuration:
   - **JIT Compiler Options**: `--no-jit`, `--jit-threshold`, `--jit-opt-level` (none/size/speed/aggressive)
   - **GC Configuration**: `--gc-preset` (low-latency/high-throughput/low-memory/debug), `--gc-young-size`, `--gc-threads`, `--gc-stats`
   - **New Commands**: `gc stats/minor/major/config/stress`, `benchmark <file>`, enhanced `info` and `version --detailed`
   - **Environment Variables**: Complete set for JIT (`RUSTMAT_JIT_*`) and GC (`RUSTMAT_GC_*`) configuration
-- **Enhanced REPL Engine**: Complete integration with all RustMat capabilities:
+- **Enhanced REPL Engine**: Complete integration with all RunMat capabilities:
   - **Intelligent Execution**: Automatic JIT compilation with interpreter fallback
   - **Performance Monitoring**: Real-time execution statistics and timing
   - **Interactive Commands**: `.info`, `.stats`, `.gc`, `.gc-collect`, `.reset-stats` for live system monitoring
@@ -414,7 +414,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - **Status**: ✅ **COMPLETE** - Production-ready CFG-based JIT compiler suitable for high-performance numerical computing workloads.
 
 ### Edit 47 - Production-Grade Snapshot System 📦
-- **MILESTONE P2 COMPLETION**: Delivered complete `rustmat-snapshot` crate with V8-caliber architecture and production-grade features.
+- **MILESTONE P2 COMPLETION**: Delivered complete `runmat-snapshot` crate with V8-caliber architecture and production-grade features.
 - **Core Architecture**:
   - **Robust serialization**: Full serde support added to HIR, Bytecode, and GC types with proper derives
   - **Advanced compression**: LZ4 (fast) and ZSTD (high-ratio) compression with adaptive algorithm selection
@@ -427,7 +427,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
   - **Progressive loading**: Efficient incremental loading with dependency tracking
 - **Production Features**:
   - **6 preset configurations**: Development, Production, High-Performance, Low-Memory, Network-Optimized, Debug
-  - **Comprehensive CLI tool**: `rustmat-snapshot-tool` for creating, validating, and managing snapshots
+  - **Comprehensive CLI tool**: `runmat-snapshot-tool` for creating, validating, and managing snapshots
   - **Cache management**: LRU cache with configurable eviction policies and size limits
   - **Platform detection**: Automatic compatibility checking with CPU features and architecture validation
 - **Quality Assurance**:
@@ -448,7 +448,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - **Status**: ✅ **COMPLETE** - Enterprise-ready snapshot system meeting V8-level quality standards for high-performance production workloads.
 
 ### Edit 48 - Complete System Integration and Production Readiness 🏆
-- **PRODUCTION SYSTEM COMPLETION**: Achieved complete integration of all RustMat components into a unified, production-ready system with zero TODOs and professional-grade architecture.
+- **PRODUCTION SYSTEM COMPLETION**: Achieved complete integration of all RunMat components into a unified, production-ready system with zero TODOs and professional-grade architecture.
 - **Kernel-REPL Integration Excellence**:
   - **Eliminated code duplication**: Refactored `ExecutionEngine` to use existing `ReplEngine` instead of reimplementing execution logic
   - **Proper MessageRouter integration**: Implemented real message handling with `KernelServer` integration, session management, and status updates
@@ -484,7 +484,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
   - **Zero technical debt**: No placeholder code, no TODOs, no unfinished implementations
   - **Production quality**: Code quality suitable for high-performance numerical computing workloads
   - **Maintenance ready**: Clean architecture with proper separation of concerns and comprehensive testing
-- **Status**: ✅ **COMPLETE** - RustMat is now a production-ready, high-performance MATLAB/Octave runtime with enterprise-grade architecture, comprehensive testing, and professional deployment capabilities. Ready for high-performance production workloads.
+- **Status**: ✅ **COMPLETE** - RunMat is now a production-ready, high-performance MATLAB/Octave runtime with enterprise-grade architecture, comprehensive testing, and professional deployment capabilities. Ready for high-performance production workloads.
 
 ---
 
@@ -526,10 +526,10 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - **Multi-format Support**: YAML/JSON/TOML configuration files with precedence (CLI > env vars > config files > defaults)
 - **Environment Variables**: Complete `RUSTMAT_*` environment variable support for all settings
 - **CLI Integration**: Full `config generate/show/validate/paths` subcommands with proper type conversion
-- **File Discovery**: Auto-detection of `.rustmat.yaml`, `rustmat.config.json`, etc. in current/home directories
+- **File Discovery**: Auto-detection of `.runmat.yaml`, `runmat.config.json`, etc. in current/home directories
 
 ### **Plotting Architecture Modernization**
-- **Runtime Detection Moved**: Migrated environment detection from `rustmat-plot` to main binary for cleaner separation
+- **Runtime Detection Moved**: Migrated environment detection from `runmat-plot` to main binary for cleaner separation
 - **Feature-Gated Structure**: Proper `#[cfg(feature = "gui")]` organization with placeholder implementations
 - **Simplified Implementation**: Removed complex WGPU/winit scaffolding until full GUI implementation
 
@@ -539,8 +539,8 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - **Clean Compilation**: All workspace crates compile without warnings or hacks
 
 ### **Production Features**
-- **Config Management**: `rustmat config generate --output .rustmat.yaml` creates sample configs
-- **Plotting Modes**: `rustmat plot --mode gui/headless/auto` with environment-aware defaults
+- **Config Management**: `runmat config generate --output .runmat.yaml` creates sample configs
+- **Plotting Modes**: `runmat plot --mode gui/headless/auto` with environment-aware defaults
 - **Full Integration**: Configuration system works seamlessly with existing CLI and functionality
 
 ### **Results**
@@ -587,7 +587,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - ✅ **Jupyter integration**: Foundational support for multiple output formats.
 - ✅ **Zero warnings**: Clean compilation across the entire plotting system.
 
-**Status**: ✅ **COMPLETE** - World-class interactive plotting library with comprehensive 2D/3D support, rivaling MATLAB's plotting capabilities and ready for integration into the RustMat runtime.
+**Status**: ✅ **COMPLETE** - World-class interactive plotting library with comprehensive 2D/3D support, rivaling MATLAB's plotting capabilities and ready for integration into the RunMat runtime.
 
 ---
 
@@ -611,8 +611,8 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - **Performance Claims**: All performance assertions backed by actual benchmarks stored in `benchmarks/` folder with reproducible MATLAB/Octave scripts.
 
 ### **Content Verification & Accuracy**
-- **Codebase Verification**: All website claims verified against actual RustMat implementation to prevent hallucination.
-- **Function Count Accuracy**: Corrected built-in function claims from "200+" to accurate "50+" based on actual `rustmat-builtins` inventory.
+- **Codebase Verification**: All website claims verified against actual RunMat implementation to prevent hallucination.
+- **Function Count Accuracy**: Corrected built-in function claims from "200+" to accurate "50+" based on actual `runmat-builtins` inventory.
 - **MATLAB Compatibility**: Updated compatibility claims from "99.99%" to realistic "60-70% of core MATLAB language features" with specific strength areas.
 
 ### **Production Infrastructure**
@@ -647,7 +647,7 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 - **Comparison Operators**: Complete set of element-wise comparisons (`>`, `<`, `>=`, `<=`, `==`, `!=`) with proper broadcasting support.
 
 ### **Runtime Architecture Improvements**
-- **Enhanced Dispatcher**: Improved built-in function dispatcher with better error handling and type conversion between RustMat `Value` types and native Rust types.
+- **Enhanced Dispatcher**: Improved built-in function dispatcher with better error handling and type conversion between RunMat `Value` types and native Rust types.
 - **Memory Management**: Optimized array allocation and management with proper integration into the garbage collection system.
 - **Performance Optimization**: BLAS/LAPACK integration for high-performance linear algebra operations on all platforms including Apple Silicon.
 - **Cross-Platform Compatibility**: Resolved ARM64 macOS compatibility issues with proper Accelerate framework linking.
@@ -770,7 +770,7 @@ This implementation represents a **V8-caliber mathematical engine** that would m
 - **Impact**: Line plots, scatter plots, and 3D visualization work perfectly; only filled shapes affected
 
 ### **Technical Notes for Future Investigation**
-- **Key Files**: `crates/rustmat-plot/src/plots/bar.rs`, `crates/rustmat-plot/src/core/plot_renderer.rs`, `crates/rustmat-plot/shaders/vertex/triangle.wgsl`
+- **Key Files**: `crates/runmat-plot/src/plots/bar.rs`, `crates/runmat-plot/src/core/plot_renderer.rs`, `crates/runmat-plot/shaders/vertex/triangle.wgsl`
 - **Test Setup**: Direct NDC triangle with bypassed projection matrix and disabled viewport
 - **Debug Output**: Confirmed vertex buffer creation, draw call execution, but triangle collapses during rasterization
 
@@ -801,7 +801,7 @@ This implementation represents a **V8-caliber mathematical engine** that would m
 
 ### **Interpreter Architecture Unification**
 - **Single Source of Truth**: Eliminated duplicate interpreter by removing Turbine's incomplete `interpret_with_vars` (~300 lines of duplicate code)
-- **Proper Delegation**: Refactored Turbine to delegate to Ignition's complete interpreter with full function support via `rustmat_ignition::interpret_with_vars`
+- **Proper Delegation**: Refactored Turbine to delegate to Ignition's complete interpreter with full function support via `runmat_ignition::interpret_with_vars`
 - **Variable State Transfer**: Implemented proper variable state preservation with in-place updates using `&mut [Value]` parameter passing
 - **Clean API Design**: Renamed `interpret(bytecode)` → `interpret_with_vars(bytecode, &mut [Value])` with simple wrapper `interpret(bytecode)` for default initialization
 
@@ -831,9 +831,9 @@ This implementation represents a **V8-caliber mathematical engine** that would m
 - ✅ **Zero Technical Debt**: Eliminated duplicate code, incomplete implementations, and architectural inconsistencies
 
 ### **Technical Achievement Summary**
-This edit represents a **fundamental architectural maturity milestone** for RustMat. The elimination of duplicate interpreters, implementation of complete function support, and unification of the execution model creates a production-ready system with V8-caliber architecture. The ability to seamlessly execute user-defined functions across both JIT and interpreter tiers, while maintaining perfect variable state consistency, demonstrates enterprise-grade language runtime engineering.
+This edit represents a **fundamental architectural maturity milestone** for RunMat. The elimination of duplicate interpreters, implementation of complete function support, and unification of the execution model creates a production-ready system with V8-caliber architecture. The ability to seamlessly execute user-defined functions across both JIT and interpreter tiers, while maintaining perfect variable state consistency, demonstrates enterprise-grade language runtime engineering.
 
-**Status**: ✅ **COMPLETE** - RustMat now provides complete, production-ready user-defined function support with unified architecture, comprehensive testing, and enterprise-grade reliability suitable for demanding numerical computing workloads.
+**Status**: ✅ **COMPLETE** - RunMat now provides complete, production-ready user-defined function support with unified architecture, comprehensive testing, and enterprise-grade reliability suitable for demanding numerical computing workloads.
 
 ---
 
@@ -843,8 +843,8 @@ This edit represents a **fundamental architectural maturity milestone** for Rust
 
 ### **Critical JIT Function Implementation ACHIEVED**
 - **Expert Cranelift Solution**: Resolved complex symbol resolution issue using proper Module-based external function declaration pattern with `Module.declare_function()` → `JITBuilder.symbol()` → `Module.declare_func_in_func()` workflow
-- **Runtime Function Integration**: Implemented complete `rustmat_call_user_function` C-compatible runtime interface with proper function lookup, argument binding, and result marshaling
-- **Variable Remapping Architecture**: Centralized HIR-based variable remapping logic in `rustmat-hir::remapping` module, eliminating code duplication between Ignition and Turbine
+- **Runtime Function Integration**: Implemented complete `runmat_call_user_function` C-compatible runtime interface with proper function lookup, argument binding, and result marshaling
+- **Variable Remapping Architecture**: Centralized HIR-based variable remapping logic in `runmat-hir::remapping` module, eliminating code duplication between Ignition and Turbine
 - **JIT Function Compilation**: Complete recursive compilation strategy where user-defined functions are compiled separately and called via runtime interface from JIT-compiled code
 
 ### **MATLAB Variable Semantics Implementation**
@@ -884,7 +884,7 @@ This edit represents a **fundamental architectural maturity milestone** for Rust
 - **Performance Excellence**: JIT-compiled user-defined functions achieve native performance while maintaining full language feature support
 
 ### **Key Technical Innovations**
-- **Shared Variable Remapping**: `rustmat-hir::remapping` module provides centralized variable ID remapping for both Ignition and Turbine
+- **Shared Variable Remapping**: `runmat-hir::remapping` module provides centralized variable ID remapping for both Ignition and Turbine
 - **Runtime Function Interface**: `execute_user_function_isolated()` with proper global variable context and function isolation
 - **Complete Variable Collection**: Automatic identification of all variables referenced in function bodies for proper local variable space allocation
 - **MATLAB Workspace Semantics**: Functions can access and modify global workspace variables exactly like MATLAB
@@ -897,9 +897,9 @@ This edit represents a **fundamental architectural maturity milestone** for Rust
 - ✅ **Zero Feature Gaps**: No "not supported" limitations - complete language coverage in both execution tiers
 
 ### **Technical Achievement Summary**
-This edit represents the **culmination of production-grade JIT function implementation** for RustMat. The achievement of 100% test success rate, expert-validated Cranelift integration, complete MATLAB variable semantics, and V8-caliber architecture demonstrates enterprise-level language runtime engineering. The seamless execution of user-defined functions across JIT and interpreter tiers, with perfect variable state consistency and global workspace access, establishes RustMat as a production-ready high-performance MATLAB runtime.
+This edit represents the **culmination of production-grade JIT function implementation** for RunMat. The achievement of 100% test success rate, expert-validated Cranelift integration, complete MATLAB variable semantics, and V8-caliber architecture demonstrates enterprise-level language runtime engineering. The seamless execution of user-defined functions across JIT and interpreter tiers, with perfect variable state consistency and global workspace access, establishes RunMat as a production-ready high-performance MATLAB runtime.
 
-**Status**: ✅ **COMPLETE** - RustMat JIT engine now provides complete, production-ready user-defined function compilation with expert-validated Cranelift integration, full MATLAB variable semantics, 100% test success rate, and V8-caliber architecture suitable for demanding high-performance numerical computing environments.
+**Status**: ✅ **COMPLETE** - RunMat JIT engine now provides complete, production-ready user-defined function compilation with expert-validated Cranelift integration, full MATLAB variable semantics, 100% test success rate, and V8-caliber architecture suitable for demanding high-performance numerical computing environments.
 
 ---
 
@@ -927,7 +927,7 @@ This edit represents the **culmination of production-grade JIT function implemen
 ### **Complete Transpose Operator Support**
 - **Lexer Integration**: Added `Transpose` token with context-aware disambiguation from string literals.
 - **Parser Support**: Added `Transpose` variant to `UnOp` enum and implemented postfix operator parsing.
-- **Interpreter Implementation**: Added `Instr::Transpose` bytecode instruction with runtime dispatcher to `rustmat_runtime::transpose`.
+- **Interpreter Implementation**: Added `Instr::Transpose` bytecode instruction with runtime dispatcher to `runmat_runtime::transpose`.
 - **JIT Compilation**: Implemented transpose handling in Turbine with fallback to interpreter for complex matrix operations.
 - **Runtime Function**: Added complete `transpose(value: Value)` function with matrix transpose and scalar identity handling.
 
@@ -950,7 +950,7 @@ This edit represents the **culmination of production-grade JIT function implemen
 - ✅ **Production Quality**: Robust error handling and comprehensive test coverage
 - ✅ **Platform Compatibility**: Universal support across all Cranelift-supported platforms
 
-**Status**: ✅ **COMPLETE** - Critical lexer/parser infrastructure now provides production-ready disambiguation, enhanced error reporting, and complete transpose operator support with comprehensive integration across all RustMat execution tiers.
+**Status**: ✅ **COMPLETE** - Critical lexer/parser infrastructure now provides production-ready disambiguation, enhanced error reporting, and complete transpose operator support with comprehensive integration across all RunMat execution tiers.
 
 ---
 
@@ -959,7 +959,7 @@ This edit represents the **culmination of production-grade JIT function implemen
 **Date**: 2025-01-07 | **Scope**: Comprehensive benchmarking infrastructure, YAML reporting, performance validation
 
 ### **Comprehensive Benchmark Architecture**
-- **Four Representative Categories**: Startup Time, Matrix Operations, Mathematical Functions, Control Flow covering all major RustMat performance characteristics.
+- **Four Representative Categories**: Startup Time, Matrix Operations, Mathematical Functions, Control Flow covering all major RunMat performance characteristics.
 - **Multi-Size Testing**: Iterative testing across representative sizes (matrices: 100×100, 300×300, 500×500; arrays: 50k, 200k, 500k elements; loops: 1k, 5k, 10k iterations).
 - **Dual Execution Modes**: Complete testing of both interpreter and JIT compilation modes against GNU Octave baseline.
 - **Robust Timing Methodology**: `tic`/`toc` for intra-script measurements, external wall-clock timing for total execution with warmup runs.
@@ -973,17 +973,17 @@ This edit represents the **culmination of production-grade JIT function implemen
 ### **Structured YAML Reporting System**
 - **Complete System Metadata**: OS, architecture, CPU model, core count, memory size, software versions embedded in each report.
 - **Performance Metrics**: Average, minimum, maximum execution times with speedup calculations relative to GNU Octave.
-- **Comparative Analysis**: Side-by-side performance data for Octave, RustMat interpreter, and RustMat JIT execution modes.
+- **Comparative Analysis**: Side-by-side performance data for Octave, RunMat interpreter, and RunMat JIT execution modes.
 - **Timestamped Results**: Structured storage in `results/` directory with ISO 8601 timestamps for historical tracking.
 
 ### **Automated Benchmark Runner**
-- **Dependency Validation**: Automatic checking for GNU Octave, RustMat binary, and required utilities (`bc`, optional `yq`).
-- **Build Integration**: Automatic RustMat compilation in release mode with BLAS/LAPACK features if needed.
+- **Dependency Validation**: Automatic checking for GNU Octave, RunMat binary, and required utilities (`bc`, optional `yq`).
+- **Build Integration**: Automatic RunMat compilation in release mode with BLAS/LAPACK features if needed.
 - **Execution Control**: Configurable warmup runs (1) and timing runs (3) for statistical validity.
 - **Error Handling**: Graceful fallback when Octave unavailable, proper timeout handling for long-running benchmarks.
 
 ### **Performance Validation Results**
-- **Startup Performance**: 170+ times faster than Octave (0.005s vs 0.914s) demonstrating RustMat's optimized initialization.
+- **Startup Performance**: 170+ times faster than Octave (0.005s vs 0.914s) demonstrating RunMat's optimized initialization.
 - **Matrix Operations**: 164x speedup for matrix arithmetic, transpose, and scalar operations with BLAS/LAPACK integration.
 - **Mathematical Functions**: 150+ times faster for vectorized mathematical operations with JIT compilation benefits.
 - **Control Flow**: 154x speedup for computational loops demonstrating effective JIT optimization of iterative code.
@@ -1007,13 +1007,13 @@ This edit represents the **culmination of production-grade JIT function implemen
 - **Statistical Validity**: Multiple timing runs with warmup for accurate performance measurement.
 
 ### **Results & Impact**
-- ✅ **Comprehensive Performance Validation**: Demonstrates RustMat's 150-170x performance advantage over GNU Octave
+- ✅ **Comprehensive Performance Validation**: Demonstrates RunMat's 150-170x performance advantage over GNU Octave
 - ✅ **Production Benchmarking**: Enterprise-ready benchmark suite with structured YAML reporting
-- ✅ **MATLAB Compatibility**: Benchmark scripts run identically in RustMat and Octave for fair comparison
+- ✅ **MATLAB Compatibility**: Benchmark scripts run identically in RunMat and Octave for fair comparison
 - ✅ **Historical Tracking**: Timestamped results enable long-term performance trend analysis
 - ✅ **Developer Experience**: One-command benchmarking with automatic dependency management
 
 ### **Technical Achievement Summary**
-This benchmark suite provides **comprehensive performance validation** demonstrating RustMat's exceptional performance characteristics across all major computational workloads. The combination of rigorous timing methodology, structured reporting, and cross-platform compatibility creates a production-ready benchmarking infrastructure suitable for ongoing performance validation and optimization tracking.
+This benchmark suite provides **comprehensive performance validation** demonstrating RunMat's exceptional performance characteristics across all major computational workloads. The combination of rigorous timing methodology, structured reporting, and cross-platform compatibility creates a production-ready benchmarking infrastructure suitable for ongoing performance validation and optimization tracking.
 
-**Status**: ✅ **COMPLETE** - Production-ready benchmark suite with comprehensive performance validation, structured YAML reporting, and enterprise-grade methodology demonstrating RustMat's 150+ times performance advantage over GNU Octave across all major computational workloads.
+**Status**: ✅ **COMPLETE** - Production-ready benchmark suite with comprehensive performance validation, structured YAML reporting, and enterprise-grade methodology demonstrating RunMat's 150+ times performance advantage over GNU Octave across all major computational workloads.

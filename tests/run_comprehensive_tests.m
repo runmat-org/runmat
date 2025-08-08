@@ -1,7 +1,7 @@
 % Comprehensive MATLAB Language Test Suite
 % This script runs all edge case tests and reports results
 
-fprintf('=== RustMat Comprehensive Language Test Suite ===\n\n');
+fprintf('=== RunMat Comprehensive Language Test Suite ===\n\n');
 
 %% Test Categories
 test_categories = {
@@ -288,7 +288,7 @@ if ~isempty(error_details)
 end
 
 if failed_tests == 0
-    fprintf('\n🎉 ALL TESTS PASSED! RustMat language implementation is comprehensive.\n');
+    fprintf('\n🎉 ALL TESTS PASSED! RunMat language implementation is comprehensive.\n');
 else
     fprintf('\n⚠️  Some tests failed. See details above for areas needing improvement.\n');
 end

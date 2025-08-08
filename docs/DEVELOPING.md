@@ -1,4 +1,4 @@
-# Developing RustMat
+# Developing RunMat
 
 This project is organised as a Cargo workspace. Each component lives in a separate crate under `crates/` and uses kebab-case names. To build the entire workspace run:
 
@@ -18,7 +18,7 @@ cargo build
 At this early stage the REPL simply tokenizes input and prints the token names:
 
 ```bash
-cargo run -p rustmat-repl
+cargo run -p runmat-repl
 ```
 
 Future milestones will integrate the parser, VM and JIT.

@@ -1,4 +1,4 @@
-% RustMat P2 Performance Features Demo
+% RunMat P2 Performance Features Demo
 % Showcasing matrix operations, comparison operators, and runtime integration
 
 % Matrix creation and operations now work!

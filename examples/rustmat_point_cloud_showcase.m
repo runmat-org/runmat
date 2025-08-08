@@ -1,7 +1,7 @@
-% RustMat High-Performance Point Cloud Showcase
+% RunMat High-Performance Point Cloud Showcase
 % Mario Kart Style Orange Sin Wave with Cubic Appearance
 % 
-% This demo showcases RustMat's advanced 3D visualization capabilities:
+% This demo showcases RunMat's advanced 3D visualization capabilities:
 % - High-performance scatter3 point cloud rendering
 % - Mario Kart inspired cubic orange aesthetic  
 % - GPU-accelerated PointCloudPlot with debug output
@@ -60,5 +60,5 @@ y_all = [y1, y2, y3, y4, y5, y6, y7, y8, y9, y10, y11, y12, y13, y14, y15, y16, 
 z_all = [z1, z2, z3, z4, z5, z6, z7, z8, z9, z10, z11, z12, z13, z14, z15, z16, z17, z18, z19, z20, z21, z22, z23, z24, z25, z26, z27, z28, z29, z30, z31, z32, z33, z34, z35, z36, z37, z38, z39];
 
 % Render the stunning Mario Kart style sin wave point cloud!
-% This will showcase RustMat's high-performance 3D capabilities
+% This will showcase RunMat's high-performance 3D capabilities
 scatter3(x_all, y_all, z_all)

@@ -1,4 +1,4 @@
-% RustMat Matrix Demo - showcasing our new matrix support
+% RunMat Matrix Demo - showcasing our new matrix support
 % This demonstrates our V8-inspired MATLAB runtime with matrices
 
 % Basic matrix creation

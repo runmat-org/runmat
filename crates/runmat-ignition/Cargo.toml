@@ -1,0 +1,16 @@
+[package]
+name = "runmat-ignition"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+runmat-builtins = { workspace = true }
+runmat-runtime = { workspace = true }
+runmat-lexer = { workspace = true }
+runmat-parser = { workspace = true }
+runmat-hir = { workspace = true }
+runmat-gc = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+runmat-lexer = { workspace = true }

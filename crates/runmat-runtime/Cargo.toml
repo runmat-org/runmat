@@ -1,0 +1,41 @@
+[package]
+name = "runmat-runtime"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+inventory = { workspace = true }
+runmat-builtins = { workspace = true }
+runmat-macros = { workspace = true }
+runmat-plot = { workspace = true }
+glam = "0.24"
+tokio = { workspace = true }
+
+# BLAS/LAPACK bindings for high-performance linear algebra (optional)
+blas = { version = "0.22", optional = true }
+lapack = { version = "0.19", optional = true }
+regex = "1.11.1"
+
+# Platform-specific BLAS/LAPACK implementations
+[target.'cfg(target_os = "macos")'.dependencies]
+# Use Apple's Accelerate framework on macOS (works on both Intel and Apple Silicon)
+accelerate-src = { version = "0.3", optional = true }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# Use OpenBLAS on other platforms
+openblas-src = { version = "0.10", features = ["cblas", "lapacke"], optional = true }
+
+[features]
+default = ["gui"]
+# GUI plotting support
+gui = ["runmat-plot/gui"]
+# Jupyter notebook integration
+jupyter = ["runmat-plot/jupyter"]
+# High-performance BLAS/LAPACK support using platform-native libraries
+# macOS: Uses Apple's Accelerate framework (WORKS on both Intel and Apple Silicon!)
+# Other platforms: Uses OpenBLAS
+# Usage: cargo test --features blas-lapack
+blas-lapack = ["blas", "lapack", "accelerate-src", "openblas-src"]
+
+[dev-dependencies]
+runmat-macros = { workspace = true } 

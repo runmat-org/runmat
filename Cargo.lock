@@ -4079,6 +4079,266 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
+name = "runmat"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "atty",
+ "clap",
+ "dirs 5.0.1",
+ "env_logger 0.11.8",
+ "log",
+ "runmat-builtins",
+ "runmat-gc",
+ "runmat-hir",
+ "runmat-ignition",
+ "runmat-kernel",
+ "runmat-parser",
+ "runmat-plot",
+ "runmat-repl",
+ "runmat-runtime",
+ "runmat-snapshot",
+ "runmat-turbine",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml 0.8.23",
+ "uuid",
+]
+
+[[package]]
+name = "runmat-builtins"
+version = "0.0.1"
+dependencies = [
+ "inventory",
+ "runmat-macros",
+ "serde",
+ "trybuild",
+]
+
+[[package]]
+name = "runmat-gc"
+version = "0.0.1"
+dependencies = [
+ "criterion",
+ "log",
+ "num-traits",
+ "num_cpus",
+ "once_cell",
+ "page_size",
+ "parking_lot",
+ "rand",
+ "runmat-builtins",
+ "runmat-hir",
+ "runmat-ignition",
+ "runmat-parser",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-hir"
+version = "1.0.0"
+dependencies = [
+ "runmat-builtins",
+ "runmat-lexer",
+ "runmat-parser",
+ "serde",
+]
+
+[[package]]
+name = "runmat-ignition"
+version = "0.0.1"
+dependencies = [
+ "runmat-builtins",
+ "runmat-gc",
+ "runmat-hir",
+ "runmat-lexer",
+ "runmat-parser",
+ "runmat-runtime",
+ "serde",
+]
+
+[[package]]
+name = "runmat-kernel"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "env_logger 0.11.8",
+ "log",
+ "runmat-builtins",
+ "runmat-hir",
+ "runmat-ignition",
+ "runmat-parser",
+ "runmat-plot",
+ "runmat-repl",
+ "runmat-runtime",
+ "runmat-snapshot",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+ "zmq",
+]
+
+[[package]]
+name = "runmat-lexer"
+version = "0.0.1"
+dependencies = [
+ "logos",
+]
+
+[[package]]
+name = "runmat-macros"
+version = "0.0.1"
+dependencies = [
+ "inventory",
+ "proc-macro2",
+ "quote",
+ "runmat-builtins",
+ "syn 1.0.109",
+ "trybuild",
+]
+
+[[package]]
+name = "runmat-parser"
+version = "0.0.1"
+dependencies = [
+ "logos",
+ "runmat-lexer",
+ "serde",
+]
+
+[[package]]
+name = "runmat-plot"
+version = "0.0.1"
+dependencies = [
+ "atty",
+ "bytemuck",
+ "eframe",
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "env_logger 0.10.2",
+ "futures",
+ "glam",
+ "image",
+ "inventory",
+ "log",
+ "lyon",
+ "nalgebra",
+ "plotters",
+ "pollster",
+ "rayon",
+ "runmat-builtins",
+ "runmat-macros",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "tempfile",
+ "tokio",
+ "webbrowser",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "runmat-repl"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "env_logger 0.11.8",
+ "log",
+ "runmat-builtins",
+ "runmat-gc",
+ "runmat-hir",
+ "runmat-ignition",
+ "runmat-lexer",
+ "runmat-parser",
+ "runmat-runtime",
+ "runmat-snapshot",
+ "runmat-turbine",
+ "rustyline",
+]
+
+[[package]]
+name = "runmat-runtime"
+version = "0.0.1"
+dependencies = [
+ "accelerate-src",
+ "blas",
+ "glam",
+ "inventory",
+ "lapack",
+ "openblas-src",
+ "regex",
+ "runmat-builtins",
+ "runmat-macros",
+ "runmat-plot",
+ "tokio",
+]
+
+[[package]]
+name = "runmat-snapshot"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "blake3",
+ "chrono",
+ "clap",
+ "crc32fast",
+ "criterion",
+ "env_logger 0.10.2",
+ "indicatif",
+ "libc",
+ "log",
+ "lz4",
+ "memmap2",
+ "parking_lot",
+ "runmat-builtins",
+ "runmat-gc",
+ "runmat-hir",
+ "runmat-ignition",
+ "runmat-parser",
+ "runmat-runtime",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "zstd",
+]
+
+[[package]]
+name = "runmat-turbine"
+version = "0.0.1"
+dependencies = [
+ "cranelift",
+ "cranelift-codegen",
+ "cranelift-jit",
+ "cranelift-module",
+ "cranelift-native",
+ "env_logger 0.11.8",
+ "libm",
+ "log",
+ "runmat-builtins",
+ "runmat-gc",
+ "runmat-hir",
+ "runmat-ignition",
+ "runmat-parser",
+ "runmat-runtime",
+ "target-lexicon",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4161,266 +4421,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "229a4a4c221013e7e1f1a043678c5cc39fe5171437c88fb47151a21e6f5b5c79"
 dependencies = [
  "zeroize",
-]
-
-[[package]]
-name = "rustmat"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "atty",
- "clap",
- "dirs 5.0.1",
- "env_logger 0.11.8",
- "log",
- "rustmat-builtins",
- "rustmat-gc",
- "rustmat-hir",
- "rustmat-ignition",
- "rustmat-kernel",
- "rustmat-parser",
- "rustmat-plot",
- "rustmat-repl",
- "rustmat-runtime",
- "rustmat-snapshot",
- "rustmat-turbine",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "toml 0.8.23",
- "uuid",
-]
-
-[[package]]
-name = "rustmat-builtins"
-version = "0.0.1"
-dependencies = [
- "inventory",
- "rustmat-macros",
- "serde",
- "trybuild",
-]
-
-[[package]]
-name = "rustmat-gc"
-version = "0.0.1"
-dependencies = [
- "criterion",
- "log",
- "num-traits",
- "num_cpus",
- "once_cell",
- "page_size",
- "parking_lot",
- "rand",
- "rustmat-builtins",
- "rustmat-hir",
- "rustmat-ignition",
- "rustmat-parser",
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "rustmat-hir"
-version = "1.0.0"
-dependencies = [
- "rustmat-builtins",
- "rustmat-lexer",
- "rustmat-parser",
- "serde",
-]
-
-[[package]]
-name = "rustmat-ignition"
-version = "0.0.1"
-dependencies = [
- "rustmat-builtins",
- "rustmat-gc",
- "rustmat-hir",
- "rustmat-lexer",
- "rustmat-parser",
- "rustmat-runtime",
- "serde",
-]
-
-[[package]]
-name = "rustmat-kernel"
-version = "0.0.1"
-dependencies = [
- "chrono",
- "env_logger 0.11.8",
- "log",
- "rustmat-builtins",
- "rustmat-hir",
- "rustmat-ignition",
- "rustmat-parser",
- "rustmat-plot",
- "rustmat-repl",
- "rustmat-runtime",
- "rustmat-snapshot",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "uuid",
- "zmq",
-]
-
-[[package]]
-name = "rustmat-lexer"
-version = "0.0.1"
-dependencies = [
- "logos",
-]
-
-[[package]]
-name = "rustmat-macros"
-version = "0.0.1"
-dependencies = [
- "inventory",
- "proc-macro2",
- "quote",
- "rustmat-builtins",
- "syn 1.0.109",
- "trybuild",
-]
-
-[[package]]
-name = "rustmat-parser"
-version = "0.0.1"
-dependencies = [
- "logos",
- "rustmat-lexer",
- "serde",
-]
-
-[[package]]
-name = "rustmat-plot"
-version = "0.0.1"
-dependencies = [
- "atty",
- "bytemuck",
- "eframe",
- "egui",
- "egui-wgpu",
- "egui-winit",
- "env_logger 0.10.2",
- "futures",
- "glam",
- "image",
- "inventory",
- "log",
- "lyon",
- "nalgebra",
- "plotters",
- "pollster",
- "rayon",
- "rustmat-builtins",
- "rustmat-macros",
- "serde",
- "serde_json",
- "serde_yaml",
- "serial_test",
- "tempfile",
- "tokio",
- "webbrowser",
- "wgpu",
- "winit",
-]
-
-[[package]]
-name = "rustmat-repl"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "env_logger 0.11.8",
- "log",
- "rustmat-builtins",
- "rustmat-gc",
- "rustmat-hir",
- "rustmat-ignition",
- "rustmat-lexer",
- "rustmat-parser",
- "rustmat-runtime",
- "rustmat-snapshot",
- "rustmat-turbine",
- "rustyline",
-]
-
-[[package]]
-name = "rustmat-runtime"
-version = "0.0.1"
-dependencies = [
- "accelerate-src",
- "blas",
- "glam",
- "inventory",
- "lapack",
- "openblas-src",
- "regex",
- "rustmat-builtins",
- "rustmat-macros",
- "rustmat-plot",
- "tokio",
-]
-
-[[package]]
-name = "rustmat-snapshot"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "bincode",
- "blake3",
- "chrono",
- "clap",
- "crc32fast",
- "criterion",
- "env_logger 0.10.2",
- "indicatif",
- "libc",
- "log",
- "lz4",
- "memmap2",
- "parking_lot",
- "rustmat-builtins",
- "rustmat-gc",
- "rustmat-hir",
- "rustmat-ignition",
- "rustmat-parser",
- "rustmat-runtime",
- "serde",
- "sha2",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "zstd",
-]
-
-[[package]]
-name = "rustmat-turbine"
-version = "0.0.1"
-dependencies = [
- "cranelift",
- "cranelift-codegen",
- "cranelift-jit",
- "cranelift-module",
- "cranelift-native",
- "env_logger 0.11.8",
- "libm",
- "log",
- "rustmat-builtins",
- "rustmat-gc",
- "rustmat-hir",
- "rustmat-ignition",
- "rustmat-parser",
- "rustmat-runtime",
- "target-lexicon",
- "thiserror 1.0.69",
 ]
 
 [[package]]

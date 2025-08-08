@@ -1,6 +1,6 @@
 % High-Performance Point Cloud Demo: Mario Kart Style Sin Wave
 % Generates a dense 3D point cloud of cubes arranged in a sin wave pattern
-% This demo showcases RustMat's advanced point cloud rendering capabilities
+% This demo showcases RunMat's advanced point cloud rendering capabilities
 
 % chaos - amplitude of random noise added to each point
 chaos = 0.1;

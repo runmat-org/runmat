@@ -1,6 +1,6 @@
 #!/bin/bash
-# RustMat Installation Script
-# Usage: curl -fsSL https://rustmat.com/install.sh | sh
+# RunMat Installation Script
+# Usage: curl -fsSL https://runmat.org/install.sh | sh
 
 set -e
 
@@ -12,10 +12,10 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Constants
-REPO="rustmat/rustmat"
-BINARY_NAME="rustmat"
+REPO="runmat-dev/runmat"
+BINARY_NAME="runmat"
 INSTALL_DIR="$HOME/.local/bin"
-WEBSITE_URL="https://rustmat.com"
+WEBSITE_URL="https://runmat.org"
 
 # Functions
 log() {
@@ -44,7 +44,7 @@ High-performance MATLAB/Octave runtime
 EOF
 echo -e "${NC}"
 
-log "Starting RustMat installation..."
+log "Starting RunMat installation..."
 
 # Detect OS and architecture
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -96,12 +96,12 @@ fi
 log "Latest release: $LATEST_RELEASE"
 
 # Download and install
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_RELEASE/rustmat-$PLATFORM.tar.gz"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_RELEASE/runmat-$PLATFORM.tar.gz"
 TEMP_DIR=$(mktemp -d)
 
 log "Downloading from: $DOWNLOAD_URL"
 if ! curl -L "$DOWNLOAD_URL" | tar -xz -C "$TEMP_DIR"; then
-    error "Failed to download or extract RustMat"
+    error "Failed to download or extract RunMat"
 fi
 
 # Create install directory
@@ -109,7 +109,7 @@ log "Creating installation directory: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 
 # Install binary
-log "Installing RustMat binary..."
+log "Installing RunMat binary..."
 if ! cp "$TEMP_DIR/$BINARY_NAME" "$INSTALL_DIR/"; then
     error "Failed to install binary"
 fi
@@ -119,11 +119,11 @@ chmod +x "$INSTALL_DIR/$BINARY_NAME"
 # Cleanup
 rm -rf "$TEMP_DIR"
 
-log "RustMat installed successfully to $INSTALL_DIR/$BINARY_NAME"
+log "RunMat installed successfully to $INSTALL_DIR/$BINARY_NAME"
 
 # Check if in PATH
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
-    warn "Add $INSTALL_DIR to your PATH to use rustmat from anywhere:"
+    warn "Add $INSTALL_DIR to your PATH to use runmat from anywhere:"
     echo
     echo "  # For bash/zsh users:"
     echo "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.bashrc"
@@ -133,18 +133,18 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
     echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
     echo
 else
-    log "RustMat is already in your PATH"
+    log "RunMat is already in your PATH"
 fi
 
 # Test installation
-if command -v rustmat >/dev/null 2>&1; then
-    INSTALLED_VERSION=$(rustmat --version 2>/dev/null || echo "unknown")
+if command -v runmat >/dev/null 2>&1; then
+    INSTALLED_VERSION=$(runmat --version 2>/dev/null || echo "unknown")
     log "Installation verified! Version: $INSTALLED_VERSION"
 else
-    if [ -f "$INSTALL_DIR/rustmat" ]; then
-        INSTALLED_VERSION=$("$INSTALL_DIR/rustmat" --version 2>/dev/null || echo "unknown")
+    if [ -f "$INSTALL_DIR/runmat" ]; then
+        INSTALLED_VERSION=$("$INSTALL_DIR/runmat" --version 2>/dev/null || echo "unknown")
         log "Installation verified! Version: $INSTALLED_VERSION"
-        warn "Run 'export PATH=\"$INSTALL_DIR:\$PATH\"' to use rustmat from anywhere"
+        warn "Run 'export PATH=\"$INSTALL_DIR:\$PATH\"' to use runmat from anywhere"
     else
         error "Installation verification failed"
     fi
@@ -154,12 +154,12 @@ echo
 log "Installation complete! 🎉"
 echo
 echo "Next steps:"
-echo "  1. Start the interactive REPL: rustmat"
-echo "  2. Run a script: rustmat run script.m"
-echo "  3. Install Jupyter kernel: rustmat --install-kernel"
-echo "  4. Get help: rustmat --help"
+echo "  1. Start the interactive REPL: runmat"
+echo "  2. Run a script: runmat run script.m"
+echo "  3. Install Jupyter kernel: runmat --install-kernel"
+echo "  4. Get help: runmat --help"
 echo
 echo "Documentation: $WEBSITE_URL/docs"
 echo "Examples: $WEBSITE_URL/docs/examples"
 echo
-log "Happy computing with RustMat!"
+log "Happy computing with RunMat!"

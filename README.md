@@ -1,21 +1,18 @@
-# 🚀 RustMat: Modern Free MATLAB Compatible Runtime
+# 🚀 RunMat: Modern Free MATLAB Compatible Runtime
 ### A blazing-fast, open-source MATLAB/Octave runtime, by the creators of [Dystr](https://dystr.com)
 
-[![Build Status](https://img.shields.io/github/actions/workflow/status/rustmat/rustmat/ci.yml?branch=main)](https://github.com/rustmat/rustmat/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/runmat-dev/runmat/ci.yml?branch=main)](https://github.com/runmat-dev/runmat/actions)
 [![License](https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg)](LICENSE.md)
-[![Crates.io](https://img.shields.io/crates/v/rustmat.svg)](https://crates.io/crates/rustmat)
-[![Downloads](https://img.shields.io/crates/d/rustmat.svg)](https://crates.io/crates/rustmat)
-[![Discord](https://img.shields.io/discord/placeholder?color=7289da&label=discord)](https://discord.gg/rustmat)
+[![Crates.io](https://img.shields.io/crates/v/runmat.svg)](https://crates.io/crates/runmat)
+[![Downloads](https://img.shields.io/crates/d/runmat.svg)](https://crates.io/crates/runmat)
 
-> **Copy-paste your existing MATLAB code and watch it run blazing fast and for free** ✨
-
-**[🌐 Website](https://rustmat.dev) • [📖 Documentation](https://docs.rustmat.dev) • [💬 Discord](https://discord.gg/rustmat) • [🎯 Examples](examples/)**
+**[🌐 Website](https://runmat.org) • [📖 Documentation](https://runmat.org/docs)**
 
 ---
 
-## What is RustMat?
+## What is RunMat?
 
-RustMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave code that eliminates license fees, vendor lock-in, and performance bottlenecks. Built from the ground up in Rust with a **V8-inspired architecture**, it delivers:
+RunMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave code that eliminates license fees, vendor lock-in, and performance bottlenecks. Built from the ground up in Rust with a **V8-inspired architecture**, it delivers:
 
 - 🚀 **150-180x faster execution** than Octave through JIT compilation
 - ⚡ **Instant startup** (5ms vs 900ms+ in Octave) via advanced snapshotting
@@ -30,7 +27,7 @@ RustMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave co
 <tr>
 <th>Benchmark</th>
 <th>GNU Octave 9.4</th>
-<th>RustMat (JIT)</th>
+<th>RunMat (JIT)</th>
 <th>Speedup</th>
 </tr>
 <tr>
@@ -63,7 +60,7 @@ RustMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave co
 
 ---
 
-### Why Engineers and Scientists Love RustMat
+### Why Engineers and Scientists Love RunMat
 
 <table>
 <tr>
@@ -94,39 +91,39 @@ RustMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave co
 
 ```bash
 # Quick install (Linux/macOS)
-curl -fsSL https://rustmat.com/install.sh | sh
+curl -fsSL https://runmat.org/install.sh | sh
 
 # Quick install (Windows PowerShell)
-iwr https://rustmat.com/install.ps1 | iex
+iwr https://runmat.org/install.ps1 | iex
 
 # Or install from crates.io
-cargo install rustmat --features gui
+cargo install runmat --features gui
 
 # Or build from source
-git clone https://github.com/rustmat/rustmat.git
-cd rustmat && cargo build --release --features gui
+git clone https://github.com/runmat-dev/runmat.git
+cd runmat && cargo build --release --features gui
 ```
 
 ### Run Your First Script
 
 ```bash
 # Start the interactive REPL
-rustmat
+runmat
 
 # Or run an existing .m file
-rustmat script.m
+runmat script.m
 
-# Or pipe a script into RustMat
-echo "a = 10; b = 20; c = a + b" | rustmat
+# Or pipe a script into RunMat
+echo "a = 10; b = 20; c = a + b" | runmat
 ```
 
 ### Jupyter Integration
 
 ```bash
-# Register RustMat as a Jupyter kernel
-rustmat --install-kernel
+# Register RunMat as a Jupyter kernel
+runmat --install-kernel
 
-# Launch JupyterLab with RustMat support
+# Launch JupyterLab with RunMat support
 jupyter lab
 ```
 
@@ -160,25 +157,25 @@ surf(X, Y, Z);
 
 ## 🏗️ Architecture: V8-Inspired Performance
 
-RustMat's **tiered execution engine** delivers both fast startup and blazing runtime performance.
+RunMat's **tiered execution engine** delivers both fast startup and blazing runtime performance.
 
 ### Key Components
 
 | Component | Purpose | Technology |
 |-----------|---------|------------|
-| **🎯 rustmat-ignition** | Baseline interpreter for instant startup | HIR-to-bytecode compiler + stack-based interpreter |
-| **⚡ rustmat-turbine** | Optimizing JIT compiler for hot code | Cranelift backend |
-| **🧠 rustmat-gc** | High-performance memory management | Generational GC with pointer compression |
-| **🎨 rustmat-plot** | Interactive plotting engine | GPU-accelerated via wgpu |
-| **📦 rustmat-snapshot** | Fast startup system | Binary blob serialization |
-| **🔧 rustmat-runtime** | 50+ builtin functions | BLAS/LAPACK integration |
+| **🎯 runmat-ignition** | Baseline interpreter for instant startup | HIR-to-bytecode compiler + stack-based interpreter |
+| **⚡ runmat-turbine** | Optimizing JIT compiler for hot code | Cranelift backend |
+| **🧠 runmat-gc** | High-performance memory management | Generational GC with pointer compression |
+| **🎨 runmat-plot** | Interactive plotting engine | GPU-accelerated via wgpu |
+| **📦 runmat-snapshot** | Fast startup system | Binary blob serialization |
+| **🔧 runmat-runtime** | 50+ builtin functions | BLAS/LAPACK integration |
 
 ## 🎨 Modern Developer Experience
 
 ### Rich REPL with Intelligent Features
 ```bash
-rustmat> .info
-🦀 RustMat v0.1.0 - High-Performance MATLAB Runtime
+runmat> .info
+🦀 RunMat v0.1.0 - High-Performance MATLAB Runtime
 ⚡ JIT: Cranelift (optimization: speed)
 🧠 GC: Generational (heap: 45MB, collections: 12)
 🎨 Plotting: GPU-accelerated (wgpu)
@@ -200,7 +197,7 @@ fn my_custom_function(x: f64, y: f64) -> f64 {
 }
 ```
 
-## 🌍 Who Uses RustMat?
+## 🌍 Who Uses RunMat?
 
 <div align="center">
 <table>
@@ -227,7 +224,7 @@ Rapid prototyping without<br/>expensive toolchain costs
 
 ## 🤝 Join the Revolution
 
-RustMat is more than just software—it's a movement toward **open, fast, and accessible scientific computing**. We're building the future of numerical programming, and we need your help.
+RunMat is more than just software—it's a movement toward **open, fast, and accessible scientific computing**. We're building the future of numerical programming, and we need your help.
 
 ### 🛠️ How to Contribute
 
@@ -252,7 +249,7 @@ RustMat is more than just software—it's a movement toward **open, fast, and ac
 - Write comprehensive tests
 - Create benchmarks
 
-[**Join Discussions →**](https://github.com/rustmat/rustmat/discussions)
+[**Join Discussions →**](https://github.com/runmat-dev/runmat/discussions)
 
 </td>
 <td width="33%">
@@ -263,7 +260,7 @@ RustMat is more than just software—it's a movement toward **open, fast, and ac
 - Create tutorials and examples
 - Spread the word
 
-[**Get Started →**](https://github.com/rustmat/rustmat/issues/labels/good-first-issue)
+[**Get Started →**](https://github.com/runmat-dev/runmat/issues/labels/good-first-issue)
 
 </td>
 </tr>
@@ -271,31 +268,30 @@ RustMat is more than just software—it's a movement toward **open, fast, and ac
 
 ### 💬 Connect With Us
 
-- **Discord**: [Join our community](https://discord.gg/rustmat) for real-time discussion
-- **GitHub Discussions**: [Share ideas and get help](https://github.com/rustmat/rustmat/discussions)  
-- **Twitter**: [@rustmat_dev](https://twitter.com/rustmat_dev) for updates and announcements
-- **Newsletter**: [Subscribe](https://rustmat.dev/newsletter) for monthly updates
+- **GitHub Discussions**: [Share ideas and get help](https://github.com/runmat-dev/runmat/discussions)  
+- **Twitter**: [@dystr_ai](https://x.com/dystr_ai) for updates and announcements
+- **Newsletter**: [Subscribe](https://runmat.org/newsletter) for monthly updates
 
 ## 📜 License
 
-RustMat is licensed under the **MIT License with Attribution Requirements**. This means:
+RunMat is licensed under the **MIT License with Attribution Requirements**. This means:
 
 ✅ **Free for everyone** - individuals, academics, most companies  
 ✅ **Open source forever** - no vendor lock-in or license fees  
 ✅ **Commercial use allowed** - embed in your products freely  
-⚠️ **Attribution required** - credit "RustMat by Dystr" in public distributions  
+⚠️ **Attribution required** - credit "RunMat by Dystr" in public distributions  
 ⚠️ **Special provisions** - large scientific software companies must keep modifications open source  
 
-See [LICENSE.md](LICENSE.md) for complete terms or visit [rustmat.dev/license](https://rustmat.dev/license) for FAQs.
+See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.org/license](https://runmat.org/license) for FAQs.
 
 ---
 
-**Built with ❤️ by [Dystr Inc.](https://dystr.com) and the RustMat community**
+**Built with ❤️ by [Dystr Inc.](https://dystr.com) and the RunMat community**
 
-⭐ **Star us on GitHub** if RustMat helps your work!
+⭐ **Star us on GitHub** if RunMat helps your work!
 
-[**🚀 Get Started**](https://rustmat.dev/docs/getting-started) • [**💬 Join Discord**](https://discord.gg/rustmat) • [**🐦 Follow @rustmat_dev**](https://twitter.com/rustmat_dev)
+[**🚀 Get Started**](https://runmat.org/docs/getting-started) • [**🐦 Follow @dystr**](https://x.com/dystr_ai)
 
 ---
 
-*MATLAB® is a registered trademark of The MathWorks, Inc. RustMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc.*
+*MATLAB® is a registered trademark of The MathWorks, Inc. RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc.*

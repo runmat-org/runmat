@@ -1,13 +1,13 @@
-# RustMat Installation Script for Windows
-# Usage: iwr https://rustmat.com/install.ps1 | iex
+# RunMat Installation Script for Windows
+# Usage: iwr https://runmat.org/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
 # Constants
-$REPO = "rustmat/rustmat"
-$BINARY_NAME = "rustmat.exe"
-$INSTALL_DIR = "$env:USERPROFILE\.rustmat\bin"
-$WEBSITE_URL = "https://rustmat.com"
+$REPO = "runmat-dev/runmat"
+$BINARY_NAME = "runmat.exe"
+$INSTALL_DIR = "$env:USERPROFILE\.runmat\bin"
+$WEBSITE_URL = "https://runmat.org"
 
 # Functions
 function Write-Info {
@@ -37,7 +37,7 @@ Write-Host @"
 High-performance MATLAB/Octave runtime
 "@ -ForegroundColor Blue
 
-Write-Info "Starting RustMat installation..."
+Write-Info "Starting RunMat installation..."
 
 # Detect architecture
 $ARCH = $env:PROCESSOR_ARCHITECTURE
@@ -74,19 +74,19 @@ if (-not $LATEST_RELEASE) {
 Write-Info "Latest release: $LATEST_RELEASE"
 
 # Download and install
-$DOWNLOAD_URL = "https://github.com/$REPO/releases/download/$LATEST_RELEASE/rustmat-$PLATFORM.zip"
-$TEMP_FILE = "$env:TEMP\rustmat-$PLATFORM.zip"
-$TEMP_DIR = "$env:TEMP\rustmat-extract"
+$DOWNLOAD_URL = "https://github.com/$REPO/releases/download/$LATEST_RELEASE/runmat-$PLATFORM.zip"
+$TEMP_FILE = "$env:TEMP\runmat-$PLATFORM.zip"
+$TEMP_DIR = "$env:TEMP\runmat-extract"
 
 Write-Info "Downloading from: $DOWNLOAD_URL"
 try {
     Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $TEMP_FILE
 } catch {
-    Write-Error "Failed to download RustMat: $($_.Exception.Message)"
+    Write-Error "Failed to download RunMat: $($_.Exception.Message)"
 }
 
 # Extract
-Write-Info "Extracting RustMat..."
+Write-Info "Extracting RunMat..."
 if (Test-Path $TEMP_DIR) {
     Remove-Item $TEMP_DIR -Recurse -Force
 }
@@ -94,7 +94,7 @@ if (Test-Path $TEMP_DIR) {
 try {
     Expand-Archive -Path $TEMP_FILE -DestinationPath $TEMP_DIR
 } catch {
-    Write-Error "Failed to extract RustMat: $($_.Exception.Message)"
+    Write-Error "Failed to extract RunMat: $($_.Exception.Message)"
 }
 
 # Create install directory
@@ -104,7 +104,7 @@ if (-not (Test-Path $INSTALL_DIR)) {
 }
 
 # Install binary
-Write-Info "Installing RustMat binary..."
+Write-Info "Installing RunMat binary..."
 try {
     Copy-Item "$TEMP_DIR\$BINARY_NAME" "$INSTALL_DIR\" -Force
 } catch {
@@ -115,7 +115,7 @@ try {
 Remove-Item $TEMP_FILE -Force -ErrorAction SilentlyContinue
 Remove-Item $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
 
-Write-Info "RustMat installed successfully to $INSTALL_DIR\$BINARY_NAME"
+Write-Info "RunMat installed successfully to $INSTALL_DIR\$BINARY_NAME"
 
 # Add to PATH if not already there
 $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
@@ -124,21 +124,21 @@ if ($userPath -notlike "*$INSTALL_DIR*") {
     $newPath = "$INSTALL_DIR;$userPath"
     [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
     Write-Info "Added $INSTALL_DIR to your PATH"
-    Write-Warn "Please restart your terminal to use rustmat from anywhere"
+    Write-Warn "Please restart your terminal to use runmat from anywhere"
     
     # Also add to current session
     $env:PATH = "$INSTALL_DIR;$env:PATH"
 } else {
-    Write-Info "RustMat is already in your PATH"
+    Write-Info "RunMat is already in your PATH"
 }
 
 # Test installation
 try {
-    if (Get-Command rustmat -ErrorAction SilentlyContinue) {
-        $INSTALLED_VERSION = & rustmat --version 2>$null
+    if (Get-Command runmat -ErrorAction SilentlyContinue) {
+        $INSTALLED_VERSION = & runmat --version 2>$null
         Write-Info "Installation verified! Version: $INSTALLED_VERSION"
-    } elseif (Test-Path "$INSTALL_DIR\rustmat.exe") {
-        $INSTALLED_VERSION = & "$INSTALL_DIR\rustmat.exe" --version 2>$null
+    } elseif (Test-Path "$INSTALL_DIR\runmat.exe") {
+        $INSTALLED_VERSION = & "$INSTALL_DIR\runmat.exe" --version 2>$null
         Write-Info "Installation verified! Version: $INSTALLED_VERSION"
     } else {
         Write-Error "Installation verification failed"
@@ -151,12 +151,12 @@ Write-Host ""
 Write-Info "Installation complete! 🎉"
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "  1. Start the interactive REPL: rustmat"
-Write-Host "  2. Run a script: rustmat run script.m"
-Write-Host "  3. Install Jupyter kernel: rustmat --install-kernel"
-Write-Host "  4. Get help: rustmat --help"
+Write-Host "  1. Start the interactive REPL: runmat"
+Write-Host "  2. Run a script: runmat run script.m"
+Write-Host "  3. Install Jupyter kernel: runmat --install-kernel"
+Write-Host "  4. Get help: runmat --help"
 Write-Host ""
 Write-Host "Documentation: $WEBSITE_URL/docs" -ForegroundColor Blue
 Write-Host "Examples: $WEBSITE_URL/docs/examples" -ForegroundColor Blue
 Write-Host ""
-Write-Info "Happy computing with RustMat!"
+Write-Info "Happy computing with RunMat!"

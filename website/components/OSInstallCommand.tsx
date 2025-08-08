@@ -91,7 +91,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           </CardHeader>
           <CardContent>
             <CopyableCommand 
-              command="curl -fsSL https://rustmat.com/install.sh | sh"
+              command="curl -fsSL https://runmat.org/install.sh | sh"
               bgColor="bg-gray-900"
             />
           </CardContent>
@@ -104,7 +104,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           </CardHeader>
           <CardContent>
             <CopyableCommand 
-              command="iwr https://rustmat.com/install.ps1 | iex"
+              command="iwr https://runmat.org/install.ps1 | iex"
               bgColor="bg-blue-900"
             />
           </CardContent>
@@ -120,7 +120,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         return {
           title: 'Windows',
           icon: Monitor,
-          command: 'iwr https://rustmat.com/install.ps1 | iex',
+          command: 'iwr https://runmat.org/install.ps1 | iex',
           bgColor: 'bg-blue-900',
           iconColor: 'text-blue-600',
           description: 'PowerShell 3.0+ required'
@@ -129,7 +129,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         return {
           title: 'macOS',
           icon: Terminal,
-          command: 'curl -fsSL https://rustmat.com/install.sh | sh',
+          command: 'curl -fsSL https://runmat.org/install.sh | sh',
           bgColor: 'bg-gray-900',
           iconColor: 'text-green-600',
           description: null
@@ -138,7 +138,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         return {
           title: 'Linux',
           icon: Terminal,
-          command: 'curl -fsSL https://rustmat.com/install.sh | sh',
+          command: 'curl -fsSL https://runmat.org/install.sh | sh',
           bgColor: 'bg-gray-900',
           iconColor: 'text-green-600',
           description: null
@@ -147,7 +147,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         return {
           title: 'Your System',
           icon: Terminal,
-          command: 'curl -fsSL https://rustmat.com/install.sh | sh',
+          command: 'curl -fsSL https://runmat.org/install.sh | sh',
           bgColor: 'bg-gray-900',
           iconColor: 'text-green-600',
           description: null

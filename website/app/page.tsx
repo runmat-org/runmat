@@ -25,7 +25,7 @@ export default function HomePage() {
             <div className="flex flex-col sm:flex-row gap-4">
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
                 <Link href="/download">
-                  Download RustMat
+                  Download RunMat
                 </Link>
               </Button>
               <Button variant="outline" size="lg" asChild className="h-12 px-8">
@@ -41,7 +41,7 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl lg:text-6xl">
-              Why Use RustMat?
+              Why Use RunMat?
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
               All the power of MATLAB without the price tag or limitations
@@ -121,11 +121,11 @@ export default function HomePage() {
                       {/* Initial command */}
                       <div className="flex">
                         <span className="text-gray-500 dark:text-gray-500 text-gray-600 dark:text-gray-500 dark:text-gray-500 text-gray-600 text-gray-600">$</span>
-                        <span className="ml-2">rustmat</span>
+                        <span className="ml-2">runmat</span>
                       </div>
 
-                      {/* RustMat header */}
-                      <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">RustMat v0.1.0 by Dystr (https://dystr.com)</div>
+                      {/* RunMat header */}
+                      <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">RunMat v0.1.0 by Dystr (https://dystr.com)</div>
                       <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">High-performance MATLAB/Octave runtime with JIT compilation</div>
                       <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">Type &apos;help&apos; for help, &apos;exit&apos; to quit</div>
                       <div className="h-4"></div>
@@ -137,14 +137,14 @@ export default function HomePage() {
                           <div className="text-cyan-300 dark:text-cyan-300 text-cyan-700 mb-2">% Generate data</div>
                           <div>
                             <div className="flex">
-                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">runmat&gt;</span>
                               <span className="ml-2">x = linspace(0, 4 * pi, 1000);</span>
                             </div>
                             <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Num(1000x1 vector)</div>
                           </div>
                           <div>
                             <div className="flex">
-                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">runmat&gt;</span>
                               <span className="ml-2">y = sin(x) .* exp(-x/10);</span>
                             </div>
                             <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Num(1000x1 vector)</div>
@@ -156,7 +156,7 @@ export default function HomePage() {
                           <div className="text-cyan-300 dark:text-cyan-300 text-cyan-700 mb-2">% Create beautiful plot</div>
                           <div>
                             <div className="flex">
-                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">runmat&gt;</span>
                               <span className="ml-2">plot(x, y);</span>
                             </div>
                             <div className="text-gray-500 dark:text-gray-500 text-gray-600">[Interactive plot window opened]</div>
@@ -168,21 +168,21 @@ export default function HomePage() {
                           <div className="text-cyan-300 dark:text-cyan-300 text-cyan-700 mb-2">% Matrix operations</div>
                           <div>
                             <div className="flex">
-                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">runmat&gt;</span>
                               <span className="ml-2">A = randn(1000, 1000);</span>
                             </div>
                             <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Matrix(1000x1000 double)</div>
                           </div>
                           <div>
                             <div className="flex">
-                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">runmat&gt;</span>
                               <span className="ml-2">B = A * A&apos;;</span>
                             </div>
                             <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Matrix(1000x1000 double)</div>
                           </div>
                           <div>
                             <div className="flex">
-                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                              <span className="text-blue-400 dark:text-blue-400 text-blue-600">runmat&gt;</span>
                               <span className="ml-2">eigenvals = eig(B);</span>
                             </div>
                             <div className="text-gray-500 dark:text-gray-500 text-gray-600">ans = Num(1000x1 complex vector)</div>
@@ -191,7 +191,7 @@ export default function HomePage() {
 
                         {/* Cursor */}
                         <div className="flex mt-3">
-                          <span className="text-blue-400 dark:text-blue-400 text-blue-600">rustmat&gt;</span>
+                          <span className="text-blue-400 dark:text-blue-400 text-blue-600">runmat&gt;</span>
                           <span className="ml-2 animate-pulse">▊</span>
                         </div>
                       </div>
@@ -200,7 +200,7 @@ export default function HomePage() {
                 </Card>
               </div>
 
-              {/* RustMat Plot Window */}
+              {/* RunMat Plot Window */}
               <div className="order-1 lg:order-2">
                 <div className="bg-gray-700 rounded-lg shadow-2xl overflow-hidden">
                   {/* macOS Window Header */}
@@ -210,7 +210,7 @@ export default function HomePage() {
                       <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
                       <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                     </div>
-                    <div className="text-gray-200 text-sm font-medium">RustMat - Interactive Visualization</div>
+                    <div className="text-gray-200 text-sm font-medium">RunMat - Interactive Visualization</div>
                     <div className="w-16"></div>
                   </div>
 
@@ -218,7 +218,7 @@ export default function HomePage() {
                   <div className="overflow-hidden">
                     <img
                       src="/plot-example.jpg"
-                      alt="RustMat interactive plot showing a damped sine wave with real-time visualization controls"
+                      alt="RunMat interactive plot showing a damped sine wave with real-time visualization controls"
                       className="w-full h-auto"
                     />
                   </div>
@@ -237,7 +237,7 @@ export default function HomePage() {
             Built with Modern Technology
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            For developers: RustMat leverages cutting-edge systems programming
+            For developers: RunMat leverages cutting-edge systems programming
           </p>
         </div>
         <div className="mx-auto grid justify-center gap-4 sm:grid-cols-2 md:max-w-[64rem]">
@@ -297,7 +297,7 @@ export default function HomePage() {
             Install in Seconds
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            Copy and paste one command to get started with RustMat
+            Copy and paste one command to get started with RunMat
           </p>
           
           <OSInstallCommand className="w-full max-w-4xl" />
@@ -322,14 +322,14 @@ export default function HomePage() {
             Ready to Experience the Future?
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            Join researchers and engineers who&rsquo;ve made the switch to RustMat
+            Join researchers and engineers who&rsquo;ve made the switch to RunMat
           </p>
           <div className="flex gap-4">
             <Button size="lg" asChild>
-              <Link href="/blog/introducing-rustmat">Read the Story</Link>
+              <Link href="/blog/introducing-runmat">Read the Story</Link>
             </Button>
             <Button variant="outline" size="lg" asChild>
-              <Link href="https://github.com/rustmat/rustmat">View on GitHub</Link>
+              <Link href="https://github.com/runmat-dev/runmat">View on GitHub</Link>
             </Button>
           </div>
         </div>

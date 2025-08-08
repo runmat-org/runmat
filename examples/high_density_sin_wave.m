@@ -1,5 +1,5 @@
-% High-Density Mario Kart Style Sin Wave - RustMat Performance Demo
-% This showcases RustMat's high-performance 3D point cloud capabilities
+% High-Density Mario Kart Style Sin Wave - RunMat Performance Demo
+% This showcases RunMat's high-performance 3D point cloud capabilities
 
 % Generate dense sin wave coordinates using linspace
 x_points = linspace(-2*pi, 2*pi, 50);  % 50 points along X

@@ -9,11 +9,11 @@ import { join } from 'path';
 import matter from 'gray-matter';
 
 export const metadata: Metadata = {
-  title: "RustMat Blog - Stories and Insights",
-  description: "Stories, insights, and updates from the RustMat development team. Learn about MATLAB compatibility, performance optimization, and the future of scientific computing.",
+  title: "RunMat Blog - Stories and Insights",
+  description: "Stories, insights, and updates from the RunMat development team. Learn about MATLAB compatibility, performance optimization, and the future of scientific computing.",
   openGraph: {
-    title: "RustMat Blog - Stories and Insights",
-    description: "Stories, insights, and updates from the RustMat development team.",
+    title: "RunMat Blog - Stories and Insights",
+    description: "Stories, insights, and updates from the RunMat development team.",
     type: "website",
   },
 };
@@ -45,7 +45,7 @@ function getAllBlogPosts(): BlogPost[] {
         description: frontmatter.description || frontmatter.excerpt || '',
         date: frontmatter.date || new Date().toISOString(),
         readTime: frontmatter.readTime || '5 min read',
-        author: frontmatter.author || 'RustMat Team',
+        author: frontmatter.author || 'RunMat Team',
         tags: frontmatter.tags || []
       };
     });
@@ -69,10 +69,10 @@ export default function BlogPage() {
             Blog
           </Badge>
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
-            RustMat Blog
+            RunMat Blog
           </h1>
           <p className="mt-6 text-xl text-muted-foreground">
-            Stories, insights, and updates from the RustMat development team
+            Stories, insights, and updates from the RunMat development team
           </p>
         </div>
 
@@ -135,13 +135,13 @@ export default function BlogPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="https://github.com/rustmat/rustmat" target="_blank">
+                  <Link href="https://github.com/runmat-dev/runmat" target="_blank">
                     Star on GitHub
                   </Link>
                 </Button>
                 <Button variant="outline" size="sm" asChild>
                   <Link href="/download">
-                    Try RustMat
+                    Try RunMat
                   </Link>
                 </Button>
               </div>

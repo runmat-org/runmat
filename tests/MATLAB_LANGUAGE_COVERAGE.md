@@ -1,6 +1,6 @@
-# RustMat MATLAB Language Coverage Report
+# RunMat MATLAB Language Coverage Report
 
-This document provides a comprehensive overview of MATLAB language features implemented in RustMat, along with extensive edge case test coverage.
+This document provides a comprehensive overview of MATLAB language features implemented in RunMat, along with extensive edge case test coverage.
 
 ## ✅ **FULLY IMPLEMENTED FEATURES**
 
@@ -186,7 +186,7 @@ stats = [min(x), max(y), sum(A)];
 
 ## 🏆 **SUMMARY**
 
-**RustMat successfully implements approximately 60-70% of core MATLAB language features** with:
+**RunMat successfully implements approximately 60-70% of core MATLAB language features** with:
 
 - **Complete matrix arithmetic** with production-grade performance
 - **Comprehensive mathematical function library** (50+ functions)

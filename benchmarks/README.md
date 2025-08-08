@@ -1,6 +1,6 @@
-### RustMat Performance Benchmarks
+### RunMat Performance Benchmarks
 
-This suite compares RustMat and GNU Octave across representative MATLAB-style workloads. It builds RustMat (if needed), runs each script in Octave, RustMat interpreter, and RustMat JIT, and writes a YAML report with system info and speedups.
+This suite compares RunMat and GNU Octave across representative MATLAB-style workloads. It builds RunMat (if needed), runs each script in Octave, RunMat interpreter, and RunMat JIT, and writes a YAML report with system info and speedups.
 
 ### What’s included
 
@@ -28,7 +28,7 @@ cd benchmarks
 ```
 
 What the runner does:
-- Builds RustMat (release) if missing
+- Builds RunMat (release) if missing
 - Gathers OS/CPU/memory and tool versions
 - For each script: 1 warmup + 3 timed runs for Octave, interpreter, and JIT
 - Computes avg/min/max and speedups; writes `results/benchmark_<timestamp>.yaml`
@@ -39,11 +39,11 @@ What the runner does:
 # Octave
 octave --no-gui matrix_operations.m
 
-# RustMat interpreter only
-../target/release/rustmat --no-jit matrix_operations.m
+# RunMat interpreter only
+../target/release/runmat --no-jit matrix_operations.m
 
-# RustMat with JIT
-../target/release/rustmat matrix_operations.m
+# RunMat with JIT
+../target/release/runmat matrix_operations.m
 ```
 
 ### Output format (YAML)
@@ -62,8 +62,8 @@ system:
 software:
   octave:
     version: "9.4.0"        # if available
-  rustmat:
-    version: "rustmat 0.0.1"
+  runmat:
+    version: "runmat 0.0.1"
     build_features: ["blas-lapack"]
 benchmark_config:
   warmup_runs: 1
@@ -72,15 +72,15 @@ benchmark_config:
 results:
   matrix_operations:
     octave: { avg_time: 0.822, min_time: 0.819, max_time: 0.826 }
-    rustmat_interpreter: { avg_time: 0.005, min_time: 0.005, max_time: 0.005, speedup_vs_octave: "164.40x" }
-    rustmat_jit: { avg_time: 0.005, min_time: 0.005, max_time: 0.005, speedup_vs_octave: "164.40x", speedup_vs_interpreter: "1.00x" }
+    runmat_interpreter: { avg_time: 0.005, min_time: 0.005, max_time: 0.005, speedup_vs_octave: "164.40x" }
+    runmat_jit: { avg_time: 0.005, min_time: 0.005, max_time: 0.005, speedup_vs_octave: "164.40x", speedup_vs_interpreter: "1.00x" }
 ```
 
 Note: The YAML aggregates total script time. Per‑size timings in the script output are for human inspection and are not parsed into YAML.
 
 ### Formatting and logging
 
-- `fprintf` in RustMat supports `%d`, `%f`, and `%.Nf` plus `\n` (newline). Prefer `%.6f` for timings.
+- `fprintf` in RunMat supports `%d`, `%f`, and `%.Nf` plus `\n` (newline). Prefer `%.6f` for timings.
 - Scripts use `tic`/`toc` for intra‑script measurements; the runner uses external wall‑clock time.
 
 ### Customize sizes
@@ -108,5 +108,5 @@ Edit within the scripts:
 ### Reproducibility notes
 
 - System metadata and tool versions are embedded in each YAML.
-- BLAS/LAPACK features are recorded in `software.rustmat.build_features`.
+- BLAS/LAPACK features are recorded in `software.runmat.build_features`.
 - For cross‑machine comparisons, run on AC power with minimal background load.

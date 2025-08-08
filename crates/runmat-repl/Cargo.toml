@@ -1,0 +1,19 @@
+[package]
+name = "runmat-repl"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+runmat-lexer = { workspace = true }
+runmat-parser = { workspace = true }
+runmat-hir = { workspace = true }
+runmat-ignition = { workspace = true }
+runmat-runtime = { workspace = true }
+runmat-turbine = { workspace = true }
+runmat-gc = { workspace = true }
+runmat-builtins = { workspace = true }
+runmat-snapshot = { workspace = true }
+rustyline = "14.0"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"

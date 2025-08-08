@@ -1,7 +1,7 @@
-% Test Currently Supported RustMat Features
+% Test Currently Supported RunMat Features
 % This tests features we know are implemented
 
-fprintf('=== RustMat Current Feature Test ===\n');
+fprintf('=== RunMat Current Feature Test ===\n');
 
 % Basic matrix operations
 A = [1, 2, 3; 4, 5, 6];

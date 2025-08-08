@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "RustMat Builtin Functions: Rapid MATLAB Compatibility",
-  description: "Discover RustMat's revolutionary approach to building MATLAB-compatible functions at unprecedented speed using modern tooling and community contributions.",
+  title: "RunMat Builtin Functions: Rapid MATLAB Compatibility",
+  description: "Discover RunMat's revolutionary approach to building MATLAB-compatible functions at unprecedented speed using modern tooling and community contributions.",
 };
 
 export default function BuiltinFunctionsPage() {
@@ -32,7 +32,7 @@ export default function BuiltinFunctionsPage() {
             Builtin Functions Reference
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed mb-6">
-            RustMat&apos;s architecture is designed for rapid implementation of MATLAB-compatible functions. 
+            RunMat&apos;s architecture is designed for rapid implementation of MATLAB-compatible functions. 
             Our macro-based builtin system, combined with modern tooling and community contributions, 
             enables efficient expansion of the function library toward full MATLAB compatibility.
           </p>
@@ -153,7 +153,7 @@ export default function BuiltinFunctionsPage() {
           
           <div className="bg-gradient-to-r from-blue-50/50 to-slate-50/50 dark:from-blue-950/30 dark:to-slate-950/30 rounded-xl p-8 mb-8">
             <p className="text-lg text-muted-foreground leading-relaxed mb-6">
-              RustMat&apos;s <code className="bg-muted px-2 py-1 rounded text-sm">runtime_builtin</code> macro 
+              RunMat&apos;s <code className="bg-muted px-2 py-1 rounded text-sm">runtime_builtin</code> macro 
               dramatically simplifies how MATLAB functions are implemented. What traditionally requires complex 
               registration code and manual type handling becomes a simple attribute on a Rust function, allowing
               us to implement new functions at a rapid pace.
@@ -308,7 +308,7 @@ export default function BuiltinFunctionsPage() {
             </CardHeader>
             <CardContent>
               <p className="text-muted-foreground mb-4">
-                RustMat&apos;s builtin system is designed for community contributions. Help us achieve 
+                RunMat&apos;s builtin system is designed for community contributions. Help us achieve 
                 full MATLAB compatibility by implementing missing functions and expanding toolbox support.
               </p>
               

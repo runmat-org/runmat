@@ -10,7 +10,7 @@ export default function Footer() {
           <div className="flex items-center gap-2">
             <div className="h-6 w-6 rounded bg-gradient-to-br from-blue-600 to-orange-600" />
             <p className="text-center text-sm leading-loose md:text-left">
-              <span className="font-medium">RustMat</span>
+              <span className="font-medium">RunMat</span>
             </p>
           </div>
           <p className="text-center text-sm leading-loose text-muted-foreground md:text-left">
@@ -19,7 +19,7 @@ export default function Footer() {
         </div>
         <div className="flex items-center gap-4">
           <Link
-            href="https://github.com/rustmat/rustmat"
+            href="https://github.com/runmat-dev/runmat"
             target="_blank"
             rel="noopener noreferrer"
             className="text-muted-foreground hover:text-foreground"

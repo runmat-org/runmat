@@ -5,8 +5,8 @@ import { CheckCircle, AlertCircle, HelpCircle, Mail } from "lucide-react";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "RustMat License",
-  description: "RustMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. Free for everyone with clear terms.",
+  title: "RunMat License",
+  description: "RunMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. Free for everyone with clear terms.",
 };
 
 export default function LicensePage() {
@@ -18,11 +18,11 @@ export default function LicensePage() {
         <div className="mb-12">
           <Badge variant="secondary" className="mb-4">Legal</Badge>
           <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">
-            RustMat License
+            RunMat License
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed">
-            RustMat is free and open source software with clear, fair licensing terms. 
-            This page explains what you can and cannot do with RustMat.
+            RunMat is free and open source software with clear, fair licensing terms. 
+            This page explains what you can and cannot do with RunMat.
           </p>
         </div>
 
@@ -35,7 +35,7 @@ export default function LicensePage() {
             </CardHeader>
             <CardContent className="text-center">
               <p className="text-sm text-green-800 dark:text-green-100 font-medium">
-                Individuals, researchers, students, and most companies can use RustMat freely
+                Individuals, researchers, students, and most companies can use RunMat freely
               </p>
             </CardContent>
           </Card>
@@ -47,7 +47,7 @@ export default function LicensePage() {
             </CardHeader>
             <CardContent className="text-center">
               <p className="text-sm text-orange-800 dark:text-orange-100 font-medium">
-                Must credit &ldquo;RustMat by Dystr&rdquo; in distributions and derivative works
+                Must credit &ldquo;RunMat by Dystr&rdquo; in distributions and derivative works
               </p>
             </CardContent>
           </Card>
@@ -75,12 +75,12 @@ export default function LicensePage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-xl text-foreground">
-                  Can I use RustMat for free?
+                  Can I use RunMat for free?
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-foreground mb-3">
-                  <strong>Yes!</strong> RustMat is completely free for:
+                  <strong>Yes!</strong> RunMat is completely free for:
                 </p>
                 <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
                   <li>Individual researchers and scientists</li>
@@ -101,16 +101,16 @@ export default function LicensePage() {
               </CardHeader>
               <CardContent>
                 <p className="text-foreground mb-3">
-                  Any distribution or modification of RustMat must credit <strong>&quot;RustMat by Dystr&quot;</strong>. This includes:
+                  Any distribution or modification of RunMat must credit <strong>&quot;RunMat by Dystr&quot;</strong>. This includes:
                 </p>
                 <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
                   <li>Startup messages or about dialogs</li>
                   <li>Documentation and README files</li>
                   <li>Package names or project titles</li>
-                  <li>Web interfaces showing &quot;Powered by RustMat by Dystr&quot;</li>
+                  <li>Web interfaces showing &quot;Powered by RunMat by Dystr&quot;</li>
                 </ul>
                 <p className="text-foreground/90 mt-3">
-                  This ensures Dystr receives appropriate credit for creating RustMat.
+                  This ensures Dystr receives appropriate credit for creating RunMat.
                 </p>
               </CardContent>
             </Card>
@@ -124,13 +124,13 @@ export default function LicensePage() {
               <CardContent>
                 <p className="text-foreground mb-3">
                   Companies whose <strong>primary business</strong> involves developing, licensing, or selling scientific computing software 
-                  (like MathWorks, Ansys, COMSOL, etc.) must distribute any RustMat modifications as open source under the same license.
+                  (like MathWorks, Ansys, COMSOL, etc.) must distribute any RunMat modifications as open source under the same license.
                 </p>
                 <p className="text-foreground mb-3">
                   <strong>This does NOT apply to:</strong>
                 </p>
                 <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
-                  <li>Companies using RustMat without modification</li>
+                  <li>Companies using RunMat without modification</li>
                   <li>Companies whose primary business is not scientific computing software</li>
                   <li>Internal modifications not distributed to third parties</li>
                   <li>Academic institutions or research organizations</li>
@@ -141,21 +141,21 @@ export default function LicensePage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-xl text-foreground">
-                  Can I create proprietary software that uses RustMat?
+                  Can I create proprietary software that uses RunMat?
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-foreground mb-3">
-                  <strong>Yes!</strong> Most users can create proprietary software that uses or embeds RustMat. 
-                  The license only requires that if you distribute or modify RustMat itself, you must:
+                  <strong>Yes!</strong> Most users can create proprietary software that uses or embeds RunMat. 
+                  The license only requires that if you distribute or modify RunMat itself, you must:
                 </p>
                 <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
-                  <li>You provide attribution to &quot;RustMat by Dystr&quot;</li>
+                  <li>You provide attribution to &quot;RunMat by Dystr&quot;</li>
                   <li>You include the license notice</li>
-                  <li>Any modifications to RustMat itself are shared (if you&apos;re a scientific software company)</li>
+                  <li>Any modifications to RunMat itself are shared (if you&apos;re a scientific software company)</li>
                 </ul>
                 <p className="text-foreground/90 mt-3">
-                  Your own code that calls RustMat functions remains proprietary.
+                  Your own code that calls RunMat functions remains proprietary.
                 </p>
               </CardContent>
             </Card>
@@ -168,7 +168,7 @@ export default function LicensePage() {
               </CardHeader>
               <CardContent>
                 <p className="text-foreground mb-3">
-                  RustMat&apos;s license is based on the MIT License with two additional requirements:
+                  RunMat&apos;s license is based on the MIT License with two additional requirements:
                 </p>
                 <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
                   <li><strong>Attribution:</strong> Similar to BSD licenses, ensures credit is maintained</li>
@@ -214,22 +214,22 @@ export default function LicensePage() {
               <div className="font-mono text-sm text-foreground/90 whitespace-pre-line leading-relaxed">
 {`# License
 
-RustMat is licensed under the **MIT License** with **Attribution Requirements** and **Commercial Scientific Software Company Copyleft** Provisions.
+RunMat is licensed under the **MIT License** with **Attribution Requirements** and **Commercial Scientific Software Company Copyleft** Provisions.
 
 ## MIT License with Additional Terms
 
-Copyright (c) 2025 Dystr Inc. and RustMat contributors
+Copyright (c) 2025 Dystr Inc. and RunMat contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
 ### Attribution Requirement
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. Any distribution, fork, modification, or derivative work of this Software must maintain attribution to "RustMat by Dystr" in a prominent location visible to end users. This includes but is not limited to:
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. Any distribution, fork, modification, or derivative work of this Software must maintain attribution to "RunMat by Dystr" in a prominent location visible to end users. This includes but is not limited to:
 
-1. **Startup messages** or **about dialogs** displaying "RustMat by Dystr"
-2. **Documentation** and **README files** crediting "RustMat by Dystr"  
-3. **Package names** or **project titles** indicating the RustMat origin
-4. **Web interfaces** showing "Powered by RustMat by Dystr"
+1. **Startup messages** or **about dialogs** displaying "RunMat by Dystr"
+2. **Documentation** and **README files** crediting "RunMat by Dystr"  
+3. **Package names** or **project titles** indicating the RunMat origin
+4. **Web interfaces** showing "Powered by RunMat by Dystr"
 
 ### Commercial Scientific Software Company Copyleft
 
@@ -237,7 +237,7 @@ Any entity whose **primary business purpose** involves the development, licensin
 
 This copyleft provision does **NOT** apply to:
 - Individual researchers, academic institutions, or educational organizations
-- Companies using RustMat as a dependency without modification
+- Companies using RunMat as a dependency without modification
 - Companies whose primary business is not scientific/technical computing software
 - Internal modifications not distributed to third parties
 - Other open source projects and their maintainers

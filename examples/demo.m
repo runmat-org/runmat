@@ -1,4 +1,4 @@
-% RustMat Demo Script - showcasing current functionality
+% RunMat Demo Script - showcasing current functionality
 % This demonstrates what our V8-inspired MATLAB runtime can do
 
 % Basic arithmetic and variables

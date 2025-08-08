@@ -16,8 +16,8 @@ import Link from "next/link";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
 
 export const metadata: Metadata = {
-  title: "Getting Started with RustMat",
-  description: "Learn how to install and use RustMat, the modern MATLAB/Octave runtime. Complete guide for researchers, engineers, and students.",
+  title: "Getting Started with RunMat",
+  description: "Learn how to install and use RunMat, the modern MATLAB/Octave runtime. Complete guide for researchers, engineers, and students.",
 };
 
 export default function GettingStartedPage() {
@@ -29,10 +29,10 @@ export default function GettingStartedPage() {
         <div className="mb-12">
           <Badge variant="secondary" className="mb-4">Documentation</Badge>
           <h1 className="text-4xl lg:text-5xl font-bold mb-6">
-            Getting Started with RustMat
+            Getting Started with RunMat
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed">
-            Get up and running with RustMat in minutes. This guide will walk you through installation, 
+            Get up and running with RunMat in minutes. This guide will walk you through installation, 
             basic usage, and your first interactive session.
           </p>
         </div>
@@ -47,7 +47,7 @@ export default function GettingStartedPage() {
             </CardHeader>
             <CardContent className="text-center">
               <p className="text-sm text-muted-foreground mb-4">
-                Jump straight into RustMat
+                Jump straight into RunMat
               </p>
               <Button variant="outline" size="sm" asChild>
                 <Link href="#installation">
@@ -83,7 +83,7 @@ export default function GettingStartedPage() {
             </CardHeader>
             <CardContent className="text-center">
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                Migrate existing scripts to RustMat
+                Migrate existing scripts to RunMat
               </p>
               <Button variant="outline" size="sm" className="opacity-50 cursor-not-allowed" disabled>
                 Coming Soon
@@ -130,7 +130,7 @@ export default function GettingStartedPage() {
         {/* First Steps */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground">
-            Your First RustMat Session
+            Your First RunMat Session
           </h2>
           
           <div className="space-y-6">
@@ -144,17 +144,17 @@ export default function GettingStartedPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  Open your terminal and start RustMat:
+                  Open your terminal and start RunMat:
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-gray-400">$ rustmat</div>
-                  <div className="text-green-400 mt-1">RustMat v0.0.1 by Dystr (https://dystr.com)</div>
+                  <div className="text-gray-400">$ runmat</div>
+                  <div className="text-green-400 mt-1">RunMat v0.0.1 by Dystr (https://dystr.com)</div>
                   <div className="text-green-400">High-performance MATLAB/Octave runtime with JIT compilation and GC</div>
                   <div className="text-green-400 mt-1">JIT compiler: enabled (Cranelift optimization level: Speed)</div>
                   <div className="text-green-400">Garbage collector: &quot;default&quot;</div>
                   <div className="text-green-400">No snapshot loaded - standard library will be compiled on demand</div>
                   <div className="text-green-400">Type &apos;help&apos; for help, &apos;exit&apos; to quit, &apos;.info&apos; for system information</div>
-                  <div className="mt-2 text-white">rustmat&gt;</div>
+                  <div className="mt-2 text-white">runmat&gt;</div>
                 </div>
               </CardContent>
             </Card>
@@ -172,11 +172,11 @@ export default function GettingStartedPage() {
                   Start with simple arithmetic and variables:
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-blue-400">rustmat&gt;</div> <span>x = 5</span>
+                  <div className="text-blue-400">runmat&gt;</div> <span>x = 5</span>
                   <div className="text-gray-400">ans = 5</div>
-                  <div className="text-blue-400 mt-2">rustmat&gt;</div> <span>y = 3.14</span>
+                  <div className="text-blue-400 mt-2">runmat&gt;</div> <span>y = 3.14</span>
                   <div className="text-gray-400">ans = 3.14</div>
-                  <div className="text-blue-400 mt-2">rustmat&gt;</div> <span>result = x * y + 2</span>
+                  <div className="text-blue-400 mt-2">runmat&gt;</div> <span>result = x * y + 2</span>
                   <div className="text-gray-400">ans = 17.7</div>
                 </div>
               </CardContent>
@@ -195,11 +195,11 @@ export default function GettingStartedPage() {
                   Create and manipulate matrices using familiar MATLAB syntax:
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-blue-400">rustmat&gt;</div> <span>A = [1, 2, 3; 4, 5, 6]</span>
+                  <div className="text-blue-400">runmat&gt;</div> <span>A = [1, 2, 3; 4, 5, 6]</span>
                   <div className="text-gray-400">ans = [1 2 3; 4 5 6]</div>
-                  <div className="text-blue-400 mt-2">rustmat&gt;</div> <span>B = A * 2</span>
+                  <div className="text-blue-400 mt-2">runmat&gt;</div> <span>B = A * 2</span>
                   <div className="text-gray-400">ans = [2 4 6; 8 10 12]</div>
-                  <div className="text-blue-400 mt-2">rustmat&gt;</div> <span>C = A + B</span>
+                  <div className="text-blue-400 mt-2">runmat&gt;</div> <span>C = A + B</span>
                   <div className="text-gray-400">ans = [3 6 9; 12 15 18]</div>
                 </div>
               </CardContent>
@@ -218,11 +218,11 @@ export default function GettingStartedPage() {
                   Generate beautiful plots with GPU acceleration:
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div className="text-blue-400">rustmat&gt;</div> <span>x = [0, 1, 2, 3, 4, 5]</span>
+                  <div className="text-blue-400">runmat&gt;</div> <span>x = [0, 1, 2, 3, 4, 5]</span>
                   <div className="text-gray-400">ans = [0 1 2 3 4 5]</div>
-                  <div className="text-blue-400 mt-1">rustmat&gt;</div> <span>y = [0, 1, 4, 9, 16, 25]</span>
+                  <div className="text-blue-400 mt-1">runmat&gt;</div> <span>y = [0, 1, 4, 9, 16, 25]</span>
                   <div className="text-gray-400">ans = [0 1 4 9 16 25]</div>
-                  <div className="text-blue-400 mt-1">rustmat&gt;</div> <span>plot(x, y)</span>
+                  <div className="text-blue-400 mt-1">runmat&gt;</div> <span>plot(x, y)</span>
                   <div className="text-green-400 mt-1">[Interactive plot window opens]</div>
                 </div>
                 <div className="flex items-center space-x-2 text-sm text-green-600 dark:text-green-400">
@@ -253,9 +253,9 @@ export default function GettingStartedPage() {
               </p>
               <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
                 <div className="text-gray-400"># Run a script file</div>
-                <div>rustmat script.m</div>
+                <div>runmat script.m</div>
                 <div className="mt-2 text-gray-400"># Run with specific options</div>
-                <div>rustmat run --jit-threshold 100 simulation.m</div>
+                <div>runmat run --jit-threshold 100 simulation.m</div>
               </div>
               <p className="text-sm text-muted-foreground">
                 Most MATLAB and GNU Octave scripts will run without modification. Check our 
@@ -277,17 +277,17 @@ export default function GettingStartedPage() {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <span className="bg-blue-100 dark:bg-blue-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-blue-600 mr-3">1</span>
-                  Install RustMat as a Jupyter Kernel
+                  Install RunMat as a Jupyter Kernel
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  Make RustMat available as a kernel in Jupyter notebooks:
+                  Make RunMat available as a kernel in Jupyter notebooks:
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
-                  <div>rustmat --install-kernel</div>
-                  <div className="text-green-400 mt-1">RustMat Jupyter kernel installed successfully!</div>
-                  <div className="text-green-400">Kernel directory: ~/.local/share/jupyter/kernels/rustmat</div>
+                  <div>runmat --install-kernel</div>
+                  <div className="text-green-400 mt-1">RunMat Jupyter kernel installed successfully!</div>
+                  <div className="text-green-400">Kernel directory: ~/.local/share/jupyter/kernels/runmat</div>
                 </div>
                 <div className="flex items-center space-x-2 text-sm text-green-600 dark:text-green-400">
                   <CheckCircle className="h-4 w-4" />
@@ -301,19 +301,19 @@ export default function GettingStartedPage() {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <span className="bg-orange-100 dark:bg-orange-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-orange-600 mr-3">2</span>
-                  Start Jupyter and Select RustMat
+                  Start Jupyter and Select RunMat
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  Launch Jupyter and create notebooks with the RustMat kernel:
+                  Launch Jupyter and create notebooks with the RunMat kernel:
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
                   <div className="text-gray-400"># Start Jupyter Notebook</div>
                   <div>jupyter notebook</div>
                   <div className="mt-2 text-gray-400"># Or Jupyter Lab</div>
                   <div>jupyter lab</div>
-                  <div className="mt-2 text-gray-400"># Then select &quot;RustMat&quot; when creating a new notebook</div>
+                  <div className="mt-2 text-gray-400"># Then select &quot;RunMat&quot; when creating a new notebook</div>
                 </div>
                 <div className="flex items-center space-x-2 text-sm text-blue-600 dark:text-blue-400">
                   <CheckCircle className="h-4 w-4" />
@@ -332,16 +332,16 @@ export default function GettingStartedPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  Check that the RustMat kernel is properly installed:
+                  Check that the RunMat kernel is properly installed:
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
                   <div>jupyter kernelspec list</div>
                   <div className="text-gray-400 mt-1">Available kernels:</div>
                   <div className="text-gray-400">  python3    /usr/local/share/jupyter/kernels/python3</div>
-                  <div className="text-green-400">  rustmat    ~/.local/share/jupyter/kernels/rustmat</div>
+                  <div className="text-green-400">  runmat    ~/.local/share/jupyter/kernels/runmat</div>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  If you don&apos;t see RustMat listed, ensure Jupyter is installed and try running the install command again.
+                  If you don&apos;t see RunMat listed, ensure Jupyter is installed and try running the install command again.
                 </p>
               </CardContent>
             </Card>
@@ -364,11 +364,11 @@ export default function GettingStartedPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  Dive deeper into RustMat&apos;s features and capabilities.
+                  Dive deeper into RunMat&apos;s features and capabilities.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
                   <Link href="/docs/how-it-works">
-                    How RustMat Works
+                    How RunMat Works
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>
@@ -384,7 +384,7 @@ export default function GettingStartedPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-gray-500 dark:text-gray-400 mb-4">
-                  See RustMat in action with real-world examples.
+                  See RunMat in action with real-world examples.
                 </p>
                 <Button variant="outline" className="w-full opacity-50 cursor-not-allowed" disabled>
                   Coming Soon
@@ -402,16 +402,16 @@ export default function GettingStartedPage() {
                 Need Help?
               </h3>
               <p className="text-muted-foreground mb-4">
-                Join our community and get support from other RustMat users and developers.
+                Join our community and get support from other RunMat users and developers.
               </p>
               <div className="flex flex-col sm:flex-row gap-3">
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="https://github.com/rustmat/rustmat/discussions">
+                  <Link href="https://github.com/runmat-dev/runmat/discussions">
                     GitHub Discussions
                   </Link>
                 </Button>
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="https://github.com/rustmat/rustmat/issues">
+                  <Link href="https://github.com/runmat-dev/runmat/issues">
                     Report Issues
                   </Link>
                 </Button>

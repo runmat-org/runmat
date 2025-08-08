@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# RustMat vs GNU Octave Benchmark Suite
+# RunMat vs GNU Octave Benchmark Suite
 # Comprehensive performance comparison with structured YAML output
 
 set -e
 
 echo "============================================================="
-echo "    RustMat vs GNU Octave Performance Benchmark Suite"
+echo "    RunMat vs GNU Octave Performance Benchmark Suite"
 echo "============================================================="
 
 # Configuration
-RUSTMAT_RELEASE="../target/release/rustmat"
-RUSTMAT_DEBUG="../target/debug/rustmat"
+RUSTMAT_RELEASE="../target/release/runmat"
+RUSTMAT_DEBUG="../target/debug/runmat"
 RESULTS_DIR="results"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 RESULT_FILE="$RESULTS_DIR/benchmark_$TIMESTAMP.yaml"
@@ -30,19 +30,19 @@ fi
 # Ensure results directory exists
 mkdir -p "$RESULTS_DIR"
 
-# Build RustMat in release mode if needed
+# Build RunMat in release mode if needed
 if [ ! -f "$RUSTMAT_RELEASE" ]; then
-    echo "Building RustMat in release mode..."
+    echo "Building RunMat in release mode..."
     cd ..
     cargo build --release --features blas-lapack
     cd benchmarks
 else
-    echo "Using existing RustMat release binary"
+    echo "Using existing RunMat release binary"
 fi
 
 # Also ensure debug build for comparison
 if [ ! -f "$RUSTMAT_DEBUG" ]; then
-    echo "Building RustMat in debug mode..."
+    echo "Building RunMat in debug mode..."
     cd ..
     cargo build --features blas-lapack
     cd benchmarks
@@ -126,7 +126,7 @@ run_single_benchmark() {
 # Initialize YAML output
 init_yaml_output() {
     cat > "$RESULT_FILE" << EOF
-# RustMat vs GNU Octave Benchmark Results
+# RunMat vs GNU Octave Benchmark Results
 # Generated on $(date)
 
 metadata:
@@ -145,7 +145,7 @@ system:
 software:
   octave:
     version: "$OCTAVE_VERSION"
-  rustmat:
+  runmat:
     version: "$RUSTMAT_VERSION"
     build_features: ["blas-lapack"]
 
@@ -166,12 +166,12 @@ EOF
 add_benchmark_result() {
     local benchmark="$1"
     local octave_avg="$2" octave_min="$3" octave_max="$4"
-    local rustmat_avg="$5" rustmat_min="$6" rustmat_max="$7"
-    local rustmat_jit_avg="$8" rustmat_jit_min="$9" rustmat_jit_max="${10}"
+    local runmat_avg="$5" runmat_min="$6" runmat_max="$7"
+    local runmat_jit_avg="$8" runmat_jit_min="$9" runmat_jit_max="${10}"
     
     # Calculate speedups
-    local speedup=$(echo "scale=2; $octave_avg / $rustmat_avg" | bc -l 2>/dev/null || echo "N/A")
-    local jit_speedup=$(echo "scale=2; $octave_avg / $rustmat_jit_avg" | bc -l 2>/dev/null || echo "N/A")
+    local speedup=$(echo "scale=2; $octave_avg / $runmat_avg" | bc -l 2>/dev/null || echo "N/A")
+    local jit_speedup=$(echo "scale=2; $octave_avg / $runmat_jit_avg" | bc -l 2>/dev/null || echo "N/A")
     
     cat >> "$RESULT_FILE" << EOF
   $benchmark:
@@ -179,17 +179,17 @@ add_benchmark_result() {
       avg_time: $octave_avg
       min_time: $octave_min
       max_time: $octave_max
-    rustmat_interpreter:
-      avg_time: $rustmat_avg
-      min_time: $rustmat_min
-      max_time: $rustmat_max
+    runmat_interpreter:
+      avg_time: $runmat_avg
+      min_time: $runmat_min
+      max_time: $runmat_max
       speedup_vs_octave: "${speedup}x"
-    rustmat_jit:
-      avg_time: $rustmat_jit_avg
-      min_time: $rustmat_jit_min
-      max_time: $rustmat_jit_max
+    runmat_jit:
+      avg_time: $runmat_jit_avg
+      min_time: $runmat_jit_min
+      max_time: $runmat_jit_max
       speedup_vs_octave: "${jit_speedup}x"
-      speedup_vs_interpreter: "$(echo "scale=2; $rustmat_avg / $rustmat_jit_avg" | bc -l 2>/dev/null || echo "N/A")x"
+      speedup_vs_interpreter: "$(echo "scale=2; $runmat_avg / $runmat_jit_avg" | bc -l 2>/dev/null || echo "N/A")x"
 EOF
 }
 
@@ -221,19 +221,19 @@ main() {
         echo "GNU Octave:"
         octave_results=($(run_single_benchmark "$display_name" "$script_name.m" "octave" ""))
         
-        # Run RustMat interpreter benchmark  
-        echo "RustMat (Interpreter):"
-        rustmat_results=($(run_single_benchmark "$display_name" "$script_name.m" "$RUSTMAT_RELEASE" "--no-jit"))
+        # Run RunMat interpreter benchmark  
+        echo "RunMat (Interpreter):"
+        runmat_results=($(run_single_benchmark "$display_name" "$script_name.m" "$RUSTMAT_RELEASE" "--no-jit"))
         
-        # Run RustMat JIT benchmark
-        echo "RustMat (JIT):"
-        rustmat_jit_results=($(run_single_benchmark "$display_name" "$script_name.m" "$RUSTMAT_RELEASE" ""))
+        # Run RunMat JIT benchmark
+        echo "RunMat (JIT):"
+        runmat_jit_results=($(run_single_benchmark "$display_name" "$script_name.m" "$RUSTMAT_RELEASE" ""))
         
         # Add results to YAML
         add_benchmark_result "$script_name" \
             "${octave_results[0]}" "${octave_results[1]}" "${octave_results[2]}" \
-            "${rustmat_results[0]}" "${rustmat_results[1]}" "${rustmat_results[2]}" \
-            "${rustmat_jit_results[0]}" "${rustmat_jit_results[1]}" "${rustmat_jit_results[2]}"
+            "${runmat_results[0]}" "${runmat_results[1]}" "${runmat_results[2]}" \
+            "${runmat_jit_results[0]}" "${runmat_jit_results[1]}" "${runmat_jit_results[2]}"
         
         echo ""
     done
@@ -244,11 +244,11 @@ main() {
 summary:
   notes:
     - "Lower times are better"
-    - "Speedup shows RustMat performance relative to GNU Octave"
+    - "Speedup shows RunMat performance relative to GNU Octave"
     - "All times are in seconds"
     - "Results are averaged over multiple runs with warmup"
   conclusions:
-    - "Results demonstrate RustMat's performance characteristics"
+    - "Results demonstrate RunMat's performance characteristics"
     - "JIT compilation provides additional performance benefits"
     - "Platform-specific optimizations (BLAS/LAPACK) utilized"
 EOF

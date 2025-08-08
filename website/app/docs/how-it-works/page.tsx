@@ -16,8 +16,8 @@ import {
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "How RustMat Works - Architecture and Design",
-  description: "Deep dive into RustMat's V8-inspired architecture, tiered execution, JIT compilation, garbage collection, and plotting system. A comprehensive technical guide.",
+  title: "How RunMat Works - Architecture and Design",
+  description: "Deep dive into RunMat's V8-inspired architecture, tiered execution, JIT compilation, garbage collection, and plotting system. A comprehensive technical guide.",
 };
 
 export default function HowItWorksPage() {
@@ -29,10 +29,10 @@ export default function HowItWorksPage() {
         <div className="mb-12">
           <Badge variant="secondary" className="mb-4">Technical Deep Dive</Badge>
           <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">
-            How RustMat Works
+            How RunMat Works
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed">
-            Traditional MATLAB interpreters can feel sluggish for compute-intensive workloads. RustMat takes a 
+            Traditional MATLAB interpreters can feel sluggish for compute-intensive workloads. RunMat takes a 
             different approach with a V8-inspired architecture that prioritizes performance without sacrificing 
             compatibility. Here&apos;s how we built a MATLAB engine that starts in 5ms and runs many workloads 
             significantly faster than existing implementations like GNU Octave.
@@ -60,11 +60,11 @@ export default function HowItWorksPage() {
             </div>
         </section>
 
-        {/* The RustMat Solution */}
+        {/* The RunMat Solution */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">The RustMat Approach: Adaptive Compilation</h2>
+          <h2 className="text-3xl font-bold mb-6 text-foreground">The RunMat Approach: Adaptive Compilation</h2>
           <p className="text-lg text-muted-foreground mb-8">
-            RustMat takes a different approach inspired by modern JavaScript engines like V8. Instead of treating 
+            RunMat takes a different approach inspired by modern JavaScript engines like V8. Instead of treating 
             every line of code the same, we use <strong>adaptive compilation</strong> that optimizes frequently-executed code paths.
           </p>
 
@@ -137,7 +137,7 @@ export default function HowItWorksPage() {
                     <span className="font-semibold">914ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RustMat</span>
+                    <span className="text-muted-foreground">RunMat</span>
                     <span className="font-semibold text-green-600">5ms avg</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
@@ -159,7 +159,7 @@ export default function HowItWorksPage() {
                     <span className="font-semibold">822ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RustMat</span>
+                    <span className="text-muted-foreground">RunMat</span>
                     <span className="font-semibold text-green-600">5ms avg</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
@@ -181,11 +181,11 @@ export default function HowItWorksPage() {
                     <span className="font-semibold">868ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RustMat (Interpreter)</span>
+                    <span className="text-muted-foreground">RunMat (Interpreter)</span>
                     <span className="font-semibold text-green-600">5.7ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RustMat (JIT)</span>
+                    <span className="text-muted-foreground">RunMat (JIT)</span>
                     <span className="font-semibold text-green-600">5.3ms avg</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
@@ -207,7 +207,7 @@ export default function HowItWorksPage() {
                     <span className="font-semibold">876ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RustMat</span>
+                    <span className="text-muted-foreground">RunMat</span>
                     <span className="font-semibold text-green-600">5.7ms avg</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
@@ -416,7 +416,7 @@ export default function HowItWorksPage() {
             A Complete Scientific Computing Ecosystem
           </h2>
           <p className="text-lg text-muted-foreground mb-6">
-            RustMat isn&apos;t just a faster interpreter — it&apos;s a complete rethinking of the scientific computing experience:
+            RunMat isn&apos;t just a faster interpreter — it&apos;s a complete rethinking of the scientific computing experience:
           </p>
           
           <div className="space-y-6">
@@ -429,7 +429,7 @@ export default function HowItWorksPage() {
                   on syntax errors before you even press enter.
                 </p>
                 <div className="bg-slate-100 dark:bg-slate-800 rounded p-3 font-mono text-sm">
-                  <span className="text-green-600">rustmat&gt;</span> A = randn(1000, 1000); B = A * A&apos;; trace(B)<br/>
+                  <span className="text-green-600">runmat&gt;</span> A = randn(1000, 1000); B = A * A&apos;; trace(B)<br/>
                   <span className="text-blue-600">ans =</span> 1000.0  <span className="text-gray-500">% Computed in 2ms</span>
                 </div>
               </CardContent>
@@ -439,13 +439,13 @@ export default function HowItWorksPage() {
               <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">First-Class Jupyter Integration</h4>
                 <p className="text-muted-foreground mb-4">
-                  Built for the notebook era. Install RustMat as a Jupyter kernel with one command, 
+                  Built for the notebook era. Install RunMat as a Jupyter kernel with one command, 
                   and enjoy the same performance in your favorite notebook environment. 
                   Rich display support for plots, matrices, and data structures.
                 </p>
                 <div className="bg-slate-100 dark:bg-slate-800 rounded p-3 font-mono text-sm">
-                  <span className="text-green-600">$</span> rustmat --install-kernel<br/>
-                  <span className="text-gray-500">✓ RustMat Jupyter kernel installed successfully!</span>
+                  <span className="text-green-600">$</span> runmat --install-kernel<br/>
+                  <span className="text-gray-500">✓ RunMat Jupyter kernel installed successfully!</span>
                 </div>
               </CardContent>
             </Card>
@@ -459,7 +459,7 @@ export default function HowItWorksPage() {
                   servers — just copy the binary and go.
                 </p>
                 <div className="bg-slate-100 dark:bg-slate-800 rounded p-3 font-mono text-sm">
-                  <span className="text-green-600">$</span> echo &quot;A = [1, 2; 3, 4]; det(A)&quot; | rustmat<br/>
+                  <span className="text-green-600">$</span> echo &quot;A = [1, 2; 3, 4]; det(A)&quot; | runmat<br/>
                   <span className="text-blue-600">ans =</span> -2.0
                 </div>
               </CardContent>
@@ -504,7 +504,7 @@ export default function HowItWorksPage() {
               <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">Enterprise Freedom: Break the License Prison</h4>
                 <p className="text-muted-foreground">
-                  No more per-seat licensing, no network license servers, no vendor audits. Deploy RustMat 
+                  No more per-seat licensing, no network license servers, no vendor audits. Deploy RunMat 
                   across unlimited machines, scale teams without budget explosions, and never face 
                   astronomical renewal costs again. True computational freedom for organizations of any size.
                 </p>
@@ -522,11 +522,11 @@ export default function HowItWorksPage() {
                 Ready to Dive Deeper?
               </h3>
               <p className="text-muted-foreground mb-6">
-                Explore RustMat&apos;s source code or try it yourself to see this architecture in action.
+                Explore RunMat&apos;s source code or try it yourself to see this architecture in action.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Button asChild>
-                  <Link href="https://github.com/rustmat/rustmat" target="_blank" rel="noopener noreferrer">
+                  <Link href="https://github.com/runmat-dev/runmat" target="_blank" rel="noopener noreferrer">
                     View Source Code
                   </Link>
                 </Button>

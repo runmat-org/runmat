@@ -236,14 +236,14 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
         <Card>
           <CardContent className="p-6 text-center">
             <h3 className="text-lg font-semibold mb-3">
-              Ready to try RustMat?
+              Ready to try RunMat?
             </h3>
             <p className="text-muted-foreground mb-4">
               Get started with the modern MATLAB runtime today.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button asChild>
-                <Link href="/download">Download RustMat</Link>
+                <Link href="/download">Download RunMat</Link>
               </Button>
               <Button variant="outline" asChild>
                 <Link href="/docs/getting-started">Get Started</Link>

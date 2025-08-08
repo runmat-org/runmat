@@ -15,8 +15,8 @@ import { OSInstallCommand } from "@/components/OSInstallCommand";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Download RustMat",
-  description: "Download RustMat for your platform. Fast, free, and open source MATLAB-compatible runtime with V8-inspired performance.",
+  title: "Download RunMat",
+  description: "Download RunMat for your platform. Fast, free, and open source MATLAB-compatible runtime with V8-inspired performance.",
 };
 
 export default function DownloadPage() {
@@ -28,10 +28,10 @@ export default function DownloadPage() {
         <div className="text-center mb-12">
           <Badge className="mb-4">Free Download</Badge>
           <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-gray-900 dark:text-white">
-            Download RustMat
+            Download RunMat
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-300 leading-relaxed max-w-3xl mx-auto">
-            Get started with RustMat in seconds.
+            Get started with RunMat in seconds.
           </p>
         </div>
 
@@ -60,10 +60,10 @@ export default function DownloadPage() {
                   </h3>
                 </div>
                 <p className="text-gray-600 dark:text-gray-300 mb-4">
-                  Jump into the interactive REPL or run your existing MATLAB scripts by typing <code>rustmat</code> in your terminal.
+                  Jump into the interactive REPL or run your existing MATLAB scripts by typing <code>runmat</code> in your terminal.
                 </p>
                 <div className="bg-gray-900 rounded-md p-3 font-mono text-sm text-white mb-4">
-                  rustmat
+                  runmat
                 </div>
                 <Button variant="outline" size="sm" asChild className="w-full">
                   <Link href="/docs/getting-started">
@@ -81,10 +81,10 @@ export default function DownloadPage() {
                   </h3>
                 </div>
                 <p className="text-gray-600 dark:text-gray-300 mb-4">
-                  Use RustMat as a Jupyter kernel for interactive notebooks with 150x speedup over GNU Octave.
+                  Use RunMat as a Jupyter kernel for interactive notebooks with 150x speedup over GNU Octave.
                 </p>
                 <div className="bg-gray-900 rounded-md p-3 font-mono text-sm text-white mb-4">
-                  rustmat --install-kernel
+                  runmat --install-kernel
                 </div>
                 <Button variant="outline" size="sm" asChild className="w-full">
                   <Link href="/docs/getting-started#jupyter-notebook-integration">
@@ -120,21 +120,21 @@ export default function DownloadPage() {
                   <div>
                     <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Homebrew (macOS/Linux)</h4>
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
-                      brew install rustmat
+                      brew install runmat
                     </div>
                   </div>
                   
                   <div>
                     <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Chocolatey (Windows)</h4>
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
-                      choco install rustmat
+                      choco install runmat
                     </div>
                   </div>
                   
                   <div>
                     <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Snap (Linux)</h4>
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
-                      sudo snap install rustmat
+                      sudo snap install runmat
                     </div>
                   </div>
                 </div>
@@ -157,14 +157,14 @@ export default function DownloadPage() {
                   <div>
                     <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Install from crates.io</h4>
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
-                      cargo install rustmat
+                      cargo install runmat
                     </div>
                   </div>
                   
                   <div>
                     <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">From source (latest)</h4>
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
-                      cargo install --git https://github.com/rustmat/rustmat
+                      cargo install --git https://github.com/runmat-dev/runmat
                     </div>
                   </div>
                   
@@ -197,7 +197,7 @@ export default function DownloadPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-gray-500 dark:text-gray-400 mb-4">
-                  Get syntax highlighting, IntelliSense, and integrated debugging for RustMat.
+                  Get syntax highlighting, IntelliSense, and integrated debugging for RunMat.
                 </p>
                 <Button className="w-full opacity-50 cursor-not-allowed" disabled>
                   <ExternalLink className="mr-2 h-4 w-4" />
@@ -219,7 +219,7 @@ export default function DownloadPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-gray-500 dark:text-gray-400 mb-4">
-                  Get syntax highlighting, IntelliSense, and integrated debugging for RustMat.
+                  Get syntax highlighting, IntelliSense, and integrated debugging for RunMat.
                 </p>
                 <Button className="w-full opacity-50 cursor-not-allowed" disabled>
                   <ExternalLink className="mr-2 h-4 w-4" />
@@ -241,17 +241,17 @@ export default function DownloadPage() {
             </CardHeader>
             <CardContent className="text-center">
               <p className="text-gray-600 dark:text-gray-300 mb-6">
-                RustMat is completely open source. Explore the code, contribute, or build it yourself.
+                RunMat is completely open source. Explore the code, contribute, or build it yourself.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Button asChild>
-                            <Link href="https://github.com/rustmat/rustmat" target="_blank" rel="noopener noreferrer">
+                            <Link href="https://github.com/runmat-dev/runmat" target="_blank" rel="noopener noreferrer">
             <SiGithub className="mr-2 h-4 w-4" />
             View on GitHub
                   </Link>
                 </Button>
                 <Button variant="outline" asChild>
-                  <Link href="https://crates.io/crates/rustmat" target="_blank" rel="noopener noreferrer">
+                  <Link href="https://crates.io/crates/runmat" target="_blank" rel="noopener noreferrer">
                     <Package className="mr-2 h-4 w-4" />
                     View on crates.io
                   </Link>
@@ -269,7 +269,7 @@ export default function DownloadPage() {
                 Looking for More?
               </h3>
               <p className="text-gray-600 dark:text-gray-300 mb-4">
-                RustMat is part of the Dystr platform for computational engineering. 
+                RunMat is part of the Dystr platform for computational engineering. 
                 Get cloud computing, team collaboration, and enterprise features.
               </p>
               <Button asChild>
