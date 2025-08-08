@@ -1,4 +1,4 @@
-# 🚀 RustMat
+# 🚀 RustMat: Modern Free MATLAB Compatible Runtime
 ### A blazing-fast, open-source MATLAB/Octave runtime, by the creators of [Dystr](https://dystr.com)
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/rustmat/rustmat/ci.yml?branch=main)](https://github.com/rustmat/rustmat/actions)
@@ -9,11 +9,7 @@
 
 > **Copy-paste your existing MATLAB code and watch it run blazing fast and for free** ✨
 
-<div align="center">
-
 **[🌐 Website](https://rustmat.dev) • [📖 Documentation](https://docs.rustmat.dev) • [💬 Discord](https://discord.gg/rustmat) • [🎯 Examples](examples/)**
-
-</div>
 
 ---
 
@@ -164,33 +160,13 @@ surf(X, Y, Z);
 
 ## 🏗️ Architecture: V8-Inspired Performance
 
-RustMat's **tiered execution engine** delivers both fast startup and blazing runtime performance:
-
-```mermaid
-graph LR
-    Source[".m files"] --> Parser[Parser]
-    Parser --> HIR[High-level IR]
-    HIR --> Ignition[🚀 Ignition<br/>Baseline Interpreter]
-    Ignition --> Turbine[⚡ Turbine<br/>Optimizing JIT]
-    Turbine --> Native[Native Code]
-    
-    subgraph "Runtime Systems"
-        GC[Generational GC]
-        Snapshot[Snapshot System]
-        Plotting[GPU Plotting]
-    end
-    
-    Ignition -.-> GC
-    Turbine -.-> GC
-    Native -.-> Plotting
-    Snapshot -.-> Ignition
-```
+RustMat's **tiered execution engine** delivers both fast startup and blazing runtime performance.
 
 ### Key Components
 
 | Component | Purpose | Technology |
 |-----------|---------|------------|
-| **🎯 rustmat-ignition** | Baseline interpreter for instant startup | Custom bytecode VM |
+| **🎯 rustmat-ignition** | Baseline interpreter for instant startup | HIR-to-bytecode compiler + stack-based interpreter |
 | **⚡ rustmat-turbine** | Optimizing JIT compiler for hot code | Cranelift backend |
 | **🧠 rustmat-gc** | High-performance memory management | Generational GC with pointer compression |
 | **🎨 rustmat-plot** | Interactive plotting engine | GPU-accelerated via wgpu |
@@ -312,15 +288,13 @@ RustMat is licensed under the **MIT License with Attribution Requirements**. Thi
 
 See [LICENSE.md](LICENSE.md) for complete terms or visit [rustmat.dev/license](https://rustmat.dev/license) for FAQs.
 
-<div align="center">
+---
 
 **Built with ❤️ by [Dystr Inc.](https://dystr.com) and the RustMat community**
 
 ⭐ **Star us on GitHub** if RustMat helps your work!
 
 [**🚀 Get Started**](https://rustmat.dev/docs/getting-started) • [**💬 Join Discord**](https://discord.gg/rustmat) • [**🐦 Follow @rustmat_dev**](https://twitter.com/rustmat_dev)
-
-</div>
 
 ---
 

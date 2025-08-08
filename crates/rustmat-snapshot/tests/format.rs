@@ -244,14 +244,13 @@ fn test_data_section_info() {
 
 #[test]
 fn test_cpu_feature_detection() {
-    let _platform = PlatformInfo::current();
-
     // Just verify the function doesn't panic and returns reasonable results
     // CPU features exist and are strings
 
     // If we're on x86_64, might have some common features
     #[cfg(target_arch = "x86_64")]
     {
+        let platform = PlatformInfo::current();
         // These are common but not guaranteed, so just test they're strings
         for feature in &platform.cpu_features {
             assert!(!feature.is_empty());
