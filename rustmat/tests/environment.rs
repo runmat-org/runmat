@@ -101,10 +101,7 @@ fn test_rustmat_jit_opt_level_env_var() {
         env.insert("RUSTMAT_JIT_OPT_LEVEL", *env_val);
 
         let output = run_rustmat_with_env(&["info"], env);
-        assert!(
-            output.status.success(),
-            "Failed with opt level: {env_val}"
-        );
+        assert!(output.status.success(), "Failed with opt level: {env_val}");
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains(&format!("JIT Optimization: {expected_output}")));
@@ -125,10 +122,7 @@ fn test_rustmat_gc_preset_env_var() {
         env.insert("RUSTMAT_GC_PRESET", *env_val);
 
         let output = run_rustmat_with_env(&["info"], env);
-        assert!(
-            output.status.success(),
-            "Failed with GC preset: {env_val}"
-        );
+        assert!(output.status.success(), "Failed with GC preset: {env_val}");
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains(&format!("GC Preset: \"{expected_output}\"")));
@@ -380,10 +374,7 @@ fn test_boolean_env_var_variations() {
         env.insert("RUSTMAT_DEBUG", *value);
 
         let output = run_rustmat_with_env(&["info"], env);
-        assert!(
-            output.status.success(),
-            "Failed with RUSTMAT_DEBUG={value}"
-        );
+        assert!(output.status.success(), "Failed with RUSTMAT_DEBUG={value}");
 
         // Test with GC stats too
         let mut env2 = HashMap::new();

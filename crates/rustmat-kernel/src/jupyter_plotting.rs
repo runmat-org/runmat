@@ -319,8 +319,7 @@ impl JupyterPlottingManager {
             "bar" => {
                 if !args.is_empty() {
                     let y_data = self.extract_numeric_array(&args[0])?;
-                    let x_labels: Vec<String> =
-                        (0..y_data.len()).map(|i| format!("{i}")).collect();
+                    let x_labels: Vec<String> = (0..y_data.len()).map(|i| format!("{i}")).collect();
 
                     let bar_chart = rustmat_plot::plots::BarChart::new(x_labels, y_data)
                         .map_err(KernelError::Execution)?;

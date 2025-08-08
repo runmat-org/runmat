@@ -351,7 +351,10 @@ mod tests {
         let result = fill_builtin(std::f64::consts::PI, 2, 2).unwrap();
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 2);
-        assert!(result.data.iter().all(|&x| (x - std::f64::consts::PI).abs() < f64::EPSILON));
+        assert!(result
+            .data
+            .iter()
+            .all(|&x| (x - std::f64::consts::PI).abs() < f64::EPSILON));
     }
 
     #[test]

@@ -398,10 +398,10 @@ impl<'window> PlotWindow<'window> {
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Use PlotOverlay for unified UI rendering - no more duplicate sidebar code!
-            let overlay_config = OverlayConfig { 
-                show_grid: true, 
-                show_axes: true, 
-                ..Default::default() 
+            let overlay_config = OverlayConfig {
+                show_grid: true,
+                show_axes: true,
+                ..Default::default()
             };
             let overlay_metrics = OverlayMetrics {
                 vertex_count: scene_stats.total_vertices,

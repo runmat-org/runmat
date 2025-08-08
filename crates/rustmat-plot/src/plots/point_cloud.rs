@@ -300,7 +300,10 @@ impl PointCloudPlot {
 
         println!("DEBUG: Generated {vertex_count} vertices for point cloud");
 
-        let material = Material { albedo: self.default_color, ..Default::default() };
+        let material = Material {
+            albedo: self.default_color,
+            ..Default::default()
+        };
 
         let draw_call = DrawCall {
             vertex_offset: 0,

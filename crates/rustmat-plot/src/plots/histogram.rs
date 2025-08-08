@@ -333,7 +333,10 @@ impl Histogram {
         let vertices = vertices.clone();
         let indices = indices.clone();
 
-        let material = Material { albedo: self.color, ..Default::default() };
+        let material = Material {
+            albedo: self.color,
+            ..Default::default()
+        };
 
         let draw_call = DrawCall {
             vertex_offset: 0,

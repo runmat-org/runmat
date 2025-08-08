@@ -29,8 +29,7 @@ impl Default for ThemeVariant {
 }
 
 /// Complete plotting theme configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PlotThemeConfig {
     /// Theme variant to use
     pub variant: ThemeVariant,
@@ -50,7 +49,6 @@ pub struct PlotThemeConfig {
     /// Animation and interaction settings
     pub interaction: InteractionConfig,
 }
-
 
 /// Typography configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -622,7 +620,10 @@ mod tests {
 
     #[test]
     fn test_custom_theme_validation() {
-        let mut config = PlotThemeConfig { variant: ThemeVariant::Custom, ..Default::default() };
+        let mut config = PlotThemeConfig {
+            variant: ThemeVariant::Custom,
+            ..Default::default()
+        };
 
         // Should fail without custom colors
         assert!(config.validate().is_err());

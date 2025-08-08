@@ -1063,10 +1063,7 @@ fn test_jit_user_function_fallback() {
 
     let (status, used_jit) = result.unwrap();
     assert_eq!(status, 0, "Execution should succeed");
-    assert!(
-        !used_jit,
-        "Should use interpreter fallback for functions"
-    );
+    assert!(!used_jit, "Should use interpreter fallback for functions");
 
     // Check result
     if let Value::Num(value) = &vars[0] {
@@ -1390,10 +1387,7 @@ fn test_jit_simple_function_compilation() {
     // Execute - should compile to JIT and run natively
     let result = engine.execute_or_compile(&bytecode, &mut vars);
 
-    assert!(
-        result.is_ok(),
-        "Function execution should work: {result:?}"
-    );
+    assert!(result.is_ok(), "Function execution should work: {result:?}");
     let (status, used_jit) = result.unwrap();
     assert_eq!(status, 0, "Execution should succeed");
 

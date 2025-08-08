@@ -520,9 +520,7 @@ async fn main() -> Result<()> {
                 info!("Native window system initialized successfully");
             }
             Err(e) => {
-                info!(
-                    "Native window initialization failed: {e}, using thread manager"
-                );
+                info!("Native window initialization failed: {e}, using thread manager");
             }
         }
 
@@ -574,9 +572,7 @@ async fn main() -> Result<()> {
 fn load_configuration(cli: &Cli) -> Result<RustMatConfig> {
     // Check if config file was explicitly provided via CLI (not just env var)
     // We can detect this by checking if RUSTMAT_CONFIG env var matches the cli.config value
-    let config_from_env = std::env::var("RUSTMAT_CONFIG")
-        .ok()
-        .map(PathBuf::from);
+    let config_from_env = std::env::var("RUSTMAT_CONFIG").ok().map(PathBuf::from);
 
     if let Some(config_file) = &cli.config {
         // If config matches env var, it came from environment - be graceful

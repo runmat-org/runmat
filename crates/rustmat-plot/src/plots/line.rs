@@ -173,7 +173,10 @@ impl LinePlot {
         let vertices = self.generate_vertices().clone();
         let vertex_count = vertices.len();
 
-        let material = Material { albedo: self.color, ..Default::default() };
+        let material = Material {
+            albedo: self.color,
+            ..Default::default()
+        };
 
         let draw_call = DrawCall {
             vertex_offset: 0,

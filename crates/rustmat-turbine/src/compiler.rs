@@ -242,14 +242,8 @@ impl BytecodeCompiler {
             module,
             rustmat_call_user_function_id,
         };
-        
-        Self::compile_with_cfg(
-            &mut builder,
-            &mut stack,
-            instructions,
-            &cfg,
-            &mut ctx,
-        )?;
+
+        Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, &mut ctx)?;
 
         // Seal all blocks (including entry block which is in cfg.blocks)
         for (&_pc, basic_block) in &cfg.blocks {
@@ -696,8 +690,7 @@ impl BytecodeCompiler {
         builder.ins().store(MemFlags::new(), null_val, null_addr, 0);
 
         // Use the expert's pattern: declare_func_in_func to get a valid FuncRef
-        let runtime_fn =
-            module.declare_func_in_func(rustmat_call_user_function_id, builder.func);
+        let runtime_fn = module.declare_func_in_func(rustmat_call_user_function_id, builder.func);
 
         // Allocate space for the result (f64)
         let result_slot =

@@ -270,10 +270,7 @@ fn test_cli_help_and_documentation() {
     ];
 
     for section in &required_sections {
-        assert!(
-            stdout.contains(section),
-            "Help missing section: {section}"
-        );
+        assert!(stdout.contains(section), "Help missing section: {section}");
     }
 }
 

@@ -163,9 +163,7 @@ fn test_snapshot_compression() {
         let compressed_size = fs::metadata(&compressed_path).unwrap().len();
 
         // Compressed should be smaller (unless data is very small or already compressed)
-        println!(
-            "Uncompressed: {uncompressed_size} bytes, Compressed: {compressed_size} bytes"
-        );
+        println!("Uncompressed: {uncompressed_size} bytes, Compressed: {compressed_size} bytes");
 
         // Load both and verify they produce equivalent snapshots
         let mut uncompressed_loader = SnapshotLoader::new(uncompressed_config);

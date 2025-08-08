@@ -15,8 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Main RustMat configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RustMatConfig {
     /// Runtime configuration
     pub runtime: RuntimeConfig,
@@ -60,8 +59,7 @@ pub struct JitConfig {
 }
 
 /// GC configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GcConfig {
     /// GC preset
     pub preset: Option<GcPreset>,
@@ -374,7 +372,6 @@ fn default_lod_threshold() -> u32 {
     10000 // Points threshold for LOD
 }
 
-
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
@@ -394,7 +391,6 @@ impl Default for JitConfig {
         }
     }
 }
-
 
 impl Default for PlottingConfig {
     fn default() -> Self {

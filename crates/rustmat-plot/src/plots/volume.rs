@@ -249,7 +249,10 @@ impl VolumePlot {
             indices.len()
         );
 
-        let material = Material { albedo: Vec4::new(1.0, 1.0, 1.0, self.opacity), ..Default::default() };
+        let material = Material {
+            albedo: Vec4::new(1.0, 1.0, 1.0, self.opacity),
+            ..Default::default()
+        };
 
         let draw_call = DrawCall {
             vertex_offset: 0,

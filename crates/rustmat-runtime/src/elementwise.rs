@@ -105,9 +105,7 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
             Ok(Value::Matrix(Matrix::new(data, m1.rows, m1.cols)?))
         }
 
-        _ => Err(format!(
-            "Addition not supported for types: {a:?} + {b:?}"
-        )),
+        _ => Err(format!("Addition not supported for types: {a:?} + {b:?}")),
     }
 }
 

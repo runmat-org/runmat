@@ -145,7 +145,9 @@ fn initialize_heap_base(first_ptr: *const u8) {
             log::info!("Initialized pointer compression heap base at {base_ptr:p}");
         }
         Err(existing) => {
-            log::debug!("Heap base already initialized at {existing:p}, first ptr was {first_ptr:p}");
+            log::debug!(
+                "Heap base already initialized at {existing:p}, first ptr was {first_ptr:p}"
+            );
         }
     }
 }
