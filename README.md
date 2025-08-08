@@ -119,6 +119,9 @@ rustmat
 
 # Or run an existing .m file
 rustmat script.m
+
+# Or pipe a script into RustMat
+echo "a = 10; b = 20; c = a + b" | rustmat
 ```
 
 ### Jupyter Integration
