@@ -121,11 +121,6 @@ export default function GettingStartedPage() {
                       More Options
                     </Link>
                   </Button>
-                  <Button variant="outline" asChild>
-                    <Link href="/download#package-managers">
-                      Package Managers
-                    </Link>
-                  </Button>
                 </div>
               </CardContent>
             </Card>
