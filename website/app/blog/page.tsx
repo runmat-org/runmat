@@ -135,7 +135,7 @@ export default function BlogPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="https://github.com/runmat-dev/runmat" target="_blank">
+                  <Link href="https://github.com/runmat-org/runmat" target="_blank">
                     Star on GitHub
                   </Link>
                 </Button>

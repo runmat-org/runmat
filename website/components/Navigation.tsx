@@ -78,7 +78,7 @@ export default function Navigation() {
           <nav className="hidden md:flex items-center space-x-2">
             <Button variant="ghost" size="sm" asChild>
               <Link
-                href="https://github.com/runmat-dev/runmat"
+                href="https://github.com/runmat-org/runmat"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -131,7 +131,7 @@ export default function Navigation() {
               <div className="flex items-center space-x-2 pt-2">
                 <Button variant="outline" size="sm" asChild>
                   <Link
-                    href="https://github.com/runmat-dev/runmat"
+                    href="https://github.com/runmat-org/runmat"
                     target="_blank"
                     rel="noopener noreferrer"
                   >

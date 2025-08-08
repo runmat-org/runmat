@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 # Constants
-$REPO = "runmat-dev/runmat"
+$REPO = "runmat-org/runmat"
 $BINARY_NAME = "runmat.exe"
 $INSTALL_DIR = "$env:USERPROFILE\.runmat\bin"
 $WEBSITE_URL = "https://runmat.org"

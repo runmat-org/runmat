@@ -4,9 +4,9 @@ version = "0.0.1"
 edition = "2021"
 description = "High-performance MATLAB/Octave runtime with Jupyter kernel support"
 authors = ["RunMat Team"]
-license = "MIT OR Apache-2.0"
+license = "MIT"
 readme = "../README.md"
-repository = "https://github.com/runmat-dev/runmat"
+repository = "https://github.com/runmat-org/runmat"
 keywords = ["matlab", "octave", "jupyter", "kernel", "interpreter"]
 categories = ["science", "development-tools"]
 

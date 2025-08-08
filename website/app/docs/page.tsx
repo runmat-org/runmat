@@ -158,7 +158,7 @@ export default function DocsPage() {
               <Link href="/blog/introducing-runmat">Read Introduction</Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link href="https://github.com/runmat-dev/runmat" target="_blank">
+              <Link href="https://github.com/runmat-org/runmat" target="_blank">
                 View on GitHub
               </Link>
             </Button>

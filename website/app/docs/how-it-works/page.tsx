@@ -526,7 +526,7 @@ export default function HowItWorksPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Button asChild>
-                  <Link href="https://github.com/runmat-dev/runmat" target="_blank" rel="noopener noreferrer">
+                  <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer">
                     View Source Code
                   </Link>
                 </Button>

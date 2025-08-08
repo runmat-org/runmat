@@ -329,7 +329,7 @@ export default function HomePage() {
               <Link href="/blog/introducing-runmat">Read the Story</Link>
             </Button>
             <Button variant="outline" size="lg" asChild>
-              <Link href="https://github.com/runmat-dev/runmat">View on GitHub</Link>
+              <Link href="https://github.com/runmat-org/runmat">View on GitHub</Link>
             </Button>
           </div>
         </div>

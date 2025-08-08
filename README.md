@@ -1,7 +1,7 @@
 # 🚀 RunMat: Modern Free MATLAB Compatible Runtime
 ### A blazing-fast, open-source MATLAB/Octave runtime, by the creators of [Dystr](https://dystr.com)
 
-[![Build Status](https://img.shields.io/github/actions/workflow/status/runmat-dev/runmat/ci.yml?branch=main)](https://github.com/runmat-dev/runmat/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/runmat-org/runmat/ci.yml?branch=main)](https://github.com/runmat-org/runmat/actions)
 [![License](https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg)](LICENSE.md)
 [![Crates.io](https://img.shields.io/crates/v/runmat.svg)](https://crates.io/crates/runmat)
 [![Downloads](https://img.shields.io/crates/d/runmat.svg)](https://crates.io/crates/runmat)
@@ -100,7 +100,7 @@ iwr https://runmat.org/install.ps1 | iex
 cargo install runmat --features gui
 
 # Or build from source
-git clone https://github.com/runmat-dev/runmat.git
+git clone https://github.com/runmat-org/runmat.git
 cd runmat && cargo build --release --features gui
 ```
 
@@ -249,7 +249,7 @@ RunMat is more than just software—it's a movement toward **open, fast, and acc
 - Write comprehensive tests
 - Create benchmarks
 
-[**Join Discussions →**](https://github.com/runmat-dev/runmat/discussions)
+[**Join Discussions →**](https://github.com/runmat-org/runmat/discussions)
 
 </td>
 <td width="33%">
@@ -260,7 +260,7 @@ RunMat is more than just software—it's a movement toward **open, fast, and acc
 - Create tutorials and examples
 - Spread the word
 
-[**Get Started →**](https://github.com/runmat-dev/runmat/issues/labels/good-first-issue)
+[**Get Started →**](https://github.com/runmat-org/runmat/issues/labels/good-first-issue)
 
 </td>
 </tr>
@@ -268,7 +268,7 @@ RunMat is more than just software—it's a movement toward **open, fast, and acc
 
 ### 💬 Connect With Us
 
-- **GitHub Discussions**: [Share ideas and get help](https://github.com/runmat-dev/runmat/discussions)  
+- **GitHub Discussions**: [Share ideas and get help](https://github.com/runmat-org/runmat/discussions)  
 - **Twitter**: [@dystr_ai](https://x.com/dystr_ai) for updates and announcements
 - **Newsletter**: [Subscribe](https://runmat.org/newsletter) for monthly updates
 

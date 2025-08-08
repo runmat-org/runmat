@@ -12,7 +12,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Constants
-REPO="runmat-dev/runmat"
+REPO="runmat-org/runmat"
 BINARY_NAME="runmat"
 INSTALL_DIR="$HOME/.local/bin"
 WEBSITE_URL="https://runmat.org"

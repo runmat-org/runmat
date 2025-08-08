@@ -164,7 +164,7 @@ export default function DownloadPage() {
                   <div>
                     <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">From source (latest)</h4>
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
-                      cargo install --git https://github.com/runmat-dev/runmat
+                      cargo install --git https://github.com/runmat-org/runmat
                     </div>
                   </div>
                   
@@ -245,7 +245,7 @@ export default function DownloadPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Button asChild>
-                            <Link href="https://github.com/runmat-dev/runmat" target="_blank" rel="noopener noreferrer">
+                            <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer">
             <SiGithub className="mr-2 h-4 w-4" />
             View on GitHub
                   </Link>

@@ -81,7 +81,7 @@ Environment Variables:
   RUSTMAT_JIT_THRESHOLD=<n>    JIT compilation threshold (default: 10)
   RUSTMAT_JIT_OPT_LEVEL=<0-3>  JIT optimization level (default: 2)
 
-For more information, visit: https://github.com/runmat-dev/runmat
+For more information, visit: https://github.com/runmat-org/runmat
 "#
 )]
 #[command(propagate_version = true)]

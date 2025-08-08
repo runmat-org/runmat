@@ -406,12 +406,12 @@ export default function GettingStartedPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-3">
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="https://github.com/runmat-dev/runmat/discussions">
+                  <Link href="https://github.com/runmat-org/runmat/discussions">
                     GitHub Discussions
                   </Link>
                 </Button>
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="https://github.com/runmat-dev/runmat/issues">
+                  <Link href="https://github.com/runmat-org/runmat/issues">
                     Report Issues
                   </Link>
                 </Button>

@@ -89,7 +89,7 @@ impl Default for KernelInfo {
             banner: "RunMat - High-performance MATLAB/Octave runtime".to_string(),
             help_links: vec![HelpLink {
                 text: "RunMat Documentation".to_string(),
-                url: "https://github.com/runmat-dev/runmat".to_string(),
+                url: "https://github.com/runmat-org/runmat".to_string(),
             }],
         }
     }
