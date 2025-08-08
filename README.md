@@ -65,6 +65,8 @@ RustMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave co
 
 *Benchmarks run on Apple M2 Max with BLAS/LAPACK optimization. See [benchmarks/](benchmarks/) for reproducible test scripts and detailed results.*
 
+---
+
 ### Why Engineers and Scientists Love RustMat
 
 <table>

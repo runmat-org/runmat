@@ -122,7 +122,7 @@ impl NativeWindowManager {
                 crate::gui::GuiOperationResult::Success(msg) => {
                     Ok(NativeWindowResult::Success(msg))
                 }
-                crate::gui::GuiOperationResult::Cancelled(msg) => {
+                crate::gui::GuiOperationResult::Cancelled(_msg) => {
                     Ok(NativeWindowResult::WindowClosed)
                 }
                 crate::gui::GuiOperationResult::Error { message, .. } => {
@@ -133,7 +133,7 @@ impl NativeWindowManager {
                 crate::gui::GuiOperationResult::Success(msg) => {
                     Ok(NativeWindowResult::Success(msg))
                 }
-                crate::gui::GuiOperationResult::Cancelled(msg) => {
+                crate::gui::GuiOperationResult::Cancelled(_msg) => {
                     Ok(NativeWindowResult::WindowClosed)
                 }
                 crate::gui::GuiOperationResult::Error { message, .. } => Err(message),
