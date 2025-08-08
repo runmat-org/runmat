@@ -1264,8 +1264,7 @@ fn test_jit_function_compilation_attempts() {
     // Execution should work via interpreter fallback
     let exec_result = engine.execute_or_compile(&function_instructions_bytecode, &mut vars);
     // This will likely error due to undefined function, but should not crash
-    if exec_result.is_err() {
-        let error = exec_result.unwrap_err();
+    if let Err(error) = exec_result {
         assert!(
             error.to_string().contains("test") || error.to_string().contains("undefined"),
             "Should get undefined function error, got: {error}"
