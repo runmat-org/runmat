@@ -79,6 +79,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install BLAS/LAPACK dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev liblapack-dev
+
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v0
         with:
