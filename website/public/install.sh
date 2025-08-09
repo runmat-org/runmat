@@ -137,13 +137,26 @@ fi
 
 log "Latest release: $LATEST_RELEASE"
 
-# Download and install
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_RELEASE/runmat-$PLATFORM.tar.gz"
+# Download and install (try versioned and non-versioned artifact names)
 TEMP_DIR=$(mktemp -d)
 
-log "Downloading from: $DOWNLOAD_URL"
-if ! curl -L "$DOWNLOAD_URL" | tar -xz -C "$TEMP_DIR"; then
-    error "Failed to download or extract RunMat"
+DOWNLOAD_BASE="https://github.com/$REPO/releases/download/$LATEST_RELEASE"
+URL_CANDIDATES=(
+  "$DOWNLOAD_BASE/runmat-$LATEST_RELEASE-$PLATFORM.tar.gz"
+  "$DOWNLOAD_BASE/runmat-$PLATFORM.tar.gz"
+)
+
+success=""
+for DOWNLOAD_URL in "${URL_CANDIDATES[@]}"; do
+    log "Downloading from: $DOWNLOAD_URL"
+    if curl -fL "$DOWNLOAD_URL" | tar -xz -C "$TEMP_DIR"; then
+        success="yes"
+        break
+    fi
+done
+
+if [ -z "$success" ]; then
+    error "Failed to download or extract RunMat (tried: ${URL_CANDIDATES[*]})"
 fi
 
 # Create install directory

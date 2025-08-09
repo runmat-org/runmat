@@ -118,17 +118,27 @@ if (-not $LATEST_RELEASE) {
 
 Write-Info "Latest release: $LATEST_RELEASE"
 
-# Download and install
-$DOWNLOAD_URL = "https://github.com/$REPO/releases/download/$LATEST_RELEASE/runmat-$PLATFORM.zip"
+# Download and install (try versioned and non-versioned names)
+$baseUrl = "https://github.com/$REPO/releases/download/$LATEST_RELEASE"
+$candidates = @(
+  "$baseUrl/runmat-$LATEST_RELEASE-$PLATFORM.zip",
+  "$baseUrl/runmat-$PLATFORM.zip"
+)
 $TEMP_FILE = "$env:TEMP\runmat-$PLATFORM.zip"
 $TEMP_DIR = "$env:TEMP\runmat-extract"
 
-Write-Info "Downloading from: $DOWNLOAD_URL"
-try {
-    Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $TEMP_FILE
-} catch {
-    Write-ErrorMsg "Failed to download RunMat: $($_.Exception.Message)"
+$downloaded = $false
+foreach ($url in $candidates) {
+    Write-Info "Downloading from: $url"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $TEMP_FILE -ErrorAction Stop
+        $downloaded = $true
+        break
+    } catch {
+        Write-Warn "Download failed from $url: $($_.Exception.Message)"
+    }
 }
+if (-not $downloaded) { Write-ErrorMsg "Failed to download RunMat; tried: $($candidates -join ', ')" }
 
 # Extract
 Write-Info "Extracting RunMat..."
