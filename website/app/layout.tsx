@@ -4,6 +4,7 @@ import "./globals.css";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -13,14 +14,14 @@ const inter = Inter({
 export const metadata: Metadata = {
   metadataBase: new URL('https://runmat.org'),
   title: {
-    default: "RunMat - High-Performance MATLAB/Octave Runtime in Rust",
+    default: "RunMat - High-Performance MATLAB/Octave Runtime",
     template: "%s | RunMat"
   },
-  description: "A modern, blazing-fast, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler, advanced garbage collection, and GPU-accelerated plotting. Free forever.",
+  description: "Drop-in replacement for MATLAB and GNU Octave with the same syntax but dramatically faster performance. Built in Rust with JIT compilation, generational garbage collection, and GPU-accelerated plotting. Open source and free.",
   keywords: [
     "MATLAB", "Octave", "Rust", "JIT compiler", "scientific computing", 
     "numerical computing", "open source", "high performance", "plotting",
-    "mathematics", "engineering", "simulation", "dystr"
+    "mathematics", "engineering", "simulation", "drop-in replacement", "dystr"
   ],
   authors: [{ name: "Dystr Inc.", url: "https://dystr.com" }],
   creator: "Dystr Inc.",
@@ -35,8 +36,8 @@ export const metadata: Metadata = {
     locale: 'en_US',
     url: 'https://runmat.org',
     siteName: 'RunMat',
-    title: 'RunMat - High-Performance MATLAB/Octave Runtime in Rust',
-    description: 'A modern, blazing-fast, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler, advanced garbage collection, and GPU-accelerated plotting. Free forever.',
+    title: 'RunMat - High-Performance MATLAB/Octave Runtime',
+    description: 'Drop-in replacement for MATLAB and GNU Octave with the same syntax but dramatically faster performance. Built in Rust with JIT compilation, generational garbage collection, and GPU-accelerated plotting.',
     images: [
       {
         url: '/og-image.png',
@@ -48,8 +49,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'RunMat - High-Performance MATLAB/Octave Runtime in Rust',
-    description: 'A modern, blazing-fast, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler.',
+    title: 'RunMat - High-Performance MATLAB/Octave Runtime',
+    description: 'Drop-in replacement for MATLAB and GNU Octave with the same syntax but dramatically faster performance. Built in Rust with JIT compilation.',
     images: ['/og-image.png'],
   },
   robots: {
@@ -63,9 +64,6 @@ export const metadata: Metadata = {
       'max-snippet': -1,
     },
   },
-  verification: {
-    google: 'your-google-verification-code',
-  }
 };
 
 export default function RootLayout({
@@ -81,6 +79,7 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/site.webmanifest" />
         <link rel="canonical" href="https://runmat.org" />
+        <GoogleAnalytics />
       </head>
       <body className={`${inter.className} antialiased`}>
         <ThemeProvider

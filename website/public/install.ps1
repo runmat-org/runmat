@@ -9,6 +9,47 @@ $BINARY_NAME = "runmat.exe"
 $INSTALL_DIR = "$env:USERPROFILE\.runmat\bin"
 $WEBSITE_URL = "https://runmat.org"
 
+$TELEMETRY_ENDPOINT = "https://runmat.org/api/telemetry"
+$TELEMETRY_ID_FILE = "$env:USERPROFILE\.runmat\telemetry_id"
+
+function New-AnonymousClientId {
+    try {
+        if (Test-Path $TELEMETRY_ID_FILE) {
+            return Get-Content $TELEMETRY_ID_FILE -ErrorAction SilentlyContinue
+        }
+        $cid = [guid]::NewGuid().ToString()
+        $dir = Split-Path $TELEMETRY_ID_FILE
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Set-Content -Path $TELEMETRY_ID_FILE -Value $cid -ErrorAction SilentlyContinue
+        return $cid
+    } catch {
+        return "anon-" + (Get-Random)
+    }
+}
+
+function Send-Telemetry {
+    param(
+        [Parameter(Mandatory=$true)][string]$EventName,
+        [string]$OS,
+        [string]$ARCH,
+        [string]$PLATFORM,
+        [string]$Release
+    )
+    try {
+        $cid = New-AnonymousClientId
+        $payload = @{ 
+            event = $EventName
+            os = $OS
+            arch = $ARCH
+            platform = $PLATFORM
+            release = $Release
+            method = "powershell"
+            cid = $cid
+        } | ConvertTo-Json -Compress
+        Invoke-WebRequest -Method Post -Uri $TELEMETRY_ENDPOINT -Body $payload -ContentType "application/json" -TimeoutSec 3 -ErrorAction SilentlyContinue | Out-Null
+    } catch {}
+}
+
 # Functions
 function Write-Info {
     param($Message)
@@ -20,7 +61,7 @@ function Write-Warn {
     Write-Host "[WARN] $Message" -ForegroundColor Yellow
 }
 
-function Write-Error {
+function Write-ErrorMsg {
     param($Message)
     Write-Host "[ERROR] $Message" -ForegroundColor Red
     exit 1
@@ -28,11 +69,12 @@ function Write-Error {
 
 # Banner
 Write-Host @"
- ____            _   __  __       _   
-|  _ \ _   _ ___| |_|  \/  | __ _| |_ 
-| |_) | | | / __| __| |\/| |/ _` | __|
-|  _ <| |_| \__ \ |_| |  | | (_| | |_ 
-|_| \_\__,_|___/\__|_|  |_|\__,_|\__|
+  _____                 __  __       _   
+ |  __ \               |  \/  |     | |  
+ | |__) | _   _ _ __   | \  / | __ _| |_ 
+ |  _  / | | | | '_ \  | |\/| |/ _` | __|
+ | | \ \ |_| | | | | | | |  | | (_| | |_ 
+ |_|  \_\__,_|_| |_| |_|_|  |_|\__,_|\__|
 
 High-performance MATLAB/Octave runtime
 "@ -ForegroundColor Blue
@@ -47,15 +89,18 @@ switch ($ARCH) {
     "AMD64" { $PLATFORM = "Windows-x86_64" }
     "ARM64" { $PLATFORM = "Windows-aarch64" }
     default { 
-        Write-Error "Unsupported architecture: $ARCH"
+        Write-ErrorMsg "Unsupported architecture: $ARCH"
     }
 }
 
 Write-Info "Installing for platform: $PLATFORM"
 
+# Send start event
+try { Send-Telemetry -EventName "install_start" -OS "windows" -ARCH $ARCH -PLATFORM $PLATFORM -Release "unknown" } catch {}
+
 # Check PowerShell version
 if ($PSVersionTable.PSVersion.Major -lt 3) {
-    Write-Error "PowerShell 3.0 or later is required"
+    Write-ErrorMsg "PowerShell 3.0 or later is required"
 }
 
 # Get latest release
@@ -64,11 +109,11 @@ try {
     $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO/releases/latest"
     $LATEST_RELEASE = $response.tag_name
 } catch {
-    Write-Error "Failed to get latest release information: $($_.Exception.Message)"
+    Write-ErrorMsg "Failed to get latest release information: $($_.Exception.Message)"
 }
 
 if (-not $LATEST_RELEASE) {
-    Write-Error "Failed to get latest release information"
+    Write-ErrorMsg "Failed to get latest release information"
 }
 
 Write-Info "Latest release: $LATEST_RELEASE"
@@ -82,7 +127,7 @@ Write-Info "Downloading from: $DOWNLOAD_URL"
 try {
     Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $TEMP_FILE
 } catch {
-    Write-Error "Failed to download RunMat: $($_.Exception.Message)"
+    Write-ErrorMsg "Failed to download RunMat: $($_.Exception.Message)"
 }
 
 # Extract
@@ -94,7 +139,7 @@ if (Test-Path $TEMP_DIR) {
 try {
     Expand-Archive -Path $TEMP_FILE -DestinationPath $TEMP_DIR
 } catch {
-    Write-Error "Failed to extract RunMat: $($_.Exception.Message)"
+    Write-ErrorMsg "Failed to extract RunMat: $($_.Exception.Message)"
 }
 
 # Create install directory
@@ -108,7 +153,7 @@ Write-Info "Installing RunMat binary..."
 try {
     Copy-Item "$TEMP_DIR\$BINARY_NAME" "$INSTALL_DIR\" -Force
 } catch {
-    Write-Error "Failed to install binary: $($_.Exception.Message)"
+    Write-ErrorMsg "Failed to install binary: $($_.Exception.Message)"
 }
 
 # Cleanup
@@ -146,11 +191,14 @@ try {
         $INSTALLED_VERSION = & "$INSTALL_DIR\runmat.exe" --version 2>$null
         Write-Info "Installation verified! Version: $INSTALLED_VERSION"
     } else {
-        Write-Error "Installation verification failed"
+        Write-ErrorMsg "Installation verification failed"
     }
 } catch {
     Write-Warn "Could not verify installation, but binary is installed at $INSTALL_DIR\$BINARY_NAME"
 }
+
+# Completion event
+try { Send-Telemetry -EventName "install_complete" -OS "windows" -ARCH $ARCH -PLATFORM $PLATFORM -Release $LATEST_RELEASE } catch {}
 
 Write-Host ""
 Write-Info "Installation complete! 🎉"

@@ -1,16 +1,17 @@
-import { readFileSync } from 'fs';
+import React from 'react';
+
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import matter from 'gray-matter';
 import { MDXRemote } from 'next-mdx-remote/rsc';
 import { notFound } from 'next/navigation';
-import React from 'react';
+import Link from 'next/link';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { BlogLayout } from '@/components/BlogLayout';
 import { CodeBlock } from '@/components/CodeBlock';
 import { MermaidDiagram } from '@/components/MermaidDiagram';
-import Link from 'next/link';
 
 interface BlogPost {
   slug: string;
@@ -58,6 +59,22 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       authors: [post.frontmatter.author],
     },
   };
+}
+
+// Generate static params for all blog posts
+export async function generateStaticParams() {
+  const contentDirectory = join(process.cwd(), 'content/blog');
+  try {
+    const files = readdirSync(contentDirectory);
+    return files
+      .filter(file => file.endsWith('.md'))
+      .map(file => ({
+        slug: file.replace('.md', '')
+      }));
+  } catch (error) {
+    console.warn('Could not read blog directory:', error);
+    return [];
+  }
 }
 
 export default async function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {

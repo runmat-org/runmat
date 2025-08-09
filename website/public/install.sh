@@ -17,32 +17,71 @@ BINARY_NAME="runmat"
 INSTALL_DIR="$HOME/.local/bin"
 WEBSITE_URL="https://runmat.org"
 
-# Functions
+# Optional: Telemetry relay (best-effort, anonymous)
+TELEMETRY_ID_FILE="$HOME/.runmat/telemetry_id"
+TELEMETRY_ENDPOINT="https://runmat.org/api/telemetry"
+
 log() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    printf "%b[INFO]%b %s\n" "$GREEN" "$NC" "$1"
 }
 
 warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    printf "%b[WARN]%b %s\n" "$YELLOW" "$NC" "$1"
 }
 
 error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    printf "%b[ERROR]%b %s\n" "$RED" "$NC" "$1"
     exit 1
 }
 
-# Banner
-echo -e "${BLUE}"
-cat << 'EOF'
- ____            _   __  __       _   
-|  _ \ _   _ ___| |_|  \/  | __ _| |_ 
-| |_) | | | / __| __| |\/| |/ _` | __|
-|  _ <| |_| \__ \ |_| |  | | (_| | |_ 
-|_| \_\\__,_|___/\__|_|  |_|\__,_|\__|
+# Generate or read a stable anonymous client id
+_telemetry_client_id() {
+    if [ -f "$TELEMETRY_ID_FILE" ]; then
+        cat "$TELEMETRY_ID_FILE" 2>/dev/null || true
+        return
+    fi
+    local cid
+    if command -v uuidgen >/dev/null 2>&1; then
+        cid="$(uuidgen)"
+    elif command -v python3 >/dev/null 2>&1; then
+        cid="$(python3 - <<'PY'
+import uuid
+print(uuid.uuid4())
+PY
+)"
+    else
+        cid="$(date +%s)-$RANDOM"
+    fi
+    mkdir -p "$(dirname "$TELEMETRY_ID_FILE")" 2>/dev/null || true
+    echo "$cid" > "$TELEMETRY_ID_FILE" 2>/dev/null || true
+    echo "$cid"
+}
 
-High-performance MATLAB/Octave runtime
+# Send anonymous telemetry event (non-blocking)
+_send_telemetry() {
+    # usage: _send_telemetry event_name
+    local EVENT_NAME="$1"
+    local CID
+    CID="$(_telemetry_client_id)"
+    curl -s -m 3 -o /dev/null -X POST -H "Content-Type: application/json" \
+      --data "{\"event\":\"$EVENT_NAME\",\"os\":\"$OS\",\"arch\":\"$ARCH\",\"platform\":\"$PLATFORM\",\"release\":\"${LATEST_RELEASE:-unknown}\",\"method\":\"shell\",\"cid\":\"$CID\"}" \
+      "$TELEMETRY_ENDPOINT" >/dev/null 2>&1 || true
+}
+
+# Trap failures so we can emit a failure event without interrupting output
+trap '_send_telemetry install_failed' ERR
+
+# Banner
+printf "%b" "$BLUE"
+cat << 'EOF'
+  _____                 __  __       _   
+ |  __ \               |  \/  |     | |  
+ | |__) | _   _ _ __   | \  / | __ _| |_ 
+ |  _  / | | | | '_ \  | |\/| |/ _` | __|
+ | | \ \ |_| | | | | | | |  | | (_| | |_ 
+ |_|  \_\__,_|_| |_| |_|_|  |_|\__,_|\__|
 EOF
-echo -e "${NC}"
+printf "%b\n" "$NC"
 
 log "Starting RunMat installation..."
 
@@ -71,7 +110,10 @@ case $OS in
     *)
         error "Unsupported OS: $OS"
         ;;
-esac
+ esac
+
+# Emit start event now that we know OS/ARCH/PLATFORM
+_send_telemetry install_start
 
 log "Installing for platform: $PLATFORM"
 
@@ -194,6 +236,9 @@ else
         error "Installation verification failed"
     fi
 fi
+
+# Emit completion event
+_send_telemetry install_complete
 
 echo
 log "Installation complete! 🎉"
