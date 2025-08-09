@@ -115,3 +115,13 @@ fn debug_complex_transpose_case() {
         }
     }
 }
+
+#[test]
+fn debug_string_after_semicolon_case() {
+    let input = "A'; 'text'";
+    let tokens = runmat_lexer::tokenize_detailed(input);
+    println!("Input: {}", input);
+    for (i, token) in tokens.iter().enumerate() {
+        println!("{}: {:?} ('{}')", i, token.token, token.lexeme);
+    }
+}

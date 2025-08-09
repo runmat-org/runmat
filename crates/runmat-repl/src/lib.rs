@@ -3,7 +3,7 @@ use log::{debug, info, warn};
 use runmat_builtins::Value;
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
 
-use runmat_lexer::tokenize;
+use runmat_lexer::{tokenize, tokenize_detailed, Token as LexToken};
 use runmat_parser::parse;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use runmat_turbine::TurbineEngine;
@@ -239,20 +239,30 @@ impl ReplEngine {
             .map(|instr| matches!(instr, runmat_ignition::Instr::Pop))
             .unwrap_or(false);
             
+        // Detect whether the user's input ends with a semicolon at the token level
+        let ends_with_semicolon = {
+            let toks = tokenize_detailed(input);
+            toks.into_iter()
+                .rev()
+                .map(|t| t.token)
+                .find(|_| true)
+                .map(|t| matches!(t, LexToken::Semicolon))
+                .unwrap_or(false)
+        };
+
         // Check if this is a semicolon-suppressed statement (expression or assignment)
         // Control flow statements never return values regardless of semicolons
         let is_semicolon_suppressed = if hir.body.len() == 1 {
             match &hir.body[0] {
-                runmat_hir::HirStmt::ExprStmt(_, true) => true, // true means semicolon-terminated (suppressed)
-                runmat_hir::HirStmt::Assign(_, _, true) => true, // true means semicolon-terminated (suppressed)
-                runmat_hir::HirStmt::If { .. } => true, // Control flow statements never return values
-                runmat_hir::HirStmt::While { .. } => true, // Control flow statements never return values
-                runmat_hir::HirStmt::For { .. } => true, // Control flow statements never return values
-                runmat_hir::HirStmt::Break => true, // Control statements never return values
-                runmat_hir::HirStmt::Continue => true, // Control statements never return values
-                runmat_hir::HirStmt::Return => true, // Return statements never return values (to REPL)
-                runmat_hir::HirStmt::Function { .. } => true, // Function definitions never return values
-                _ => false,
+                runmat_hir::HirStmt::ExprStmt(_, _) => ends_with_semicolon,
+                runmat_hir::HirStmt::Assign(_, _, _) => ends_with_semicolon,
+                runmat_hir::HirStmt::If { .. }
+                | runmat_hir::HirStmt::While { .. }
+                | runmat_hir::HirStmt::For { .. }
+                | runmat_hir::HirStmt::Break
+                | runmat_hir::HirStmt::Continue
+                | runmat_hir::HirStmt::Return
+                | runmat_hir::HirStmt::Function { .. } => true,
             }
         } else {
             false
@@ -293,12 +303,21 @@ impl ReplEngine {
                             self.stats.interpreter_fallback += 1;
                         }
                         // For assignments, capture the assigned value for both display and type info
-                        let assignment_value = self
-                            .variable_array
-                            .iter()
-                            .rev()
-                            .find(|v| !matches!(v, Value::Num(0.0)))
-                            .cloned();
+                        // Prefer the variable slot indicated by HIR if available.
+                        let assignment_value = if let Some(runmat_hir::HirStmt::Assign(var_id, _, _)) = hir.body.get(0) {
+                            if var_id.0 < self.variable_array.len() {
+                                Some(self.variable_array[var_id.0].clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            self
+                                .variable_array
+                                .iter()
+                                .rev()
+                                .find(|v| !matches!(v, Value::Num(0.0)))
+                                .cloned()
+                        };
                             
                         if !is_semicolon_suppressed {
                             result_value = assignment_value.clone();
@@ -381,14 +400,14 @@ impl ReplEngine {
 
                     // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
                     if hir.body.len() == 1 {
-                        if let runmat_hir::HirStmt::Assign(var_id, _, semicolon_terminated) = &hir.body[0] {
+                        if let runmat_hir::HirStmt::Assign(var_id, _, _) = &hir.body[0] {
                             if self.verbose {
-                                debug!("Assignment detected, var_id: {}, semicolon_terminated: {}", var_id.0, semicolon_terminated);
+                                debug!("Assignment detected, var_id: {}, ends_with_semicolon: {}", var_id.0, ends_with_semicolon);
                             }
                             // For assignments, capture the assigned value for both display and type info
                             if var_id.0 < self.variable_array.len() {
                                 let assignment_value = self.variable_array[var_id.0].clone();
-                                if !semicolon_terminated {
+                                if !is_semicolon_suppressed {
                                     result_value = Some(assignment_value);
                                     if self.verbose {
                                         debug!("Setting assignment result_value: {:?}", result_value);

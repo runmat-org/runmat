@@ -39,10 +39,11 @@ pub enum Token {
     Float,
     #[regex(r"\d+([eE][+-]?\d+)?", |lex| { lex.extras.last_was_value = true; })]
     Integer,
-    // Transpose first with higher priority to avoid greedy partial string scans swallowing it
-    #[token("'", transpose_filter, priority = 10)]
+    // Prefer transpose over string at the same position; filter will skip when not after a value
+    #[token("'", transpose_filter, priority = 0)]
     Transpose,
-    #[regex(r#"'([^'\n\r]|'')*'"#, string_or_skip, priority = 1)]
+    // Full string literal; evaluated after transpose filter chooses to skip
+    #[regex(r#"'([^'\n\r]|'')*'"#, string_or_emit, priority = 1)]
     Str,
     #[token("...")]
     Ellipsis,
@@ -88,11 +89,13 @@ pub enum Token {
     Less,
     #[token(">")]
     Greater,
-    #[token("=")]
+    #[token("=", |lex| { lex.extras.last_was_value = false; })]
     Assign,
     #[token(".")]
     Dot,
-    #[token(";", |lex| { lex.extras.last_was_value = true; })]
+    // Semicolon ends a statement; next token should not be treated as a value.
+    // This helps disambiguate that a following apostrophe starts a string, not a transpose.
+    #[token(";", |lex| { lex.extras.last_was_value = false; })]
     Semicolon,
     #[token(",")]
     Comma,
@@ -216,7 +219,11 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
 
                     // Single-character punctuation/operators
                     let token = match ch {
-                        '\'' => Token::Transpose,
+                        '\'' => {
+                            // In recovery, only treat apostrophe as transpose when the previous token
+                            // was a value; otherwise it's likely a broken string start -> mark as error.
+                            if lex.extras.last_was_value { Token::Transpose } else { Token::Error }
+                        }
                         ';' => Token::Semicolon,
                         ')' => Token::RParen,
                         '(' => Token::LParen,
@@ -260,15 +267,20 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
 
 // If regex matched but it's actually an unterminated quote (no closing '),
 // tell Logos to Skip so the single-quote token can be picked up as Transpose.
-fn string_or_skip(_lexer: &mut Lexer<Token>) -> Filter<()> {
-    // Regex ensures we only get here for complete strings. Emit unit.
+fn string_or_emit(lexer: &mut Lexer<Token>) -> Filter<()> {
+    // Full strings are unambiguous; mark as value and emit.
+    lexer.extras.last_was_value = true;
     Filter::Emit(())
 }
 
 fn transpose_filter(lex: &mut Lexer<Token>) -> Filter<()> {
-    // Always emit transpose for a single apostrophe.
-    // Full strings like 'text' are matched by the longer Str regex and will take precedence.
-    // Transpose acts like a value (similar to closing parentheses)
-    lex.extras.last_was_value = true;
-    Filter::Emit(())
+    // Emit transpose only when the previous token formed a value
+    // (e.g., after identifiers, numbers, closing parens/brackets/braces, etc.).
+    // Otherwise, skip so that the Str token (full quoted string) can match.
+    if lex.extras.last_was_value {
+        lex.extras.last_was_value = true;
+        Filter::Emit(())
+    } else {
+        Filter::Skip
+    }
 }

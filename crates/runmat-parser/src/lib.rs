@@ -217,11 +217,16 @@ impl Parser {
     fn parse_stmt_with_semicolon(&mut self) -> Result<Stmt, ParseError> {
         let stmt = self.parse_stmt()?;
         let is_semicolon_terminated = self.consume(&Token::Semicolon);
-        
-        // Apply semicolon suppression to both expression statements and assignments
+
+        // Expression statements: semicolon indicates output suppression
+        // Top-level assignments: set true only if a following top-level statement exists
+        // (i.e., not the final trailing semicolon at EOF).
         match stmt {
             Stmt::ExprStmt(expr, _) => Ok(Stmt::ExprStmt(expr, is_semicolon_terminated)),
-            Stmt::Assign(name, expr, _) => Ok(Stmt::Assign(name, expr, is_semicolon_terminated)),
+            Stmt::Assign(name, expr, _) => {
+                let has_more_toplevel_tokens = self.pos < self.tokens.len();
+                Ok(Stmt::Assign(name, expr, is_semicolon_terminated && has_more_toplevel_tokens))
+            }
             other => Ok(other),
         }
     }
@@ -588,11 +593,11 @@ impl Parser {
             }
             let stmt = self.parse_stmt().map_err(|e| e.message)?;
             let is_semicolon_terminated = self.consume(&Token::Semicolon);
-            
-            // Apply semicolon suppression to both expression statements and assignments
+
+            // Only expression statements are display-suppressed by semicolon.
             let final_stmt = match stmt {
                 Stmt::ExprStmt(expr, _) => Stmt::ExprStmt(expr, is_semicolon_terminated),
-                Stmt::Assign(name, expr, _) => Stmt::Assign(name, expr, is_semicolon_terminated),
+                Stmt::Assign(name, expr, _) => Stmt::Assign(name, expr, false),
                 other => other,
             };
             body.push(final_stmt);
