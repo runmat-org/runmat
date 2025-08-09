@@ -593,17 +593,17 @@ impl ConfigLoader {
             paths.push(home_dir.join(".runmat.yaml"));
             paths.push(home_dir.join(".runmat.yml"));
             paths.push(home_dir.join(".runmat.json"));
-            paths.push(home_dir.join(".config/rustmat/config.yaml"));
-            paths.push(home_dir.join(".config/rustmat/config.yml"));
-            paths.push(home_dir.join(".config/rustmat/config.json"));
+            paths.push(home_dir.join(".config/runmat/config.yaml"));
+            paths.push(home_dir.join(".config/runmat/config.yml"));
+            paths.push(home_dir.join(".config/runmat/config.json"));
         }
 
         // 4. System-wide configurations
         #[cfg(unix)]
         {
-            paths.push(PathBuf::from("/etc/rustmat/config.yaml"));
-            paths.push(PathBuf::from("/etc/rustmat/config.yml"));
-            paths.push(PathBuf::from("/etc/rustmat/config.json"));
+            paths.push(PathBuf::from("/etc/runmat/config.yaml"));
+            paths.push(PathBuf::from("/etc/runmat/config.yml"));
+            paths.push(PathBuf::from("/etc/runmat/config.json"));
         }
 
         paths

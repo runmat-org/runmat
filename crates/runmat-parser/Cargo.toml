@@ -2,6 +2,8 @@
 name = "runmat-parser"
 version = "0.0.1"
 edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../LICENSE.md"
 
 [dependencies]
 runmat-lexer = { workspace = true }

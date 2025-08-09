@@ -65,9 +65,6 @@ export default function BlogPage() {
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-24">
         <div className="mx-auto max-w-[58rem] text-center">
-          <Badge variant="secondary" className="mb-4">
-            Blog
-          </Badge>
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
             RunMat Blog
           </h1>

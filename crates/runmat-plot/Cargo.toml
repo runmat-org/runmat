@@ -2,6 +2,8 @@
 name = "runmat-plot"
 version = "0.0.1"
 edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../LICENSE.md"
 
 [dependencies]
 # Legacy static plotting support
@@ -54,7 +56,7 @@ image = { version = "0.24", features = ["png", "jpeg"] }
 
 
 
-# RustMat integration
+# RunMat integration
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }

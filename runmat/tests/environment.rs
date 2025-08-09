@@ -13,7 +13,7 @@ fn get_binary_path() -> PathBuf {
     path
 }
 
-// Helper function to run rustmat with environment variables
+// Helper function to run runmat with environment variables
 fn run_runmat_with_env(args: &[&str], env_vars: HashMap<&str, &str>) -> std::process::Output {
     let mut cmd = Command::new(get_binary_path());
     cmd.args(args);
@@ -22,7 +22,7 @@ fn run_runmat_with_env(args: &[&str], env_vars: HashMap<&str, &str>) -> std::pro
         cmd.env(key, value);
     }
 
-    cmd.output().expect("Failed to execute rustmat binary")
+    cmd.output().expect("Failed to execute runmat binary")
 }
 
 #[test]

@@ -2,7 +2,9 @@
 name = "runmat-gc"
 version = "0.0.1"
 edition = "2021"
-description = "Generational garbage collector for RustMat with optional pointer compression"
+description = "Generational garbage collector for RunMat with optional pointer compression"
+authors = ["Dystr Team"]
+license-file = "../LICENSE.md"
 
 [dependencies]
 runmat-builtins = { workspace = true }

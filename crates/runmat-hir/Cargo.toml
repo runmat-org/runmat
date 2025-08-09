@@ -2,6 +2,8 @@
 name = "runmat-hir"
 version = "1.0.0"
 edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../LICENSE.md"
 
 [dependencies]
 runmat-parser = { workspace = true }

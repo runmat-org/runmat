@@ -31,9 +31,9 @@ Checked in order; first existing file is loaded:
    - `runmat.config.yaml`, `runmat.config.yml`, `runmat.config.json`, `runmat.config.toml`
 3. Home directory:
    - `~/.runmat.yaml`, `~/.runmat.yml`, `~/.runmat.json`
-   - `~/.config/rustmat/config.yaml`, `config.yml`, `config.json`
+   - `~/.config/runmat/config.yaml`, `config.yml`, `config.json`
 4. System-wide (Unix):
-   - `/etc/rustmat/config.yaml`, `config.yml`, `config.json`
+   - `/etc/runmat/config.yaml`, `config.yml`, `config.json`
 
 If nothing exists, defaults are used.
 

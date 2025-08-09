@@ -20,53 +20,53 @@ jobs:
     strategy:
       matrix:
         platform:
-          - release_for: FreeBSD-x86_64
+          - release_for: freebsd-x86_64
             os: ubuntu-20.04
             target: x86_64-unknown-freebsd
             bin: runmat
-            name: runmat-FreeBSD-x86_64.tar.gz
+            name: runmat-freebsd-x86_64.tar.gz
             command: build
 
-          - release_for: Windows-x86_64
+          - release_for: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
-            name: runmat-Windows-x86_64.zip
+            name: runmat-windows-x86_64.zip
             command: build
 
-          - release_for: Windows-aarch64
+          - release_for: windows-aarch64
             os: windows-latest
             target: aarch64-pc-windows-msvc
             bin: runmat.exe
-            name: runmat-Windows-aarch64.zip
+            name: runmat-windows-aarch64.zip
             command: build
 
-          - release_for: macOS-x86_64
+          - release_for: macos-x86_64
             os: macOS-latest
             target: x86_64-apple-darwin
             bin: runmat
-            name: runmat-Darwin-x86_64.tar.gz
+            name: runmat-darwin-x86_64.tar.gz
             command: build
 
-          - release_for: macOS-aarch64
+          - release_for: macos-aarch64
             os: macOS-latest
             target: aarch64-apple-darwin
             bin: runmat
-            name: runmat-Darwin-aarch64.tar.gz
+            name: runmat-darwin-aarch64.tar.gz
             command: build
 
-          - release_for: Linux-x86_64
+          - release_for: linux-x86_64
             os: ubuntu-20.04
             target: x86_64-unknown-linux-gnu
             bin: runmat
-            name: runmat-Linux-x86_64.tar.gz
+            name: runmat-linux-x86_64.tar.gz
             command: build
 
-          - release_for: Linux-aarch64
+          - release_for: linux-aarch64
             os: ubuntu-20.04
             target: aarch64-unknown-linux-gnu
             bin: runmat
-            name: runmat-Linux-aarch64.tar.gz
+            name: runmat-linux-aarch64.tar.gz
             command: build
 
     runs-on: ${{ matrix.platform.os }}
@@ -108,7 +108,7 @@ jobs:
 
   create-release:
     name: Create Release
-    needs: [build-release]
+    needs: [build-release, publish-crates]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -151,3 +151,78 @@ jobs:
             artifacts/**/*
           draft: false
           prerelease: false
+
+  publish-crates:
+    name: Publish crates to crates.io
+    needs: [build-release]
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-workspaces
+        run: cargo install cargo-workspaces --locked
+
+      - name: Derive release version (strip leading 'v')
+        shell: bash
+        run: |
+          RAW_VERSION="${{ env.VERSION }}"
+          CLEAN_VERSION=${RAW_VERSION#v}
+          echo "RELEASE_VERSION=$CLEAN_VERSION" >> $GITHUB_ENV
+          echo "Using release version: $CLEAN_VERSION"
+
+      - name: Ensure LICENSE is included in each crate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for d in crates/*; do
+            if [ -d "$d" ]; then
+              # Copy root LICENSE to each crate as LICENSE (crates.io requires in-package)
+              if [ -f LICENSE ] || [ -f LICENSE.md ]; then
+                cp -f LICENSE* "$d/" || true
+                # Normalize to LICENSE for crates.io scanners
+                if [ -f "$d/LICENSE.md" ]; then mv -f "$d/LICENSE.md" "$d/LICENSE"; fi
+              fi
+            fi
+          done
+
+      - name: Normalize Cargo.toml license metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for toml in crates/*/Cargo.toml; do
+            # If license-file points outside the crate, retarget it to in-crate LICENSE
+            if grep -q '^license-file\s*=\s*"\..*/LICENSE' "$toml"; then
+              sed -i.bak 's#^license-file\s*=\s*"\..*/LICENSE.*#license-file = "LICENSE"#' "$toml"
+              rm -f "$toml.bak"
+            fi
+            # If license not set at all, but LICENSE exists, add MIT license fallback
+            if ! grep -q '^license\s*=' "$toml" && [ -f "${toml%/*}/LICENSE" ]; then
+              # Append license = "MIT" under [package] if not present
+              awk 'BEGIN{printed=0} {print} /^\[package\]/{if(!printed){print "license = \"MIT\""; printed=1}}' "$toml" > "$toml.tmp" && mv "$toml.tmp" "$toml"
+            fi
+          done
+
+      - name: Bump workspace crate versions
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cargo workspaces version "$RELEASE_VERSION" \
+            --force '*' \
+            --no-git-commit --no-git-tag \
+            --exact
+
+      - name: Publish all crates in dependency order
+        shell: bash
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euxo pipefail
+          # Publish in correct order, skipping already published crates
+          cargo workspaces publish --all --yes --allow-dirty --skip-published \
+            --token "$CARGO_REGISTRY_TOKEN"

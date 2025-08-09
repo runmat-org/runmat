@@ -14,12 +14,12 @@ fn get_binary_path() -> PathBuf {
     path
 }
 
-// Helper function to run rustmat with arguments
-fn run_rustmat(args: &[&str]) -> std::process::Output {
+// Helper function to run runmat with arguments
+fn run_runmat(args: &[&str]) -> std::process::Output {
     Command::new(get_binary_path())
         .args(args)
         .output()
-        .expect("Failed to execute rustmat binary")
+        .expect("Failed to execute runmat binary")
 }
 
 #[test]
@@ -40,7 +40,7 @@ result = z + 5
     )
     .unwrap();
 
-    let output = run_rustmat(&["run", script_path.to_str().unwrap()]);
+    let output = run_runmat(&["run", script_path.to_str().unwrap()]);
     assert!(
         output.status.success(),
         "End-to-end script execution failed: {}",
@@ -65,7 +65,7 @@ final_result = 42
     )
     .unwrap();
 
-    let output = run_rustmat(&[
+    let output = run_runmat(&[
         "--gc-preset",
         "debug",
         "--gc-stats",
@@ -97,7 +97,7 @@ result = x + y * 2;
     .unwrap();
 
     // Test with JIT enabled
-    let jit_output = run_rustmat(&[
+    let jit_output = run_runmat(&[
         "--jit-opt-level",
         "speed",
         "benchmark",
@@ -108,7 +108,7 @@ result = x + y * 2;
     ]);
 
     // Test with JIT disabled
-    let interp_output = run_rustmat(&["--no-jit", "run", script_path.to_str().unwrap()]);
+    let interp_output = run_runmat(&["--no-jit", "run", script_path.to_str().unwrap()]);
 
     assert!(jit_output.status.success(), "JIT benchmark failed");
     assert!(
@@ -123,7 +123,7 @@ result = x + y * 2;
 #[test]
 fn test_configuration_persistence() {
     // Test that configuration options are properly applied
-    let output = run_rustmat(&[
+    let output = run_runmat(&[
         "--gc-preset",
         "low-latency",
         "--jit-threshold",
@@ -154,11 +154,11 @@ fn test_error_handling_and_recovery() {
     fs::write(&good_script_path, "x = 42").unwrap();
 
     // Bad script should fail
-    let bad_output = run_rustmat(&["run", bad_script_path.to_str().unwrap()]);
+    let bad_output = run_runmat(&["run", bad_script_path.to_str().unwrap()]);
     assert!(!bad_output.status.success());
 
     // Good script should work after error
-    let good_output = run_rustmat(&["run", good_script_path.to_str().unwrap()]);
+    let good_output = run_runmat(&["run", good_script_path.to_str().unwrap()]);
     assert!(good_output.status.success());
 }
 
@@ -195,7 +195,7 @@ final_answer = result1 + result3;
     )
     .unwrap();
 
-    let output = run_rustmat(&[
+    let output = run_runmat(&[
         "--gc-preset",
         "high-throughput",
         "--jit-opt-level",
@@ -235,7 +235,7 @@ result = 999
     )
     .unwrap();
 
-    let output = run_rustmat(&[
+    let output = run_runmat(&[
         "--gc-preset",
         "low-memory",
         "--gc-stats",
@@ -253,7 +253,7 @@ result = 999
 #[test]
 fn test_cli_help_and_documentation() {
     // Test that help output is comprehensive and correct
-    let output = run_rustmat(&["--help"]);
+    let output = run_runmat(&["--help"]);
     assert!(output.status.success());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -276,7 +276,7 @@ fn test_cli_help_and_documentation() {
 
 #[test]
 fn test_version_information() {
-    let output = run_rustmat(&["version", "--detailed"]);
+    let output = run_runmat(&["version", "--detailed"]);
     assert!(output.status.success());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -306,7 +306,7 @@ fn test_benchmark_functionality() {
 
     fs::write(&script_path, "benchmark_result = 10 + 20").unwrap();
 
-    let output = run_rustmat(&[
+    let output = run_runmat(&[
         "benchmark",
         script_path.to_str().unwrap(),
         "--iterations",
@@ -331,7 +331,7 @@ fn test_gc_commands() {
     let gc_commands = ["stats", "minor", "major", "config"];
 
     for cmd in &gc_commands {
-        let output = run_rustmat(&["gc", cmd]);
+        let output = run_runmat(&["gc", cmd]);
         assert!(
             output.status.success() || output.status.success(), // Some might not be implemented yet
             "GC command failed: gc {cmd}"
@@ -352,7 +352,7 @@ fn test_multi_configuration_compatibility() {
         let mut args = combo.clone();
         args.push("info");
 
-        let output = run_rustmat(&args);
+        let output = run_runmat(&args);
         assert!(
             output.status.success(),
             "Configuration combination failed: {combo:?}"
@@ -393,7 +393,7 @@ final_result = arithmetic_result + condition_result + loop_sum;
     )
     .unwrap();
 
-    let output = run_rustmat(&["run", script_path.to_str().unwrap()]);
+    let output = run_runmat(&["run", script_path.to_str().unwrap()]);
     assert!(
         output.status.success(),
         "All features test failed: {}",
@@ -416,7 +416,7 @@ fn test_concurrent_execution_safety() {
             let script_path = temp_dir_clone.path().join(format!("concurrent_{i}.m"));
             fs::write(&script_path, format!("thread_result_{i} = {i} * 10")).unwrap();
 
-            let output = run_rustmat(&["run", script_path.to_str().unwrap()]);
+            let output = run_runmat(&["run", script_path.to_str().unwrap()]);
             output.status.success()
         });
         handles.push(handle);
@@ -436,19 +436,19 @@ fn test_edge_case_handling() {
     // Test empty file
     let empty_script = temp_dir.path().join("empty.m");
     fs::write(&empty_script, "").unwrap();
-    let output = run_rustmat(&["run", empty_script.to_str().unwrap()]);
+    let output = run_runmat(&["run", empty_script.to_str().unwrap()]);
     assert!(output.status.success()); // Should handle gracefully
 
     // Test whitespace-only file
     let whitespace_script = temp_dir.path().join("whitespace.m");
     fs::write(&whitespace_script, "   \n\t  \n  ").unwrap();
-    let output = run_rustmat(&["run", whitespace_script.to_str().unwrap()]);
+    let output = run_runmat(&["run", whitespace_script.to_str().unwrap()]);
     assert!(output.status.success()); // Should handle gracefully
 
     // Test very large numbers
     let large_num_script = temp_dir.path().join("large_nums.m");
     fs::write(&large_num_script, "huge = 1e100; result = huge / 1e50;").unwrap();
-    let output = run_rustmat(&["run", large_num_script.to_str().unwrap()]);
+    let output = run_runmat(&["run", large_num_script.to_str().unwrap()]);
     // Should handle gracefully (success or controlled failure)
     assert!(output.status.success() || !output.status.success());
 }

@@ -52,14 +52,14 @@ Performance Features:
 • Zero-copy memory management where possible
 
 Examples:
-  rustmat                                   # Start interactive REPL with JIT
-  rustmat --no-jit                          # Start REPL with interpreter only
-  rustmat --gc-preset low-latency           # Optimize GC for low latency
-  rustmat script.m                          # Execute MATLAB script
-  rustmat --install-kernel                  # Install as Jupyter kernel
-  rustmat kernel                            # Start Jupyter kernel
-  rustmat kernel-connection connection.json # Start with connection file
-  rustmat --version --detailed              # Show detailed version information
+  runmat                                   # Start interactive REPL with JIT
+  runmat --no-jit                          # Start REPL with interpreter only
+  runmat --gc-preset low-latency           # Optimize GC for low latency
+  runmat script.m                          # Execute MATLAB script
+  runmat --install-kernel                  # Install as Jupyter kernel
+  runmat kernel                            # Start Jupyter kernel
+  runmat kernel-connection connection.json # Start with connection file
+  runmat --version --detailed              # Show detailed version information
 "#,
     after_help = r#"
 Environment Variables:
@@ -1430,7 +1430,7 @@ async fn execute_config_command(
                     println!("  {}{}", path.display(), exists);
                 }
 
-                let config_dir = home_dir.join(".config/rustmat");
+                let config_dir = home_dir.join(".config/runmat");
                 for name in &["config.yaml", "config.yml", "config.json"] {
                     let path = config_dir.join(name);
                     let exists = if path.exists() { " (exists)" } else { "" };
@@ -1443,9 +1443,9 @@ async fn execute_config_command(
                 println!();
                 println!("System-wide:");
                 for name in &[
-                    "/etc/rustmat/config.yaml",
-                    "/etc/rustmat/config.yml",
-                    "/etc/rustmat/config.json",
+                    "/etc/runmat/config.yaml",
+                    "/etc/runmat/config.yml",
+                    "/etc/runmat/config.json",
                 ] {
                     let path = std::path::Path::new(name);
                     let exists = if path.exists() { " (exists)" } else { "" };
