@@ -24,9 +24,6 @@ jobs:
     env:
       # Ensure single-threaded tests for GC stability
       RUST_TEST_THREADS: 1
-      # Enable sccache for faster Rust builds across CI runs
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v3
 
@@ -36,9 +33,6 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.4
 
       - name: Install Linux system dependencies (BLAS/LAPACK, ZMQ, GUI)
         run: |
@@ -67,9 +61,6 @@ jobs:
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 -- --test-threads=1 | tee test.log
 
-      - name: sccache stats
-        if: always()
-        run: sccache -s || true
 
       - name: Test Summary
         if: always() && github.event_name == 'pull_request'
