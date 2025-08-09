@@ -10,8 +10,8 @@ export default function Footer() {
         <div className="flex flex-col items-center gap-4 px-8 md:flex-row md:gap-2 md:px-0">
           <div className="flex items-center gap-3">
             <Logo height={24} className="shrink-0" />
-            <p className="text-center text-sm leading-loose md:text-left">
-              <span className="font-medium">RunMat</span>
+            <p className="text-center text-base leading-none md:text-left md:text-lg">
+              <span className="font-semibold brand-text-sheen">RunMat</span>
             </p>
           </div>
           <p className="text-center text-sm leading-loose text-muted-foreground md:text-left">

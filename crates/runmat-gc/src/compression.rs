@@ -5,6 +5,8 @@
 
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
+use parking_lot::RwLock;
+use once_cell::sync::Lazy;
 
 /// Global heap base address for pointer compression
 static HEAP_BASE: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
@@ -13,6 +15,11 @@ static HEAP_BASE: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
 pub const MAX_COMPRESSED_HEAP_SIZE: usize = 4 * 1024 * 1024 * 1024; // 4GB
 
 /// A compressed pointer that uses 32 bits instead of 64 bits
+///
+/// Representation detail:
+/// - offset == 0 represents a NULL pointer
+/// - non-zero values store (actual_offset + 1) so that a pointer located exactly at the
+///   heap base is representable without colliding with NULL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompressedPtr {
     /// 32-bit offset from heap base
@@ -51,25 +58,31 @@ impl CompressedPtr {
         let ptr_addr = ptr as usize;
 
         if ptr_addr < base_addr {
-            log::warn!("Pointer {ptr:p} is below heap base {heap_base:p}");
-            return Self::null();
+            // Fallback: store pointer in registry when it falls below base
+            return registry_store(ptr);
         }
 
         let offset = ptr_addr - base_addr;
-        if offset > u32::MAX as usize {
-            log::warn!("Pointer {ptr:p} offset {offset} exceeds 32-bit range");
-            return Self::null();
+        // We reserve 0 for NULL, so the maximum representable offset is u32::MAX - 1
+        if offset > (u32::MAX as usize - 1) {
+            // Too large for inline offset, fallback to registry
+            return registry_store(ptr);
         }
 
-        Self {
-            offset: offset as u32,
-        }
+        // Store (offset + 1) so that base-address pointers are representable (offset == 0)
+        Self { offset: (offset as u32) + 1 }
     }
 
     /// Decompress to a raw pointer
     pub fn decompress(&self) -> *const u8 {
         if self.is_null() {
             return ptr::null();
+        }
+
+        // Registry-tagged pointer?
+        if is_registry_tag(self.offset) {
+            let idx = registry_index(self.offset);
+            return registry_get(idx);
         }
 
         let heap_base = HEAP_BASE.load(Ordering::Relaxed);
@@ -79,14 +92,20 @@ impl CompressedPtr {
         }
 
         let base_addr = heap_base as usize;
-        let ptr_addr = base_addr + (self.offset as usize);
+        // Stored value is (actual_offset + 1)
+        let actual_offset = (self.offset as usize).saturating_sub(1);
+        let ptr_addr = base_addr + actual_offset;
 
         ptr_addr as *const u8
     }
 
     /// Get the raw offset value
     pub fn offset(&self) -> u32 {
-        self.offset
+        if self.is_null() {
+            0
+        } else {
+            self.offset - 1
+        }
     }
 
     /// Create a compressed pointer from an offset (unsafe)
@@ -100,10 +119,11 @@ impl CompressedPtr {
 
     /// Add an offset to this compressed pointer
     pub fn add_offset(&self, additional_offset: usize) -> Option<Self> {
-        let new_offset = self.offset as usize + additional_offset;
-        if new_offset <= u32::MAX as usize {
+        let base = if self.is_null() { 0usize } else { (self.offset as usize) - 1 };
+        let new_actual = base.checked_add(additional_offset)?;
+        if new_actual <= (u32::MAX as usize - 1) {
             Some(Self {
-                offset: new_offset as u32,
+                offset: (new_actual as u32) + 1,
             })
         } else {
             None
@@ -112,12 +132,52 @@ impl CompressedPtr {
 
     /// Calculate the distance between two compressed pointers
     pub fn offset_from(&self, other: &CompressedPtr) -> Option<isize> {
-        if self.offset >= other.offset {
-            Some((self.offset - other.offset) as isize)
+        // For registry-tagged pointers, offset math is undefined; return None
+        if is_registry_tag(self.offset) || is_registry_tag(other.offset) {
+            return None;
+        }
+        let a = if self.is_null() { 0 } else { self.offset - 1 } as isize;
+        let b = if other.is_null() { 0 } else { other.offset - 1 } as isize;
+        if a >= b {
+            Some(a - b)
         } else {
-            Some(-((other.offset - self.offset) as isize))
+            Some(-(b - a))
         }
     }
+}
+
+// -------- Registry fallback for non-inline-compressible pointers --------
+
+// Use high bit as a tag to indicate registry storage
+const REGISTRY_TAG: u32 = 1 << 31;
+
+fn is_registry_tag(v: u32) -> bool {
+    (v & REGISTRY_TAG) != 0
+}
+
+fn registry_index(v: u32) -> usize {
+    // lower 31 bits store (index + 1)
+    ((v & !REGISTRY_TAG) as usize).saturating_sub(1)
+}
+
+static POINTER_REGISTRY: Lazy<RwLock<Vec<usize>>> = Lazy::new(|| RwLock::new(Vec::new()));
+
+fn registry_store(ptr: *const u8) -> CompressedPtr {
+    let mut reg = POINTER_REGISTRY.write();
+    let idx = reg.len();
+    // Guard against overflow of 31-bit index space
+    if idx >= (u32::MAX as usize - 1) {
+        log::error!("Pointer registry exhausted; returning null compressed ptr");
+        return CompressedPtr::null();
+    }
+    reg.push(ptr as usize);
+    let stored = REGISTRY_TAG | ((idx as u32) + 1);
+    CompressedPtr { offset: stored }
+}
+
+fn registry_get(idx: usize) -> *const u8 {
+    let reg = POINTER_REGISTRY.read();
+    if idx < reg.len() { reg[idx] as *const u8 } else { ptr::null() }
 }
 
 impl Default for CompressedPtr {
@@ -347,6 +407,7 @@ mod tests {
 
         let compressed = CompressedPtr::compress(offset_ptr);
         assert!(!compressed.is_null());
+        // offset() returns the actual logical offset, should be 100
         assert_eq!(compressed.offset(), 100);
 
         let decompressed = compressed.decompress();
@@ -391,20 +452,21 @@ mod tests {
 
     #[test]
     fn test_compressed_ptr_add_offset() {
+        // Represent a pointer that is base+99 (stored as 100 internally)
         let ptr = CompressedPtr { offset: 100 };
 
         let new_ptr = ptr.add_offset(50).expect("should add offset");
-        assert_eq!(new_ptr.offset(), 150);
+        assert_eq!(new_ptr.offset(), 149);
 
         // Test overflow
-        let large_ptr = CompressedPtr {
-            offset: u32::MAX - 10,
-        };
+        // offset field stores +1, so u32::MAX - 10 represents an actual offset of u32::MAX - 11
+        let large_ptr = CompressedPtr { offset: u32::MAX - 10 };
         assert!(large_ptr.add_offset(20).is_none());
     }
 
     #[test]
     fn test_compressed_ptr_offset_from() {
+        // ptr1 actual offset = 99, ptr2 actual offset = 149
         let ptr1 = CompressedPtr { offset: 100 };
         let ptr2 = CompressedPtr { offset: 150 };
 

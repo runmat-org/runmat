@@ -26,7 +26,7 @@ export default function Navigation() {
         <div className="mr-4 hidden md:flex">
           <Link href="/" className="mr-6 flex items-center space-x-2">
             <Logo height={20} className="pr-2" />
-            <span className="hidden font-bold sm:inline-block">RunMat</span>
+            <span className="hidden sm:inline-block font-bold text-lg md:text-xl leading-none brand-text-sheen">RunMat</span>
           </Link>
           <NavigationMenu>
             <NavigationMenuList>
@@ -71,9 +71,9 @@ export default function Navigation() {
         </Button>
         <div className="flex flex-1 items-center justify-between space-x-2 md:justify-end">
           <div className="w-full flex-1 md:w-auto md:flex-none">
-            <Link href="/" className="flex items-center space-x-2 md:hidden">
+            <Link href="/" className="flex items-center space-x-3 md:hidden">
               <Logo height={24} />
-              <span className="font-bold">RunMat</span>
+              <span className="font-bold text-lg leading-none brand-text-sheen">RunMat</span>
             </Link>
           </div>
           <nav className="hidden md:flex items-center space-x-2">
