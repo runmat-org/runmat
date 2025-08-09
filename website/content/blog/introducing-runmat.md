@@ -1,5 +1,5 @@
 ---
-title: "Introducing RunMat: A Modern MATLAB Runtime"
+title: "Introducing RunMat: A Free, Fast, Modern MATLAB Runtime"
 description: "A blazing-fast, memory-safe, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler, advanced garbage collection, and GPU-accelerated plotting."
 date: "2025-01-07"
 author: "Nabeel Allana"
@@ -173,8 +173,11 @@ RunMat is completely open source under the MIT license (with attribution require
 ### Install RunMat in seconds
 
 ```bash
-curl -fsSL https://runmat.org/install.sh | sh    # Linux/macOS
-iwr https://runmat.org/install.ps1 | iex        # Windows
+# Linux/macOS
+curl -fsSL https://runmat.org/install.sh | sh
+
+# Windows
+iwr https://runmat.org/install.ps1 | iex
 ```
 
 ### Run your first script and see the 150x speedup
@@ -199,13 +202,15 @@ The performance improvements have practical implications for real workflows:
 
 RunMat represents just the beginning. We're building a complete ecosystem for scientific computing:
 
-- **Cloud integration:** Run RunMat notebooks in the browser
-- **Distributed computing:** Scale to thousands of cores  
-- **GPU compute:** CUDA and ROCm integration for ML workloads
-- **Package ecosystem:** A modern package manager for numerical libraries
+- **Full built-in coverage**: Our roadmap targets implementing the entire MATLAB built-in function set with high-quality, well-tested equivalents.
+- **Major toolboxes**: Signal Processing, Statistics & Machine Learning, Image Processing, Optimization, Control Systems, and more. These APIs are well understood, and we’re using LLM-assisted tooling to accelerate development while keeping rigorous tests and benchmarks to ensure correctness and performance.
+- **High-performance graphics**: Our wgpu-based graphics engine is designed for extremely dense visualizations—think multi-million-point scatter/point clouds, large mesh rendering, and complex interactive scenes—while staying responsive and visually crisp.
+- **Extensibility first**: RunMat is an open, modular runtime. Add functions, contribute toolboxes, build custom accelerators, and integrate with your pipelines.
 
-**Join the revolution** in democratizing access to high-performance scientific computing. With RunMat's proven 150x speedup over free alternatives, the future of research is no longer held back by expensive licenses or slow software.
+We’re actively seeking contributors. If you’d like to help implement built-ins, toolboxes, plotting primitives, or docs, head over to our GitHub repository and jump in: https://github.com/runmat-org/runmat
+
+**Spread the word** and share RunMat with your friends and colleagues. Scientific computing deserves better tools, and together we can make high-performance, accessible computing the new standard for researchers, engineers, and students worldwide.
 
 ---
 
-*RunMat is developed by [Dystr](https://dystr.com), a modern computational platform for engineering teams. Learn more at [dystr.com](https://dystr.com).*
+*RunMat is developed by [Dystr](https://dystr.com) - a next generation computational platform for engineering teams. Learn more at [dystr.com](https://dystr.com).*
