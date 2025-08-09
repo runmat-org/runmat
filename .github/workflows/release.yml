@@ -145,15 +145,8 @@ jobs:
             2. Extract the archive
             3. Add the binary to your PATH
             
-            ### What's New
-            - Enhanced Jupyter plotting with WebAssembly widgets
-            - Improved performance for matrix operations
-            - Bug fixes and stability improvements
-            
             ### Documentation
             - [Getting Started](https://runmat.org/docs/getting-started)
-            - [API Reference](https://runmat.org/docs/api)
-            - [Examples](https://runmat.org/docs/examples)
           files: |
             artifacts/**/*
           draft: false
