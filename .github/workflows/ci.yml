@@ -63,19 +63,31 @@ jobs:
           brew update
           brew install zeromq
 
-      - name: Install Windows dependencies (ZMQ)
+      - name: Install Windows dependencies (ZMQ, vcpkg + OpenBLAS)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           choco install -y pkgconfiglite
-          echo "Fetching prebuilt ZeroMQ for Windows (MSVC)" 
+
+          Write-Host "Fetching prebuilt ZeroMQ for Windows (MSVC)"
           curl -L -o libzmq.zip https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.zip
-          powershell -Command "Expand-Archive -Path libzmq.zip -DestinationPath zmq"
-          # Locate lib and include (the exact layout varies by package; prefer MSVC x64)
-          echo "Setting up env vars for ZMQ include/lib"
-          echo "INCLUDE=%CD%/zmq/include;%INCLUDE%" >> $env:GITHUB_ENV
-          echo "LIB=%CD%/zmq/lib;%LIB%" >> $env:GITHUB_ENV
-          echo "ZMQ_PATH=%CD%/zmq" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG_PATH=%CD%/zmq/lib/pkgconfig" >> $env:GITHUB_ENV
+          Expand-Archive -Path libzmq.zip -DestinationPath zmq
+          # Set env vars for ZMQ include/lib
+          $zmq = Join-Path $pwd "zmq"
+          Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$($zmq)\include;$env:INCLUDE"
+          Add-Content -Path $env:GITHUB_ENV -Value "LIB=$($zmq)\lib;$env:LIB"
+          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
+          Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
+
+          Write-Host "Cloning vcpkg and installing OpenBLAS"
+          $vcpkgRoot = Join-Path $pwd "vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          & "$vcpkgRoot\bootstrap-vcpkg.bat"
+          # Ensure x64 triplet
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=x64-windows"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=x64-windows"
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
 
       - name: Format
         run: cargo fmt -- --check
