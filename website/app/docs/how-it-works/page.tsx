@@ -242,8 +242,8 @@ export default function HowItWorksPage() {
               <p className="text-lg text-muted-foreground mb-4">
                 When you type <code>A = [1, 2; 3, 4]</code> and press enter, here&apos;s what happens in microseconds:
               </p>
-              <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-6">
-                <ol className="space-y-3 text-muted-foreground">
+              <div className="bg-muted dark:bg-slate-900 rounded-lg p-6 border border-border dark:border-slate-800">
+                <ol className="space-y-3 text-foreground dark:text-muted-foreground">
                   <li><strong>1. Lexical Analysis:</strong> Your MATLAB code gets tokenized into meaningful chunks</li>
                   <li><strong>2. Parsing:</strong> Tokens become an Abstract Syntax Tree (AST) representing the structure</li>
                   <li><strong>3. HIR Translation:</strong> The AST becomes High-level Intermediate Representation for optimization</li>
@@ -265,8 +265,8 @@ export default function HowItWorksPage() {
               <p className="text-lg text-muted-foreground mb-4">
                 Once a function gets called enough times (our threshold is carefully tuned), Turbine kicks in:
               </p>
-              <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-6">
-                <ul className="space-y-3 text-muted-foreground">
+              <div className="bg-muted dark:bg-slate-900 rounded-lg p-6 border border-border dark:border-slate-800">
+                <ul className="space-y-3 text-foreground dark:text-muted-foreground">
                   <li><strong>• Type Specialization:</strong> Generate optimized code paths for your specific data types</li>
                   <li><strong>• Loop Optimization:</strong> Unroll tight loops and vectorize operations using SIMD instructions</li>
                   <li><strong>• Function Inlining:</strong> Eliminate call overhead for frequently-used builtins like <code>sin()</code> or <code>cos()</code></li>

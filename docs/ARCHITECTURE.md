@@ -27,10 +27,10 @@ graph TD
     C -->|runmat-hir| D(High-level IR - HIR);
     D -->|runmat-ignition| E(Bytecode);
     E -->|Ignition Interpreter| F[Execution & Profiling];
-    F -- Hot Code -->|runmat-turbine| G(Cranelift IR);
-    G -->|Turbine JIT Compiler| H{Native Machine Code};
+    F -->|Hot Code via runmat-turbine| G(Cranelift IR);
+    G -->|Turbine JIT Compiler| H[Native Machine Code];
     H -->|JIT Execution| I[Optimized Execution];
-    F -- Cold Code --> J[Result];
+    F -->|Cold Code| J[Result];
     I --> J;
 
     subgraph "1. Frontend Parsing"
@@ -99,18 +99,18 @@ The power of RunMat comes from its extensive and performant standard library, wh
 
 ```mermaid
 graph TD
-    A[MATLAB Code: `y = sin(x)`] --> B{Execution Engine};
-    B -->|`call_builtin("sin", ...)`| C{Runtime Dispatch};
-    C -->|`inventory` lookup| D[Builtin Registry];
-    D -->|Finds `sin`| E(runmat-runtime::sin_builtin);
+    A["MATLAB Code: y = sin(x)"] --> B{Execution Engine}
+    B -->|call builtin sin| C{Runtime Dispatch}
+    C -->|inventory lookup| D["Builtin Registry"]
+    D -->|finds sin| E["sin_builtin (runtime)"]
     subgraph Crates
-        F[`runmat-macros`]: `#[runtime_builtin]` registers `sin_builtin`;
-        G[`runmat-builtins`]: Defines `Value` and the `Builtin` struct;
-        H[`runmat-runtime`]: Implements `sin_builtin`;
+        F["runmat-macros: runtime_builtin macro"]
+        G["runmat-builtins: Value & Builtin types"]
+        H["runmat-runtime: function implementations"]
     end
-    E -- Implemented in --> H;
-    E -- Registered via --> F;
-    F -- Uses --> G;
+    E -->|implemented in| H
+    E -->|registered via| F
+    F -->|uses| G
 ```
 
 -   **`runmat-builtins`**: This is the foundational crate. It defines the core `Value` enum, which represents all possible data types in the RunMat runtime (integers, floats, strings, matrices, etc.). It also defines the `Builtin` struct and uses the `inventory` crate to create a global, self-registering list of all available standard library functions.

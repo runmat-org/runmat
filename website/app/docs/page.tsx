@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { BookOpen, Zap, Code, Cpu, Settings, Terminal } from "lucide-react";
+import { BookOpen, Zap, Code, Cpu, Settings, Terminal, GitBranch } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "RunMat Documentation - Complete Guides and API Reference",
@@ -72,6 +72,7 @@ export default function DocsPage() {
             </Card>
           </Link>
 
+
           {/* Built-in Functions */}
           <Link href="/docs/builtin-functions" className="block">
             <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
@@ -87,6 +88,86 @@ export default function DocsPage() {
               <CardContent>
                 <div className="text-sm text-muted-foreground">
                   Browse Functions →
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* Architecture (from repo docs) */}
+          <Link href="/docs/architecture" className="block">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <GitBranch className="h-6 w-6 text-primary" />
+                  <CardTitle>Architecture</CardTitle>
+                </div>
+                <CardDescription>
+                  Learn how RunMat is structured (interpreter, JIT, GC, runtime, plotting)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-muted-foreground">
+                  Open Document →
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* Configuration (from repo docs) */}
+          <Link href="/docs/configuration" className="block">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Settings className="h-6 w-6 text-primary" />
+                  <CardTitle>Configuration</CardTitle>
+                </div>
+                <CardDescription>
+                  Configure RunMat via YAML/JSON/TOML with env & CLI precedence
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-muted-foreground">
+                  Open Guide →
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* CLI Reference (from repo docs) */}
+          <Link href="/docs/cli" className="block">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Terminal className="h-6 w-6 text-primary" />
+                  <CardTitle>CLI Reference</CardTitle>
+                </div>
+                <CardDescription>
+                  Full CLI reference, commands, env vars, and examples
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-muted-foreground">
+                  Browse Reference →
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* Language Coverage (from repo docs) */}
+          <Link href="/docs/language-coverage" className="block">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <BookOpen className="h-6 w-6 text-primary" />
+                  <CardTitle>Language Coverage</CardTitle>
+                </div>
+                <CardDescription>
+                  Track MATLAB syntax and feature support in RunMat
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-muted-foreground">
+                  View Coverage →
                 </div>
               </CardContent>
             </Card>
@@ -110,41 +191,6 @@ export default function DocsPage() {
             </CardContent>
           </Card>
 
-          {/* Configuration */}
-          <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 opacity-60">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Settings className="h-6 w-6 text-primary" />
-                <CardTitle>Configuration</CardTitle>
-              </div>
-              <CardDescription>
-                Configure RunMat for optimal performance in your environment
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm text-muted-foreground">
-                Coming Soon
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* CLI Reference */}
-          <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 opacity-60">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Terminal className="h-6 w-6 text-primary" />
-                <CardTitle>CLI Reference</CardTitle>
-              </div>
-              <CardDescription>
-                Complete command-line interface reference and examples
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm text-muted-foreground">
-                Coming Soon
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Quick Links */}

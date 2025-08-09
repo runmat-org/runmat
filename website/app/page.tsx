@@ -1,9 +1,48 @@
+import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 import { OSInstallCommand } from "@/components/OSInstallCommand";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "RunMat - Free, Modern MATLAB Runtime",
+  description:
+    "Run MATLAB code for free with RunMat: a high-performance, open-source runtime and Octave alternative with JIT compilation, BLAS/LAPACK, GPU plotting, and a Jupyter kernel.",
+  keywords: [
+    "run matlab online",
+    "free matlab runtime",
+    "matlab alternative",
+    "octave alternative",
+    "run matlab code",
+    "matlab replacement",
+    "gnu octave vs",
+    "high performance matlab",
+    "matlab jit",
+    "jupyter matlab",
+    "matlab plotting",
+    "matlab vs octave",
+    "matlab vs python",
+    "matlab vs julia",
+    "matlab vs scilab",
+  ],
+  alternates: { canonical: "/" },
+  openGraph: {
+    title: "RunMat - Free, Modern MATLAB Runtime",
+    description:
+      "Run MATLAB code for free with a modern, high-performance runtime. Open source, JIT-accelerated, BLAS/LAPACK powered, beautiful plots, and Jupyter kernel support.",
+    url: "/",
+    siteName: "RunMat",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "RunMat - Free, Modern MATLAB Runtime",
+    description:
+      "Run MATLAB code for free with a fast, open-source Octave alternative. JIT compiler, BLAS/LAPACK, GPU plots, and Jupyter integration.",
+  },
+};
 
 export default function HomePage() {
   return (

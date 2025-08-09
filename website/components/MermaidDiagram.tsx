@@ -24,20 +24,28 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
       setError(null);
 
       try {
-        // Initialize mermaid with theme
+        // Initialize mermaid with theme. Keep securityLevel default (strict) for safety.
         mermaid.initialize({
           startOnLoad: true,
           theme: theme === 'dark' ? 'dark' : 'default',
+          flowchart: {
+            htmlLabels: false,
+            useMaxWidth: true,
+            curve: 'basis',
+          },
           themeVariables: {
-            primaryColor: '#3ea7fd',
-            primaryTextColor: theme === 'dark' ? '#F4F5F5' : '#202124',
-            primaryBorderColor: '#3ea7fd',
-            lineColor: theme === 'dark' ? '#AEAFB0' : '#8C8C8C',
-            sectionBkgColor: theme === 'dark' ? '#2D2E30' : '#f8f9fa',
-            altSectionBkgColor: theme === 'dark' ? '#27282B' : '#e9ecef',
-            gridColor: theme === 'dark' ? '#454545' : '#e1e5e9',
-            secondaryColor: theme === 'dark' ? '#454545' : '#f1f3f4',
-            tertiaryColor: theme === 'dark' ? '#27282B' : '#ffffff',
+            primaryColor: theme === 'dark' ? '#111827' : '#ffffff',
+            primaryTextColor: theme === 'dark' ? '#E6E7E9' : '#202124',
+            primaryBorderColor: theme === 'dark' ? '#334155' : '#CBD5E1',
+            lineColor: theme === 'dark' ? '#64748B' : '#94A3B8',
+            nodeBorder: theme === 'dark' ? '#334155' : '#CBD5E1',
+            clusterBkg: theme === 'dark' ? '#0b1220' : '#F8FAFC',
+            clusterBorder: theme === 'dark' ? '#334155' : '#CBD5E1',
+            edgeLabelBackground: theme === 'dark' ? '#0f172a' : '#ffffff',
+            tertiaryColor: theme === 'dark' ? '#0b1220' : '#ffffff',
+            fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+            noteBkgColor: theme === 'dark' ? '#0b1220' : '#F8FAFC',
+            noteBorderColor: theme === 'dark' ? '#334155' : '#CBD5E1',
           },
         });
 
@@ -80,13 +88,13 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
   }
 
   return (
-    <div className={className}>
+    <div className={`w-full flex justify-center ${className ?? ''}`}>
       {isLoading && (
         <div className="flex items-center justify-center p-8">
           <div className="animate-pulse text-gray-500 dark:text-gray-400">Loading diagram...</div>
         </div>
       )}
-      <div ref={ref} className={isLoading ? 'hidden' : ''} />
+      <div ref={ref} className={`${isLoading ? 'hidden' : ''} max-w-full overflow-x-auto`} />
     </div>
   );
 }

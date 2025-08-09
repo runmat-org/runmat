@@ -95,6 +95,67 @@
 }
 
 @layer utilities {
+  /* Highlight.js / rehype-highlight code block theming tweaks to match site */
+  pre code.hljs {
+    display: block;
+    overflow-x: auto;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    border: 1px solid hsl(var(--border));
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  }
+
+  /* Mermaid embeds: ensure max width and centered visuals */
+  .mermaid svg { max-width: 100%; height: auto; }
+  .mermaid .node rect, .mermaid .node path {
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,0.15));
+    rx: 6px;
+    ry: 6px;
+  }
+  .mermaid .cluster rect {
+    rx: 8px;
+    ry: 8px;
+  }
+
+  /* Give code blocks breathing room */
+  pre:has(code.hljs) {
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  /* Inline code styling */
+  :not(pre) > code {
+    background: hsl(var(--muted));
+    padding: 0.15rem 0.35rem;
+    border-radius: 0.35rem;
+    border: 1px solid hsl(var(--border));
+    font-size: 0.9em;
+  }
+
+  /* Ensure readable contrast in light mode */
+  :root {
+    --hljs-key: #1d4ed8; /* blue-700 */
+    --hljs-str: #166534; /* green-700 */
+    --hljs-lit: #b45309; /* amber-700 */
+    --hljs-com: #6b7280; /* gray-500 */
+  }
+  .bg-muted { background-color: hsl(var(--muted)); }
+  .text-foreground { color: hsl(var(--foreground)); }
+  .dark .bg-muted { background-color: #0f172a; } /* slate-900 to match old dark block */
+  .hljs-keyword, .hljs-selector-tag, .hljs-subst { color: var(--hljs-key); }
+  .hljs-string, .hljs-title, .hljs-name, .hljs-type { color: var(--hljs-str); }
+  .hljs-attribute, .hljs-symbol, .hljs-bullet { color: var(--hljs-lit); }
+  .hljs-comment { color: var(--hljs-com); }
+  .hljs-keyword, .hljs-selector-tag, .hljs-subst { color: #7aa2f7; }
+  .hljs-string, .hljs-title, .hljs-name, .hljs-type { color: #9ece6a; }
+  .hljs-attribute, .hljs-symbol, .hljs-bullet { color: #e0af68; }
+  .hljs-built_in, .hljs-builtin-name, .hljs-meta { color: #bb9af7; }
+  .hljs-comment { color: #6b7280; }
+
   .gradient-brand {
     background: linear-gradient(135deg, #3ea7fd 0%, #bb51ff 100%);
     -webkit-background-clip: text;
