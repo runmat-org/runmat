@@ -22,6 +22,10 @@ pub mod lapack;
 #[link(name = "Accelerate", kind = "framework")]
 extern "C" {}
 
+// Ensure OpenBLAS is linked on non-macOS platforms when BLAS/LAPACK is enabled
+#[cfg(all(feature = "blas-lapack", not(target_os = "macos")))]
+extern crate openblas_src;
+
 pub use arrays::*;
 pub use comparison::*;
 pub use concatenation::*;
