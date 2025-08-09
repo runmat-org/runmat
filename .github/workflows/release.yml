@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., v0.1.0)'
-        required: true
-        default: 'v0.0.1'
 
 permissions:
   contents: write
@@ -18,6 +12,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  VERSION: ${{ github.ref_name }}
 
 jobs:
   build-release:
@@ -97,17 +92,18 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.platform.target }}/release
+          ARTIFACT_NAME="runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
           if [[ "${{ matrix.platform.os }}" == "windows-latest" ]]; then
-            7z a ../../../${{ matrix.platform.name }} ${{ matrix.platform.bin }}
+            7z a ../../../${ARTIFACT_NAME}.zip ${{ matrix.platform.bin }}
           else
-            tar czvf ../../../${{ matrix.platform.name }} ${{ matrix.platform.bin }}
+            tar czvf ../../../${ARTIFACT_NAME}.tar.gz ${{ matrix.platform.bin }}
           fi
           cd -
 
       - name: Publish release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: runmat-${{ matrix.platform.release_for }}
+          name: runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}
           path: "runmat-*"
 
   create-release:
@@ -126,10 +122,10 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          name: RunMat ${{ github.event.inputs.version || github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          name: RunMat ${{ github.ref_name }}
           body: |
-            ## RunMat ${{ github.event.inputs.version || github.ref_name }}
+            ## RunMat ${{ github.ref_name }}
             
             High-performance MATLAB/Octave runtime with Jupyter kernel support.
             
