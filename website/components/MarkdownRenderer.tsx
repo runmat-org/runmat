@@ -4,14 +4,17 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { MermaidDiagram } from '@/components/MermaidDiagram';
 
+type MDXComponent = (props: { children?: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null;
+type MarkdownRendererComponents = Record<string, MDXComponent | ((props: { children: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null)>;
+
 type MarkdownRendererProps = {
   source: string;
-  components?: Record<string, React.ComponentType<any>>;
+  components?: MarkdownRendererComponents;
 };
 
 // Server component to render Markdown/MDX content with shared components
 export async function MarkdownRenderer({ source, components = {} }: MarkdownRendererProps) {
-  const defaultComponents = {
+  const defaultComponents: MarkdownRendererComponents = {
     h1: ({ children, ...props }: { children: React.ReactNode }) => (
       <h1 className="text-4xl font-bold mt-12 mb-6 text-foreground first:mt-0" {...props}>{children}</h1>
     ),
@@ -76,28 +79,28 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     td: ({ children, ...props }: { children: React.ReactNode }) => (
       <td className="border border-border px-4 py-3 text-muted-foreground" {...props}>{children}</td>
     ),
-    code: ({ children, className, ...props }: { children: string; className?: string }) => {
+    code: ({ children, className, ...props }: { children?: React.ReactNode; className?: string }) => {
       // Render Mermaid even if the renderer bypassed <pre> wrapper
       if (className && /language-mermaid/.test(className)) {
         return (
           <div className="my-8">
-            <MermaidDiagram chart={children} />
+            <MermaidDiagram chart={String(children ?? '')} />
           </div>
         );
       }
       // Otherwise fall back to default rendering (allows rehype-highlight SSR output to style)
       return <code className={className} {...props}>{children}</code>;
     },
-    MermaidDiagram: ({ chart, ...props }: { chart: string }) => (
+    MermaidDiagram: (props: { chart?: string } & Record<string, unknown>) => (
       <div className="my-12 flex justify-center">
         <div className="max-w-full overflow-x-auto">
-          <MermaidDiagram chart={chart} {...props} />
+          <MermaidDiagram chart={String(props.chart ?? '')} {...props} />
         </div>
       </div>
     ),
   } as const;
 
-  const merged = { ...defaultComponents, ...components } as any;
+  const merged: MarkdownRendererComponents = { ...defaultComponents, ...components };
   return (
     <MDXRemote
       source={source}

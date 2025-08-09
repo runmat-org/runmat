@@ -10,7 +10,6 @@ import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { BlogLayout } from '@/components/BlogLayout';
-// MarkdownRenderer provides styled headings, lists, code blocks, and Mermaid diagrams
 
 interface BlogPost {
   slug: string;
@@ -83,8 +82,6 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
   if (!post) {
     notFound();
   }
-
-  const components = undefined; // MarkdownRenderer includes sensible defaults
 
   return (
     <BlogLayout

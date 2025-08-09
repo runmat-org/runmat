@@ -4,12 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   Calculator, 
   TrendingUp, 
-  BarChart3, 
-  GitBranch,
   Database,
-  Settings,
-  Users,
-  Brain,
   Code,
   Target,
   GitPullRequest
