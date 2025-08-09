@@ -66,7 +66,16 @@ jobs:
       - name: Install Windows dependencies (ZMQ)
         if: runner.os == 'Windows'
         run: |
-          choco install -y zeromq
+          choco install -y pkgconfiglite
+          echo "Fetching prebuilt ZeroMQ for Windows (MSVC)" 
+          curl -L -o libzmq.zip https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.zip
+          powershell -Command "Expand-Archive -Path libzmq.zip -DestinationPath zmq"
+          # Locate lib and include (the exact layout varies by package; prefer MSVC x64)
+          echo "Setting up env vars for ZMQ include/lib"
+          echo "INCLUDE=%CD%/zmq/include;%INCLUDE%" >> $env:GITHUB_ENV
+          echo "LIB=%CD%/zmq/lib;%LIB%" >> $env:GITHUB_ENV
+          echo "ZMQ_PATH=%CD%/zmq" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=%CD%/zmq/lib/pkgconfig" >> $env:GITHUB_ENV
 
       - name: Format
         run: cargo fmt -- --check
