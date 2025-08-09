@@ -39,8 +39,8 @@ export default async function LanguageCoveragePage() {
         <Badge variant="secondary" className="mb-4">Documentation</Badge>
         <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">Language Coverage</h1>
         <p className="text-muted-foreground mb-6 text-lg">
-          Track MATLAB syntax and feature support in RunMat. This page is generated from the
-          repository's authoritative coverage document and updated regularly.
+            Track MATLAB syntax and feature support in RunMat. This page is generated from the
+            repository&apos;s authoritative coverage document and updated regularly.
         </p>
         <MarkdownRenderer source={source} />
       </div>

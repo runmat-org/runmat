@@ -7,7 +7,7 @@ import { OSInstallCommand } from "@/components/OSInstallCommand";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "RunMat - Free, Modern MATLAB Runtime",
+  title: "RunMat - Fast, Free, Modern MATLAB Runtime",
   description:
     "Run MATLAB code for free with RunMat: a high-performance, open-source runtime and Octave alternative with JIT compilation, BLAS/LAPACK, GPU plotting, and a Jupyter kernel.",
   keywords: [

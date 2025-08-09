@@ -7,8 +7,7 @@ import {
   Code,
   Zap,
   Cpu,
-  ExternalLink,
-  CheckCircle
+  ExternalLink
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
