@@ -104,6 +104,14 @@ git clone https://github.com/runmat-org/runmat.git
 cd runmat && cargo build --release --features gui
 ```
 
+#### Linux prerequisite
+
+For BLAS/LAPACK acceleration on Linux, install the system OpenBLAS package before building:
+
+```bash
+sudo apt-get update && sudo apt-get install -y libopenblas-dev
+```
+
 ### Run Your First Script
 
 ```bash
