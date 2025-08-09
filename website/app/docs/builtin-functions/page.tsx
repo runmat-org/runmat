@@ -39,7 +39,7 @@ export default function BuiltinFunctionsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
             <div className="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-4">
               <div className="text-2xl font-bold text-blue-600">50+</div>
-              <div className="text-sm text-muted-foreground">Functions Implemented</div>
+              <div className="text-sm text-muted-foreground">Functions Implemented (Week 1)</div>
         </div>
             <div className="bg-green-50 dark:bg-green-950/30 rounded-lg p-4">
               <div className="text-2xl font-bold text-green-600">~1000</div>

@@ -32,17 +32,21 @@ export default function HowItWorksPage() {
             How RunMat Works
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed">
-            Traditional MATLAB interpreters can feel sluggish for compute-intensive workloads. RunMat takes a 
-            different approach with a V8-inspired architecture that prioritizes performance without sacrificing 
-            compatibility. Here&apos;s how we built a MATLAB runtime that starts in 5ms and runs many workloads 
+            Here&apos;s how we built a MATLAB runtime that starts in 5ms and runs many workloads
             significantly faster than existing implementations like GNU Octave.
+          </p>
+          <p className="text-lg text-muted-foreground leading-relaxed mt-8">
+            Traditional MATLAB interpreters can
+            feel sluggish for compute-intensive workloads. RunMat takes a different approach with a V8-inspired
+            architecture that prioritizes performance without sacrificing
+            compatibility.
           </p>
         </div>
 
         {/* The Problem with Traditional Scientific Computing */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground">Why Octave and MATLAB are Slow</h2>
-            <div className="bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-950/30 dark:to-orange-950/30 rounded-lg p-6 mb-8">
+          <div className="bg-gradient-to-r from-amber-100 to-yellow-100 dark:from-amber-900/40 dark:to-yellow-900/40 rounded-lg p-6 mb-8 border border-amber-200 dark:border-amber-800">
               <p className="text-lg leading-relaxed">
                 <strong>Slow Startup:</strong> MATLAB takes 10+ seconds to start because it loads massive runtime environments, 
                 initializes complex licensing systems, and builds symbol tables from scratch every time. Even with JIT compilation, 
@@ -346,8 +350,8 @@ export default function HowItWorksPage() {
             Instant Startup: 2000x Faster Boot Times
           </h2>
           <p className="text-lg text-muted-foreground mb-6">
-            Remember waiting 10+ seconds for MATLAB to start? We solved that with a combination of 
-            <strong> snapshotting, lightweight runtime design, and fast compilation</strong>:
+            Remember how MATLAB takes 10+ seconds to start? It&apos;s a symptom of a larger problem.
+            RunMat solves runtime startup time using modern techniques like <strong>snapshotting, lightweight runtime design, and fast compilation</strong>.
           </p>
           
           <div className="space-y-4">
@@ -381,8 +385,8 @@ export default function HowItWorksPage() {
             Modern Plotting: Built for the GPU Era
           </h2>
           <p className="text-lg text-muted-foreground mb-6">
-            Traditional MATLAB plotting is CPU-bound and struggles with large datasets. We rebuilt plotting 
-            from scratch for the modern era:
+            Traditional MATLAB plotting is CPU-bound and struggles with large datasets. We build a clean, GPU-accelerated plotting
+            system that&apos;s fast, beautiful and seamlessly integrates with the rest of the runtime:
           </p>
           
           <div className="grid md:grid-cols-2 gap-6">
@@ -425,12 +429,13 @@ export default function HowItWorksPage() {
                 <h4 className="text-xl font-semibold mb-3">Lightning-Fast REPL</h4>
                 <p className="text-muted-foreground mb-4">
                   No more waiting for calculations to complete. The interactive shell starts instantly, 
-                  remembers your variables and functions between sessions, and gives you immediate feedback 
-                  on syntax errors before you even press enter.
+                  remembers your variables and functions within your session, and provides fast syntax error
+                  detection with clear, helpful error messages.
                 </p>
                 <div className="bg-slate-100 dark:bg-slate-800 rounded p-3 font-mono text-sm">
-                  <span className="text-green-600">runmat&gt;</span> A = randn(1000, 1000); B = A * A&apos;; trace(B)<br/>
-                  <span className="text-blue-600">ans =</span> 1000.0  <span className="text-gray-500">% Computed in 2ms</span>
+                  <span className="text-green-600">runmat&gt;</span> A = randn(1000, 1000); B = A * A&apos;;<br />
+                  { /* Note: This is a placeholder for the actual computation time. Need to measure this after implementing tic / toc */}
+                  <span className="text-blue-600">ans =</span> 1000.0  {false && <span className="text-gray-500">% Computed in 2us</span>}
                 </div>
               </CardContent>
             </Card>
