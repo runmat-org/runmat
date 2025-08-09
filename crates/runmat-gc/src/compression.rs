@@ -3,10 +3,10 @@
 //! Implements compressed pointers to reduce memory overhead on 64-bit platforms.
 //! Pointers are compressed to 32 bits by using a base address and offset encoding.
 
+use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
-use parking_lot::RwLock;
-use once_cell::sync::Lazy;
 
 /// Global heap base address for pointer compression
 static HEAP_BASE: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
@@ -70,7 +70,9 @@ impl CompressedPtr {
         }
 
         // Store (offset + 1) so that base-address pointers are representable (offset == 0)
-        Self { offset: (offset as u32) + 1 }
+        Self {
+            offset: (offset as u32) + 1,
+        }
     }
 
     /// Decompress to a raw pointer
@@ -119,7 +121,11 @@ impl CompressedPtr {
 
     /// Add an offset to this compressed pointer
     pub fn add_offset(&self, additional_offset: usize) -> Option<Self> {
-        let base = if self.is_null() { 0usize } else { (self.offset as usize) - 1 };
+        let base = if self.is_null() {
+            0usize
+        } else {
+            (self.offset as usize) - 1
+        };
         let new_actual = base.checked_add(additional_offset)?;
         if new_actual <= (u32::MAX as usize - 1) {
             Some(Self {
@@ -177,7 +183,11 @@ fn registry_store(ptr: *const u8) -> CompressedPtr {
 
 fn registry_get(idx: usize) -> *const u8 {
     let reg = POINTER_REGISTRY.read();
-    if idx < reg.len() { reg[idx] as *const u8 } else { ptr::null() }
+    if idx < reg.len() {
+        reg[idx] as *const u8
+    } else {
+        ptr::null()
+    }
 }
 
 impl Default for CompressedPtr {
@@ -460,7 +470,9 @@ mod tests {
 
         // Test overflow
         // offset field stores +1, so u32::MAX - 10 represents an actual offset of u32::MAX - 11
-        let large_ptr = CompressedPtr { offset: u32::MAX - 10 };
+        let large_ptr = CompressedPtr {
+            offset: u32::MAX - 10,
+        };
         assert!(large_ptr.add_offset(20).is_none());
     }
 
