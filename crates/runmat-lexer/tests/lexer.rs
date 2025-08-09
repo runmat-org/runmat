@@ -131,7 +131,13 @@ fn comments_until_end_of_line() {
     let tokens = tokenize(src);
     assert_eq!(
         tokens,
-        vec![Token::Ident, Token::Plus, Token::Ident, Token::Minus, Token::Ident]
+        vec![
+            Token::Ident,
+            Token::Plus,
+            Token::Ident,
+            Token::Minus,
+            Token::Ident
+        ]
     );
 }
 
@@ -139,7 +145,10 @@ fn comments_until_end_of_line() {
 fn ellipsis_line_continuation() {
     let src = "1 + ...\n  2";
     let tokens = tokenize(src);
-    assert_eq!(tokens, vec![Token::Integer, Token::Plus, Token::Ellipsis, Token::Integer]);
+    assert_eq!(
+        tokens,
+        vec![Token::Integer, Token::Plus, Token::Ellipsis, Token::Integer]
+    );
 }
 
 #[test]
@@ -153,7 +162,10 @@ fn ellipsis_inside_string_is_string() {
 fn two_dots_are_two_dots_not_ellipsis() {
     let src = "1..3";
     let tokens = tokenize(src);
-    assert_eq!(tokens, vec![Token::Integer, Token::Dot, Token::Dot, Token::Integer]);
+    assert_eq!(
+        tokens,
+        vec![Token::Integer, Token::Dot, Token::Dot, Token::Integer]
+    );
 }
 
 #[test]
@@ -181,10 +193,25 @@ fn indexing_parentheses_and_braces() {
     assert_eq!(
         tokens,
         vec![
-            Token::Ident, Token::LParen, Token::Integer, Token::Comma, Token::Integer, Token::RParen,
-            Token::Ident, Token::LBrace, Token::Integer, Token::RBrace,
-            Token::Ident, Token::LBrace, Token::Integer, Token::Comma, Token::Integer, Token::RBrace,
-            Token::LParen, Token::Integer, Token::RParen,
+            Token::Ident,
+            Token::LParen,
+            Token::Integer,
+            Token::Comma,
+            Token::Integer,
+            Token::RParen,
+            Token::Ident,
+            Token::LBrace,
+            Token::Integer,
+            Token::RBrace,
+            Token::Ident,
+            Token::LBrace,
+            Token::Integer,
+            Token::Comma,
+            Token::Integer,
+            Token::RBrace,
+            Token::LParen,
+            Token::Integer,
+            Token::RParen,
         ]
     );
 }
@@ -196,8 +223,15 @@ fn matrix_literal_tokens() {
     assert_eq!(
         tokens,
         vec![
-            Token::LBracket, Token::Integer, Token::Comma, Token::Integer, Token::Semicolon,
-            Token::Integer, Token::Comma, Token::Integer, Token::RBracket,
+            Token::LBracket,
+            Token::Integer,
+            Token::Comma,
+            Token::Integer,
+            Token::Semicolon,
+            Token::Integer,
+            Token::Comma,
+            Token::Integer,
+            Token::RBracket,
         ]
     );
 }
@@ -220,8 +254,15 @@ fn fprintf_with_string_then_transpose_usage() {
     assert_eq!(
         tokens,
         vec![
-            Token::Ident, Token::LParen, Token::Str, Token::RParen, Token::Semicolon,
-            Token::Ident, Token::Assign, Token::Ident, Token::Transpose,
+            Token::Ident,
+            Token::LParen,
+            Token::Str,
+            Token::RParen,
+            Token::Semicolon,
+            Token::Ident,
+            Token::Assign,
+            Token::Ident,
+            Token::Transpose,
         ]
     );
 }

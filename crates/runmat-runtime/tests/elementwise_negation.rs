@@ -7,13 +7,13 @@ fn test_scalar_negation() {
     let num = Value::Num(42.0);
     let result = elementwise_neg(&num).unwrap();
     assert_eq!(result, Value::Num(-42.0));
-    
+
     // Test integer scalar
     let int = Value::Int(5);
     let result = elementwise_neg(&int).unwrap();
     assert_eq!(result, Value::Int(-5));
-    
-    // Test boolean scalar 
+
+    // Test boolean scalar
     let bool_val = Value::Bool(true);
     let result = elementwise_neg(&bool_val).unwrap();
     assert_eq!(result, Value::Bool(false));
@@ -25,7 +25,7 @@ fn test_matrix_negation() {
     let matrix = Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let value = Value::Matrix(matrix);
     let result = elementwise_neg(&value).unwrap();
-    
+
     if let Value::Matrix(result_matrix) = result {
         assert_eq!(result_matrix.data, vec![-1.0, -2.0, -3.0, -4.0]);
         assert_eq!(result_matrix.rows, 2);
@@ -41,7 +41,7 @@ fn test_vector_negation() {
     let vector = Matrix::new(vec![1.0, 2.0, 3.0], 1, 3).unwrap();
     let value = Value::Matrix(vector);
     let result = elementwise_neg(&value).unwrap();
-    
+
     if let Value::Matrix(result_matrix) = result {
         assert_eq!(result_matrix.data, vec![-1.0, -2.0, -3.0]);
         assert_eq!(result_matrix.rows, 1);

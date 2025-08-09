@@ -3,8 +3,8 @@
 //! This module implements MATLAB-compatible element-wise operations (.*,  ./,  .^)
 //! These operations work element-by-element on matrices and support scalar broadcasting.
 
+use crate::matrix::matrix_power;
 use runmat_builtins::{Matrix, Value};
-use crate::matrix::{matrix_power};
 
 /// Element-wise negation: -A
 /// Supports scalars and matrices

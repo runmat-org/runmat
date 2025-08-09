@@ -6,15 +6,18 @@ fn parse_expression() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Binary(
-                Box::new(Expr::Number("1".into())),
-                BinOp::Add,
-                Box::new(Expr::Binary(
-                    Box::new(Expr::Number("2".into())),
-                    BinOp::Mul,
-                    Box::new(Expr::Number("3".into()))
-                ))
-            ), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::Binary(
+                    Box::new(Expr::Number("1".into())),
+                    BinOp::Add,
+                    Box::new(Expr::Binary(
+                        Box::new(Expr::Number("2".into())),
+                        BinOp::Mul,
+                        Box::new(Expr::Number("3".into()))
+                    ))
+                ),
+                false
+            )]
         }
     );
 }
@@ -32,7 +35,7 @@ fn parse_assignment() {
                     BinOp::Add,
                     Box::new(Expr::Number("5".into()))
                 ),
-                false  // Assignment without semicolon for test case
+                false // Assignment without semicolon for test case
             )]
         }
     );
@@ -44,15 +47,18 @@ fn precedence_and_associativity() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Binary(
-                Box::new(Expr::Binary(
-                    Box::new(Expr::Number("1".into())),
+            body: vec![Stmt::ExprStmt(
+                Expr::Binary(
+                    Box::new(Expr::Binary(
+                        Box::new(Expr::Number("1".into())),
+                        BinOp::Sub,
+                        Box::new(Expr::Number("2".into()))
+                    )),
                     BinOp::Sub,
-                    Box::new(Expr::Number("2".into()))
-                )),
-                BinOp::Sub,
-                Box::new(Expr::Number("3".into()))
-            ), false)]
+                    Box::new(Expr::Number("3".into()))
+                ),
+                false
+            )]
         }
     );
 }
@@ -63,15 +69,18 @@ fn parentheses_override_precedence() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Binary(
-                Box::new(Expr::Number("1".into())),
-                BinOp::Mul,
-                Box::new(Expr::Binary(
-                    Box::new(Expr::Number("2".into())),
-                    BinOp::Add,
-                    Box::new(Expr::Number("3".into()))
-                ))
-            ), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::Binary(
+                    Box::new(Expr::Number("1".into())),
+                    BinOp::Mul,
+                    Box::new(Expr::Binary(
+                        Box::new(Expr::Number("2".into())),
+                        BinOp::Add,
+                        Box::new(Expr::Number("3".into()))
+                    ))
+                ),
+                false
+            )]
         }
     );
 }
@@ -83,7 +92,7 @@ fn multiple_statements() {
         program,
         Program {
             body: vec![
-                Stmt::Assign("x".into(), Expr::Number("1".into()), true),  // Has semicolon
+                Stmt::Assign("x".into(), Expr::Number("1".into()), true), // Has semicolon
                 Stmt::Assign("y".into(), Expr::Number("2".into()), false)  // No semicolon
             ]
         }
@@ -96,11 +105,14 @@ fn trailing_semicolon_is_allowed() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Binary(
-                Box::new(Expr::Number("1".into())),
-                BinOp::Add,
-                Box::new(Expr::Number("2".into()))
-            ), true)]  // true because it has a semicolon (suppressed output)
+            body: vec![Stmt::ExprStmt(
+                Expr::Binary(
+                    Box::new(Expr::Number("1".into())),
+                    BinOp::Add,
+                    Box::new(Expr::Number("2".into()))
+                ),
+                true
+            )] // true because it has a semicolon (suppressed output)
         }
     );
 }
@@ -138,15 +150,18 @@ fn power_is_right_associative() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Binary(
-                Box::new(Expr::Number("2".into())),
-                BinOp::Pow,
-                Box::new(Expr::Binary(
-                    Box::new(Expr::Number("3".into())),
+            body: vec![Stmt::ExprStmt(
+                Expr::Binary(
+                    Box::new(Expr::Number("2".into())),
                     BinOp::Pow,
-                    Box::new(Expr::Number("2".into()))
-                ))
-            ), false)]
+                    Box::new(Expr::Binary(
+                        Box::new(Expr::Number("3".into())),
+                        BinOp::Pow,
+                        Box::new(Expr::Number("2".into()))
+                    ))
+                ),
+                false
+            )]
         }
     );
 }
@@ -157,11 +172,14 @@ fn unary_minus_precedence() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Binary(
-                Box::new(Expr::Unary(UnOp::Minus, Box::new(Expr::Number("1".into())))),
-                BinOp::Add,
-                Box::new(Expr::Number("2".into()))
-            ), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::Binary(
+                    Box::new(Expr::Unary(UnOp::Minus, Box::new(Expr::Number("1".into())))),
+                    BinOp::Add,
+                    Box::new(Expr::Number("2".into()))
+                ),
+                false
+            )]
         }
     );
 }
@@ -172,14 +190,17 @@ fn unary_minus_with_power() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Unary(
-                UnOp::Minus,
-                Box::new(Expr::Binary(
-                    Box::new(Expr::Number("2".into())),
-                    BinOp::Pow,
-                    Box::new(Expr::Number("2".into()))
-                ))
-            ), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::Unary(
+                    UnOp::Minus,
+                    Box::new(Expr::Binary(
+                        Box::new(Expr::Number("2".into())),
+                        BinOp::Pow,
+                        Box::new(Expr::Number("2".into()))
+                    ))
+                ),
+                false
+            )]
         }
     );
 }
@@ -190,10 +211,13 @@ fn parse_simple_matrix() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Matrix(vec![
-                vec![Expr::Number("1".into()), Expr::Number("2".into())],
-                vec![Expr::Number("3".into()), Expr::Number("4".into())],
-            ]), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::Matrix(vec![
+                    vec![Expr::Number("1".into()), Expr::Number("2".into())],
+                    vec![Expr::Number("3".into()), Expr::Number("4".into())],
+                ]),
+                false
+            )]
         }
     );
 }
@@ -215,18 +239,21 @@ fn matrix_with_expressions() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Matrix(vec![vec![
-                Expr::Binary(
-                    Box::new(Expr::Number("1".into())),
-                    BinOp::Add,
-                    Box::new(Expr::Number("2".into()))
-                ),
-                Expr::Binary(
-                    Box::new(Expr::Number("3".into())),
-                    BinOp::Mul,
-                    Box::new(Expr::Number("4".into()))
-                ),
-            ]]), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::Matrix(vec![vec![
+                    Expr::Binary(
+                        Box::new(Expr::Number("1".into())),
+                        BinOp::Add,
+                        Box::new(Expr::Number("2".into()))
+                    ),
+                    Expr::Binary(
+                        Box::new(Expr::Number("3".into())),
+                        BinOp::Mul,
+                        Box::new(Expr::Number("4".into()))
+                    ),
+                ]]),
+                false
+            )]
         }
     );
 }
@@ -237,13 +264,16 @@ fn nested_matrix_literal() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Matrix(vec![vec![
-                Expr::Number("1".into()),
+            body: vec![Stmt::ExprStmt(
                 Expr::Matrix(vec![vec![
-                    Expr::Number("2".into()),
-                    Expr::Number("3".into())
-                ]])
-            ],]), false)]
+                    Expr::Number("1".into()),
+                    Expr::Matrix(vec![vec![
+                        Expr::Number("2".into()),
+                        Expr::Number("3".into())
+                    ]])
+                ],]),
+                false
+            )]
         }
     );
 }
@@ -264,11 +294,14 @@ fn left_division_operator() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Binary(
-                Box::new(Expr::Number("4".into())),
-                BinOp::LeftDiv,
-                Box::new(Expr::Number("2".into())),
-            ), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::Binary(
+                    Box::new(Expr::Number("4".into())),
+                    BinOp::LeftDiv,
+                    Box::new(Expr::Number("2".into())),
+                ),
+                false
+            )]
         }
     );
 }
@@ -279,11 +312,14 @@ fn elementwise_power_operator() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::Binary(
-                Box::new(Expr::Number("3".into())),
-                BinOp::ElemPow,
-                Box::new(Expr::Number("2".into())),
-            ), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::Binary(
+                    Box::new(Expr::Number("3".into())),
+                    BinOp::ElemPow,
+                    Box::new(Expr::Number("2".into())),
+                ),
+                false
+            )]
         }
     );
 }
@@ -298,7 +334,11 @@ fn parse_if_else_statement() {
                 cond: Expr::Ident("x".into()),
                 then_body: vec![Stmt::Assign("y".into(), Expr::Number("1".into()), false)],
                 elseif_blocks: vec![],
-                else_body: Some(vec![Stmt::Assign("y".into(), Expr::Number("2".into()), false)]),
+                else_body: Some(vec![Stmt::Assign(
+                    "y".into(),
+                    Expr::Number("2".into()),
+                    false
+                )]),
             }]
         }
     );
@@ -355,10 +395,13 @@ fn parse_array_indexing() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::FuncCall(
-                "A".into(),
-                vec![Expr::Number("1".into()), Expr::Number("2".into()),]
-            ), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::FuncCall(
+                    "A".into(),
+                    vec![Expr::Number("1".into()), Expr::Number("2".into()),]
+                ),
+                false
+            )]
         }
     );
 }
@@ -380,10 +423,10 @@ fn parse_function_call_with_string() {
     assert_eq!(
         program,
         Program {
-            body: vec![Stmt::ExprStmt(Expr::FuncCall(
-                "fprintf".into(),
-                vec![Expr::String("'test'".into())]
-            ), false)]
+            body: vec![Stmt::ExprStmt(
+                Expr::FuncCall("fprintf".into(), vec![Expr::String("'test'".into())]),
+                false
+            )]
         }
     );
 }

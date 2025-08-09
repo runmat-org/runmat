@@ -145,7 +145,9 @@ pub mod remapping {
     /// Remap VarIds in a single HIR statement
     pub fn remap_stmt(stmt: &HirStmt, var_map: &HashMap<VarId, VarId>) -> HirStmt {
         match stmt {
-            HirStmt::ExprStmt(expr, suppressed) => HirStmt::ExprStmt(remap_expr(expr, var_map), *suppressed),
+            HirStmt::ExprStmt(expr, suppressed) => {
+                HirStmt::ExprStmt(remap_expr(expr, var_map), *suppressed)
+            }
             HirStmt::Assign(var_id, expr, suppressed) => {
                 let new_var_id = var_map.get(var_id).copied().unwrap_or(*var_id);
                 HirStmt::Assign(new_var_id, remap_expr(expr, var_map), *suppressed)
@@ -468,7 +470,10 @@ impl Ctx {
 
     fn lower_stmt(&mut self, stmt: &AstStmt) -> Result<HirStmt, String> {
         match stmt {
-            AstStmt::ExprStmt(e, semicolon_terminated) => Ok(HirStmt::ExprStmt(self.lower_expr(e)?, *semicolon_terminated)),
+            AstStmt::ExprStmt(e, semicolon_terminated) => Ok(HirStmt::ExprStmt(
+                self.lower_expr(e)?,
+                *semicolon_terminated,
+            )),
             AstStmt::Assign(name, expr, semicolon_terminated) => {
                 let id = match self.lookup(name) {
                     Some(id) => id,

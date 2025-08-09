@@ -288,8 +288,8 @@ impl JupyterPlottingManager {
                     let y_data = self.extract_numeric_array(&args[1])?;
 
                     if x_data.len() == y_data.len() {
-                        let line_plot = runmat_plot::plots::LinePlot::new(x_data, y_data)
-                            .map_err(|e| {
+                        let line_plot =
+                            runmat_plot::plots::LinePlot::new(x_data, y_data).map_err(|e| {
                                 KernelError::Execution(format!("Failed to create line plot: {e}"))
                             })?;
                         figure.add_line_plot(line_plot);

@@ -47,8 +47,8 @@ fn test_large_matrix_stress() {
     for i in 0..100 {
         let size = 100; // 100x100 matrix = 10,000 elements
         let data = vec![i as f64; size * size];
-        let matrix = runmat_builtins::Matrix::new(data, size, size)
-            .expect("matrix creation should succeed");
+        let matrix =
+            runmat_builtins::Matrix::new(data, size, size).expect("matrix creation should succeed");
 
         let ptr = gc_allocate(Value::Matrix(matrix)).expect("matrix allocation should succeed");
         matrices.push(ptr);

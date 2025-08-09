@@ -238,7 +238,7 @@ impl ReplEngine {
             .last()
             .map(|instr| matches!(instr, runmat_ignition::Instr::Pop))
             .unwrap_or(false);
-            
+
         // Detect whether the user's input ends with a semicolon at the token level
         let ends_with_semicolon = {
             let toks = tokenize_detailed(input);
@@ -267,7 +267,7 @@ impl ReplEngine {
         } else {
             false
         };
-        
+
         if self.verbose {
             debug!("HIR body len: {}", hir.body.len());
             if !hir.body.is_empty() {
@@ -304,21 +304,25 @@ impl ReplEngine {
                         }
                         // For assignments, capture the assigned value for both display and type info
                         // Prefer the variable slot indicated by HIR if available.
-                        let assignment_value = if let Some(runmat_hir::HirStmt::Assign(var_id, _, _)) = hir.body.get(0) {
+                        let assignment_value = if let Some(runmat_hir::HirStmt::Assign(
+                            var_id,
+                            _,
+                            _,
+                        )) = hir.body.get(0)
+                        {
                             if var_id.0 < self.variable_array.len() {
                                 Some(self.variable_array[var_id.0].clone())
                             } else {
                                 None
                             }
                         } else {
-                            self
-                                .variable_array
+                            self.variable_array
                                 .iter()
                                 .rev()
                                 .find(|v| !matches!(v, Value::Num(0.0)))
                                 .cloned()
                         };
-                            
+
                         if !is_semicolon_suppressed {
                             result_value = assignment_value.clone();
                             if self.verbose {
@@ -402,7 +406,10 @@ impl ReplEngine {
                     if hir.body.len() == 1 {
                         if let runmat_hir::HirStmt::Assign(var_id, _, _) = &hir.body[0] {
                             if self.verbose {
-                                debug!("Assignment detected, var_id: {}, ends_with_semicolon: {}", var_id.0, ends_with_semicolon);
+                                debug!(
+                                    "Assignment detected, var_id: {}, ends_with_semicolon: {}",
+                                    var_id.0, ends_with_semicolon
+                                );
                             }
                             // For assignments, capture the assigned value for both display and type info
                             if var_id.0 < self.variable_array.len() {
@@ -410,20 +417,30 @@ impl ReplEngine {
                                 if !is_semicolon_suppressed {
                                     result_value = Some(assignment_value);
                                     if self.verbose {
-                                        debug!("Setting assignment result_value: {:?}", result_value);
+                                        debug!(
+                                            "Setting assignment result_value: {:?}",
+                                            result_value
+                                        );
                                     }
                                 } else {
                                     suppressed_value = Some(assignment_value);
                                     if self.verbose {
-                                        debug!("Assignment suppressed, captured for type info: {:?}", suppressed_value);
+                                        debug!(
+                                            "Assignment suppressed, captured for type info: {:?}",
+                                            suppressed_value
+                                        );
                                     }
                                 }
                             }
                         }
                     }
-                    
+
                     // For expressions, get the result from the temporary variable (capture for both display and type info)
-                    if is_expression_stmt && !execution_bytecode.instructions.is_empty() && result_value.is_none() && suppressed_value.is_none() {
+                    if is_expression_stmt
+                        && !execution_bytecode.instructions.is_empty()
+                        && result_value.is_none()
+                        && suppressed_value.is_none()
+                    {
                         let temp_var_id = execution_bytecode.var_count - 1; // The temp variable we added
                         if temp_var_id < self.variable_array.len() {
                             let expression_value = self.variable_array[temp_var_id].clone();

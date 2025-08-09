@@ -1037,7 +1037,7 @@ fn test_jit_user_function_fallback() {
                     ),
                     ty: Type::Num,
                 },
-                false  // Assignment suppression flag for test
+                false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
         },
@@ -1125,7 +1125,7 @@ fn test_jit_function_variable_preservation() {
                     ),
                     ty: Type::Num,
                 },
-                false  // Assignment suppression flag for test
+                false, // Assignment suppression flag for test
             )],
             local_var_count: 3,
         },
@@ -1194,7 +1194,7 @@ fn test_jit_mixed_execution_patterns() {
                     ),
                     ty: Type::Num,
                 },
-                false  // Assignment suppression flag for test
+                false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
         },
@@ -1363,7 +1363,7 @@ fn test_jit_simple_function_compilation() {
                     ),
                     ty: Type::Num,
                 },
-                false  // Assignment suppression flag for test
+                false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
         },
@@ -1443,7 +1443,7 @@ fn test_jit_nested_function_calls_compilation() {
                     ),
                     ty: Type::Num,
                 },
-                false  // Assignment suppression flag for test
+                false, // Assignment suppression flag for test
             )],
             local_var_count: 3,
         },
@@ -1493,7 +1493,7 @@ fn test_jit_nested_function_calls_compilation() {
                     ),
                     ty: Type::Num,
                 },
-                false  // Assignment suppression flag for test
+                false, // Assignment suppression flag for test
             )],
             local_var_count: 5,
         },
@@ -1567,7 +1567,7 @@ fn test_jit_function_parameter_validation() {
                     ),
                     ty: Type::Num,
                 },
-                false  // Assignment suppression flag for test
+                false, // Assignment suppression flag for test
             )],
             local_var_count: 3,
         },
@@ -1653,7 +1653,7 @@ fn test_jit_function_variable_isolation() {
                     ),
                     ty: Type::Num,
                 },
-                false  // Assignment suppression flag for test
+                false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
         },
@@ -1729,7 +1729,7 @@ fn test_jit_function_compilation_performance() {
                         ),
                         ty: Type::Num,
                     },
-                    false  // Assignment suppression flag for test
+                    false, // Assignment suppression flag for test
                 ),
                 // result = temp + temp
                 runmat_hir::HirStmt::Assign(
@@ -1748,7 +1748,7 @@ fn test_jit_function_compilation_performance() {
                         ),
                         ty: Type::Num,
                     },
-                    false  // Assignment suppression flag for test
+                    false, // Assignment suppression flag for test
                 ),
             ],
             local_var_count: 3,
@@ -1833,7 +1833,7 @@ fn test_jit_function_error_handling() {
                     kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
                     ty: Type::Num,
                 },
-                false  // Assignment suppression flag for test
+                false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
         },

@@ -225,7 +225,11 @@ impl Parser {
             Stmt::ExprStmt(expr, _) => Ok(Stmt::ExprStmt(expr, is_semicolon_terminated)),
             Stmt::Assign(name, expr, _) => {
                 let has_more_toplevel_tokens = self.pos < self.tokens.len();
-                Ok(Stmt::Assign(name, expr, is_semicolon_terminated && has_more_toplevel_tokens))
+                Ok(Stmt::Assign(
+                    name,
+                    expr,
+                    is_semicolon_terminated && has_more_toplevel_tokens,
+                ))
             }
             other => Ok(other),
         }

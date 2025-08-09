@@ -1,4 +1,4 @@
-use runmat_parser::{parse_simple as parse, Expr, Program, Stmt, BinOp};
+use runmat_parser::{parse_simple as parse, BinOp, Expr, Program, Stmt};
 
 /// Test that semicolon termination is correctly parsed and preserved
 #[test]
@@ -13,7 +13,7 @@ fn test_expression_without_semicolon() {
                     BinOp::Add,
                     Box::new(Expr::Number("2".into()))
                 ),
-                false  // false = not semicolon-terminated, output should be shown
+                false // false = not semicolon-terminated, output should be shown
             )]
         }
     );
@@ -32,7 +32,7 @@ fn test_expression_with_semicolon() {
                     BinOp::Add,
                     Box::new(Expr::Number("2".into()))
                 ),
-                true  // true = semicolon-terminated, output should be suppressed
+                true // true = semicolon-terminated, output should be suppressed
             )]
         }
     );
@@ -43,7 +43,7 @@ fn test_expression_with_semicolon() {
 fn test_mixed_semicolon_statements() {
     let program = parse("x = 1; y = 2").unwrap();
     assert_eq!(program.body.len(), 2);
-    
+
     // First statement is assignment (semicolon-terminated)
     if let Stmt::Assign(name, _, suppressed) = &program.body[0] {
         assert_eq!(name, "x");
@@ -51,7 +51,7 @@ fn test_mixed_semicolon_statements() {
     } else {
         panic!("Expected assignment statement");
     }
-    
+
     // Second statement is assignment (not semicolon-terminated)
     if let Stmt::Assign(name, _, suppressed) = &program.body[1] {
         assert_eq!(name, "y");
@@ -66,14 +66,14 @@ fn test_mixed_semicolon_statements() {
 fn test_multiple_expressions_semicolon_patterns() {
     let program = parse("1 + 2; 3 + 4").unwrap();
     assert_eq!(program.body.len(), 2);
-    
+
     // First expression: semicolon-terminated (suppressed)
     if let Stmt::ExprStmt(_, suppressed) = &program.body[0] {
         assert_eq!(*suppressed, true);
     } else {
         panic!("Expected expression statement");
     }
-    
+
     // Second expression: not semicolon-terminated (shown)
     if let Stmt::ExprStmt(_, suppressed) = &program.body[1] {
         assert_eq!(*suppressed, false);
@@ -91,7 +91,7 @@ fn test_function_call_semicolon_preservation() {
         Program {
             body: vec![Stmt::ExprStmt(
                 Expr::FuncCall("sin".into(), vec![Expr::Ident("x".into())]),
-                true  // Semicolon-terminated
+                true // Semicolon-terminated
             )]
         }
     );
@@ -110,7 +110,7 @@ fn test_matrix_literal_semicolon_preservation() {
                     Expr::Number("2".into()),
                     Expr::Number("3".into())
                 ]]),
-                true  // Semicolon-terminated
+                true // Semicolon-terminated
             )]
         }
     );

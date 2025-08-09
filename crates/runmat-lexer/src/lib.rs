@@ -222,7 +222,11 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                         '\'' => {
                             // In recovery, only treat apostrophe as transpose when the previous token
                             // was a value; otherwise it's likely a broken string start -> mark as error.
-                            if lex.extras.last_was_value { Token::Transpose } else { Token::Error }
+                            if lex.extras.last_was_value {
+                                Token::Transpose
+                            } else {
+                                Token::Error
+                            }
                         }
                         ';' => Token::Semicolon,
                         ')' => Token::RParen,
