@@ -2,16 +2,31 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches:
+      - '**'
   pull_request:
+    branches:
+      - '**'
 
 permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
+    env:
+      # Ensure single-threaded tests for GC stability
+      RUST_TEST_THREADS: 1
+      # Enable sccache for faster Rust builds across CI runs
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v3
 
@@ -20,12 +35,21 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Install BLAS/LAPACK dependencies
+      - name: Setup sccache
+        uses: mozilla-actions/sccache@v0.0.4
+
+      - name: Install Linux system dependencies (BLAS/LAPACK, ZMQ, GUI)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopenblas-dev liblapack-dev
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libopenblas-dev liblapack-dev \
+            libzmq3-dev pkg-config \
+            libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+            libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev \
+            libegl1-mesa-dev libgl1-mesa-dev \
+            libudev-dev libdbus-1-dev ca-certificates
 
       - name: Format
         run: cargo fmt -- --check
@@ -34,12 +58,18 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Check
-        run: cargo check --all-targets
+        run: cargo check --all-targets --all-features
 
       - name: Test
+        env:
+          RUST_TEST_THREADS: 1
         run: |
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 -- --test-threads=1 | tee test.log
+
+      - name: sccache stats
+        if: always()
+        run: sccache -s || true
 
       - name: Test Summary
         if: always() && github.event_name == 'pull_request'

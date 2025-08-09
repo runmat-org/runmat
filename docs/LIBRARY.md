@@ -4,7 +4,7 @@ This document describes how built-in MATLAB functions are implemented in the
 RunMat project. The goal is to mirror the behaviour of the MATLAB language
 while keeping the codebase maintainable and approachable.
 
-## Organisation
+## Organization
 
 Each group of built-ins lives in its own crate under `crates/`. For example
 `runmat-plot` implements plotting related functions. Future crates will cover

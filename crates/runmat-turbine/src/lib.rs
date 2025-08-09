@@ -549,8 +549,9 @@ pub extern "C" fn runmat_call_user_function(
             }
         };
 
-        // Convert C string to Rust string
-        let func_name_cstr = std::ffi::CStr::from_ptr(func_name_ptr as *const i8);
+        // Convert C string to Rust string (null-terminated UTF-8)
+        // Cast to platform-correct c_char for portability (i8 on macOS/x86_64, u8 on aarch64 Linux)
+        let func_name_cstr = std::ffi::CStr::from_ptr(func_name_ptr as *const std::os::raw::c_char);
         let func_name = match func_name_cstr.to_str() {
             Ok(name) => name,
             Err(_) => {

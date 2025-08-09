@@ -52,8 +52,10 @@ kebab-case crates (lexer, parser, IR passes, runtime, GC, JIT, kernel, etc.).
 ### Milestone P3 – User Experience
 
 - [ ] GUI plotting via WGPU.
+- [ ] Full language coverage (`docs/LANGUAGE_COVERAGE.md`).
+- [ ] Full standard library coverage.
 - [ ] MEX/C API (`runmat-ffi`).
-- [ ] Package manager stub and documentation website.
+- [ ] Full toolbox coverage.
 
 ## Log
 

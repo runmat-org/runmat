@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { Heart } from "lucide-react";
 import { SiGithub } from "react-icons/si";
+import Logo from "@/components/Logo";
 
 export default function Footer() {
   return (
     <footer className="border-t bg-background">
       <div className="container mx-auto flex flex-col items-center justify-between gap-4 py-10 md:h-24 md:flex-row md:py-0 px-4 md:px-6">
         <div className="flex flex-col items-center gap-4 px-8 md:flex-row md:gap-2 md:px-0">
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded bg-gradient-to-br from-blue-600 to-orange-600" />
+          <div className="flex items-center gap-3">
+            <Logo height={24} className="shrink-0" />
             <p className="text-center text-sm leading-loose md:text-left">
               <span className="font-medium">RunMat</span>
             </p>
