@@ -57,7 +57,7 @@ fn test_issue_isolation() {
     ];
 
     for test_case in test_cases {
-        println!("\nTest: '{}'", test_case);
+        println!("\nTest: '{test_case}'");
         let tokens = runmat_lexer::tokenize_detailed(test_case);
         for (i, token) in tokens.iter().enumerate() {
             println!("  {}: {:?} ('{}')", i, token.token, token.lexeme);
@@ -74,7 +74,7 @@ fn debug_complex_transpose_case() {
     let input = "tic; A = randn(1000, 1000); B = A * A'; trace(B)";
     let tokens = runmat_lexer::tokenize_detailed(input);
 
-    println!("Input: {}", input);
+    println!("Input: {input}");
     for (i, token) in tokens.iter().enumerate() {
         println!("{}: {:?} ('{}')", i, token.token, token.lexeme);
         if token.token == runmat_lexer::Token::Error {
@@ -96,7 +96,7 @@ fn debug_complex_transpose_case() {
     ];
 
     for test_case in test_cases {
-        println!("\nTest: '{}'", test_case);
+        println!("\nTest: '{test_case}'");
         let tokens = runmat_lexer::tokenize_detailed(test_case);
         for (i, token) in tokens.iter().enumerate() {
             println!("  {}: {:?} ('{}')", i, token.token, token.lexeme);
@@ -106,7 +106,7 @@ fn debug_complex_transpose_case() {
     // Test minimal failing case
     println!("\nMinimal reproduction:");
     let failing = "A'; trace";
-    println!("Full input: '{}'", failing);
+    println!("Full input: '{failing}'");
     let tokens = runmat_lexer::tokenize_detailed(failing);
     for (i, token) in tokens.iter().enumerate() {
         println!(
@@ -123,7 +123,7 @@ fn debug_complex_transpose_case() {
 fn debug_string_after_semicolon_case() {
     let input = "A'; 'text'";
     let tokens = runmat_lexer::tokenize_detailed(input);
-    println!("Input: {}", input);
+    println!("Input: {input}");
     for (i, token) in tokens.iter().enumerate() {
         println!("{}: {:?} ('{}')", i, token.token, token.lexeme);
     }

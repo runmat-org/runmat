@@ -117,20 +117,25 @@ Remove-Item $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Info "RunMat installed successfully to $INSTALL_DIR\$BINARY_NAME"
 
-# Add to PATH if not already there
+# Add to PATH for user and current session if not already present
 $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($userPath -notlike "*$INSTALL_DIR*") {
-    Write-Info "Adding $INSTALL_DIR to your PATH..."
-    $newPath = "$INSTALL_DIR;$userPath"
-    [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
-    Write-Info "Added $INSTALL_DIR to your PATH"
-    Write-Warn "Please restart your terminal to use runmat from anywhere"
-    
-    # Also add to current session
-    $env:PATH = "$INSTALL_DIR;$env:PATH"
-} else {
-    Write-Info "RunMat is already in your PATH"
+    try {
+        Write-Info "Adding $INSTALL_DIR to your PATH (User scope)..."
+        $newPath = if ([string]::IsNullOrEmpty($userPath)) { $INSTALL_DIR } else { "$INSTALL_DIR;$userPath" }
+        [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
+        Write-Info "Added $INSTALL_DIR to your PATH (User)"
+    } catch {
+        Write-Warn "Could not set PATH in User scope: $($_.Exception.Message)"
+    }
 }
+
+# Add to current process PATH to be immediately available
+if ($env:PATH -notlike "*$INSTALL_DIR*") {
+    $env:PATH = "$INSTALL_DIR;$env:PATH"
+}
+
+Write-Warn "If other terminals were open, restart them to pick up PATH changes."
 
 # Test installation
 try {

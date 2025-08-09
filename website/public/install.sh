@@ -121,17 +121,62 @@ rm -rf "$TEMP_DIR"
 
 log "RunMat installed successfully to $INSTALL_DIR/$BINARY_NAME"
 
-# Check if in PATH
+# Ensure $INSTALL_DIR is in PATH (persistently and for current session)
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
-    warn "Add $INSTALL_DIR to your PATH to use runmat from anywhere:"
-    echo
-    echo "  # For bash/zsh users:"
-    echo "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.bashrc"
-    echo "  source ~/.bashrc"
-    echo
-    echo "  # Or for immediate use in this session:"
-    echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
-    echo
+    SHELL_NAME=$(basename "${SHELL:-sh}")
+    declare -a PROFILE_FILES
+    case "$SHELL_NAME" in
+        bash)
+            PROFILE_FILES=("$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile")
+            ;;
+        zsh)
+            PROFILE_FILES=("$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.profile")
+            ;;
+        fish)
+            # Fish shell uses a different mechanism; append to config.fish
+            FISH_CONFIG="$HOME/.config/fish/config.fish"
+            mkdir -p "$(dirname "$FISH_CONFIG")"
+            if ! grep -q "$INSTALL_DIR" "$FISH_CONFIG" 2>/dev/null; then
+                echo "# Added by RunMat installer" >> "$FISH_CONFIG"
+                echo "set -Ux fish_user_paths $INSTALL_DIR \$fish_user_paths" >> "$FISH_CONFIG"
+                log "Added $INSTALL_DIR to PATH in $FISH_CONFIG"
+            fi
+            ;;
+        *)
+            PROFILE_FILES=("$HOME/.profile")
+            ;;
+    esac
+
+    if [ "$SHELL_NAME" != "fish" ]; then
+        added=false
+        for file in "${PROFILE_FILES[@]}"; do
+            if [ -f "$file" ]; then
+                if ! grep -q "$INSTALL_DIR" "$file"; then
+                    {
+                        echo ""
+                        echo "# Added by RunMat installer"
+                        echo "export PATH=\"$INSTALL_DIR:\$PATH\""
+                    } >> "$file"
+                    log "Added $INSTALL_DIR to PATH in $file"
+                fi
+                added=true
+                break
+            fi
+        done
+        if [ "$added" = false ]; then
+            # Create primary profile file if none existed
+            target_file="${PROFILE_FILES[0]}"
+            {
+                echo "# Created by RunMat installer"
+                echo "export PATH=\"$INSTALL_DIR:\$PATH\""
+            } >> "$target_file"
+            log "Created $target_file and added $INSTALL_DIR to PATH"
+        fi
+    fi
+
+    # Apply for current session
+    export PATH="$INSTALL_DIR:$PATH"
+    warn "Added $INSTALL_DIR to your PATH. Restart your terminal or 'source' your shell profile to take effect."
 else
     log "RunMat is already in your PATH"
 fi

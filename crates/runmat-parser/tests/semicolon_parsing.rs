@@ -47,7 +47,7 @@ fn test_mixed_semicolon_statements() {
     // First statement is assignment (semicolon-terminated)
     if let Stmt::Assign(name, _, suppressed) = &program.body[0] {
         assert_eq!(name, "x");
-        assert_eq!(*suppressed, true); // Has semicolon
+        assert!(*suppressed); // Has semicolon
     } else {
         panic!("Expected assignment statement");
     }
@@ -55,7 +55,7 @@ fn test_mixed_semicolon_statements() {
     // Second statement is assignment (not semicolon-terminated)
     if let Stmt::Assign(name, _, suppressed) = &program.body[1] {
         assert_eq!(name, "y");
-        assert_eq!(*suppressed, false); // No semicolon
+        assert!(!*suppressed); // No semicolon
     } else {
         panic!("Expected assignment statement");
     }
@@ -69,14 +69,14 @@ fn test_multiple_expressions_semicolon_patterns() {
 
     // First expression: semicolon-terminated (suppressed)
     if let Stmt::ExprStmt(_, suppressed) = &program.body[0] {
-        assert_eq!(*suppressed, true);
+        assert!(*suppressed);
     } else {
         panic!("Expected expression statement");
     }
 
     // Second expression: not semicolon-terminated (shown)
     if let Stmt::ExprStmt(_, suppressed) = &program.body[1] {
-        assert_eq!(*suppressed, false);
+        assert!(!*suppressed);
     } else {
         panic!("Expected expression statement");
     }

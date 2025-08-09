@@ -61,9 +61,7 @@ fn format_type_info(value: &Value) -> String {
         Value::Matrix(m) => {
             if m.rows == 1 && m.cols == 1 {
                 "scalar".to_string()
-            } else if m.rows == 1 {
-                format!("{}x{} vector", m.rows, m.cols)
-            } else if m.cols == 1 {
+            } else if m.rows == 1 || m.cols == 1 {
                 format!("{}x{} vector", m.rows, m.cols)
             } else {
                 format!("{}x{} matrix", m.rows, m.cols)
@@ -273,7 +271,7 @@ impl ReplEngine {
             if !hir.body.is_empty() {
                 debug!("HIR statement: {:?}", &hir.body[0]);
             }
-            debug!("is_semicolon_suppressed: {}", is_semicolon_suppressed);
+            debug!("is_semicolon_suppressed: {is_semicolon_suppressed}");
         }
 
         // Use JIT for assignments, interpreter for expressions (to capture results properly)
@@ -304,29 +302,27 @@ impl ReplEngine {
                         }
                         // For assignments, capture the assigned value for both display and type info
                         // Prefer the variable slot indicated by HIR if available.
-                        let assignment_value = if let Some(runmat_hir::HirStmt::Assign(
-                            var_id,
-                            _,
-                            _,
-                        )) = hir.body.get(0)
-                        {
-                            if var_id.0 < self.variable_array.len() {
-                                Some(self.variable_array[var_id.0].clone())
+                        let assignment_value =
+                            if let Some(runmat_hir::HirStmt::Assign(var_id, _, _)) =
+                                hir.body.first()
+                            {
+                                if var_id.0 < self.variable_array.len() {
+                                    Some(self.variable_array[var_id.0].clone())
+                                } else {
+                                    None
+                                }
                             } else {
-                                None
-                            }
-                        } else {
-                            self.variable_array
-                                .iter()
-                                .rev()
-                                .find(|v| !matches!(v, Value::Num(0.0)))
-                                .cloned()
-                        };
+                                self.variable_array
+                                    .iter()
+                                    .rev()
+                                    .find(|v| !matches!(v, Value::Num(0.0)))
+                                    .cloned()
+                            };
 
                         if !is_semicolon_suppressed {
                             result_value = assignment_value.clone();
                             if self.verbose {
-                                debug!("JIT assignment result: {:?}", result_value);
+                                debug!("JIT assignment result: {result_value:?}");
                             }
                         } else {
                             suppressed_value = assignment_value;
@@ -417,18 +413,12 @@ impl ReplEngine {
                                 if !is_semicolon_suppressed {
                                     result_value = Some(assignment_value);
                                     if self.verbose {
-                                        debug!(
-                                            "Setting assignment result_value: {:?}",
-                                            result_value
-                                        );
+                                        debug!("Setting assignment result_value: {result_value:?}");
                                     }
                                 } else {
                                     suppressed_value = Some(assignment_value);
                                     if self.verbose {
-                                        debug!(
-                                            "Assignment suppressed, captured for type info: {:?}",
-                                            suppressed_value
-                                        );
+                                        debug!("Assignment suppressed, captured for type info: {suppressed_value:?}");
                                     }
                                 }
                             }
@@ -496,7 +486,7 @@ impl ReplEngine {
         }
 
         // Generate type info if we have a suppressed value
-        let type_info = suppressed_value.as_ref().map(|v| format_type_info(v));
+        let type_info = suppressed_value.as_ref().map(format_type_info);
 
         Ok(ExecutionResult {
             value: result_value,
