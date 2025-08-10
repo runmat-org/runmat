@@ -89,12 +89,8 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=x64-windows"
           # Install OpenBLAS with LAPACK symbols and ensure DLLs are on PATH
           & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
-          # Install LAPACK provider (try lapack first, then lapack-reference)
-          & "$vcpkgRoot\vcpkg.exe" install lapack:x64-windows
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "vcpkg lapack port not found or failed; trying lapack-reference"
-            & "$vcpkgRoot\vcpkg.exe" install lapack-reference:x64-windows
-          }
+          # Install LAPACK provider (use lapack-reference on Windows)
+          & "$vcpkgRoot\vcpkg.exe" install lapack-reference:x64-windows
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\x64-windows\bin"
           # Hint BLAS/LAPACK discovery for blas-sys/lapack-sys

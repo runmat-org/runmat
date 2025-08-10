@@ -4,6 +4,8 @@ version = "0.0.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
+build = "build.rs"
+links = "runmat_runtime_native"
 
 [dependencies]
 inventory = { workspace = true }
@@ -24,8 +26,8 @@ regex = "1.11.1"
 accelerate-src = { version = "0.3", optional = true }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-# Use OpenBLAS on other platforms
-openblas-src = { version = "0.10", features = ["cblas", "lapacke", "system"], optional = true }
+# Use system OpenBLAS via vcpkg on Windows and distro packages on Linux; also expose CBLAS symbols
+openblas-src = { version = "0.10", features = ["system", "cblas"], optional = true }
 
 [features]
 default = ["gui"]
