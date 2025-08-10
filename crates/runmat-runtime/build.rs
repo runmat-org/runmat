@@ -2,7 +2,7 @@ use std::env;
 
 fn split_list(value: &str) -> Vec<String> {
     value
-        .split(|c| c == ';' || c == ':' || c == ',' || c == ' ')
+        .split([';', ':', ',', ' '])
         .filter(|s| !s.trim().is_empty())
         .map(|s| s.trim().to_string())
         .collect()
@@ -30,8 +30,8 @@ fn main() {
             .ok()
             .or_else(|| env::var("VCPKG_DEFAULT_TRIPLET").ok())
             .unwrap_or_else(|| "x64-windows".to_string());
-        let lib_path = format!("{}/installed/{}/lib", vcpkg_root, triplet);
-        println!("cargo:rustc-link-search=native={}", lib_path);
+        let lib_path = format!("{vcpkg_root}/installed/{triplet}/lib");
+        println!("cargo:rustc-link-search=native={lib_path}");
         println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
         println!("cargo:rerun-if-env-changed=VCPKGRS_TRIPLET");
         println!("cargo:rerun-if-env-changed=VCPKG_DEFAULT_TRIPLET");
@@ -39,18 +39,18 @@ fn main() {
 
     // OPENBLAS_DIR typically points at vcpkg installed prefix
     if let Ok(openblas_dir) = env::var("OPENBLAS_DIR") {
-        println!("cargo:rustc-link-search=native={}/lib", openblas_dir);
+        println!("cargo:rustc-link-search=native={openblas_dir}/lib");
         println!("cargo:rerun-if-env-changed=OPENBLAS_DIR");
     }
 
     // Explicit LAPACK hints
     if let Ok(lapack_lib_dir) = env::var("LAPACK_LIB_DIR") {
-        println!("cargo:rustc-link-search=native={}", lapack_lib_dir);
+        println!("cargo:rustc-link-search=native={lapack_lib_dir}");
         println!("cargo:rerun-if-env-changed=LAPACK_LIB_DIR");
     }
     if let Ok(lapack_libs) = env::var("LAPACK_LIBS") {
         for lib in split_list(&lapack_libs) {
-            println!("cargo:rustc-link-lib={}", lib);
+            println!("cargo:rustc-link-lib={lib}");
         }
         println!("cargo:rerun-if-env-changed=LAPACK_LIBS");
     } else {
@@ -64,12 +64,12 @@ fn main() {
 
     // Explicit BLAS hints
     if let Ok(blas_lib_dir) = env::var("BLAS_LIB_DIR") {
-        println!("cargo:rustc-link-search=native={}", blas_lib_dir);
+        println!("cargo:rustc-link-search=native={blas_lib_dir}");
         println!("cargo:rerun-if-env-changed=BLAS_LIB_DIR");
     }
     if let Ok(blas_libs) = env::var("BLAS_LIBS") {
         for lib in split_list(&blas_libs) {
-            println!("cargo:rustc-link-lib={}", lib);
+            println!("cargo:rustc-link-lib={lib}");
         }
         println!("cargo:rerun-if-env-changed=BLAS_LIBS");
     } else {

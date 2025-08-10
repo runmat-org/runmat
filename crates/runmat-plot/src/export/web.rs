@@ -168,7 +168,7 @@ impl WebExporter {
         let inc = COUNTER.fetch_add(1, Ordering::Relaxed);
 
         // Combine time with a monotonic counter for cross-platform uniqueness
-        format!("runmat_{}_{}", timestamp, inc)
+        format!("runmat_{timestamp}_{inc}")
     }
 
     /// Update export settings
