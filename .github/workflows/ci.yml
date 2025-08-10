@@ -98,12 +98,23 @@ jobs:
       - name: Check
         run: cargo check --all-targets --all-features
 
-      - name: Test
+      - name: Test (Unix)
+        if: runner.os != 'Windows'
         env:
           RUST_TEST_THREADS: 1
         run: |
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 -- --test-threads=1 | tee test.log
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RUST_TEST_THREADS: 1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --all-targets --all-features -- --test-threads=1 2>&1 | Tee-Object -FilePath test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test Summary
         if: always() && github.event_name == 'pull_request'

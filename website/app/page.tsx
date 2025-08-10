@@ -79,11 +79,11 @@ export default function HomePage() {
             🚀 Open Source • MIT Licensed • Free Forever
           </Badge>
           <h1 className="font-heading text-3xl sm:text-5xl md:text-6xl lg:text-7xl text-center">
-            <span className="gradient-brand">The Modern MATLAB Runtime</span>
+              <span className="gradient-brand">The Fast, Free, Modern MATLAB Runtime</span>
           </h1>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              A free, high-performance runtime for MATLAB code with Jupyter kernel support that runs your existing scripts faster and more reliably. 
-            No license fees, no vendor lock-in, just blazing-fast numerical computing with beautiful visualizations.
+              A free, high-performance runtime for MATLAB code.
+              No license fees, no vendor lock-in, just blazing-fast numerical computing and beautiful visualizations.
           </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
@@ -171,7 +171,7 @@ export default function HomePage() {
             Same MATLAB Syntax, Better Performance
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            Copy-paste your existing MATLAB code and watch it run faster and for free
+              Copy-paste your existing MATLAB/Octave code and watch it run faster and for free
           </p>
           </div>
 
@@ -201,7 +201,7 @@ export default function HomePage() {
 
                       {/* RunMat header */}
                       <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">RunMat v0.1.0 by Dystr (https://dystr.com)</div>
-                      <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">High-performance MATLAB/Octave runtime with JIT compilation</div>
+                      <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">Fast, free, modern MATLAB runtime with JIT compilation and GC</div>
                       <div className="text-cyan-400 dark:text-cyan-400 text-cyan-600">Type &apos;help&apos; for help, &apos;exit&apos; to quit</div>
                       <div className="h-4"></div>
 

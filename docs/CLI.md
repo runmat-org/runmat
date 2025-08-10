@@ -17,6 +17,9 @@ runmat
 # Run a script
 runmat my_script.m
 
+# Pipe a script to RunMat
+echo "x = 1 + 2" | runmat
+
 # System info (current config, env, GC status)
 runmat info
 
@@ -27,9 +30,6 @@ runmat benchmark my_script.m --iterations 5 --jit
 runmat snapshot create -o stdlib.snapshot
 runmat snapshot info stdlib.snapshot
 ```
-
-Minimal MATLAB examples used below aim to stay simple, e.g. `x = 1 + 2` or
-`A = [1, 2; 3, 4]` so you can focus on the tooling.
 
 ## Usage
 

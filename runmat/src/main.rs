@@ -794,7 +794,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         "RunMat v{} by Dystr (https://dystr.com)",
         env!("CARGO_PKG_VERSION")
     );
-    println!("High-performance MATLAB/Octave runtime with JIT compilation and GC");
+    println!("Fast, free, modern MATLAB runtime with JIT compilation and GC");
     println!();
 
     if enable_jit {
