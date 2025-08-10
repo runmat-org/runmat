@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-test:
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     strategy:
@@ -255,21 +255,22 @@ jobs:
           & "$vcpkgRoot\bootstrap-vcpkg.bat"
 
           # Compute vcpkg triplet based on target
-          $target = "${{ matrix.platform.target }}"
-          if ($target -eq "aarch64-pc-windows-msvc") {
-            $triplet = "arm64-windows"
-          } else {
-            $triplet = "x64-windows"
-          }
+          if (Test-Path env:MatrixPlatformTarget) { Remove-Item env:MatrixPlatformTarget }
+          $env:MatrixPlatformTarget = "${{ matrix.platform.target }}"
+          if ($env:MatrixPlatformTarget -eq "aarch64-pc-windows-msvc") { $triplet = "arm64-windows" } else { $triplet = "x64-windows" }
 
           # Ensure triplet in env
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
 
-          # Install OpenBLAS and LAPACK provider, enable dynamic linking
+          # Install OpenBLAS and, when supported, a LAPACK provider. arm64-windows lacks vcpkg-gfortran.
           & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
-          & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
+          if ($triplet -ne "arm64-windows") {
+            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
+          } else {
+            Write-Host "Skipping lapack-reference on $triplet (vcpkg-gfortran unsupported)"
+          }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
 
@@ -277,7 +278,11 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
-          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
+          if ($triplet -ne "arm64-windows") {
+            Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
+          } else {
+            Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=openblas"
+          }
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
 
       - name: Cross build
