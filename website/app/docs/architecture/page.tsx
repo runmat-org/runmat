@@ -39,7 +39,7 @@ export default async function ArchitectureDocsPage() {
         <Badge variant="secondary" className="mb-4">Documentation</Badge>
         <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">Architecture</h1>
         <p className="text-muted-foreground mb-6 text-lg">
-          Understand RunMat’s high-level design: tiered execution (Ignition interpreter ➝ Turbine JIT),
+          Understand RunMat&apos;s high-level design: tiered execution (Ignition interpreter ➝ Turbine JIT),
           generational GC, BLAS/LAPACK runtime, kernel, and plotting subsystems.
         </p>
         <MarkdownRenderer source={source} />

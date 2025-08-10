@@ -3,7 +3,7 @@
 RunMat provides a modern, explicit configuration system designed for clarity
 and portability. It supports multiple file formats, sane defaults, rich
 environment variable overrides, and precise CLI flag precedence — a major step
-up from MATLAB’s largely process‑flag driven approach.
+up from MATLAB's largely process‑flag driven approach.
 
 This document is the definitive reference for all configuration options.
 
@@ -357,7 +357,7 @@ A = [1, 2; 3, 4]
 runmat run simple_intro.m
 ```
 
-## Why this is better than MATLAB’s configuration model
+## Why this is better than MATLAB's configuration model
 
 - Multiple file formats (YAML/JSON/TOML) with the same schema.
 - Clear, documented precedence (flags > env > files > defaults).

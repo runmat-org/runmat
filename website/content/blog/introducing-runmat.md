@@ -203,11 +203,11 @@ The performance improvements have practical implications for real workflows:
 RunMat represents just the beginning. We're building a complete ecosystem for scientific computing:
 
 - **Full built-in coverage**: Our roadmap targets implementing the entire MATLAB built-in function set with high-quality, well-tested equivalents.
-- **Major toolboxes**: Signal Processing, Statistics & Machine Learning, Image Processing, Optimization, Control Systems, and more. These APIs are well understood, and we’re using LLM-assisted tooling to accelerate development while keeping rigorous tests and benchmarks to ensure correctness and performance.
+- **Major toolboxes**: Signal Processing, Statistics & Machine Learning, Image Processing, Optimization, Control Systems, and more. These APIs are well understood, and we're using LLM-assisted tooling to accelerate development while keeping rigorous tests and benchmarks to ensure correctness and performance.
 - **High-performance graphics**: Our wgpu-based graphics engine is designed for extremely dense visualizations—think multi-million-point scatter/point clouds, large mesh rendering, and complex interactive scenes—while staying responsive and visually crisp.
 - **Extensibility first**: RunMat is an open, modular runtime. Add functions, contribute toolboxes, build custom accelerators, and integrate with your pipelines.
 
-We’re actively seeking contributors. If you’d like to help implement built-ins, toolboxes, plotting primitives, or docs, head over to our GitHub repository and jump in: https://github.com/runmat-org/runmat
+Were actively seeking contributors. If you'd like to help implement built-ins, toolboxes, plotting primitives, or docs, head over to our GitHub repository and jump in: https://github.com/runmat-org/runmat
 
 **Spread the word** and share RunMat with your friends and colleagues. Scientific computing deserves better tools, and together we can make high-performance, accessible computing the new standard for researchers, engineers, and students worldwide.
 

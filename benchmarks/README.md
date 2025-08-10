@@ -2,7 +2,7 @@
 
 This suite compares RunMat and GNU Octave across representative MATLAB-style workloads. It builds RunMat (if needed), runs each script in Octave, RunMat interpreter, and RunMat JIT, and writes a YAML report with system info and speedups.
 
-### What’s included
+### What's included
 
 - **Startup Time** (`startup_time.m`): end‑to‑end cold script execution.
 - **Matrix Operations** (`matrix_operations.m`): add, matmul, transpose, scalar‑mul over sizes `[100, 300, 500]`.

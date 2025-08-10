@@ -1,7 +1,7 @@
 # RunMat CLI
 
 RunMat ships with a modern, ergonomic command-line interface designed for both
-everyday users and power users. It goes far beyond what MATLAB’s `matlab` CLI
+everyday users and power users. It goes far beyond what MATLAB's `matlab` CLI
 offers: first-class subcommands, rich help, environment-variable integration,
 snapshot management, a built-in benchmarker, a Jupyter kernel, and deep control
 over the JIT compiler and garbage collector.
@@ -250,7 +250,7 @@ See `docs/CONFIG.md` for file formats and discovery.
 
 ## Operating environments
 
-RunMat’s CLI is designed to work identically in interactive shells and
+RunMat's CLI is designed to work identically in interactive shells and
 non-interactive environments:
 
 - CI/CD: set headless plotting and deterministic JIT options.
@@ -304,7 +304,7 @@ runmat plot --mode headless
 ls sample_plot.png
 ```
 
-## Why this is better than MATLAB’s CLI
+## Why this is better than MATLAB's CLI
 
 - Modern subcommand design (repl, run, kernel, snapshot, benchmark, gc, config) instead of a
   monolithic binary with sparse flags.

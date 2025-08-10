@@ -18,7 +18,7 @@ function CopyableCommand({ command, bgColor }: { command: string; bgColor: strin
 
       // Track the copy event
       trackEvent('copy_install_command', 'installation', command.includes('curl') ? 'unix' : 'windows');
-    } catch (err) {
+    } catch {
       // Fallback for browsers that don't support clipboard API
       const textArea = document.createElement('textarea');
       textArea.value = command;
