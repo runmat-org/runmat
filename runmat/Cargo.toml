@@ -29,6 +29,10 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true }
 
+# Ensure vendored OpenSSL can be enabled for cross targets (feature unification)
+openssl = { version = "0.10", optional = true }
+openssl-sys = { version = "0.9.109", optional = true }
+
 # RunMat crates
 runmat-kernel = { path = "../crates/runmat-kernel" }
 runmat-repl = { path = "../crates/runmat-repl" }
@@ -48,6 +52,7 @@ default = ["gui", "blas-lapack"]
 gui = ["runmat-plot/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
 blas-only = ["runmat-runtime/blas-only"]
+vendored-openssl = ["openssl/vendored", "openssl-sys/vendored"]
 
 [dev-dependencies]
 tempfile = "3.12" 

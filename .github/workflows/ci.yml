@@ -245,7 +245,7 @@ jobs:
           OPENSSL_INCLUDE_DIR: /usr/include/aarch64-linux-gnu
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          cargo build --locked --release --bin runmat --features blas-lapack --target aarch64-unknown-linux-gnu
+          cargo build --locked --release --bin runmat --features blas-lapack,vendored-openssl --target aarch64-unknown-linux-gnu
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
@@ -308,5 +308,5 @@ jobs:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
           # Build all targets with full BLAS+LAPACK
-          args: "--locked --release --bin runmat --features blas-lapack"
+          args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl"
           strip: false

@@ -146,7 +146,7 @@ jobs:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
           # Build all targets with full BLAS+LAPACK
-          args: "--locked --release --bin runmat --features blas-lapack"
+          args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl"
           strip: true
 
       - name: Build binary (linux-aarch64 manual)
@@ -161,7 +161,7 @@ jobs:
           OPENSSL_INCLUDE_DIR: /usr/include/aarch64-linux-gnu
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          cargo build --locked --release --bin runmat --features blas-lapack --target aarch64-unknown-linux-gnu
+          cargo build --locked --release --bin runmat --features blas-lapack,vendored-openssl --target aarch64-unknown-linux-gnu
 
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
