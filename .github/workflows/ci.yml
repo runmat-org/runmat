@@ -179,3 +179,111 @@ jobs:
             } else {
               console.log(body);
             }
+
+  cross-build:
+    # Build all release targets so failures are caught before tagging
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
+    name: Cross build ${{ matrix.platform.release_for }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - release_for: freebsd-x86_64
+            os: ubuntu-20.04
+            target: x86_64-unknown-freebsd
+            command: build
+          - release_for: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            command: build
+          - release_for: windows-aarch64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+            command: build
+          - release_for: macos-x86_64
+            os: macOS-latest
+            target: x86_64-apple-darwin
+            command: build
+          - release_for: macos-aarch64
+            os: macOS-latest
+            target: aarch64-apple-darwin
+            command: build
+          - release_for: linux-x86_64
+            os: ubuntu-20.04
+            target: x86_64-unknown-linux-gnu
+            command: build
+          - release_for: linux-aarch64
+            os: ubuntu-20.04
+            target: aarch64-unknown-linux-gnu
+            command: build
+    runs-on: ${{ matrix.platform.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install BLAS/LAPACK dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config
+
+      - name: Install macOS dependencies (ZMQ)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install zeromq
+
+      - name: Install Windows dependencies (ZMQ, vcpkg + OpenBLAS/LAPACK)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y pkgconfiglite
+
+          Write-Host "Fetching prebuilt ZeroMQ for Windows (MSVC)"
+          curl -L -o libzmq.zip https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.zip
+          Expand-Archive -Path libzmq.zip -DestinationPath zmq
+          # Set env vars for ZMQ include/lib
+          $zmq = Join-Path $pwd "zmq"
+          Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$($zmq)\include;$env:INCLUDE"
+          Add-Content -Path $env:GITHUB_ENV -Value "LIB=$($zmq)\lib;$env:LIB"
+          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
+          Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
+
+          Write-Host "Cloning vcpkg and installing OpenBLAS/LAPACK"
+          $vcpkgRoot = Join-Path $pwd "vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          & "$vcpkgRoot\bootstrap-vcpkg.bat"
+
+          # Compute vcpkg triplet based on target
+          $target = "${{ matrix.platform.target }}"
+          if ($target -eq "aarch64-pc-windows-msvc") {
+            $triplet = "arm64-windows"
+          } else {
+            $triplet = "x64-windows"
+          }
+
+          # Ensure triplet in env
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
+
+          # Install OpenBLAS and LAPACK provider, enable dynamic linking
+          & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
+          & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
+          Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
+
+          # Hint BLAS/LAPACK discovery for blas-sys/lapack-sys
+          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
+
+      - name: Cross build
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: ${{ matrix.platform.command }}
+          target: ${{ matrix.platform.target }}
+          args: "--locked --release --bin runmat --features blas-lapack"
+          strip: false
