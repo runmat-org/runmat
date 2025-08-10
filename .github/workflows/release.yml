@@ -74,6 +74,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
+      - name: Install cross deps for linux-aarch64 target
+        if: runner.os == 'Linux' && matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          set -euxo pipefail
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libssl-dev:arm64 zlib1g-dev:arm64 pkg-config
+
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
         run: |
@@ -131,7 +139,8 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
 
-      - name: Build binary
+      - name: Build binary (cross)
+        if: matrix.platform.target != 'aarch64-unknown-linux-gnu'
         uses: houseabsolute/actions-rust-cross@v0
         with:
           command: ${{ matrix.platform.command }}
@@ -139,6 +148,20 @@ jobs:
           # Build all targets with full BLAS+LAPACK
           args: "--locked --release --bin runmat --features blas-lapack"
           strip: true
+
+      - name: Build binary (linux-aarch64 manual)
+        if: runner.os == 'Linux' && matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        env:
+          PKG_CONFIG_ALLOW_CROSS: '1'
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          OPENSSL_LIB_DIR: /usr/lib/aarch64-linux-gnu
+          OPENSSL_INCLUDE_DIR: /usr/include/aarch64-linux-gnu
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
+          cargo build --locked --release --bin runmat --features blas-lapack --target aarch64-unknown-linux-gnu
 
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
