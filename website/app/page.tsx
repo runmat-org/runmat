@@ -79,7 +79,7 @@ export default function HomePage() {
             🚀 Open Source • MIT Licensed • Free Forever
           </Badge>
           <h1 className="font-heading text-3xl sm:text-5xl md:text-6xl lg:text-7xl text-center">
-              <span className="gradient-brand">The Fast, Free, Modern MATLAB Runtime</span>
+              <span className="gradient-brand">The Fast, Free, Modern<br />MATLAB Runtime</span>
           </h1>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
               A free, high-performance runtime for MATLAB code.
