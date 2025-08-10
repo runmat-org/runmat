@@ -77,6 +77,18 @@ jobs:
       - name: Install BLAS/LAPACK deps (Linux ARM64 native)
         if: matrix.platform.os == 'ubuntu-latest-arm-l'
         run: |
+          # Ensure ARM64 uses Ubuntu Ports mirrors; some images point to security.ubuntu.com which lacks arm64 indexes
+          sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64-native.list >/dev/null <<'EOF'
+          deb http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
+          deb http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
+          deb http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
+          deb http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse
+          EOF
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+            if [ -f "$f" ]; then
+              sudo sed -i -E 's|^deb\s+https?://(archive|security)\.ubuntu\.com/ubuntu|# &|' "$f" || true
+            fi
+          done
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
@@ -159,6 +171,9 @@ jobs:
       - name: Build binary (cross)
         if: matrix.platform.target != 'aarch64-unknown-linux-gnu' || matrix.platform.os == 'ubuntu-latest-arm-l'
         uses: houseabsolute/actions-rust-cross@v0
+        env:
+          OPENSSL_NO_PKG_CONFIG: '1'
+          OPENSSL_STATIC: '1'
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
