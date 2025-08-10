@@ -1901,8 +1901,7 @@ fn find_jupyter_kernel_dir() -> Result<PathBuf> {
         {
             if let Ok(appdata) = std::env::var("APPDATA") {
                 let windows_kernels = PathBuf::from(appdata).join("jupyter/kernels");
-                if windows_kernels.exists()
-                    || windows_kernels.parent().is_some_and(|p| p.exists())
+                if windows_kernels.exists() || windows_kernels.parent().is_some_and(|p| p.exists())
                 {
                     return Ok(windows_kernels);
                 }
