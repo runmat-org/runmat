@@ -34,13 +34,6 @@ jobs:
             name: runmat-windows-x86_64.zip
             command: build
 
-          - release_for: windows-aarch64
-            os: windows-latest
-            target: aarch64-pc-windows-msvc
-            bin: runmat.exe
-            name: runmat-windows-aarch64.zip
-            command: build
-
           - release_for: macos-x86_64
             os: macOS-latest
             target: x86_64-apple-darwin
@@ -86,8 +79,8 @@ jobs:
           brew update
           brew install zeromq
 
-      - name: Install Windows dependencies (ZMQ, vcpkg + OpenBLAS/LAPACK)
-        if: runner.os == 'Windows'
+      - name: Install Windows MSVC dependencies (ZMQ, vcpkg + OpenBLAS/LAPACK)
+        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
           choco install -y pkgconfiglite
@@ -147,7 +140,7 @@ jobs:
           strip: true
 
       - name: Package as archive (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

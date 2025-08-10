@@ -118,13 +118,20 @@ if (-not $LATEST_RELEASE) {
 
 Write-Info "Latest release: $LATEST_RELEASE"
 
-# Download and install (try versioned and non-versioned names)
+# Determine which artifact to download
 $baseUrl = "https://github.com/$REPO/releases/download/$LATEST_RELEASE"
+$DownloadPlatform = $PLATFORM
+if ($PLATFORM -eq "windows-aarch64") {
+    Write-Warn "No native Windows ARM64 build is published yet; using the x64 build via Windows on ARM emulation."
+    $DownloadPlatform = "windows-x86_64"
+}
+
+# Download and install (try versioned and non-versioned names)
 $candidates = @(
-  "$baseUrl/runmat-$LATEST_RELEASE-$PLATFORM.zip",
-  "$baseUrl/runmat-$PLATFORM.zip"
+  "$baseUrl/runmat-$LATEST_RELEASE-$DownloadPlatform.zip",
+  "$baseUrl/runmat-$DownloadPlatform.zip"
 )
-$TEMP_FILE = "$env:TEMP\runmat-$PLATFORM.zip"
+$TEMP_FILE = "$env:TEMP\runmat-$DownloadPlatform.zip"
 $TEMP_DIR = "$env:TEMP\runmat-extract"
 
 $downloaded = $false
