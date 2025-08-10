@@ -27,6 +27,8 @@ jobs:
         include:
           - os: ubuntu-latest-m
             name: linux-x86_64
+          - os: ubuntu-latest-arm-l
+            name: linux-aarch64
           - os: windows-latest-l
             name: windows-x86_64
           - os: macos-latest
@@ -219,22 +221,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install BLAS/LAPACK dependencies (Linux)
-        if: runner.os == 'Linux'
+      - name: Install BLAS/LAPACK dependencies (Linux x86_64)
+        if: runner.os == 'Linux' && matrix.platform.os != 'ubuntu-latest-arm-l'
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
-      - name: Install cross deps for linux-aarch64 target
-        if: runner.os == 'Linux' && matrix.platform.target == 'aarch64-unknown-linux-gnu'
+      - name: Install BLAS/LAPACK deps (Linux ARM64 native)
+        if: matrix.platform.os == 'ubuntu-latest-arm-l'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+
+      - name: Install cross deps for linux-aarch64 target (x86_64 runner)
+        if: runner.os == 'Linux' && matrix.platform.target == 'aarch64-unknown-linux-gnu' && matrix.platform.os != 'ubuntu-latest-arm-l'
         run: |
           set -euxo pipefail
           sudo dpkg --add-architecture arm64
+          sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64.list >/dev/null <<'EOF'
+deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
+deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
+deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
+deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse
+EOF
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libssl-dev:arm64 zlib1g-dev:arm64 pkg-config
 
-      - name: Build linux-aarch64 (manual)
-        if: runner.os == 'Linux' && matrix.platform.target == 'aarch64-unknown-linux-gnu'
+      - name: Build linux-aarch64 (manual cross)
+        if: runner.os == 'Linux' && matrix.platform.target == 'aarch64-unknown-linux-gnu' && matrix.platform.os != 'ubuntu-latest-arm-l'
         env:
           PKG_CONFIG_ALLOW_CROSS: '1'
           PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
@@ -302,7 +316,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
 
       - name: Cross build
-        if: matrix.platform.target != 'aarch64-unknown-linux-gnu'
+        if: matrix.platform.target != 'aarch64-unknown-linux-gnu' || matrix.platform.os == 'ubuntu-latest-arm-l'
         uses: houseabsolute/actions-rust-cross@v0
         with:
           command: ${{ matrix.platform.command }}
