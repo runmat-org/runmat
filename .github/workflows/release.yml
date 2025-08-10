@@ -121,7 +121,18 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
 
-      - name: Build binary (cross)
+      - name: Cross build (linux-x86_64)
+        if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: ${{ matrix.platform.command }}
+          target: ${{ matrix.platform.target }}
+          # Use system OpenSSL via pkg-config; libssl-dev installed above
+          args: "--locked --release --bin runmat --features blas-lapack"
+          strip: true
+
+      - name: Cross build (other targets)
+        if: matrix.platform.target != 'x86_64-unknown-linux-gnu'
         uses: houseabsolute/actions-rust-cross@v0
         env:
           OPENSSL_NO_PKG_CONFIG: '1'
@@ -129,7 +140,7 @@ jobs:
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
-          # Build all targets with full BLAS+LAPACK
+          # Build all targets with vendored OpenSSL and full BLAS+LAPACK
           args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl"
           strip: true
 
