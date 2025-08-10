@@ -223,7 +223,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config
+          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
