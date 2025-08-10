@@ -22,11 +22,12 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     strategy:
       fail-fast: false
+      max-parallel: 8
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-latest-m
             name: linux-x86_64
-          - os: windows-latest
+          - os: windows-latest-l
             name: windows-x86_64
           - os: macos-latest
             name: macos-universal
@@ -186,14 +187,15 @@ jobs:
     name: Cross build ${{ matrix.platform.release_for }}
     strategy:
       fail-fast: false
+      max-parallel: 12
       matrix:
         platform:
           - release_for: freebsd-x86_64
-            os: ubuntu-20.04
+            os: ubuntu-latest-m
             target: x86_64-unknown-freebsd
             command: build
           - release_for: windows-x86_64
-            os: windows-latest
+            os: windows-latest-l
             target: x86_64-pc-windows-msvc
             command: build
           - release_for: macos-x86_64
@@ -205,11 +207,11 @@ jobs:
             target: aarch64-apple-darwin
             command: build
           - release_for: linux-x86_64
-            os: ubuntu-20.04
+            os: ubuntu-latest-m
             target: x86_64-unknown-linux-gnu
             command: build
           - release_for: linux-aarch64
-            os: ubuntu-20.04
+            os: ubuntu-latest-m
             target: aarch64-unknown-linux-gnu
             command: build
     runs-on: ${{ matrix.platform.os }}

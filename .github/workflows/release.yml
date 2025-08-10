@@ -18,17 +18,18 @@ jobs:
   build-release:
     name: Build ${{ matrix.platform.release_for }}
     strategy:
+      max-parallel: 8
       matrix:
         platform:
           - release_for: freebsd-x86_64
-            os: ubuntu-20.04
+            os: ubuntu-latest-m
             target: x86_64-unknown-freebsd
             bin: runmat
             name: runmat-freebsd-x86_64.tar.gz
             command: build
 
           - release_for: windows-x86_64
-            os: windows-latest
+            os: windows-latest-l
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
             name: runmat-windows-x86_64.zip
@@ -49,14 +50,14 @@ jobs:
             command: build
 
           - release_for: linux-x86_64
-            os: ubuntu-20.04
+            os: ubuntu-latest-m
             target: x86_64-unknown-linux-gnu
             bin: runmat
             name: runmat-linux-x86_64.tar.gz
             command: build
 
           - release_for: linux-aarch64
-            os: ubuntu-20.04
+            os: ubuntu-latest-m
             target: aarch64-unknown-linux-gnu
             bin: runmat
             name: runmat-linux-aarch64.tar.gz
