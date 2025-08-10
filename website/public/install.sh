@@ -96,9 +96,17 @@ log "Detected architecture: $ARCH"
 case $OS in
     linux)
         case $ARCH in
-            x86_64) PLATFORM="linux-x86_64" ;;
-            aarch64|arm64) PLATFORM="linux-aarch64" ;;
-            *) error "Unsupported architecture: $ARCH" ;;
+            x86_64)
+                PLATFORM="linux-x86_64"
+                ;;
+            aarch64|arm64)
+                warn "Linux ARM64 builds are not yet available."
+                warn "Please build from source (requires Rust toolchain) or use a container image."
+                error "Unsupported architecture for prebuilt binaries: $ARCH"
+                ;;
+            *)
+                error "Unsupported architecture: $ARCH"
+                ;;
         esac
         ;;
     darwin)

@@ -192,10 +192,6 @@ jobs:
       max-parallel: 12
       matrix:
         platform:
-          - release_for: freebsd-x86_64
-            os: ubuntu-latest-m
-            target: x86_64-unknown-freebsd
-            command: build
           - release_for: windows-x86_64
             os: windows-latest-l
             target: x86_64-pc-windows-msvc
@@ -212,10 +208,6 @@ jobs:
             os: ubuntu-latest-m
             target: x86_64-unknown-linux-gnu
             command: build
-          - release_for: linux-aarch64
-            os: ubuntu-latest-m
-            target: aarch64-unknown-linux-gnu
-            command: build
     runs-on: ${{ matrix.platform.os }}
     steps:
       - name: Checkout
@@ -226,58 +218,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
-
-      - name: Install BLAS/LAPACK deps (Linux ARM64 native)
-        if: matrix.platform.os == 'ubuntu-latest-arm-l'
-        run: |
-          # Ensure ARM64 uses Ubuntu Ports mirrors; some partner images point to security.ubuntu.com which lacks arm64 indexes
-          sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64-native.list >/dev/null <<'EOF'
-          deb http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
-          deb http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
-          deb http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse
-          EOF
-          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
-            if [ -f "$f" ]; then
-              # Comment out archive/security entries that may produce arm64 404s
-              sudo sed -i -E 's|^deb\s+https?://(archive|security)\.ubuntu\.com/ubuntu|# &|' "$f" || true
-            fi
-          done
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
-
-      - name: Install cross deps for linux-aarch64 target (x86_64 runner)
-        if: runner.os == 'Linux' && matrix.platform.target == 'aarch64-unknown-linux-gnu' && matrix.platform.os != 'ubuntu-latest-arm-l'
-        run: |
-          set -euxo pipefail
-          sudo dpkg --add-architecture arm64
-          sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64.list >/dev/null <<'EOF'
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse
-          EOF
-          # Restrict existing sources to native arch to avoid 404s for arm64
-          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
-            if [ -f "$f" ]; then
-              sudo sed -i -E 's/^deb ([^[])/deb [arch=amd64] \1/' "$f"
-            fi
-          done
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libssl-dev:arm64 zlib1g-dev:arm64 pkg-config
-
-      - name: Build linux-aarch64 (manual cross)
-        if: runner.os == 'Linux' && matrix.platform.target == 'aarch64-unknown-linux-gnu' && matrix.platform.os != 'ubuntu-latest-arm-l'
-        env:
-          PKG_CONFIG_ALLOW_CROSS: '1'
-          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-          OPENSSL_LIB_DIR: /usr/lib/aarch64-linux-gnu
-          OPENSSL_INCLUDE_DIR: /usr/include/aarch64-linux-gnu
-        run: |
-          rustup target add aarch64-unknown-linux-gnu
-          cargo build --locked --release --bin runmat --features blas-lapack,vendored-openssl --target aarch64-unknown-linux-gnu
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
@@ -344,7 +284,7 @@ jobs:
           strip: false
 
       - name: Cross build (other targets)
-        if: matrix.platform.target != 'x86_64-unknown-linux-gnu' && (matrix.platform.target != 'aarch64-unknown-linux-gnu' || matrix.platform.os == 'ubuntu-latest-arm-l')
+        if: matrix.platform.target != 'x86_64-unknown-linux-gnu'
         uses: houseabsolute/actions-rust-cross@v0
         env:
           OPENSSL_NO_PKG_CONFIG: '1'
