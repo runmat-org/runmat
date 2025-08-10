@@ -20,16 +20,16 @@ export const metadata: Metadata = {
 
 export default function DownloadPage() {
   return (
-    <div className="min-h-screen bg-white dark:bg-gray-900">
+    <div className="min-h-screen bg-background">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
         
         {/* Header */}
         <div className="text-center mb-12">
           <Badge className="mb-4">Free Download</Badge>
-          <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-gray-900 dark:text-white">
+          <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">
             Download RunMat
           </h1>
-          <p className="text-xl text-gray-600 dark:text-gray-300 leading-relaxed max-w-3xl mx-auto">
+          <p className="text-xl text-muted-foreground leading-relaxed max-w-3xl mx-auto">
             Get started with RunMat in seconds.
           </p>
         </div>
@@ -38,14 +38,14 @@ export default function DownloadPage() {
         <section className="mb-12">
           <Card className="bg-gradient-to-r from-blue-50 to-orange-50 dark:from-blue-900/20 dark:to-orange-900/20 border-blue-200 dark:border-blue-800">
             <CardContent className="p-4 text-center">
-              <OSInstallCommand className="max-w-4xl mx-auto" />
+              <OSInstallCommand className="max-w-4xl mx-auto shadow-none border-none" />
             </CardContent>
           </Card>
         </section>
 
         {/* Next Steps */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-8 text-center text-gray-900 dark:text-white">
+          <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
             Next Steps
           </h2>
           
@@ -54,14 +54,14 @@ export default function DownloadPage() {
               <CardContent className="p-6">
                 <div className="flex items-center mb-4">
                   <Code className="h-6 w-6 mr-3 text-green-600" />
-                  <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                  <h3 className="text-xl font-bold text-foreground">
                     Start Coding
                   </h3>
                 </div>
-                <p className="text-gray-600 dark:text-gray-300 mb-4">
+                <p className="text-muted-foreground mb-4">
                   Jump into the interactive REPL or run your existing MATLAB scripts by typing <code>runmat</code> in your terminal.
                 </p>
-                <div className="bg-gray-900 rounded-md p-3 font-mono text-sm text-white mb-4">
+                <div className="bg-muted rounded-md p-3 font-mono text-sm text-muted-foreground mb-4">
                   runmat
                 </div>
                 <Button variant="outline" size="sm" asChild className="w-full">
@@ -75,14 +75,14 @@ export default function DownloadPage() {
               <CardContent className="p-6">
                 <div className="flex items-center mb-4">
                   <Zap className="h-6 w-6 mr-3 text-purple-600" />
-                  <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                  <h3 className="text-xl font-bold text-foreground">
                     Set up Jupyter Kernel
                   </h3>
                 </div>
-                <p className="text-gray-600 dark:text-gray-300 mb-4">
+                <p className="text-muted-foreground mb-4">
                   Use RunMat as a Jupyter kernel for interactive notebooks with 150x speedup over GNU Octave.
                 </p>
-                <div className="bg-gray-900 rounded-md p-3 font-mono text-sm text-white mb-4">
+                <div className="bg-muted rounded-md p-3 font-mono text-sm text-muted-foreground mb-4">
                   runmat --install-kernel
                 </div>
                 <Button variant="outline" size="sm" asChild className="w-full">
@@ -97,7 +97,7 @@ export default function DownloadPage() {
 
         {/* Alternative Installation Methods */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-8 text-center text-gray-900 dark:text-white">
+          <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
             Alternative Installation Methods
           </h2>
           
@@ -178,7 +178,7 @@ export default function DownloadPage() {
 
         {/* Development Setup */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-8 text-center text-gray-900 dark:text-white">
+          <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
             Development Environment
           </h2>
           
@@ -231,15 +231,15 @@ export default function DownloadPage() {
 
         {/* Source Code */}
         <section className="mb-12">
-          <Card className="bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+          <Card className="bg-muted border-border">
             <CardHeader className="text-center">
-              <CardTitle className="flex items-center justify-center">
+              <CardTitle className="flex items-center justify-center text-foreground">
                 <SiGithub className="h-6 w-6 mr-2" />
                 Open Source
               </CardTitle>
             </CardHeader>
             <CardContent className="text-center">
-              <p className="text-gray-600 dark:text-gray-300 mb-6">
+              <p className="text-muted-foreground mb-6">
                 RunMat is completely open source. Explore the code, contribute, or build it yourself.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -264,10 +264,10 @@ export default function DownloadPage() {
         <section>
           <Card className="bg-gradient-to-r from-orange-50 to-blue-50 dark:from-orange-900/20 dark:to-blue-900/20 border-orange-200 dark:border-orange-800">
             <CardContent className="p-6 text-center">
-              <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-white">
+              <h3 className="text-lg font-semibold mb-3 text-foreground">
                 Looking for More?
               </h3>
-              <p className="text-gray-600 dark:text-gray-300 mb-4">
+              <p className="text-muted-foreground mb-4">
                 RunMat is part of the Dystr platform for computational engineering. 
                 Get cloud computing, team collaboration, and enterprise features.
               </p>

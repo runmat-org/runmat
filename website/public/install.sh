@@ -92,25 +92,26 @@ ARCH=$(uname -m)
 log "Detected OS: $OS"
 log "Detected architecture: $ARCH"
 
+# Map to release artifact naming (new scheme) and keep legacy fallback
 case $OS in
     linux)
         case $ARCH in
-            x86_64) PLATFORM="Linux-x86_64" ;;
-            aarch64|arm64) PLATFORM="Linux-aarch64" ;;
+            x86_64) PLATFORM="linux-x86_64" ;;
+            aarch64|arm64) PLATFORM="linux-aarch64" ;;
             *) error "Unsupported architecture: $ARCH" ;;
         esac
         ;;
     darwin)
         case $ARCH in
-            x86_64) PLATFORM="Darwin-x86_64" ;;
-            arm64) PLATFORM="Darwin-aarch64" ;;
+            x86_64) PLATFORM="macos-x86_64" ;;
+            arm64) PLATFORM="macos-aarch64" ;;
             *) error "Unsupported architecture: $ARCH" ;;
         esac
         ;;
     *)
         error "Unsupported OS: $OS"
         ;;
- esac
+esac
 
 # Emit start event now that we know OS/ARCH/PLATFORM
 _send_telemetry install_start
@@ -163,11 +164,18 @@ fi
 log "Creating installation directory: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 
-# Install binary
+# Install binary (and preserve any bundled shared libs in TEMP_DIR if present)
 log "Installing RunMat binary..."
 if ! cp "$TEMP_DIR/$BINARY_NAME" "$INSTALL_DIR/"; then
     error "Failed to install binary"
 fi
+
+# Copy bundled shared libraries next to the binary (non-invasive; private dir)
+for lib in "$TEMP_DIR"/*.so "$TEMP_DIR"/*.dylib; do
+    if [ -f "$lib" ]; then
+        cp -f "$lib" "$INSTALL_DIR/" 2>/dev/null || true
+    fi
+done
 
 chmod +x "$INSTALL_DIR/$BINARY_NAME"
 

@@ -78,7 +78,60 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopenblas-dev liblapack-dev
+          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config
+
+      - name: Install macOS dependencies (ZMQ)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install zeromq
+
+      - name: Install Windows dependencies (ZMQ, vcpkg + OpenBLAS/LAPACK)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y pkgconfiglite
+
+          Write-Host "Fetching prebuilt ZeroMQ for Windows (MSVC)"
+          curl -L -o libzmq.zip https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.zip
+          Expand-Archive -Path libzmq.zip -DestinationPath zmq
+          # Set env vars for ZMQ include/lib
+          $zmq = Join-Path $pwd "zmq"
+          Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$($zmq)\include;$env:INCLUDE"
+          Add-Content -Path $env:GITHUB_ENV -Value "LIB=$($zmq)\lib;$env:LIB"
+          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
+          Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
+
+          Write-Host "Cloning vcpkg and installing OpenBLAS/LAPACK"
+          $vcpkgRoot = Join-Path $pwd "vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          & "$vcpkgRoot\bootstrap-vcpkg.bat"
+
+          # Compute vcpkg triplet based on target
+          $target = "${{ matrix.platform.target }}"
+          if ($target -eq "aarch64-pc-windows-msvc") {
+            $triplet = "arm64-windows"
+          } else {
+            $triplet = "x64-windows"
+          }
+
+          # Ensure triplet in env
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
+
+          # Install OpenBLAS and LAPACK provider, enable dynamic linking
+          & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
+          & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
+          Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
+
+          # Hint BLAS/LAPACK discovery for blas-sys/lapack-sys
+          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
 
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v0
@@ -88,16 +141,39 @@ jobs:
           args: "--locked --release --bin runmat --features blas-lapack"
           strip: true
 
-      - name: Package as archive
+      - name: Package as archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $target = "${{ matrix.platform.target }}"
+          $outDir = Join-Path "target" (Join-Path $target "release")
+          $artifactName = "runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
+
+          Push-Location $outDir
+          # Copy required runtime DLLs into output dir
+          $triplet = $env:VCPKG_DEFAULT_TRIPLET
+          $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $triplet + "\bin")
+          if (Test-Path $vcpkgBin) { Copy-Item -Path (Join-Path $vcpkgBin "*.dll") -Destination . -Force -ErrorAction SilentlyContinue }
+
+          $zmqBin = Join-Path $env:ZMQ_PATH "bin"
+          if (Test-Path $zmqBin) { Copy-Item -Path (Join-Path $zmqBin "*.dll") -Destination . -Force -ErrorAction SilentlyContinue }
+          else {
+            $zmqLib = Join-Path $env:ZMQ_PATH "lib"
+            if (Test-Path $zmqLib) { Copy-Item -Path (Join-Path $zmqLib "*.dll") -Destination . -Force -ErrorAction SilentlyContinue }
+          }
+
+          # Create zip with binary and DLLs
+          7z a (Join-Path "..\..\.." ("$artifactName.zip")) ${{ matrix.platform.bin }} *.dll
+          Pop-Location
+
+      - name: Package as archive (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           cd target/${{ matrix.platform.target }}/release
           ARTIFACT_NAME="runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
-          if [[ "${{ matrix.platform.os }}" == "windows-latest" ]]; then
-            7z a ../../../${ARTIFACT_NAME}.zip ${{ matrix.platform.bin }}
-          else
-            tar czvf ../../../${ARTIFACT_NAME}.tar.gz ${{ matrix.platform.bin }}
-          fi
+          tar czvf ../../../${ARTIFACT_NAME}.tar.gz ${{ matrix.platform.bin }}
           cd -
 
       - name: Publish release artifacts

@@ -86,8 +86,8 @@ $ARCH = $env:PROCESSOR_ARCHITECTURE
 Write-Info "Detected architecture: $ARCH"
 
 switch ($ARCH) {
-    "AMD64" { $PLATFORM = "Windows-x86_64" }
-    "ARM64" { $PLATFORM = "Windows-aarch64" }
+    "AMD64" { $PLATFORM = "windows-x86_64" }
+    "ARM64" { $PLATFORM = "windows-aarch64" }
     default { 
         Write-ErrorMsg "Unsupported architecture: $ARCH"
     }
@@ -158,10 +158,14 @@ if (-not (Test-Path $INSTALL_DIR)) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
 }
 
-# Install binary
+# Install binary and any bundled DLLs (do not overwrite system-wide deps)
 Write-Info "Installing RunMat binary..."
 try {
     Copy-Item "$TEMP_DIR\$BINARY_NAME" "$INSTALL_DIR\" -Force
+    # Copy any DLLs that shipped alongside the binary into the private install dir
+    Get-ChildItem -Path $TEMP_DIR -Filter *.dll -ErrorAction SilentlyContinue | ForEach-Object {
+        Copy-Item $_.FullName "$INSTALL_DIR\" -Force
+    }
 } catch {
     Write-ErrorMsg "Failed to install binary: $($_.Exception.Message)"
 }

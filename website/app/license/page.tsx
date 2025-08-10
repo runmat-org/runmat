@@ -28,37 +28,37 @@ export default function LicensePage() {
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/50">
+          <Card className="border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/50 shadow-lg">
             <CardHeader className="text-center pb-3">
-              <CheckCircle className="h-8 w-8 mx-auto mb-2 text-green-600" />
-              <CardTitle className="text-lg text-green-800 dark:text-green-200">Free for Most Uses</CardTitle>
+              <CheckCircle className="h-8 w-8 mx-auto mb-2 text-green-600 dark:text-green-400" />
+              <CardTitle className="text-lg text-foreground dark:text-green-100 font-semibold">Free for Most Uses</CardTitle>
             </CardHeader>
             <CardContent className="text-center">
-              <p className="text-sm text-green-800 dark:text-green-100 font-medium">
+              <p className="text-sm text-foreground dark:text-green-200 font-medium">
                 Individuals, researchers, students, and most companies can use RunMat freely
               </p>
             </CardContent>
           </Card>
 
-          <Card className="border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/50">
+          <Card className="border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/50 shadow-lg">
             <CardHeader className="text-center pb-3">
-              <AlertCircle className="h-8 w-8 mx-auto mb-2 text-orange-600" />
-              <CardTitle className="text-lg text-orange-800 dark:text-orange-200">Attribution Required</CardTitle>
+              <AlertCircle className="h-8 w-8 mx-auto mb-2 text-orange-600 dark:text-orange-400" />
+              <CardTitle className="text-lg text-foreground dark:text-orange-100 font-semibold">Attribution Required</CardTitle>
             </CardHeader>
             <CardContent className="text-center">
-              <p className="text-sm text-orange-800 dark:text-orange-100 font-medium">
+              <p className="text-sm text-foreground dark:text-orange-200 font-medium">
                 Must credit &ldquo;RunMat by Dystr&rdquo; in distributions and derivative works
               </p>
             </CardContent>
           </Card>
 
-          <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50">
+          <Card className="border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50 shadow-lg">
             <CardHeader className="text-center pb-3">
-              <HelpCircle className="h-8 w-8 mx-auto mb-2 text-blue-600" />
-              <CardTitle className="text-lg text-blue-800 dark:text-blue-200">Special Rules</CardTitle>
+              <HelpCircle className="h-8 w-8 mx-auto mb-2 text-blue-300 dark:text-blue-400" />
+              <CardTitle className="text-lg text-foreground dark:text-blue-100 font-semibold">Special Rules</CardTitle>
             </CardHeader>
             <CardContent className="text-center">
-              <p className="text-sm text-blue-800 dark:text-blue-100 font-medium">
+              <p className="text-sm text-foreground dark:text-blue-200 font-medium">
                 Commercial scientific software companies must keep modifications open source
               </p>
             </CardContent>
