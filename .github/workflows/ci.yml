@@ -87,16 +87,47 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=x64-windows"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=x64-windows"
-          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+          # Install OpenBLAS with LAPACK symbols and ensure DLLs are on PATH
+          & "$vcpkgRoot\vcpkg.exe" install "openblas[lapack]:x64-windows"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
+          Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\x64-windows\bin"
+          # Hint BLAS/LAPACK discovery for blas-sys/lapack-sys
+          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\x64-windows\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\x64-windows\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\x64-windows"
 
       - name: Format
         run: cargo fmt -- --check
 
-      - name: Clippy
+      - name: Clippy (Unix)
+        if: runner.os != 'Windows'
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Check
+      - name: Clippy (Windows, workspace excluding runmat)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cargo clippy --workspace --exclude runmat --all-targets -- -D warnings
+
+      - name: Clippy (Windows, runmat without BLAS)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cargo clippy -p runmat --no-default-features --features gui --all-targets -- -D warnings
+
+      - name: Check (Unix)
+        if: runner.os != 'Windows'
         run: cargo check --all-targets --all-features
+
+      - name: Check (Windows, workspace excluding runmat)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cargo check --workspace --exclude runmat --all-targets
+
+      - name: Check (Windows, runmat without BLAS)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cargo check -p runmat --no-default-features --features gui --all-targets
 
       - name: Test (Unix)
         if: runner.os != 'Windows'
@@ -106,14 +137,24 @@ jobs:
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 -- --test-threads=1 | tee test.log
 
-      - name: Test (Windows)
+      - name: Test (Windows, workspace excluding runmat)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           RUST_TEST_THREADS: 1
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo test --all-targets --all-features -- --test-threads=1 2>&1 | Tee-Object -FilePath test.log
+          cargo test --workspace --exclude runmat --all-targets -- --test-threads=1 2>&1 | Tee-Object -FilePath test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test (Windows, runmat without BLAS)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RUST_TEST_THREADS: 1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test -p runmat --no-default-features --features gui --all-targets -- --test-threads=1 2>&1 | Tee-Object -FilePath test.log -Append
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test Summary
