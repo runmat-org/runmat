@@ -31,15 +31,23 @@ openblas-src = { version = "0.10", features = ["system", "cblas"], optional = tr
 
 [features]
 default = ["gui"]
+
 # GUI plotting support
 gui = ["runmat-plot/gui"]
+
 # Jupyter notebook integration
 jupyter = ["runmat-plot/jupyter"]
+
 # High-performance BLAS/LAPACK support using platform-native libraries
 # macOS: Uses Apple's Accelerate framework (WORKS on both Intel and Apple Silicon!)
 # Other platforms: Uses OpenBLAS
 # Usage: cargo test --features blas-lapack
 blas-lapack = ["blas", "lapack", "accelerate-src", "openblas-src"]
+
+# BLAS-only support (no LAPACK)
+# macOS: Uses Accelerate
+# Other platforms: Uses OpenBLAS
+blas-only = ["blas", "accelerate-src", "openblas-src"]
 
 [dev-dependencies]
 runmat-macros = { workspace = true } 

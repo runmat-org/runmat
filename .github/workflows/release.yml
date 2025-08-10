@@ -120,12 +120,12 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
 
-          # Install OpenBLAS and, when supported, a LAPACK provider. arm64-windows lacks vcpkg-gfortran.
+          # Install OpenBLAS and LAPACK provider; on arm64-windows allow unsupported gfortran
           & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
-          if ($triplet -ne "arm64-windows") {
-            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
+          if ($triplet -eq "arm64-windows") {
+            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet" --allow-unsupported
           } else {
-            Write-Host "Skipping lapack-reference on $triplet (vcpkg-gfortran unsupported)"
+            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
           }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
@@ -134,12 +134,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
-          if ($triplet -ne "arm64-windows") {
-            Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
-          } else {
-            # On arm64, rely on OpenBLAS providing LAPACK symbols
-            Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=openblas"
-          }
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
 
       - name: Build binary
@@ -147,6 +142,7 @@ jobs:
         with:
           command: ${{ matrix.platform.command }}
           target: ${{ matrix.platform.target }}
+          # Build all targets with full BLAS+LAPACK
           args: "--locked --release --bin runmat --features blas-lapack"
           strip: true
 

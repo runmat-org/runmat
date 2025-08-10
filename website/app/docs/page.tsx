@@ -196,18 +196,18 @@ export default function DocsPage() {
         <div className="mt-16 rounded-lg border bg-muted/50 p-6">
           <h2 className="mb-4 text-xl font-semibold">Quick Links</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="outline" size="default" asChild>
               <Link href="/download">Download RunMat</Link>
             </Button>
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="outline" size="default" asChild>
               <Link href="/blog/introducing-runmat">Read Introduction</Link>
             </Button>
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="outline" size="default" asChild>
               <Link href="https://github.com/runmat-org/runmat" target="_blank">
                 View on GitHub
               </Link>
             </Button>
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="outline" size="default" asChild>
               <Link href="/license">License (MIT)</Link>
             </Button>
           </div>

@@ -47,6 +47,7 @@ runmat-plot = { path = "../crates/runmat-plot" }
 default = ["gui", "blas-lapack"]
 gui = ["runmat-plot/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
+blas-only = ["runmat-runtime/blas-only"]
 
 [dev-dependencies]
 tempfile = "3.12" 
