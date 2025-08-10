@@ -333,8 +333,18 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
           Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
 
-      - name: Cross build
-        if: matrix.platform.target != 'aarch64-unknown-linux-gnu' || matrix.platform.os == 'ubuntu-latest-arm-l'
+      - name: Cross build (linux-x86_64)
+        if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: ${{ matrix.platform.command }}
+          target: ${{ matrix.platform.target }}
+          # Build all targets with full BLAS+LAPACK
+          args: "--locked --release --bin runmat --features blas-lapack"
+          strip: false
+
+      - name: Cross build (other targets)
+        if: matrix.platform.target != 'x86_64-unknown-linux-gnu' && (matrix.platform.target != 'aarch64-unknown-linux-gnu' || matrix.platform.os == 'ubuntu-latest-arm-l')
         uses: houseabsolute/actions-rust-cross@v0
         env:
           OPENSSL_NO_PKG_CONFIG: '1'
