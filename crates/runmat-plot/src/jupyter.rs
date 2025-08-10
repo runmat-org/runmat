@@ -184,7 +184,8 @@ impl JupyterBackend {
     fn export_png(&self, figure: &mut Figure) -> Result<String, String> {
         use crate::export::ImageExporter;
 
-        let output_path = format!("/tmp/runmat_plot_{}.png", Self::generate_plot_id());
+        let output_path =
+            std::env::temp_dir().join(format!("runmat_plot_{}.png", Self::generate_plot_id()));
 
         // Use our high-performance GPU export system
         let runtime = tokio::runtime::Runtime::new()
@@ -204,9 +205,10 @@ impl JupyterBackend {
         })?;
 
         // Return HTML img tag for Jupyter
+        let output_path_str = output_path.to_string_lossy();
         Ok(format!(
             "<img src='{}' alt='RunMat Plot' width='{}' height='{}' />",
-            output_path, self.export_settings.width, self.export_settings.height
+            output_path_str, self.export_settings.width, self.export_settings.height
         ))
     }
 
@@ -236,7 +238,8 @@ impl JupyterBackend {
         use crate::export::ImageExporter;
 
         // Create temporary file for PNG export
-        let temp_path = format!("/tmp/runmat_base64_{}.png", Self::generate_plot_id());
+        let temp_path =
+            std::env::temp_dir().join(format!("runmat_base64_{}.png", Self::generate_plot_id()));
 
         // Export PNG first
         let runtime = tokio::runtime::Runtime::new()
