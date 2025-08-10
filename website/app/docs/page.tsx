@@ -72,6 +72,45 @@ export default function DocsPage() {
             </Card>
           </Link>
 
+          {/* CLI Reference (from repo docs) */}
+          <Link href="/docs/cli" className="block">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Terminal className="h-6 w-6 text-primary" />
+                  <CardTitle>CLI Reference</CardTitle>
+                </div>
+                <CardDescription>
+                  Full CLI reference, commands, env vars, and examples
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-muted-foreground">
+                  Browse Reference →
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* Configuration (from repo docs) */}
+          <Link href="/docs/configuration" className="block">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Settings className="h-6 w-6 text-primary" />
+                  <CardTitle>Configuration</CardTitle>
+                </div>
+                <CardDescription>
+                  Configure RunMat via YAML/JSON/TOML with env & CLI precedence
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-muted-foreground">
+                  Open Guide →
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
 
           {/* Built-in Functions */}
           <Link href="/docs/builtin-functions" className="block">
@@ -108,46 +147,6 @@ export default function DocsPage() {
               <CardContent>
                 <div className="text-sm text-muted-foreground">
                   Open Document →
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* Configuration (from repo docs) */}
-          <Link href="/docs/configuration" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Settings className="h-6 w-6 text-primary" />
-                  <CardTitle>Configuration</CardTitle>
-                </div>
-                <CardDescription>
-                  Configure RunMat via YAML/JSON/TOML with env & CLI precedence
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-sm text-muted-foreground">
-                  Open Guide →
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* CLI Reference (from repo docs) */}
-          <Link href="/docs/cli" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Terminal className="h-6 w-6 text-primary" />
-                  <CardTitle>CLI Reference</CardTitle>
-                </div>
-                <CardDescription>
-                  Full CLI reference, commands, env vars, and examples
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-sm text-muted-foreground">
-                  Browse Reference →
                 </div>
               </CardContent>
             </Card>

@@ -178,7 +178,7 @@ export default function HomePage() {
           <div className="mx-auto max-w-7xl">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
               {/* Terminal/Shell on the left */}
-              <div className="order-2 lg:order-1">
+              <div className="order-1 lg:order-1">
                 <Card className="bg-gray-900 dark:bg-gray-900 bg-gray-100 border-gray-700 dark:border-gray-700 border-gray-300 shadow-2xl py-0">
                   {/* Terminal Header */}
                   <div className="flex items-center justify-between px-4 py-3 bg-gray-800 dark:bg-gray-800 bg-gray-200 rounded-t-lg border-b border-gray-700 dark:border-gray-700 border-b-gray-300">
@@ -276,7 +276,7 @@ export default function HomePage() {
               </div>
 
               {/* RunMat Plot Window */}
-              <div className="order-1 lg:order-2">
+              <div className="order-2 lg:order-2">
                 <div className="bg-gray-700 rounded-lg shadow-2xl overflow-hidden">
                   {/* macOS Window Header */}
                   <div className="bg-gray-600 px-4 py-3 flex items-center justify-between">
@@ -400,10 +400,10 @@ export default function HomePage() {
             Join researchers and engineers who&rsquo;ve made the switch to RunMat
           </p>
           <div className="flex gap-4">
-            <Button size="lg" asChild>
+              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
               <Link href="/blog/introducing-runmat">Read the Story</Link>
             </Button>
-            <Button variant="outline" size="lg" asChild>
+              <Button variant="outline" size="lg" asChild className="h-12 px-8">
               <Link href="https://github.com/runmat-org/runmat">View on GitHub</Link>
             </Button>
           </div>

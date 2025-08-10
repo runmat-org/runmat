@@ -1,31 +1,35 @@
+"use client";
+
 import Link from "next/link";
 import { Heart } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import Logo from "@/components/Logo";
+import SubscribeForm from "@/components/SubscribeForm";
 
 export default function Footer() {
   return (
     <footer className="border-t bg-background">
-      <div className="container mx-auto flex flex-col items-center justify-between gap-4 py-10 md:h-24 md:flex-row md:py-0 px-4 md:px-6">
-        <div className="flex flex-col items-center gap-4 px-8 md:flex-row md:gap-2 md:px-0">
+      <div className="container relative mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-8 py-8 px-4 md:px-6">
+        <div className="flex w-full flex-col items-start gap-3 md:flex-[2]">
           <div className="flex items-center gap-3">
             <Logo height={24} className="shrink-0" />
             <p className="text-center text-base leading-none md:text-left md:text-lg">
               <span className="font-semibold brand-text-sheen">RunMat</span>
             </p>
           </div>
-          <p className="text-center text-sm leading-loose text-muted-foreground md:text-left">
+          <p className="text-left text-sm leading-loose text-muted-foreground">
             A modern, high-performance runtime for MATLAB and GNU Octave code.
           </p>
+          <div className="w-full"><SubscribeForm /></div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 md:flex-[0_0_auto] absolute right-4 top-4 md:static">
           <Link
             href="https://github.com/runmat-org/runmat"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground flex items-center"
           >
-            <SiGithub className="h-5 w-5" />
+            <SiGithub className="h-5 w-5" aria-label="GitHub" />
             <span className="sr-only">GitHub</span>
           </Link>
         </div>

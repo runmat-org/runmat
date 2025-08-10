@@ -206,10 +206,10 @@ export default function LicensePage() {
         {/* Full License Text */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-8 text-foreground">
-            Full License Text
+            Full License Text         
           </h2>
           
-          <Card>
+          <Card className="p-0">
             <CardContent className="p-6">
               <div className="font-mono text-sm text-foreground/90 whitespace-pre-line leading-relaxed">
 {`# License

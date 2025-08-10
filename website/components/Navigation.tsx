@@ -11,7 +11,7 @@ import {
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
 import { Button } from "@/components/ui/button";
-import { Download, Menu } from "lucide-react";
+import { Download, Menu, Home, BookOpen, FileText, Scale, Minus } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
@@ -126,6 +126,7 @@ export default function Navigation() {
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
+                <Home className="mr-2 h-4 w-4" />
                 Home
               </Link>
               <Link
@@ -133,6 +134,7 @@ export default function Navigation() {
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
+                <FileText className="mr-2 h-4 w-4" />
                 Blog
               </Link>
               <Link
@@ -140,6 +142,7 @@ export default function Navigation() {
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
+                <BookOpen className="mr-2 h-4 w-4" />
                 Documentation
               </Link>
               <Link
@@ -147,44 +150,49 @@ export default function Navigation() {
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                • Getting Started
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                Getting Started
               </Link>
               <Link
                 href="/docs/architecture"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                • Architecture
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                Architecture
               </Link>
               <Link
                 href="/docs/cli"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                • CLI Reference
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                CLI Reference
               </Link>
               <Link
                 href="/docs/configuration"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                • Configuration
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                Configuration
               </Link>
               <Link
                 href="/license"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
+                <Scale className="mr-2 h-4 w-4" />
                 License
               </Link>
-              <div className="flex items-center pt-2">
-                <Button size="sm" asChild className="w-full">
-                  <Link href="/download">
-                    <Download className="mr-2 h-4 w-4" />
-                    Download
-                  </Link>
-                </Button>
-              </div>
+              <Link
+                href="/download"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent mt-2"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Download
+              </Link>
             </div>
           </div>
         </div>

@@ -37,61 +37,6 @@ export default function GettingStartedPage() {
           </p>
         </div>
 
-        {/* Quick Path Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-
-          <Card className="border-2 hover:border-green-500 transition-colors">
-            <CardHeader className="text-center">
-              <Clock className="h-8 w-8 mx-auto mb-2 text-green-600" />
-              <CardTitle className="text-lg">Quick Start</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center">
-              <p className="text-sm text-muted-foreground mb-4">
-                Jump straight into RunMat
-              </p>
-              <Button variant="outline" size="sm" asChild>
-                <Link href="#installation">
-                  Install Now
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="opacity-60 relative border-2 transition-colors">
-            <CardHeader className="text-center">
-              <Users className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-              <CardTitle className="text-lg text-gray-500 dark:text-gray-400">
-                New to MATLAB
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-center">
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                Learn scientific computing fundamentals
-              </p>
-              <Button variant="outline" size="sm" className="opacity-50 cursor-not-allowed" disabled>
-                Coming Soon
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="opacity-60 relative border-2 transition-colors">
-            <CardHeader className="text-center">
-              <FileText className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-              <CardTitle className="text-lg text-gray-500 dark:text-gray-400">
-                MATLAB User
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-center">
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                Migrate existing scripts to RunMat
-              </p>
-              <Button variant="outline" size="sm" className="opacity-50 cursor-not-allowed" disabled>
-                Coming Soon
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
         {/* Installation Section */}
         <section id="installation" className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground">
@@ -100,30 +45,13 @@ export default function GettingStartedPage() {
           
           <div className="space-y-6">
             {/* Quick Install */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Terminal className="h-5 w-5 mr-2 text-green-600" />
-                  Recommended: One-Line Install
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-6">
-                  The fastest way to get started. Our installer automatically detects your platform:
-                </p>
-                
-                <OSInstallCommand className="mb-6" />
-                
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <Button asChild>
+            <OSInstallCommand className="mb-6" />
+            <Button asChild>
                     <Link href="/download">
                       <Download className="mr-2 h-4 w-4" />
-                      More Options
+                More Installation Options
                     </Link>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            </Button>
           </div>
         </section>
 

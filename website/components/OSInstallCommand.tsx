@@ -35,11 +35,11 @@ function CopyableCommand({ command, bgColor }: { command: string; bgColor: strin
   };
 
   return (
-    <div className={`${bgColor} rounded-md p-4 font-mono text-sm text-white overflow-x-auto relative group cursor-pointer`} onClick={copyToClipboard}>
-      <div className="flex items-center justify-between">
-        <span className="flex-1 select-all">{command}</span>
+    <div className={`${bgColor} rounded-md p-4 font-mono text-sm text-white relative group cursor-pointer`} onClick={copyToClipboard}>
+      <div className="flex items-center justify-center min-w-0">
+        <span className="select-all whitespace-nowrap overflow-hidden text-ellipsis text-center max-w-full">{command}</span>
         <button
-          className="ml-3 p-1 opacity-70 hover:opacity-100 transition-opacity bg-white/10 hover:bg-white/20 rounded"
+          className="ml-3 p-1 opacity-70 hover:opacity-100 transition-opacity bg-white/10 hover:bg-white/20 rounded flex-shrink-0"
           onClick={(e) => {
             e.stopPropagation();
             copyToClipboard();
@@ -207,7 +207,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         )}
         
         {selectedOS !== 'unknown' && (
-          <div className="mt-4 pt-4 border-t">
+          <div className="mt-4 pt-4">
             <p className="text-xs text-gray-500 dark:text-gray-400 text-center mb-3">
               Not {getOSInfo().title}? Pick your platform:
             </p>
