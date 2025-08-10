@@ -109,18 +109,46 @@ export default function Navigation() {
                 Home
               </Link>
               <Link
-                href="/docs/getting-started"
-                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Getting Started
-              </Link>
-              <Link
                 href="/blog"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 Blog
+              </Link>
+              <Link
+                href="/docs"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Documentation
+              </Link>
+              <Link
+                href="/docs/getting-started"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                • Getting Started
+              </Link>
+              <Link
+                href="/docs/architecture"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                • Architecture
+              </Link>
+              <Link
+                href="/docs/cli"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                • CLI Reference
+              </Link>
+              <Link
+                href="/docs/configuration"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                • Configuration
               </Link>
               <Link
                 href="/license"

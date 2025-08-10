@@ -9,7 +9,7 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "RunMat - Fast, Free, Modern MATLAB Runtime",
   description:
-    "Run MATLAB code for free with RunMat: a high-performance, open-source runtime and Octave alternative with JIT compilation, BLAS/LAPACK, GPU plotting, and a Jupyter kernel.",
+    "Run MATLAB code for free with RunMat: high-performance, open-source runtime with Jupyter kernel, BLAS/LAPACK, beautiful plotting, and JIT compilation.",
   keywords: [
     "run matlab online",
     "free matlab runtime",
@@ -21,17 +21,31 @@ export const metadata: Metadata = {
     "high performance matlab",
     "matlab jit",
     "jupyter matlab",
+    "matlab jupyter kernel",
+    "jupyter matlab integration",
     "matlab plotting",
     "matlab vs octave",
     "matlab vs python",
     "matlab vs julia",
     "matlab vs scilab",
+    "matlab blas lapack",
   ],
   alternates: { canonical: "/" },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
   openGraph: {
     title: "RunMat - Free, Modern MATLAB Runtime",
     description:
-      "Run MATLAB code for free with a modern, high-performance runtime. Open source, JIT-accelerated, BLAS/LAPACK powered, beautiful plots, and Jupyter kernel support.",
+      "Run MATLAB code for free with a modern, high-performance runtime. Jupyter kernel, BLAS/LAPACK, beautiful plots, JIT compilation, and open source.",
     url: "/",
     siteName: "RunMat",
     type: "website",
@@ -40,13 +54,23 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "RunMat - Free, Modern MATLAB Runtime",
     description:
-      "Run MATLAB code for free with a fast, open-source Octave alternative. JIT compiler, BLAS/LAPACK, GPU plots, and Jupyter integration.",
+      "Run MATLAB code for free with a fast, open-source alternative. Jupyter kernel, BLAS/LAPACK, beautiful plots, and JIT compilation.",
   },
 };
 
 export default function HomePage() {
   return (
     <div className="flex flex-col min-h-screen">
+      {/* SEO-optimized opening content */}
+      <div className="sr-only">
+        <h1>RunMat - Fast, Free, Modern MATLAB Runtime</h1>
+        <p>
+          Run MATLAB code for free with RunMat: high-performance, open-source runtime with
+          Jupyter kernel, BLAS/LAPACK, beautiful plotting, and JIT compilation. Replacement for
+          MATLAB and GNU Octave with dramatically faster performance.
+        </p>
+      </div>
+
       {/* Hero Section */}
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
@@ -58,7 +82,7 @@ export default function HomePage() {
             <span className="gradient-brand">The Modern MATLAB Runtime</span>
           </h1>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              A free, high-performance runtime for MATLAB code that runs your existing scripts faster and more reliably. 
+              A free, high-performance runtime for MATLAB code with Jupyter kernel support that runs your existing scripts faster and more reliably. 
             No license fees, no vendor lock-in, just blazing-fast numerical computing with beautiful visualizations.
           </p>
             <div className="flex flex-col sm:flex-row gap-4">
@@ -86,7 +110,7 @@ export default function HomePage() {
               All the power of MATLAB without the price tag or limitations
             </p>
         </div>
-        <div className="mx-auto grid justify-center gap-4 sm:grid-cols-2 md:max-w-[64rem] md:grid-cols-3">
+          <div className="mx-auto grid justify-center gap-4 sm:grid-cols-2 lg:grid-cols-4 md:max-w-[80rem]">
           <Card>
             <CardHeader>
               <div className="mb-2 text-3xl">⚡</div>
@@ -123,6 +147,18 @@ export default function HomePage() {
               </CardDescription>
             </CardContent>
           </Card>
+            <Card>
+              <CardHeader>
+                <div className="mb-2 text-3xl">📓</div>
+                <CardTitle>Jupyter Kernel</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>
+                  Run MATLAB code directly in Jupyter notebooks with full interactive support.
+                  Perfect for data science and research workflows.
+                </CardDescription>
+              </CardContent>
+            </Card>          
         </div>
         </div>
       </section>
