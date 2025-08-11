@@ -294,7 +294,8 @@ jobs:
           cargo workspaces version custom "$RELEASE_VERSION" \
             --force '*' \
             --no-git-commit \
-            --exact
+            --exact \
+            --yes
 
       - name: Publish all crates in dependency order
         shell: bash
