@@ -187,7 +187,7 @@ export default function GettingStartedPage() {
               </div>
               <p className="text-sm text-muted-foreground">
                 Most MATLAB and GNU Octave scripts will run without modification. Check our 
-                <Link href="/docs/compatibility" className="text-blue-600 dark:text-blue-400 underline">compatibility guide</Link> for details.
+                <Link href="/docs/language-coverage" className="text-blue-600 dark:text-blue-400 underline"> compatibility guide</Link> for details.
               </p>
             </CardContent>
           </Card>

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Node runtime to avoid Edge CORS peculiarities and allow future secret usage
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const HUBSPOT_PORTAL_ID = process.env.HUBSPOT_PORTAL_ID;
 const HUBSPOT_FORM_ID = process.env.HUBSPOT_FORM_ID;
