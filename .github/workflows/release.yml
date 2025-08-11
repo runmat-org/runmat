@@ -16,6 +16,7 @@ env:
 
 jobs:
   build-release:
+    environment: Production
     name: Build ${{ matrix.platform.release_for }}
     strategy:
       max-parallel: 8
@@ -247,6 +248,7 @@ jobs:
   create-release:
     name: Create Release
     needs: [build-release, publish-crates]
+    environment: Production
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -293,6 +295,7 @@ jobs:
   publish-crates:
     name: Publish crates to crates.io
     needs: [build-release]
+    environment: Production
     runs-on: ubuntu-latest
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
