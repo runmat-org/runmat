@@ -1019,3 +1019,131 @@ This edit represents the **culmination of production-grade JIT function implemen
 This benchmark suite provides **comprehensive performance validation** demonstrating RunMat's exceptional performance characteristics across all major computational workloads. The combination of rigorous timing methodology, structured reporting, and cross-platform compatibility creates a production-ready benchmarking infrastructure suitable for ongoing performance validation and optimization tracking.
 
 **Status**: ✅ **COMPLETE** - Production-ready benchmark suite with comprehensive performance validation, structured YAML reporting, and enterprise-grade methodology demonstrating RunMat's 150+ times performance advantage over GNU Octave across all major computational workloads.
+
+
+---
+
+## **Edit 60 – CI/CD, Release Automation, and macOS Notarization**
+
+**Scope**: Cross-platform CI, release pipeline, crate publishing, code signing, installers
+
+### **What we shipped**
+- **Unified CI matrix** (`.github/workflows/ci.yml`):
+  - Linux x86_64 (Ubuntu), macOS (x86_64 + arm64), Windows x86_64
+  - OS-specific dependency installs: OpenBLAS/LAPACK + OpenSSL on Linux, Homebrew `zeromq` on macOS, vcpkg `openblas` + `lapack-reference` + prebuilt ZeroMQ on Windows
+  - Tests run single-threaded for GC determinism (`RUST_TEST_THREADS=1`)
+  - Increased parallelism and larger hosted runners
+
+- **Cross-build job** mirrors release targets using `houseabsolute/actions-rust-cross` with correct OpenSSL strategy:
+  - Linux x86_64 uses system OpenSSL via `pkg-config`
+  - Other cross targets use `vendored-openssl` with `OPENSSL_NO_PKG_CONFIG=1` and `OPENSSL_STATIC=1`
+  - For first release we intentionally removed `linux-aarch64` and `freebsd-x86_64` targets (documented below)
+
+- **Release pipeline** (`.github/workflows/release.yml`):
+  - Builds all supported targets, packages artifacts, and uploads
+  - Publishes all crates to crates.io in dependency order via `cargo-workspaces`
+  - Version bump via: `cargo workspaces version custom "$RELEASE_VERSION" --force '*' --no-git-commit --exact --yes`
+  - Ensures license compliance by copying root `LICENSE` into each crate and normalizing `license-file = "LICENSE"`
+  - Fixes for git context in Actions: full history checkout (`fetch-depth: 0`), ref checkout, and fallback to `main` when HEAD is detached; sets `http.cainfo` on Linux runners
+
+- **Windows specifics**:
+  - vcpkg triplet selection, installs `openblas` and `lapack-reference`
+  - Exposes `BLAS_LIB_DIR`, `LAPACK_LIB_DIR`, `OPENBLAS_DIR`, and `VCPKGRS_DYNAMIC=1`
+  - Bundles vcpkg and ZeroMQ DLLs alongside the binary in release zips
+
+- **Runtime linking improvements**:
+  - `runmat-runtime/build.rs` links BLAS/LAPACK using env overrides (`BLAS_LIB_DIR`, `BLAS_LIBS`, `LAPACK_*`) and defaults on Windows; OpenSSL strategy moved to workflows (system vs vendored)
+
+- **macOS code signing + notarization**:
+  - Codesign with Hardened Runtime and minimal entitlements (JIT, unsigned executable memory, disable library validation)
+  - Notarize with `notarytool --wait`, staple ticket; submission performed with a temporary zip (not shipped)
+  - GitHub Environment secrets (attached via `environment: Production`):
+    - `MACOS_CERT_P12` (base64 .p12), `MACOS_CERT_PASSWORD`, `MACOS_CERT_IDENTITY`
+    - `APPLE_NOTARIZE_KEY_ID`, `APPLE_NOTARIZE_ISSUER_ID`, `APPLE_NOTARIZE_PRIVATE_KEY` (base64 .p8)
+  - Fixed nested-archive issue by restricting uploaded artifacts and deleting the submission zip
+
+- **Installers**:
+  - `install.sh`: maps `linux-x86_64`/`macos-{x86_64,aarch64}`, disables Linux ARM64 prebuilt for first release with clear guidance; copies bundled `.so/.dylib`; auto-refreshes shell (`exec "$SHELL" -l`) when interactive for immediate PATH availability
+  - `install.ps1`: on Windows ARM64, fetches x64 artifact (emulation) and installs to a private user dir; non-destructive DLL handling
+
+### **Intentional exclusions for v0.0.1**
+- Removed `linux-aarch64` and `freebsd-x86_64` release targets temporarily due to OpenSSL/Fortran/cross constraints. CI entries and ancillary hacks were also removed. Linux ARM64 will return with a native runner or stable cross-OpenSSL story.
+
+### **Key fixes and gotchas**
+- Avoid static export in the website when using API routes (no `output: 'export'`); mark API routes `dynamic = 'force-dynamic'` to prevent static optimization.
+- Cargo publishing requires a branch, not a detached HEAD—ensure `actions/checkout` uses `fetch-depth: 0` and an explicit `ref`.
+- For macOS notarization, ensure the `.p12` and `.p8` are base64-encoded secrets; certificate identity must match the Developer ID Application cert.
+
+**Status**: ✅ **COMPLETE** – Robust, reproducible CI/CD with cross-platform builds, crate publishing, signed/notarized macOS binaries, and polished installers for v0.0.1.
+
+
+---
+
+## **Edit 61 – Website UX Polish, Theming Consistency, and Docs Rendering**
+
+**Scope**: CTA consistency, Mermaid + code highlighting, light/dark theming parity, subscription API hardening, SEO/static rendering, and download page normalization
+
+### Summary
+Focused pass to make the public site production-ready and consistent. We consolidated button styles, fixed light-mode contrast issues, unified the color system across pages, and created a HubSpot email newsletter subscribe endpoint. We also ensured docs/MDX render correctly with Mermaid diagrams and SSR syntax highlighting, and verified that all docs routes are statically generated for SEO.
+
+### Changes
+- CTA and buttons
+  - Unified primary CTA style across pages: gradient brand button
+    (`bg-gradient-to-r from-blue-500 to-purple-600 ...`) for actions like
+    “Download RunMat”, “More Install Options”, “Read the Story”.
+  - Secondary actions use `variant="outline"` with consistent height/padding.
+  - Files: `website/app/page.tsx` (final CTA section), various docs pages.
+
+- License page readability (light and dark modes)
+  - Increased contrast for summary cards; iterated from overly light → dark →
+    final approach: light tinted backgrounds with full `text-foreground` body
+    copy for maximum readability in light mode; maintained dark-mode styles.
+  - Tuned icon color for “Special Rules” to dark blue in light mode
+    (`text-blue-800`) for better separation.
+  - File: `website/app/license/page.tsx`.
+
+- Mermaid diagrams and code highlighting
+  - `MarkdownRenderer` detects `language-mermaid` blocks and renders via
+    `MermaidDiagram` client component; SSR syntax highlighting via
+    `rehype-highlight` with `.hljs` theming in `globals.css`.
+  - Mermaid config tightened (securityLevel `strict`, no htmlLabels) and themed
+    to match site colors; centered layout and improved node/edge styling.
+  - Files: `website/components/MarkdownRenderer.tsx`,
+    `website/components/MermaidDiagram.tsx`, `website/app/globals.css`.
+
+- Subscribe form and HubSpot API
+  - Moved HubSpot IDs to environment variables and added guard when unset.
+    - `HUBSPOT_PORTAL_ID`, `HUBSPOT_FORM_ID`
+    - If missing returns `{ error: "not_configured" }` (503)
+  - Kept Node runtime for the route. No client secrets are exposed.
+  - Files: `website/app/api/subscribe/route.ts`, `.env.example` (update needed).
+
+- Download page theming normalization
+  - Replaced hardcoded Tailwind grays with design tokens: `bg-background`,
+    `text-foreground`, `text-muted-foreground`, `bg-muted`, `border-border`.
+  - Result: light mode now matches the rest of the site; dark mode unchanged.
+  - Removed extra shadows/borders from `OSInstallCommand` wrapper on this page.
+  - File: `website/app/download/page.tsx`.
+
+- Homepage adjustments
+  - Made CTA styles consistent; ensured mobile-first order of terminal/plot; minor copy polish.
+  - File: `website/app/page.tsx`.
+
+- Static docs pages and SEO
+  - All docs pages export `dynamic = 'force-static'` and include rich metadata
+    (title, description, canonical, OG/Twitter). OG image routes now use
+    hardcoded titles to avoid `fs` in Edge runtime and are also static.
+  - Files: `website/app/docs/**/page.tsx`, `website/app/**/opengraph-image.tsx`.
+
+### Env/Config
+- Add to website environment (Vercel/Dev):
+  - `HUBSPOT_PORTAL_ID="####"`
+  - `HUBSPOT_FORM_ID="####"`
+- Route uses Node runtime; no additional secrets required.
+
+### Visual/Theming Guidelines codified
+- Use design tokens everywhere: `bg-background`, `text-foreground`,
+  `text-muted-foreground`, `bg-muted`, `border-border`.
+- Primary button = branded gradient; secondary = `outline`.
+- For info cards on light mode: prefer light-tint backgrounds with standard
+  foreground text for readability; icons may keep semantic color.
