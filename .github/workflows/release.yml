@@ -194,8 +194,8 @@ jobs:
         run: |
           set -euxo pipefail
           BIN="target/${{ matrix.platform.target }}/release/runmat"
-          # Create a zip for notarization submission
-          ZIP_NAME="runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}.zip"
+          # Create a temporary zip only for notarization submission (do not ship this)
+          ZIP_NAME="notarize-submit.zip"
           /usr/bin/zip -j "$ZIP_NAME" "$BIN"
           echo "$APPLE_NOTARIZE_PRIVATE_KEY" | base64 --decode > notary_key.p8
           # Submit and wait for notarization result
@@ -203,6 +203,7 @@ jobs:
             --key-id "$APPLE_NOTARIZE_KEY_ID" --issuer "$APPLE_NOTARIZE_ISSUER_ID" --wait
           # Staple ticket to binary if possible (no-op for some formats)
           xcrun stapler staple "$BIN" || true
+          rm -f "$ZIP_NAME" notary_key.p8
 
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
@@ -243,7 +244,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}
-          path: "runmat-*"
+          path: |
+            runmat-*.tar.gz
+            runmat-*.zip
 
   create-release:
     name: Create Release
