@@ -144,6 +144,65 @@ jobs:
           args: "--locked --release --bin runmat --features blas-lapack,vendored-openssl"
           strip: true
 
+      - name: Import signing cert and codesign (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_CERT_IDENTITY: ${{ secrets.MACOS_CERT_IDENTITY }}
+        run: |
+          set -euxo pipefail
+          # Prepare keychain with Developer ID Application certificate
+          KEYCHAIN=build.keychain
+          KEYCHAIN_PWD=$(uuidgen)
+          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security import cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PWD" "$KEYCHAIN"
+
+          BIN="target/${{ matrix.platform.target }}/release/runmat"
+          # Minimal entitlements to support JIT and dynamic loading under Hardened Runtime
+          cat > entitlements.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>com.apple.security.cs.allow-jit</key><true/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+            <key>com.apple.security.cs.disable-library-validation</key><true/>
+          </dict>
+          </plist>
+          EOF
+
+          codesign --force --timestamp --options runtime --entitlements entitlements.plist \
+            --sign "$MACOS_CERT_IDENTITY" "$BIN"
+          codesign -dv --verbose=4 "$BIN" || true
+
+      - name: Notarize (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_NOTARIZE_KEY_ID: ${{ secrets.APPLE_NOTARIZE_KEY_ID }}
+          APPLE_NOTARIZE_ISSUER_ID: ${{ secrets.APPLE_NOTARIZE_ISSUER_ID }}
+          APPLE_NOTARIZE_PRIVATE_KEY: ${{ secrets.APPLE_NOTARIZE_PRIVATE_KEY }}
+        run: |
+          set -euxo pipefail
+          BIN="target/${{ matrix.platform.target }}/release/runmat"
+          # Create a zip for notarization submission
+          ZIP_NAME="runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}.zip"
+          /usr/bin/zip -j "$ZIP_NAME" "$BIN"
+          echo "$APPLE_NOTARIZE_PRIVATE_KEY" | base64 --decode > notary_key.p8
+          # Submit and wait for notarization result
+          xcrun notarytool submit "$ZIP_NAME" --key notary_key.p8 \
+            --key-id "$APPLE_NOTARIZE_KEY_ID" --issuer "$APPLE_NOTARIZE_ISSUER_ID" --wait
+          # Staple ticket to binary if possible (no-op for some formats)
+          xcrun stapler staple "$BIN" || true
+
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
