@@ -291,7 +291,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cargo workspaces version "$RELEASE_VERSION" \
+          cargo workspaces version custom \
+            --to "$RELEASE_VERSION" \
             --force '*' \
             --no-git-commit \
             --exact
