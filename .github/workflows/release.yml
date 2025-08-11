@@ -293,7 +293,7 @@ jobs:
           set -euxo pipefail
           cargo workspaces version "$RELEASE_VERSION" \
             --force '*' \
-            --no-git-commit --no-git-tag \
+            --no-git-commit \
             --exact
 
       - name: Publish all crates in dependency order
