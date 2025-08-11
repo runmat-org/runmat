@@ -1,6 +1,6 @@
 [package]
 name = "runmat"
-version = "0.0.5"
+version = "0.0.1"
 edition = "2021"
 description = "High-performance MATLAB/Octave runtime with Jupyter kernel support"
 authors = ["Dystr Team"]
