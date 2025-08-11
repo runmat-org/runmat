@@ -245,9 +245,16 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
         fi
     fi
 
-    # Apply for current session
+    # Apply for current session (affects this subshell only)
     export PATH="$INSTALL_DIR:$PATH"
-    warn "Added $INSTALL_DIR to your PATH. Restart your terminal or 'source' your shell profile to take effect."
+    warn "Added $INSTALL_DIR to your PATH."
+    # If interactive and not in CI, start a new login shell so PATH is live immediately
+    if [ -t 1 ] && [ -n "${SHELL:-}" ] && [ -z "${CI:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ] && [ -z "${RUNMAT_NO_SHELL_RELOAD:-}" ]; then
+        log "Refreshing your shell to pick up PATH changes (run 'exit' to return)."
+        exec "$SHELL" -l
+    else
+        warn "Restart your terminal or 'source' your shell profile to take effect."
+    fi
 else
     log "RunMat is already in your PATH"
 fi
