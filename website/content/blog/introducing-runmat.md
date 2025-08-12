@@ -1,7 +1,7 @@
 ---
 title: "Introducing RunMat: A Fast, Free, Modern MATLAB Runtime"
 description: "A blazing-fast, memory-safe, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler, advanced garbage collection, and GPU-accelerated plotting."
-date: "2025-01-07"
+date: "2025-08-07"
 author: "Nabeel Allana"
 readTime: "8 min read"
 slug: "introducing-runmat"
