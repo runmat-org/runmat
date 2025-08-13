@@ -12,6 +12,7 @@ inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
 runmat-plot = { workspace = true }
+runmat-accelerate-api = { path = "../runmat-accelerate-api" }
 glam = "0.24"
 tokio = { workspace = true }
 
@@ -49,5 +50,9 @@ blas-lapack = ["blas", "lapack", "accelerate-src", "openblas-src"]
 # Other platforms: Uses OpenBLAS
 blas-only = ["blas", "accelerate-src", "openblas-src"]
 
+# Internal testing utilities (class registry seeders)
+test-classes = []
+
 [dev-dependencies]
 runmat-macros = { workspace = true } 
+runmat-accelerate = { workspace = true }

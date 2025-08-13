@@ -136,7 +136,7 @@ impl WriteBarrierAware for Value {
             Value::Cell(cells) => {
                 // Check if any cell values are young
                 // This is a placeholder - in reality we'd check generations
-                !cells.is_empty()
+                !cells.data.is_empty()
             }
             _ => false,
         }

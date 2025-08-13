@@ -499,6 +499,9 @@ async fn main() -> Result<()> {
         .filter_level(log_level)
         .init();
 
+    // Register a minimal in-process acceleration provider so gpuArray/gather work out of the box
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
     debug!("Configuration loaded: {config:?}");
 

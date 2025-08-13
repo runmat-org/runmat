@@ -1,0 +1,31 @@
+[package]
+name = "runmat-accelerate"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Pluggable GPU acceleration layer for RunMat (CUDA, ROCm, Metal, Vulkan/Spir-V)"
+
+[features]
+# Backends are opt-in features
+cuda = []
+rocm = []
+metal = []
+vulkan = []
+opencl = []
+wgpu = ["dep:wgpu", "dep:pollster"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+runmat-builtins = { workspace = true }
+runmat-runtime = { workspace = true }
+runmat-hir = { workspace = true }
+runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+once_cell = "1"
+
+# Optional backend deps
+wgpu = { version = "0.19", optional = true }
+pollster = { version = "0.3", optional = true }
+
+

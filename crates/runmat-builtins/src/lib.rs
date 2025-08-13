@@ -1,6 +1,7 @@
 pub use inventory;
 use std::convert::TryFrom;
 use std::fmt;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -8,92 +9,118 @@ pub enum Value {
     Num(f64),
     Bool(bool),
     String(String),
-    Matrix(Matrix),
-    Cell(Vec<Value>), // Cell arrays
+    Tensor(Tensor),
+    Cell(CellArray),
+    // GPU-resident tensor handle (opaque; buffer managed by backend)
+    GpuTensor(runmat_accelerate_api::GpuTensorHandle),
+    // Simple object instance until full class system lands
+    Object(ObjectInstance),
+    // Function handle pointing to a named function (builtin or user)
+    FunctionHandle(String),
+    Closure(Closure),
+    ClassRef(String),
+    MException(MException),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Matrix {
+pub struct Tensor {
     pub data: Vec<f64>,
-    pub rows: usize,
-    pub cols: usize,
+    pub shape: Vec<usize>, // Column-major layout
+    pub rows: usize,        // Compatibility for 2D usage
+    pub cols: usize,        // Compatibility for 2D usage
 }
 
-impl Matrix {
-    pub fn new(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
-        if data.len() != rows * cols {
+// GpuTensorHandle now lives in runmat-accel-api
+
+
+impl Tensor {
+    pub fn new(data: Vec<f64>, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if data.len() != expected {
             return Err(format!(
-                "Matrix data length {} doesn't match dimensions {}x{}",
-                data.len(),
-                rows,
-                cols
+                "Tensor data length {} doesn't match shape {:?} ({} elements)",
+                data.len(), shape, expected
             ));
         }
-        Ok(Matrix { data, rows, cols })
+        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
+        Ok(Tensor { data, shape, rows, cols })
     }
 
-    pub fn zeros(rows: usize, cols: usize) -> Self {
-        Matrix {
-            data: vec![0.0; rows * cols],
-            rows,
-            cols,
-        }
+    pub fn new_2d(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
+        Self::new(data, vec![rows, cols])
     }
 
-    pub fn ones(rows: usize, cols: usize) -> Self {
-        Matrix {
-            data: vec![1.0; rows * cols],
-            rows,
-            cols,
-        }
+    pub fn zeros(shape: Vec<usize>) -> Self {
+        let size: usize = shape.iter().product();
+        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
+        Tensor { data: vec![0.0; size], shape, rows, cols }
     }
 
-    pub fn get(&self, row: usize, col: usize) -> Result<f64, String> {
-        if row >= self.rows || col >= self.cols {
-            return Err(format!(
-                "Index ({}, {}) out of bounds for {}x{} matrix",
-                row, col, self.rows, self.cols
-            ));
-        }
-        Ok(self.data[row * self.cols + col])
+    pub fn ones(shape: Vec<usize>) -> Self {
+        let size: usize = shape.iter().product();
+        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
+        Tensor { data: vec![1.0; size], shape, rows, cols }
     }
 
-    pub fn set(&mut self, row: usize, col: usize, value: f64) -> Result<(), String> {
-        if row >= self.rows || col >= self.cols {
-            return Err(format!(
-                "Index ({}, {}) out of bounds for {}x{} matrix",
-                row, col, self.rows, self.cols
-            ));
+    // 2D helpers for transitional call sites
+    pub fn zeros2(rows: usize, cols: usize) -> Self { Self::zeros(vec![rows, cols]) }
+    pub fn ones2(rows: usize, cols: usize) -> Self { Self::ones(vec![rows, cols]) }
+
+    pub fn rows(&self) -> usize { self.shape.get(0).copied().unwrap_or(1) }
+    pub fn cols(&self) -> usize { self.shape.get(1).copied().unwrap_or(1) }
+
+    pub fn get2(&self, row: usize, col: usize) -> Result<f64, String> {
+        let rows = self.rows(); let cols = self.cols();
+        if row >= rows || col >= cols {
+            return Err(format!("Index ({}, {}) out of bounds for {}x{} tensor", row, col, rows, cols));
         }
-        self.data[row * self.cols + col] = value;
+        // Column-major linearization: lin = row + col*rows
+        Ok(self.data[row + col * rows])
+    }
+
+    pub fn set2(&mut self, row: usize, col: usize, value: f64) -> Result<(), String> {
+        let rows = self.rows(); let cols = self.cols();
+        if row >= rows || col >= cols {
+            return Err(format!("Index ({}, {}) out of bounds for {}x{} tensor", row, col, rows, cols));
+        }
+        // Column-major linearization
+        self.data[row + col * rows] = value;
         Ok(())
     }
 
-    pub fn scalar_to_matrix(scalar: f64, rows: usize, cols: usize) -> Matrix {
-        Matrix {
-            data: vec![scalar; rows * cols],
-            rows,
-            cols,
-        }
+    pub fn scalar_to_tensor2(scalar: f64, rows: usize, cols: usize) -> Tensor {
+        Tensor { data: vec![scalar; rows * cols], shape: vec![rows, cols], rows, cols }
     }
+    // No-compat constructors: prefer new/new_2d/zeros/zeros2/ones/ones2
 }
 
-impl fmt::Display for Matrix {
+impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[")?;
-        for r in 0..self.rows {
-            for c in 0..self.cols {
-                if c > 0 {
-                    write!(f, " ")?;
+        match self.shape.len() {
+            0 | 1 => {
+                // Treat as row vector for display
+                write!(f, "[")?;
+                for (i, v) in self.data.iter().enumerate() {
+                    if i > 0 { write!(f, " ")?; }
+                    write!(f, "{}", format_number_short_g(*v))?;
                 }
-                let v = self.data[r * self.cols + c];
-                write!(f, "{}", format_number_short_g(v))?;
+                write!(f, "]")
             }
-            if r + 1 < self.rows {
-                write!(f, "; ")?;
+            2 => {
+                let rows = self.rows(); let cols = self.cols();
+                write!(f, "[")?;
+                for r in 0..rows {
+                    for c in 0..cols {
+                        if c > 0 { write!(f, " ")?; }
+                        let v = self.data[r + c * rows];
+                        write!(f, "{}", format_number_short_g(v))?;
+                    }
+                    if r + 1 < rows { write!(f, "; ")?; }
+                }
+                write!(f, "]")
             }
+            _ => write!(f, "Tensor(shape={:?})", self.shape),
         }
-        write!(f, "]")
     }
 }
 
@@ -128,17 +155,13 @@ impl From<&str> for Value {
     }
 }
 
-impl From<Matrix> for Value {
-    fn from(m: Matrix) -> Self {
-        Value::Matrix(m)
+impl From<Tensor> for Value {
+    fn from(m: Tensor) -> Self {
+        Value::Tensor(m)
     }
 }
 
-impl From<Vec<Value>> for Value {
-    fn from(v: Vec<Value>) -> Self {
-        Value::Cell(v)
-    }
-}
+// Remove blanket From<Vec<Value>> to avoid losing shape information
 
 // TryFrom implementations for extracting native types
 impl TryFrom<&Value> for i32 {
@@ -188,13 +211,20 @@ impl TryFrom<&Value> for String {
     }
 }
 
-impl TryFrom<&Value> for Matrix {
+impl TryFrom<&Value> for Tensor {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Matrix(m) => Ok(m.clone()),
+            Value::Tensor(m) => Ok(m.clone()),
             _ => Err(format!("cannot convert {v:?} to Matrix")),
         }
+    }
+}
+
+impl TryFrom<&Value> for Value {
+    type Error = String;
+    fn try_from(v: &Value) -> Result<Self, Self::Error> {
+        Ok(v.clone())
     }
 }
 
@@ -202,7 +232,7 @@ impl TryFrom<&Value> for Vec<Value> {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Cell(c) => Ok(c.clone()),
+            Value::Cell(c) => Ok(c.data.clone()),
             _ => Err(format!("cannot convert {v:?} to Vec<Value>")),
         }
     }
@@ -312,24 +342,46 @@ impl Type {
             Value::Num(_) => Type::Num,
             Value::Bool(_) => Type::Bool,
             Value::String(_) => Type::String,
-            Value::Matrix(m) => Type::Matrix {
-                rows: Some(m.rows),
-                cols: Some(m.cols),
+            Value::Tensor(t) => {
+                if t.shape.len() == 2 {
+                    Type::Matrix { rows: Some(t.shape[0]), cols: Some(t.shape[1]) }
+                } else {
+                    // Treat other ranks conservatively as matrix unknown dims for now
+                    Type::matrix()
+                }
             },
             Value::Cell(cells) => {
-                if cells.is_empty() {
+                if cells.data.is_empty() {
                     Type::cell()
                 } else {
                     // Infer element type from first element
-                    let element_type = Type::from_value(&cells[0]);
+                    let element_type = Type::from_value(&cells.data[0]);
                     Type::Cell {
                         element_type: Some(Box::new(element_type)),
-                        length: Some(cells.len()),
+                        length: Some(cells.data.len()),
                     }
                 }
             }
+            Value::GpuTensor(h) => {
+                if h.shape.len() == 2 {
+                    Type::Matrix { rows: Some(h.shape[0]), cols: Some(h.shape[1]) }
+                } else {
+                    Type::matrix()
+                }
+            }
+            Value::Object(_) => Type::Unknown,
+            Value::FunctionHandle(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
+            Value::Closure(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
+            Value::ClassRef(_) => Type::Unknown,
+            Value::MException(_) => Type::Unknown,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Closure {
+    pub function_name: String,
+    pub captures: Vec<Value>,
 }
 
 /// Simple builtin function definition using the unified type system
@@ -337,6 +389,9 @@ impl Type {
 pub struct BuiltinFunction {
     pub name: &'static str,
     pub description: &'static str,
+    pub category: &'static str,
+    pub doc: &'static str,
+    pub examples: &'static str,
     pub param_types: Vec<Type>,
     pub return_type: Type,
     pub implementation: fn(&[Value]) -> Result<Value, String>,
@@ -346,17 +401,14 @@ impl BuiltinFunction {
     pub fn new(
         name: &'static str,
         description: &'static str,
+        category: &'static str,
+        doc: &'static str,
+        examples: &'static str,
         param_types: Vec<Type>,
         return_type: Type,
         implementation: fn(&[Value]) -> Result<Value, String>,
     ) -> Self {
-        Self {
-            name,
-            description,
-            param_types,
-            return_type,
-            implementation,
-        }
+        Self { name, description, category, doc, examples, param_types, return_type, implementation }
     }
 }
 
@@ -467,6 +519,20 @@ fn format_number_short_g(value: f64) -> String {
     s
 }
 
+// -------- Exception type --------
+#[derive(Debug, Clone, PartialEq)]
+pub struct MException {
+    pub identifier: String,
+    pub message: String,
+    pub stack: Vec<String>,
+}
+
+impl MException {
+    pub fn new(identifier: String, message: String) -> Self {
+        Self { identifier, message, stack: Vec::new() }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -474,17 +540,120 @@ impl fmt::Display for Value {
             Value::Num(n) => write!(f, "{}", format_number_short_g(*n)),
             Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
             Value::String(s) => write!(f, "'{s}'"),
-            Value::Matrix(m) => write!(f, "{m}"),
-            Value::Cell(items) => {
-                write!(f, "{{")?;
-                for (idx, item) in items.iter().enumerate() {
-                    if idx > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{item}")?;
-                }
-                write!(f, "}}")
-            }
+            Value::Tensor(m) => write!(f, "{m}"),
+            Value::Cell(ca) => ca.fmt(f),
+            Value::GpuTensor(h) => write!(f, "GpuTensor(shape={:?}, device={}, buffer={})", h.shape, h.device_id, h.buffer_id),
+            Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
+            Value::FunctionHandle(name) => write!(f, "@{}", name),
+            Value::Closure(c) => write!(f, "<closure {} captures={}>", c.function_name, c.captures.len()),
+            Value::ClassRef(name) => write!(f, "<class {}>", name),
+            Value::MException(e) => write!(f, "MException(identifier='{}', message='{}')", e.identifier, e.message),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CellArray {
+    pub data: Vec<Value>,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+impl CellArray {
+    pub fn new(data: Vec<Value>, rows: usize, cols: usize) -> Result<Self, String> {
+        if rows * cols != data.len() {
+            return Err(format!("Cell data length {} doesn't match dimensions {}x{}", data.len(), rows, cols));
+        }
+        Ok(CellArray { data, rows, cols })
+    }
+
+    pub fn get(&self, row: usize, col: usize) -> Result<&Value, String> {
+        if row >= self.rows || col >= self.cols {
+            return Err(format!("Cell index ({}, {}) out of bounds for {}x{} cell array", row, col, self.rows, self.cols));
+        }
+        Ok(&self.data[row * self.cols + col])
+    }
+}
+
+impl fmt::Display for CellArray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{")?;
+        for r in 0..self.rows {
+            for c in 0..self.cols {
+                if c > 0 { write!(f, ", ")?; }
+                let v = &self.data[r * self.cols + c];
+                write!(f, "{v}")?;
+            }
+            if r + 1 < self.rows { write!(f, "; ")?; }
+        }
+        write!(f, "}}")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjectInstance {
+    pub class_name: String,
+    pub properties: HashMap<String, Value>,
+}
+
+impl ObjectInstance {
+    pub fn new(class_name: String) -> Self { Self { class_name, properties: HashMap::new() } }
+}
+
+// -------- Class registry (scaffolding) --------
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Access { Public, Private }
+
+#[derive(Debug, Clone)]
+pub struct PropertyDef {
+    pub name: String,
+    pub is_static: bool,
+    pub access: Access,
+    pub default_value: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MethodDef {
+    pub name: String,
+    pub is_static: bool,
+    pub access: Access,
+    pub function_name: String, // bound runtime builtin/user func name
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassDef {
+    pub name: String,                // namespaced e.g. pkg.Point
+    pub parent: Option<String>,
+    pub properties: HashMap<String, PropertyDef>,
+    pub methods: HashMap<String, MethodDef>,
+}
+
+use std::sync::{Mutex, OnceLock};
+
+static CLASS_REGISTRY: OnceLock<Mutex<HashMap<String, ClassDef>>> = OnceLock::new();
+static STATIC_VALUES: OnceLock<Mutex<HashMap<(String, String), Value>>> = OnceLock::new();
+
+fn registry() -> &'static Mutex<HashMap<String, ClassDef>> {
+    CLASS_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn register_class(def: ClassDef) {
+    let mut m = registry().lock().unwrap();
+    m.insert(def.name.clone(), def);
+}
+
+pub fn get_class(name: &str) -> Option<ClassDef> {
+    registry().lock().unwrap().get(name).cloned()
+}
+
+fn static_values() -> &'static Mutex<HashMap<(String, String), Value>> {
+    STATIC_VALUES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn get_static_property_value(class_name: &str, prop: &str) -> Option<Value> {
+    static_values().lock().unwrap().get(&(class_name.to_string(), prop.to_string())).cloned()
+}
+
+pub fn set_static_property_value(class_name: &str, prop: &str, value: Value) {
+    static_values().lock().unwrap().insert((class_name.to_string(), prop.to_string()), value);
 }

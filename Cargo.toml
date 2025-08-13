@@ -4,6 +4,8 @@ members = [
     "crates/runmat-parser",
     "crates/runmat-hir",
     "crates/runmat-ignition",
+    "crates/runmat-accelerate-api",
+    "crates/runmat-accelerate",
     "crates/runmat-plot",
     "crates/runmat-repl",
     "crates/runmat-macros",
@@ -56,3 +58,4 @@ runmat-kernel = { path = "crates/runmat-kernel" }
 runmat-turbine = { path = "crates/runmat-turbine" }
 runmat-gc = { path = "crates/runmat-gc" }
 runmat-snapshot = { path = "crates/runmat-snapshot" }
+runmat-accelerate = { path = "crates/runmat-accelerate" }

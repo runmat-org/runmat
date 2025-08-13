@@ -2,15 +2,15 @@
 //!
 //! Implements comparison operators returning logical matrices/values.
 
-use runmat_builtins::Matrix;
+use runmat_builtins::Tensor;
 use runmat_macros::runtime_builtin;
 
 /// Element-wise greater than comparison
-pub fn matrix_gt(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
-    if a.rows != b.rows || a.cols != b.cols {
+pub fn matrix_gt(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+    if a.rows() != b.rows() || a.cols() != b.cols() {
         return Err(format!(
             "Matrix dimensions must agree: {}x{} > {}x{}",
-            a.rows, a.cols, b.rows, b.cols
+            a.rows(), a.cols(), b.rows(), b.cols()
         ));
     }
 
@@ -21,15 +21,15 @@ pub fn matrix_gt(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
         .map(|(x, y)| if x > y { 1.0 } else { 0.0 })
         .collect();
 
-    Matrix::new(data, a.rows, a.cols)
+    Tensor::new_2d(data, a.rows(), a.cols())
 }
 
 /// Element-wise greater than or equal comparison
-pub fn matrix_ge(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
-    if a.rows != b.rows || a.cols != b.cols {
+pub fn matrix_ge(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+    if a.rows() != b.rows() || a.cols() != b.cols() {
         return Err(format!(
             "Matrix dimensions must agree: {}x{} >= {}x{}",
-            a.rows, a.cols, b.rows, b.cols
+            a.rows(), a.cols(), b.rows(), b.cols()
         ));
     }
 
@@ -40,15 +40,15 @@ pub fn matrix_ge(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
         .map(|(x, y)| if x >= y { 1.0 } else { 0.0 })
         .collect();
 
-    Matrix::new(data, a.rows, a.cols)
+    Tensor::new_2d(data, a.rows(), a.cols())
 }
 
 /// Element-wise less than comparison
-pub fn matrix_lt(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
-    if a.rows != b.rows || a.cols != b.cols {
+pub fn matrix_lt(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+    if a.rows() != b.rows() || a.cols() != b.cols() {
         return Err(format!(
             "Matrix dimensions must agree: {}x{} < {}x{}",
-            a.rows, a.cols, b.rows, b.cols
+            a.rows(), a.cols(), b.rows(), b.cols()
         ));
     }
 
@@ -59,15 +59,15 @@ pub fn matrix_lt(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
         .map(|(x, y)| if x < y { 1.0 } else { 0.0 })
         .collect();
 
-    Matrix::new(data, a.rows, a.cols)
+    Tensor::new_2d(data, a.rows(), a.cols())
 }
 
 /// Element-wise less than or equal comparison
-pub fn matrix_le(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
-    if a.rows != b.rows || a.cols != b.cols {
+pub fn matrix_le(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+    if a.rows() != b.rows() || a.cols() != b.cols() {
         return Err(format!(
             "Matrix dimensions must agree: {}x{} <= {}x{}",
-            a.rows, a.cols, b.rows, b.cols
+            a.rows(), a.cols(), b.rows(), b.cols()
         ));
     }
 
@@ -78,15 +78,15 @@ pub fn matrix_le(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
         .map(|(x, y)| if x <= y { 1.0 } else { 0.0 })
         .collect();
 
-    Matrix::new(data, a.rows, a.cols)
+    Tensor::new_2d(data, a.rows(), a.cols())
 }
 
 /// Element-wise equality comparison
-pub fn matrix_eq(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
-    if a.rows != b.rows || a.cols != b.cols {
+pub fn matrix_eq(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+    if a.rows() != b.rows() || a.cols() != b.cols() {
         return Err(format!(
             "Matrix dimensions must agree: {}x{} == {}x{}",
-            a.rows, a.cols, b.rows, b.cols
+            a.rows(), a.cols(), b.rows(), b.cols()
         ));
     }
 
@@ -103,15 +103,15 @@ pub fn matrix_eq(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
         })
         .collect();
 
-    Matrix::new(data, a.rows, a.cols)
+    Tensor::new_2d(data, a.rows(), a.cols())
 }
 
 /// Element-wise inequality comparison
-pub fn matrix_ne(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
-    if a.rows != b.rows || a.cols != b.cols {
+pub fn matrix_ne(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+    if a.rows() != b.rows() || a.cols() != b.cols() {
         return Err(format!(
             "Matrix dimensions must agree: {}x{} != {}x{}",
-            a.rows, a.cols, b.rows, b.cols
+            a.rows(), a.cols(), b.rows(), b.cols()
         ));
     }
 
@@ -128,7 +128,7 @@ pub fn matrix_ne(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
         })
         .collect();
 
-    Matrix::new(data, a.rows, a.cols)
+    Tensor::new_2d(data, a.rows(), a.cols())
 }
 
 // Built-in comparison functions

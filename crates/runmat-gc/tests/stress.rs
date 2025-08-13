@@ -50,7 +50,7 @@ fn test_large_matrix_stress() {
         let matrix =
             runmat_builtins::Matrix::new(data, size, size).expect("matrix creation should succeed");
 
-        let ptr = gc_allocate(Value::Matrix(matrix)).expect("matrix allocation should succeed");
+        let ptr = gc_allocate(Value::Tensor(matrix)).expect("tensor allocation should succeed");
         matrices.push(ptr);
 
         // Trigger collection periodically
@@ -204,7 +204,7 @@ fn test_gc_under_memory_pressure() {
         let value = match i % 5 {
             0 => Value::Num(i as f64),
             1 => Value::String(format!("pressure_test_{i}")),
-            2 => Value::Matrix(runmat_builtins::Matrix::new(vec![i as f64; 100], 10, 10).unwrap()),
+            2 => Value::Tensor(runmat_builtins::Tensor::new_2d(vec![i as f64; 100], 10, 10).unwrap()),
             3 => Value::Cell(vec![Value::Num(i as f64), Value::Int(i)]),
             _ => Value::Bool(i % 2 == 0),
         };

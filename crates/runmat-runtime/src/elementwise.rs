@@ -4,7 +4,7 @@
 //! These operations work element-by-element on matrices and support scalar broadcasting.
 
 use crate::matrix::matrix_power;
-use runmat_builtins::{Matrix, Value};
+use runmat_builtins::{Tensor, Value};
 
 /// Element-wise negation: -A
 /// Supports scalars and matrices
@@ -13,9 +13,9 @@ pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
         Value::Num(x) => Ok(Value::Num(-x)),
         Value::Int(x) => Ok(Value::Int(-x)),
         Value::Bool(b) => Ok(Value::Bool(!b)), // Boolean negation
-        Value::Matrix(m) => {
+        Value::Tensor(m) => {
             let data: Vec<f64> = m.data.iter().map(|x| -x).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
         _ => Err(format!("Negation not supported for type: -{a:?}")),
     }
@@ -32,31 +32,31 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
         (Value::Int(x), Value::Int(y)) => Ok(Value::Num(*x as f64 * *y as f64)),
 
         // Matrix-scalar cases (broadcasting)
-        (Value::Matrix(m), Value::Num(s)) => {
+        (Value::Tensor(m), Value::Num(s)) => {
             let data: Vec<f64> = m.data.iter().map(|x| x * s).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Matrix(m), Value::Int(s)) => {
+        (Value::Tensor(m), Value::Int(s)) => {
             let scalar = *s as f64;
             let data: Vec<f64> = m.data.iter().map(|x| x * scalar).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Num(s), Value::Matrix(m)) => {
+        (Value::Num(s), Value::Tensor(m)) => {
             let data: Vec<f64> = m.data.iter().map(|x| s * x).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Int(s), Value::Matrix(m)) => {
+        (Value::Int(s), Value::Tensor(m)) => {
             let scalar = *s as f64;
             let data: Vec<f64> = m.data.iter().map(|x| scalar * x).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
 
         // Matrix-matrix case
-        (Value::Matrix(m1), Value::Matrix(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols {
+        (Value::Tensor(m1), Value::Tensor(m2)) => {
+            if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for element-wise multiplication: {}x{} .* {}x{}",
-                    m1.rows, m1.cols, m2.rows, m2.cols
+                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -65,7 +65,7 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
                 .zip(m2.data.iter())
                 .map(|(x, y)| x * y)
                 .collect();
-            Ok(Value::Matrix(Matrix::new(data, m1.rows, m1.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
         }
 
         _ => Err(format!(
@@ -85,31 +85,31 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
         (Value::Int(x), Value::Int(y)) => Ok(Value::Num(*x as f64 + *y as f64)),
 
         // Matrix-scalar cases (broadcasting)
-        (Value::Matrix(m), Value::Num(s)) => {
+        (Value::Tensor(m), Value::Num(s)) => {
             let data: Vec<f64> = m.data.iter().map(|x| x + s).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Matrix(m), Value::Int(s)) => {
+        (Value::Tensor(m), Value::Int(s)) => {
             let scalar = *s as f64;
             let data: Vec<f64> = m.data.iter().map(|x| x + scalar).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Num(s), Value::Matrix(m)) => {
+        (Value::Num(s), Value::Tensor(m)) => {
             let data: Vec<f64> = m.data.iter().map(|x| s + x).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Int(s), Value::Matrix(m)) => {
+        (Value::Int(s), Value::Tensor(m)) => {
             let scalar = *s as f64;
             let data: Vec<f64> = m.data.iter().map(|x| scalar + x).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
 
         // Matrix-matrix case
-        (Value::Matrix(m1), Value::Matrix(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols {
+        (Value::Tensor(m1), Value::Tensor(m2)) => {
+            if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for addition: {}x{} + {}x{}",
-                    m1.rows, m1.cols, m2.rows, m2.cols
+                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -118,7 +118,7 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
                 .zip(m2.data.iter())
                 .map(|(x, y)| x + y)
                 .collect();
-            Ok(Value::Matrix(Matrix::new(data, m1.rows, m1.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
         }
 
         _ => Err(format!("Addition not supported for types: {a:?} + {b:?}")),
@@ -136,31 +136,31 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
         (Value::Int(x), Value::Int(y)) => Ok(Value::Num(*x as f64 - *y as f64)),
 
         // Matrix-scalar cases (broadcasting)
-        (Value::Matrix(m), Value::Num(s)) => {
+        (Value::Tensor(m), Value::Num(s)) => {
             let data: Vec<f64> = m.data.iter().map(|x| x - s).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Matrix(m), Value::Int(s)) => {
+        (Value::Tensor(m), Value::Int(s)) => {
             let scalar = *s as f64;
             let data: Vec<f64> = m.data.iter().map(|x| x - scalar).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Num(s), Value::Matrix(m)) => {
+        (Value::Num(s), Value::Tensor(m)) => {
             let data: Vec<f64> = m.data.iter().map(|x| s - x).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Int(s), Value::Matrix(m)) => {
+        (Value::Int(s), Value::Tensor(m)) => {
             let scalar = *s as f64;
             let data: Vec<f64> = m.data.iter().map(|x| scalar - x).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
 
         // Matrix-matrix case
-        (Value::Matrix(m1), Value::Matrix(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols {
+        (Value::Tensor(m1), Value::Tensor(m2)) => {
+            if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for subtraction: {}x{} - {}x{}",
-                    m1.rows, m1.cols, m2.rows, m2.cols
+                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -169,7 +169,7 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
                 .zip(m2.data.iter())
                 .map(|(x, y)| x - y)
                 .collect();
-            Ok(Value::Matrix(Matrix::new(data, m1.rows, m1.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
         }
 
         _ => Err(format!(
@@ -213,26 +213,26 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
         }
 
         // Matrix-scalar cases (broadcasting)
-        (Value::Matrix(m), Value::Num(s)) => {
+        (Value::Tensor(m), Value::Num(s)) => {
             if *s == 0.0 {
                 let data: Vec<f64> = m.data.iter().map(|x| f64::INFINITY * x.signum()).collect();
-                Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+                Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
             } else {
                 let data: Vec<f64> = m.data.iter().map(|x| x / s).collect();
-                Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+                Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
             }
         }
-        (Value::Matrix(m), Value::Int(s)) => {
+        (Value::Tensor(m), Value::Int(s)) => {
             let scalar = *s as f64;
             if scalar == 0.0 {
                 let data: Vec<f64> = m.data.iter().map(|x| f64::INFINITY * x.signum()).collect();
-                Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+                Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
             } else {
                 let data: Vec<f64> = m.data.iter().map(|x| x / scalar).collect();
-                Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+                Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
             }
         }
-        (Value::Num(s), Value::Matrix(m)) => {
+        (Value::Num(s), Value::Tensor(m)) => {
             let data: Vec<f64> = m
                 .data
                 .iter()
@@ -244,9 +244,9 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                     }
                 })
                 .collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Int(s), Value::Matrix(m)) => {
+        (Value::Int(s), Value::Tensor(m)) => {
             let scalar = *s as f64;
             let data: Vec<f64> = m
                 .data
@@ -259,15 +259,15 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                     }
                 })
                 .collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
 
         // Matrix-matrix case
-        (Value::Matrix(m1), Value::Matrix(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols {
+        (Value::Tensor(m1), Value::Tensor(m2)) => {
+            if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for element-wise division: {}x{} ./ {}x{}",
-                    m1.rows, m1.cols, m2.rows, m2.cols
+                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -282,7 +282,7 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                     }
                 })
                 .collect();
-            Ok(Value::Matrix(Matrix::new(data, m1.rows, m1.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
         }
 
         _ => Err(format!(
@@ -303,19 +303,19 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
         (Value::Int(x), Value::Int(y)) => Ok(Value::Num((*x as f64).powf(*y as f64))),
 
         // Matrix^scalar case - matrix exponentiation
-        (Value::Matrix(m), Value::Num(s)) => {
+        (Value::Tensor(m), Value::Num(s)) => {
             // Check if scalar is an integer for matrix power
             if s.fract() == 0.0 {
                 let n = *s as i32;
                 let result = matrix_power(m, n)?;
-                Ok(Value::Matrix(result))
+                Ok(Value::Tensor(result))
             } else {
                 Err("Matrix power requires integer exponent".to_string())
             }
         }
-        (Value::Matrix(m), Value::Int(s)) => {
+        (Value::Tensor(m), Value::Int(s)) => {
             let result = matrix_power(m, *s)?;
-            Ok(Value::Matrix(result))
+            Ok(Value::Tensor(result))
         }
 
         // Other cases not supported for regular matrix power
@@ -336,31 +336,31 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
         (Value::Int(x), Value::Int(y)) => Ok(Value::Num((*x as f64).powf(*y as f64))),
 
         // Matrix-scalar cases (broadcasting)
-        (Value::Matrix(m), Value::Num(s)) => {
+        (Value::Tensor(m), Value::Num(s)) => {
             let data: Vec<f64> = m.data.iter().map(|x| x.powf(*s)).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Matrix(m), Value::Int(s)) => {
+        (Value::Tensor(m), Value::Int(s)) => {
             let scalar = *s as f64;
             let data: Vec<f64> = m.data.iter().map(|x| x.powf(scalar)).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Num(s), Value::Matrix(m)) => {
+        (Value::Num(s), Value::Tensor(m)) => {
             let data: Vec<f64> = m.data.iter().map(|x| s.powf(*x)).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
-        (Value::Int(s), Value::Matrix(m)) => {
+        (Value::Int(s), Value::Tensor(m)) => {
             let scalar = *s as f64;
             let data: Vec<f64> = m.data.iter().map(|x| scalar.powf(*x)).collect();
-            Ok(Value::Matrix(Matrix::new(data, m.rows, m.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
 
         // Matrix-matrix case
-        (Value::Matrix(m1), Value::Matrix(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols {
+        (Value::Tensor(m1), Value::Tensor(m2)) => {
+            if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for element-wise power: {}x{} .^ {}x{}",
-                    m1.rows, m1.cols, m2.rows, m2.cols
+                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -369,7 +369,7 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
                 .zip(m2.data.iter())
                 .map(|(x, y)| x.powf(*y))
                 .collect();
-            Ok(Value::Matrix(Matrix::new(data, m1.rows, m1.cols)?))
+            Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
         }
 
         _ => Err(format!(
@@ -400,13 +400,13 @@ mod tests {
 
     #[test]
     fn test_elementwise_mul_matrix_scalar() {
-        let matrix = Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-        let result = elementwise_mul(&Value::Matrix(matrix), &Value::Num(2.0)).unwrap();
+        let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+        let result = elementwise_mul(&Value::Tensor(matrix), &Value::Num(2.0)).unwrap();
 
-        if let Value::Matrix(m) = result {
+        if let Value::Tensor(m) = result {
             assert_eq!(m.data, vec![2.0, 4.0, 6.0, 8.0]);
-            assert_eq!(m.rows, 2);
-            assert_eq!(m.cols, 2);
+            assert_eq!(m.rows(), 2);
+            assert_eq!(m.cols(), 2);
         } else {
             panic!("Expected matrix result");
         }
@@ -414,11 +414,11 @@ mod tests {
 
     #[test]
     fn test_elementwise_mul_matrices() {
-        let m1 = Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-        let m2 = Matrix::new(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
-        let result = elementwise_mul(&Value::Matrix(m1), &Value::Matrix(m2)).unwrap();
+        let m1 = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+        let m2 = Tensor::new_2d(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
+        let result = elementwise_mul(&Value::Tensor(m1), &Value::Tensor(m2)).unwrap();
 
-        if let Value::Matrix(m) = result {
+        if let Value::Tensor(m) = result {
             assert_eq!(m.data, vec![2.0, 6.0, 12.0, 20.0]);
         } else {
             panic!("Expected matrix result");
@@ -437,10 +437,10 @@ mod tests {
 
     #[test]
     fn test_elementwise_pow() {
-        let matrix = Matrix::new(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
-        let result = elementwise_pow(&Value::Matrix(matrix), &Value::Num(2.0)).unwrap();
+        let matrix = Tensor::new_2d(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
+        let result = elementwise_pow(&Value::Tensor(matrix), &Value::Num(2.0)).unwrap();
 
-        if let Value::Matrix(m) = result {
+        if let Value::Tensor(m) = result {
             assert_eq!(m.data, vec![4.0, 9.0, 16.0, 25.0]);
         } else {
             panic!("Expected matrix result");
@@ -449,9 +449,9 @@ mod tests {
 
     #[test]
     fn test_dimension_mismatch() {
-        let m1 = Matrix::new(vec![1.0, 2.0], 1, 2).unwrap();
-        let m2 = Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+        let m1 = Tensor::new_2d(vec![1.0, 2.0], 1, 2).unwrap();
+        let m2 = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
 
-        assert!(elementwise_mul(&Value::Matrix(m1), &Value::Matrix(m2)).is_err());
+        assert!(elementwise_mul(&Value::Tensor(m1), &Value::Tensor(m2)).is_err());
     }
 }

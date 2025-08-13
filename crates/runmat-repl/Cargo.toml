@@ -11,6 +11,7 @@ runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-ignition = { workspace = true }
 runmat-runtime = { workspace = true }
+runmat-accelerate = { workspace = true }
 runmat-turbine = { workspace = true }
 runmat-gc = { workspace = true }
 runmat-builtins = { workspace = true }

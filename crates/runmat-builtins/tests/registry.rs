@@ -1,4 +1,4 @@
-use runmat_builtins::{builtin_functions, Matrix, Value};
+use runmat_builtins::{builtin_functions, Tensor, Value, CellArray};
 use runmat_macros::runtime_builtin;
 
 #[runtime_builtin(name = "add")]
@@ -12,7 +12,7 @@ fn sub(x: i32, y: i32) -> Result<i32, String> {
 }
 
 #[runtime_builtin(name = "matrix_sum")]
-fn matrix_sum(m: Matrix) -> Result<f64, String> {
+fn matrix_sum(m: Tensor) -> Result<f64, String> {
     Ok(m.data.iter().sum())
 }
 
@@ -54,42 +54,46 @@ fn test_value_conversions() {
 
 #[test]
 fn test_matrix_operations() {
-    let mut matrix = Matrix::zeros(2, 3);
-    assert_eq!(matrix.rows, 2);
-    assert_eq!(matrix.cols, 3);
+    let mut matrix = Tensor::zeros2(2, 3);
+    assert_eq!(matrix.rows(), 2);
+    assert_eq!(matrix.cols(), 3);
     assert_eq!(matrix.data.len(), 6);
 
-    // Test setting and getting values
-    matrix.set(1, 2, 5.0).unwrap();
-    assert_eq!(matrix.get(1, 2).unwrap(), 5.0);
+    // Test setting and getting values (0-based helpers)
+    matrix.set2(1, 2, 5.0).unwrap();
+    assert_eq!(matrix.get2(1, 2).unwrap(), 5.0);
 
     // Test bounds checking
-    assert!(matrix.get(2, 0).is_err());
-    assert!(matrix.set(0, 3, 1.0).is_err());
+    assert!(matrix.get2(2, 0).is_err());
+    assert!(matrix.set2(0, 3, 1.0).is_err());
 
     // Test matrix creation
     let data = vec![1.0, 2.0, 3.0, 4.0];
-    let matrix2 = Matrix::new(data, 2, 2).unwrap();
-    assert_eq!(matrix2.get(0, 1).unwrap(), 2.0);
-    assert_eq!(matrix2.get(1, 1).unwrap(), 4.0);
+    let matrix2 = Tensor::new_2d(data, 2, 2).unwrap();
+    assert_eq!(matrix2.get2(0, 1).unwrap(), 2.0);
+    assert_eq!(matrix2.get2(1, 1).unwrap(), 4.0);
 
     // Test invalid dimensions
-    assert!(Matrix::new(vec![1.0, 2.0], 2, 2).is_err());
+    assert!(Tensor::new_2d(vec![1.0, 2.0], 2, 2).is_err());
 }
 
 #[test]
 fn test_cell_arrays() {
-    let cell = Value::Cell(vec![
-        Value::Int(1),
-        Value::String("test".to_string()),
-        Value::Bool(false),
-    ]);
+    let cell = Value::Cell(CellArray::new(
+        vec![
+            Value::Int(1),
+            Value::String("test".to_string()),
+            Value::Bool(false),
+        ],
+        1,
+        3,
+    ).unwrap());
 
     if let Value::Cell(contents) = cell {
-        assert_eq!(contents.len(), 3);
-        assert_eq!(contents[0], Value::Int(1));
-        assert_eq!(contents[1], Value::String("test".to_string()));
-        assert_eq!(contents[2], Value::Bool(false));
+        assert_eq!(contents.data.len(), 3);
+        assert_eq!(contents.data[0], Value::Int(1));
+        assert_eq!(contents.data[1], Value::String("test".to_string()));
+        assert_eq!(contents.data[2], Value::Bool(false));
     } else {
         panic!("Expected Cell value");
     }

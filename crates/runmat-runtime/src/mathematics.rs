@@ -4,7 +4,7 @@
 //! logarithmic, exponential, hyperbolic, and other mathematical operations.
 //! All functions are optimized for performance and handle both scalars and matrices.
 
-use runmat_builtins::Matrix;
+use runmat_builtins::Tensor;
 use runmat_macros::runtime_builtin;
 
 // Trigonometric functions - scalar versions
@@ -27,21 +27,21 @@ fn tan_builtin(x: f64) -> Result<f64, String> {
 // Trigonometric functions - matrix versions (element-wise)
 
 #[runtime_builtin(name = "sin")]
-fn sin_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+fn sin_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.sin()).collect();
-    Matrix::new(data, x.rows, x.cols)
+    Tensor::new_2d(data, x.rows(), x.cols())
 }
 
 #[runtime_builtin(name = "cos")]
-fn cos_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+fn cos_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.cos()).collect();
-    Matrix::new(data, x.rows, x.cols)
+    Tensor::new_2d(data, x.rows(), x.cols())
 }
 
 #[runtime_builtin(name = "tan")]
-fn tan_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+fn tan_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.tan()).collect();
-    Matrix::new(data, x.rows, x.cols)
+    Tensor::new_2d(data, x.rows(), x.cols())
 }
 
 #[runtime_builtin(name = "asin")]
@@ -164,27 +164,27 @@ fn abs_builtin(x: f64) -> Result<f64, String> {
 }
 
 #[runtime_builtin(name = "abs")]
-fn abs_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+fn abs_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.abs()).collect();
-    Matrix::new(data, x.rows, x.cols)
+    Tensor::new_2d(data, x.rows(), x.cols())
 }
 
 #[runtime_builtin(name = "exp")]
-fn exp_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+fn exp_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.exp()).collect();
-    Matrix::new(data, x.rows, x.cols)
+    Tensor::new_2d(data, x.rows(), x.cols())
 }
 
 #[runtime_builtin(name = "log")]
-fn log_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+fn log_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.ln()).collect();
-    Matrix::new(data, x.rows, x.cols)
+    Tensor::new_2d(data, x.rows(), x.cols())
 }
 
 #[runtime_builtin(name = "sqrt")]
-fn sqrt_matrix_builtin(x: Matrix) -> Result<Matrix, String> {
+fn sqrt_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
     let data: Vec<f64> = x.data.iter().map(|&val| val.sqrt()).collect();
-    Matrix::new(data, x.rows, x.cols)
+    Tensor::new_2d(data, x.rows(), x.cols())
 }
 
 // Rounding and related functions
@@ -298,12 +298,12 @@ fn factorial_builtin(n: i32) -> Result<f64, String> {
 // Statistical functions
 
 #[runtime_builtin(name = "sum")]
-fn sum_builtin(matrix: Matrix) -> Result<f64, String> {
+fn sum_builtin(matrix: Tensor) -> Result<f64, String> {
     Ok(matrix.data.iter().sum())
 }
 
 #[runtime_builtin(name = "mean")]
-fn mean_builtin(matrix: Matrix) -> Result<f64, String> {
+fn mean_builtin(matrix: Tensor) -> Result<f64, String> {
     if matrix.data.is_empty() {
         return Err("Cannot compute mean of empty matrix".to_string());
     }
@@ -311,7 +311,7 @@ fn mean_builtin(matrix: Matrix) -> Result<f64, String> {
 }
 
 #[runtime_builtin(name = "std")]
-fn std_builtin(matrix: Matrix) -> Result<f64, String> {
+fn std_builtin(matrix: Tensor) -> Result<f64, String> {
     if matrix.data.len() < 2 {
         return Err("Need at least 2 elements to compute standard deviation".to_string());
     }
@@ -324,7 +324,7 @@ fn std_builtin(matrix: Matrix) -> Result<f64, String> {
 }
 
 #[runtime_builtin(name = "var")]
-fn var_builtin(matrix: Matrix) -> Result<f64, String> {
+fn var_builtin(matrix: Tensor) -> Result<f64, String> {
     if matrix.data.len() < 2 {
         return Err("Need at least 2 elements to compute variance".to_string());
     }
@@ -337,7 +337,7 @@ fn var_builtin(matrix: Matrix) -> Result<f64, String> {
 }
 
 #[runtime_builtin(name = "min")]
-fn min_vector_builtin(matrix: Matrix) -> Result<f64, String> {
+fn min_vector_builtin(matrix: Tensor) -> Result<f64, String> {
     matrix
         .data
         .iter()
@@ -347,7 +347,7 @@ fn min_vector_builtin(matrix: Matrix) -> Result<f64, String> {
 }
 
 #[runtime_builtin(name = "max")]
-fn max_vector_builtin(matrix: Matrix) -> Result<f64, String> {
+fn max_vector_builtin(matrix: Tensor) -> Result<f64, String> {
     matrix
         .data
         .iter()
@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn test_statistical_functions() {
-        let matrix = Matrix::new(vec![1.0, 2.0, 3.0, 4.0, 5.0], 1, 5).unwrap();
+        let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0, 5.0], 1, 5).unwrap();
         assert_eq!(sum_builtin(matrix.clone()).unwrap(), 15.0);
         assert_eq!(mean_builtin(matrix.clone()).unwrap(), 3.0);
         assert_eq!(min_vector_builtin(matrix.clone()).unwrap(), 1.0);

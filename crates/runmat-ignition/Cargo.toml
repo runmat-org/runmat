@@ -16,3 +16,8 @@ serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 runmat-lexer = { workspace = true }
+
+[features]
+# Enabling this feature also enables the dependency feature on runmat-runtime
+# so the test-only builtins and registry seeders are available.
+test-classes = ["runmat-runtime/test-classes"]

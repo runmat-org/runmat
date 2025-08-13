@@ -40,15 +40,15 @@ fn test_multiple_allocations() {
 #[test]
 fn test_matrix_allocation() {
     let _ = gc_reset_for_test();
-    use runmat_builtins::Matrix;
+    use runmat_builtins::Tensor as Matrix;
 
     let matrix =
         Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).expect("matrix creation should succeed");
-    let value = Value::Matrix(matrix);
+    let value = Value::Tensor(matrix);
 
     let ptr = gc_allocate(value).expect("allocation should succeed");
 
-    if let Value::Matrix(ref m) = *ptr {
+    if let Value::Tensor(ref m) = *ptr {
         assert_eq!(m.rows, 2);
         assert_eq!(m.cols, 2);
         assert_eq!(m.data, vec![1.0, 2.0, 3.0, 4.0]);
@@ -117,11 +117,11 @@ fn test_large_allocation() {
     let data = vec![1.0; size * size];
     let matrix =
         runmat_builtins::Matrix::new(data, size, size).expect("matrix creation should succeed");
-    let value = Value::Matrix(matrix);
+    let value = Value::Tensor(matrix);
 
     let ptr = gc_allocate(value).expect("large allocation should succeed");
 
-    if let Value::Matrix(ref m) = *ptr {
+    if let Value::Tensor(ref m) = *ptr {
         assert_eq!(m.rows, size);
         assert_eq!(m.cols, size);
         assert_eq!(m.data.len(), size * size);

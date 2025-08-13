@@ -1162,6 +1162,14 @@ impl TurbineEngine {
                     count.hash(&mut hasher);
                 }
                 Instr::ReturnValue => "ReturnValue".hash(&mut hasher),
+                Instr::IndexSlice(d,n,c,e) => { "IndexSlice".hash(&mut hasher); d.hash(&mut hasher); n.hash(&mut hasher); c.hash(&mut hasher); e.hash(&mut hasher); }
+                Instr::CreateCell2D(r,c) => { "CreateCell2D".hash(&mut hasher); r.hash(&mut hasher); c.hash(&mut hasher); }
+                Instr::IndexCell(k) => { "IndexCell".hash(&mut hasher); k.hash(&mut hasher); }
+                Instr::LoadStaticProperty(class, prop) => { "LoadStaticProperty".hash(&mut hasher); class.hash(&mut hasher); prop.hash(&mut hasher); }
+                Instr::CallStaticMethod(class, method, argc) => { "CallStaticMethod".hash(&mut hasher); class.hash(&mut hasher); method.hash(&mut hasher); argc.hash(&mut hasher); }
+                Instr::EnterTry(catch_pc, catch_var) => { "EnterTry".hash(&mut hasher); catch_pc.hash(&mut hasher); catch_var.hash(&mut hasher); }
+                Instr::PopTry => { "PopTry".hash(&mut hasher); }
+                Instr::CallFeval(argc) => { "CallFeval".hash(&mut hasher); argc.hash(&mut hasher); }
             }
         }
 
@@ -1366,9 +1374,9 @@ pub extern "C" fn runtime_create_matrix(
     let elements = unsafe { std::slice::from_raw_parts(elements_ptr, elements_len) }.to_vec();
 
     // Create matrix
-    match runmat_builtins::Matrix::new(elements, rows, cols) {
+    match runmat_builtins::Tensor::new_2d(elements, rows, cols) {
         Ok(matrix) => {
-            let value = runmat_builtins::Value::Matrix(matrix);
+            let value = runmat_builtins::Value::Tensor(matrix);
             // Allocate in GC memory and return pointer
             match runmat_gc::gc_allocate(value) {
                 Ok(gc_ptr) => unsafe { gc_ptr.as_raw() as i64 },

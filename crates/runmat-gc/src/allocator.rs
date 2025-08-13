@@ -337,19 +337,33 @@ impl GenerationalAllocator {
         match value {
             Value::Int(_) | Value::Num(_) | Value::Bool(_) => std::mem::size_of::<Value>(),
             Value::String(s) => std::mem::size_of::<Value>() + s.len(),
-            Value::Matrix(m) => {
+            Value::Tensor(m) => {
                 std::mem::size_of::<Value>()
-                    + std::mem::size_of::<runmat_builtins::Matrix>()
+                    + std::mem::size_of::<runmat_builtins::Tensor>()
                     + m.data.len() * std::mem::size_of::<f64>()
             }
             Value::Cell(cells) => {
                 std::mem::size_of::<Value>()
-                    + cells.len() * std::mem::size_of::<Value>()
+                    + cells.data.len() * std::mem::size_of::<Value>()
                     + cells
+                        .data
                         .iter()
                         .map(|v| self.estimate_value_size(v))
                         .sum::<usize>()
             }
+            Value::GpuTensor(_h) => {
+                // Handle is small; device memory is managed externally by backend
+                std::mem::size_of::<Value>() + std::mem::size_of::<runmat_accelerate_api::GpuTensorHandle>()
+            }
+            Value::Object(obj) => {
+                std::mem::size_of::<Value>()
+                    + obj.class_name.len()
+                    + obj.properties.iter().map(|(k, v)| k.len() + self.estimate_value_size(v)).sum::<usize>()
+            }
+            Value::FunctionHandle(name) => std::mem::size_of::<Value>() + name.len(),
+            Value::ClassRef(name) => std::mem::size_of::<Value>() + name.len(),
+            Value::Closure(c) => std::mem::size_of::<Value>() + c.function_name.len() + c.captures.iter().map(|v| self.estimate_value_size(v)).sum::<usize>(),
+            Value::MException(e) => std::mem::size_of::<Value>() + e.identifier.len() + e.message.len() + e.stack.iter().map(|s| s.len()).sum::<usize>(),
         }
     }
 

@@ -574,6 +574,18 @@ impl BytecodeCompiler {
                         builder.ins().return_(&[zero]);
                         block_terminated = true;
                     }
+                    // Not yet supported in JIT; require interpreter
+                    Instr::IndexSlice(_, _, _, _)
+                    | Instr::CreateCell2D(_, _)
+                    | Instr::IndexCell(_)
+                    | Instr::LoadStaticProperty(_, _)
+                    | Instr::CallStaticMethod(_, _, _)
+                    | Instr::EnterTry(_, _)
+                    | Instr::PopTry => {
+                        return Err(TurbineError::ExecutionError(
+                            "Unsupported instruction in JIT; use interpreter".to_string(),
+                        ));
+                    }
                 }
 
                 pc += 1;

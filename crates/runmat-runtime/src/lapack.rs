@@ -2,7 +2,7 @@
 //!
 //! Advanced linear algebra operations including decompositions and linear system solvers.
 
-use runmat_builtins::{Matrix, Value};
+use runmat_builtins::{Tensor as Matrix, Value};
 use runmat_macros::runtime_builtin;
 
 /// LU decomposition result
@@ -37,23 +37,23 @@ pub fn lapack_solve_linear_system(a: &Matrix, b: &[f64]) -> Result<Vec<f64>, Str
         return Err("Matrix must be square for linear system solving".to_string());
     }
 
-    if a.rows != b.len() {
+    if a.rows() != b.len() {
         return Err(format!(
             "Matrix rows {} must match RHS vector length {}",
-            a.rows,
+            a.rows(),
             b.len()
         ));
     }
 
-    let n = a.rows as i32;
+    let n = a.rows() as i32;
     let nrhs = 1i32;
 
     // Copy data since LAPACK modifies input
     // Transpose A since LAPACK expects column-major but we store row-major
     let mut a_copy = vec![0.0; a.data.len()];
-    for i in 0..a.rows {
-        for j in 0..a.cols {
-            a_copy[j * a.rows + i] = a.data[i * a.cols + j]; // transpose
+    for i in 0..a.rows() {
+        for j in 0..a.cols() {
+            a_copy[j * a.rows() + i] = a.data[i * a.cols() + j]; // transpose
         }
     }
     let mut b_copy = b.to_vec();
@@ -87,12 +87,12 @@ pub fn lapack_lu_decomposition(matrix: &Matrix) -> Result<LuDecomposition, Strin
         return Err("Matrix must be square for LU decomposition".to_string());
     }
 
-    let n = matrix.rows as i32;
+    let n = matrix.rows() as i32;
     // Transpose matrix since LAPACK expects column-major but we store row-major
     let mut a_copy = vec![0.0; matrix.data.len()];
-    for i in 0..matrix.rows {
-        for j in 0..matrix.cols {
-            a_copy[j * matrix.rows + i] = matrix.data[i * matrix.cols + j]; // transpose
+    for i in 0..matrix.rows() {
+        for j in 0..matrix.cols() {
+            a_copy[j * matrix.rows() + i] = matrix.data[i * matrix.cols() + j]; // transpose
         }
     }
     let mut ipiv = vec![0i32; n as usize];
@@ -115,12 +115,12 @@ pub fn lapack_lu_decomposition(matrix: &Matrix) -> Result<LuDecomposition, Strin
 
     // Transpose result back to row-major
     let mut lu_data = vec![0.0; a_copy.len()];
-    for i in 0..matrix.rows {
-        for j in 0..matrix.cols {
-            lu_data[i * matrix.cols + j] = a_copy[j * matrix.rows + i]; // transpose back
+    for i in 0..matrix.rows() {
+        for j in 0..matrix.cols() {
+            lu_data[i * matrix.cols() + j] = a_copy[j * matrix.rows() + i]; // transpose back
         }
     }
-    let lu_matrix = Matrix::new(lu_data, matrix.rows, matrix.cols)?;
+    let lu_matrix = Matrix::new_2d(lu_data, matrix.rows(), matrix.cols())?;
 
     Ok(LuDecomposition {
         lu_matrix,
@@ -131,8 +131,8 @@ pub fn lapack_lu_decomposition(matrix: &Matrix) -> Result<LuDecomposition, Strin
 /// QR decomposition
 /// Uses DGEQRF (double precision general QR factorization)
 pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, String> {
-    let m = matrix.rows as i32;
-    let n = matrix.cols as i32;
+    let m = matrix.rows() as i32;
+    let n = matrix.cols() as i32;
     let mut a_copy = matrix.data.clone();
     let mut tau = vec![0.0; std::cmp::min(m, n) as usize];
     let mut work = vec![0.0; 1];
@@ -169,7 +169,7 @@ pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, Strin
             r_data[i * n as usize + j] = a_copy[i * m as usize + j];
         }
     }
-    let r = Matrix::new(r_data, n as usize, n as usize)?;
+    let r = Matrix::new_2d(r_data, n as usize, n as usize)?;
 
     // Generate Q matrix using DORGQR
     let mut q_data = a_copy;
@@ -183,7 +183,7 @@ pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, Strin
         return Err(format!("LAPACK DORGQR failed with info = {info}"));
     }
 
-    let q = Matrix::new(q_data, matrix.rows, matrix.cols)?;
+    let q = Matrix::new_2d(q_data, matrix.rows(), matrix.cols())?;
 
     Ok(QrDecomposition { q, r })
 }
@@ -198,7 +198,7 @@ pub fn lapack_eigenvalues(
         return Err("Matrix must be square for eigenvalue decomposition".to_string());
     }
 
-    let n = matrix.rows as i32;
+    let n = matrix.rows() as i32;
     let jobz = if compute_vectors { b'V' } else { b'N' };
     let uplo = b'U'; // Upper triangular
 
@@ -252,7 +252,7 @@ pub fn lapack_eigenvalues(
     }
 
     let eigenvectors = if compute_vectors {
-        Some(Matrix::new(a_copy, matrix.rows, matrix.cols)?)
+        Some(Matrix::new_2d(a_copy, matrix.rows(), matrix.cols())?)
     } else {
         None
     };
@@ -269,7 +269,7 @@ pub fn lapack_determinant(matrix: &Matrix) -> Result<f64, String> {
 
     // Determinant is product of diagonal elements times sign of permutation
     let mut det = 1.0;
-    let n = matrix.rows;
+    let n = matrix.rows();
 
     // Product of diagonal elements
     for i in 0..n {
@@ -301,9 +301,9 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
     let n = matrix.rows as i32;
     // Transpose matrix since LAPACK expects column-major but we store row-major
     let mut a_copy = vec![0.0; matrix.data.len()];
-    for i in 0..matrix.rows {
-        for j in 0..matrix.cols {
-            a_copy[j * matrix.rows + i] = matrix.data[i * matrix.cols + j]; // transpose
+    for i in 0..matrix.rows() {
+        for j in 0..matrix.cols() {
+            a_copy[j * matrix.rows() + i] = matrix.data[i * matrix.cols() + j]; // transpose
         }
     }
     let mut ipiv = vec![0i32; n as usize];
@@ -345,17 +345,17 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
 
     // Transpose result back to row-major
     let mut inv_data = vec![0.0; a_copy.len()];
-    for i in 0..matrix.rows {
-        for j in 0..matrix.cols {
-            inv_data[i * matrix.cols + j] = a_copy[j * matrix.rows + i]; // transpose back
+    for i in 0..matrix.rows() {
+        for j in 0..matrix.cols() {
+            inv_data[i * matrix.cols() + j] = a_copy[j * matrix.rows() + i]; // transpose back
         }
     }
-    Matrix::new(inv_data, matrix.rows, matrix.cols)
+    Matrix::new_2d(inv_data, matrix.rows(), matrix.cols())
 }
 
 // Helper function to check if a matrix is square
 fn is_square(matrix: &Matrix) -> bool {
-    matrix.rows == matrix.cols
+    matrix.rows() == matrix.cols()
 }
 
 // Helper function to convert Vec<Value> to Vec<f64>
@@ -371,16 +371,19 @@ fn value_vector_to_f64(values: &[Value]) -> Result<Vec<f64>, String> {
 }
 
 // Helper function to convert Vec<f64> to Vec<Value>
+#[allow(dead_code)]
 fn f64_vector_to_value(values: Vec<f64>) -> Vec<Value> {
     values.into_iter().map(Value::Num).collect()
 }
 
 // Builtin functions for LAPACK operations
 #[runtime_builtin(name = "solve")]
-fn solve_builtin(a: Matrix, b: Vec<Value>) -> Result<Vec<Value>, String> {
+fn solve_builtin(a: Matrix, b: Vec<Value>) -> Result<Matrix, String> {
     let b_f64 = value_vector_to_f64(&b)?;
     let solution = lapack_solve_linear_system(&a, &b_f64)?;
-    Ok(f64_vector_to_value(solution))
+    // Return as a column vector (n x 1)
+    let n = solution.len();
+    Matrix::new_2d(solution, n, 1)
 }
 
 #[runtime_builtin(name = "det")]
@@ -394,7 +397,8 @@ fn inv_builtin(matrix: Matrix) -> Result<Matrix, String> {
 }
 
 #[runtime_builtin(name = "eig")]
-fn eig_builtin(matrix: Matrix) -> Result<Vec<Value>, String> {
+fn eig_builtin(matrix: Matrix) -> Result<Matrix, String> {
     let decomp = lapack_eigenvalues(&matrix, false)?;
-    Ok(f64_vector_to_value(decomp.eigenvalues))
+    let n = decomp.eigenvalues.len();
+    Matrix::new_2d(decomp.eigenvalues, n, 1)
 }

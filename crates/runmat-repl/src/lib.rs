@@ -58,20 +58,30 @@ fn format_type_info(value: &Value) -> String {
         Value::Num(_) => "scalar".to_string(),
         Value::Bool(_) => "logical scalar".to_string(),
         Value::String(_) => "string".to_string(),
-        Value::Matrix(m) => {
-            if m.rows == 1 && m.cols == 1 {
+        Value::Tensor(m) => {
+            if m.rows() == 1 && m.cols() == 1 {
                 "scalar".to_string()
-            } else if m.rows == 1 || m.cols == 1 {
-                format!("{}x{} vector", m.rows, m.cols)
+            } else if m.rows() == 1 || m.cols() == 1 {
+                format!("{}x{} vector", m.rows(), m.cols())
             } else {
-                format!("{}x{} matrix", m.rows, m.cols)
+                format!("{}x{} matrix", m.rows(), m.cols())
             }
         }
         Value::Cell(cells) => {
-            if cells.len() == 1 {
+            if cells.data.len() == 1 {
                 "1x1 cell".to_string()
             } else {
-                format!("{}x1 cell array", cells.len())
+                format!("{}x1 cell array", cells.data.len())
+            }
+        }
+        Value::GpuTensor(h) => {
+            if h.shape.len() == 2 {
+                let r = h.shape[0]; let c = h.shape[1];
+                if r == 1 && c == 1 { "scalar (gpu)".to_string() }
+                else if r == 1 || c == 1 { format!("{}x{} vector (gpu)", r, c) }
+                else { format!("{}x{} matrix (gpu)", r, c) }
+            } else {
+                format!("Tensor{:?} (gpu)", h.shape)
             }
         }
     }
@@ -260,7 +270,15 @@ impl ReplEngine {
                 | runmat_hir::HirStmt::Break
                 | runmat_hir::HirStmt::Continue
                 | runmat_hir::HirStmt::Return
-                | runmat_hir::HirStmt::Function { .. } => true,
+                | runmat_hir::HirStmt::Function { .. }
+                | runmat_hir::HirStmt::MultiAssign(_, _, _)
+                | runmat_hir::HirStmt::AssignLValue(_, _, _)
+                | runmat_hir::HirStmt::Switch { .. }
+                | runmat_hir::HirStmt::TryCatch { .. }
+                | runmat_hir::HirStmt::Global(_)
+                | runmat_hir::HirStmt::Persistent(_)
+                | runmat_hir::HirStmt::Import { path: _, wildcard: _ }
+                | runmat_hir::HirStmt::ClassDef { .. } => true,
             }
         } else {
             false

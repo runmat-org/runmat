@@ -126,20 +126,36 @@ impl MarkSweepCollector {
         // Recursively mark referenced objects
         match &*obj {
             Value::Cell(cells) => {
-                for cell_value in cells {
+                for cell_value in &cells.data {
                     // Mark nested Value objects for collection
                     self.mark_value_contents(cell_value, max_generation)?;
                 }
             }
-            Value::Matrix(_) => {
+            Value::Tensor(_) => {
                 // Matrices don't contain references to other GC objects
                 // (their data is Vec<f64>)
+            }
+            Value::GpuTensor(_) => {
+                // GPU handle contains no GC references
             }
             Value::String(_) => {
                 // Strings don't contain references to other GC objects
             }
             Value::Int(_) | Value::Num(_) | Value::Bool(_) => {
                 // Primitive values don't contain references
+            }
+            Value::FunctionHandle(_) => { }
+            Value::ClassRef(_) => { }
+            Value::Closure(c) => {
+                for v in &c.captures { self.mark_value_contents(v, max_generation)?; }
+            }
+            Value::Object(obj) => {
+                for (_k, v) in &obj.properties {
+                    self.mark_value_contents(v, max_generation)?;
+                }
+            }
+            Value::MException(_e) => {
+                // Contains only strings; no GC references
             }
         }
 
@@ -151,10 +167,18 @@ impl MarkSweepCollector {
     fn mark_value_contents(&mut self, value: &Value, _max_generation: usize) -> Result<()> {
         match value {
             Value::Cell(cells) => {
-                for cell_value in cells {
+                for cell_value in &cells.data {
                     self.mark_value_contents(cell_value, _max_generation)?;
                 }
             }
+            Value::GpuTensor(_) => {}
+            Value::FunctionHandle(_) => {}
+            Value::ClassRef(_) => {}
+            Value::Closure(c) => { for v in &c.captures { self.mark_value_contents(v, _max_generation)?; } }
+            Value::Object(obj) => {
+                for (_k, v) in &obj.properties { self.mark_value_contents(v, _max_generation)?; }
+            }
+            Value::MException(_e) => {}
             _ => {
                 // Other value types don't contain GC references yet
             }

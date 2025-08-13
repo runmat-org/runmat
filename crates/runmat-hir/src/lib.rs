@@ -24,17 +24,27 @@ pub enum HirExprKind {
     Constant(String), // For built-in constants like pi, e, etc.
     Unary(UnOp, Box<HirExpr>),
     Binary(Box<HirExpr>, BinOp, Box<HirExpr>),
-    Matrix(Vec<Vec<HirExpr>>),
+    Tensor(Vec<Vec<HirExpr>>),
+    Cell(Vec<Vec<HirExpr>>),
     Index(Box<HirExpr>, Vec<HirExpr>),
+    IndexCell(Box<HirExpr>, Vec<HirExpr>),
     Range(Box<HirExpr>, Option<Box<HirExpr>>, Box<HirExpr>),
     Colon,
+    End,
+    Member(Box<HirExpr>, String),
+    MethodCall(Box<HirExpr>, String, Vec<HirExpr>),
+    AnonFunc { params: Vec<VarId>, body: Box<HirExpr> },
+    FuncHandle(String),
     FuncCall(String, Vec<HirExpr>),
+    MetaClass(String),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirStmt {
     ExprStmt(HirExpr, bool), // Expression and whether it's semicolon-terminated (suppressed)
     Assign(VarId, HirExpr, bool), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
+    MultiAssign(Vec<VarId>, HirExpr, bool),
+    AssignLValue(HirLValue, HirExpr, bool),
     If {
         cond: HirExpr,
         then_body: Vec<HirStmt>,
@@ -50,6 +60,18 @@ pub enum HirStmt {
         expr: HirExpr,
         body: Vec<HirStmt>,
     },
+    Switch {
+        expr: HirExpr,
+        cases: Vec<(HirExpr, Vec<HirStmt>)>,
+        otherwise: Option<Vec<HirStmt>>,
+    },
+    TryCatch {
+        try_body: Vec<HirStmt>,
+        catch_var: Option<VarId>,
+        catch_body: Vec<HirStmt>,
+    },
+    Global(Vec<VarId>),
+    Persistent(Vec<VarId>),
     Break,
     Continue,
     Return,
@@ -59,6 +81,29 @@ pub enum HirStmt {
         outputs: Vec<VarId>,
         body: Vec<HirStmt>,
     },
+    ClassDef {
+        name: String,
+        super_class: Option<String>,
+        members: Vec<HirClassMember>,
+    },
+    Import { path: Vec<String>, wildcard: bool },
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirClassMember {
+    Properties(Vec<String>),
+    Methods(Vec<HirStmt>),
+    Events(Vec<String>),
+    Enumeration(Vec<String>),
+    Arguments(Vec<String>),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirLValue {
+    Var(VarId),
+    Member(Box<HirExpr>, String),
+    Index(Box<HirExpr>, Vec<HirExpr>),
+    IndexCell(Box<HirExpr>, Vec<HirExpr>),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -152,6 +197,28 @@ pub mod remapping {
                 let new_var_id = var_map.get(var_id).copied().unwrap_or(*var_id);
                 HirStmt::Assign(new_var_id, remap_expr(expr, var_map), *suppressed)
             }
+            HirStmt::MultiAssign(var_ids, expr, suppressed) => {
+                let mapped: Vec<VarId> = var_ids
+                    .iter()
+                    .map(|v| var_map.get(v).copied().unwrap_or(*v))
+                    .collect();
+                HirStmt::MultiAssign(mapped, remap_expr(expr, var_map), *suppressed)
+            }
+            HirStmt::AssignLValue(lv, expr, suppressed) => {
+                let remapped_lv = match lv {
+                    super::HirLValue::Var(v) => super::HirLValue::Var(var_map.get(v).copied().unwrap_or(*v)),
+                    super::HirLValue::Member(b, n) => super::HirLValue::Member(Box::new(remap_expr(b, var_map)), n.clone()),
+                    super::HirLValue::Index(b, idxs) => super::HirLValue::Index(
+                        Box::new(remap_expr(b, var_map)),
+                        idxs.iter().map(|e| remap_expr(e, var_map)).collect(),
+                    ),
+                    super::HirLValue::IndexCell(b, idxs) => super::HirLValue::IndexCell(
+                        Box::new(remap_expr(b, var_map)),
+                        idxs.iter().map(|e| remap_expr(e, var_map)).collect(),
+                    ),
+                };
+                HirStmt::AssignLValue(remapped_lv, remap_expr(expr, var_map), *suppressed)
+            }
             HirStmt::If {
                 cond,
                 then_body,
@@ -178,8 +245,47 @@ pub mod remapping {
                     body: remap_function_body(body, var_map),
                 }
             }
+            HirStmt::Switch { expr, cases, otherwise } => HirStmt::Switch {
+                expr: remap_expr(expr, var_map),
+                cases: cases
+                    .iter()
+                    .map(|(c, b)| (remap_expr(c, var_map), remap_function_body(b, var_map)))
+                    .collect(),
+                otherwise: otherwise.as_ref().map(|b| remap_function_body(b, var_map)),
+            },
+            HirStmt::TryCatch { try_body, catch_var, catch_body } => HirStmt::TryCatch {
+                try_body: remap_function_body(try_body, var_map),
+                catch_var: catch_var.map(|v| var_map.get(&v).copied().unwrap_or(v)),
+                catch_body: remap_function_body(catch_body, var_map),
+            },
+            HirStmt::Global(vars) => HirStmt::Global(
+                vars.iter()
+                    .map(|v| var_map.get(v).copied().unwrap_or(*v))
+                    .collect(),
+            ),
+            HirStmt::Persistent(vars) => HirStmt::Persistent(
+                vars.iter()
+                    .map(|v| var_map.get(v).copied().unwrap_or(*v))
+                    .collect(),
+            ),
             HirStmt::Break | HirStmt::Continue | HirStmt::Return => stmt.clone(),
             HirStmt::Function { .. } => stmt.clone(), // Functions shouldn't be nested in our current implementation
+            HirStmt::ClassDef { name, super_class, members } => HirStmt::ClassDef {
+                name: name.clone(),
+                super_class: super_class.clone(),
+                members: members
+                    .iter()
+                    .map(|m| match m {
+                        HirClassMember::Properties(p) => HirClassMember::Properties(p.clone()),
+                        HirClassMember::Events(e) => HirClassMember::Events(e.clone()),
+                        HirClassMember::Enumeration(e) => HirClassMember::Enumeration(e.clone()),
+                        HirClassMember::Arguments(a) => HirClassMember::Arguments(a.clone()),
+                        HirClassMember::Methods(body) =>
+                            HirClassMember::Methods(remap_function_body(body, var_map)),
+                    })
+                    .collect(),
+            },
+            HirStmt::Import { path, wildcard } => HirStmt::Import { path: path.clone(), wildcard: *wildcard },
         }
     }
 
@@ -196,7 +302,12 @@ pub mod remapping {
                 *op,
                 Box::new(remap_expr(right, var_map)),
             ),
-            HirExprKind::Matrix(rows) => HirExprKind::Matrix(
+            HirExprKind::Tensor(rows) => HirExprKind::Tensor(
+                rows.iter()
+                    .map(|row| row.iter().map(|e| remap_expr(e, var_map)).collect())
+                    .collect(),
+            ),
+            HirExprKind::Cell(rows) => HirExprKind::Cell(
                 rows.iter()
                     .map(|row| row.iter().map(|e| remap_expr(e, var_map)).collect())
                     .collect(),
@@ -205,19 +316,37 @@ pub mod remapping {
                 Box::new(remap_expr(base, var_map)),
                 indices.iter().map(|i| remap_expr(i, var_map)).collect(),
             ),
+            HirExprKind::IndexCell(base, indices) => HirExprKind::IndexCell(
+                Box::new(remap_expr(base, var_map)),
+                indices.iter().map(|i| remap_expr(i, var_map)).collect(),
+            ),
             HirExprKind::Range(start, step, end) => HirExprKind::Range(
                 Box::new(remap_expr(start, var_map)),
                 step.as_ref().map(|s| Box::new(remap_expr(s, var_map))),
                 Box::new(remap_expr(end, var_map)),
             ),
+            HirExprKind::Member(base, name) =>
+                HirExprKind::Member(Box::new(remap_expr(base, var_map)), name.clone()),
+            HirExprKind::MethodCall(base, name, args) => HirExprKind::MethodCall(
+                Box::new(remap_expr(base, var_map)),
+                name.clone(),
+                args.iter().map(|a| remap_expr(a, var_map)).collect(),
+            ),
+            HirExprKind::AnonFunc { params, body } => HirExprKind::AnonFunc {
+                params: params.clone(),
+                body: Box::new(remap_expr(body, var_map)),
+            },
+            HirExprKind::FuncHandle(name) => HirExprKind::FuncHandle(name.clone()),
             HirExprKind::FuncCall(name, args) => HirExprKind::FuncCall(
                 name.clone(),
                 args.iter().map(|a| remap_expr(a, var_map)).collect(),
             ),
             HirExprKind::Number(_)
-            | HirExprKind::String(_)
-            | HirExprKind::Constant(_)
-            | HirExprKind::Colon => expr.kind.clone(),
+                | HirExprKind::String(_)
+                | HirExprKind::Constant(_)
+                | HirExprKind::Colon
+                | HirExprKind::End
+                | HirExprKind::MetaClass(_) => expr.kind.clone(),
         };
         HirExpr {
             kind: new_kind,
@@ -241,6 +370,10 @@ pub mod remapping {
             HirStmt::ExprStmt(expr, _) => collect_expr_variables(expr, vars),
             HirStmt::Assign(var_id, expr, _) => {
                 vars.insert(*var_id);
+                collect_expr_variables(expr, vars);
+            }
+            HirStmt::MultiAssign(var_ids, expr, _) => {
+                for v in var_ids { vars.insert(*v); }
                 collect_expr_variables(expr, vars);
             }
             HirStmt::If {
@@ -278,8 +411,39 @@ pub mod remapping {
                     collect_stmt_variables(stmt, vars);
                 }
             }
+            HirStmt::Switch { expr, cases, otherwise } => {
+                collect_expr_variables(expr, vars);
+                for (v, b) in cases {
+                    collect_expr_variables(v, vars);
+                    for s in b { collect_stmt_variables(s, vars); }
+                }
+                if let Some(b) = otherwise {
+                    for s in b { collect_stmt_variables(s, vars); }
+                }
+            }
+            HirStmt::TryCatch { try_body, catch_var, catch_body } => {
+                if let Some(v) = catch_var { vars.insert(*v); }
+                for s in try_body { collect_stmt_variables(s, vars); }
+                for s in catch_body { collect_stmt_variables(s, vars); }
+            }
+            HirStmt::Global(vs) | HirStmt::Persistent(vs) => {
+                for v in vs { vars.insert(*v); }
+            }
+            HirStmt::AssignLValue(lv, expr, _) => {
+                match lv {
+                    HirLValue::Var(v) => { vars.insert(*v); }
+                    HirLValue::Member(base, _) => collect_expr_variables(base, vars),
+                    HirLValue::Index(base, idxs) | HirLValue::IndexCell(base, idxs) => {
+                        collect_expr_variables(base, vars);
+                        for i in idxs { collect_expr_variables(i, vars); }
+                    }
+                }
+                collect_expr_variables(expr, vars);
+            }
             HirStmt::Break | HirStmt::Continue | HirStmt::Return => {}
             HirStmt::Function { .. } => {} // Nested functions not supported
+            HirStmt::ClassDef { .. } => {}
+            HirStmt::Import { .. } => {}
         }
     }
 
@@ -293,11 +457,16 @@ pub mod remapping {
                 collect_expr_variables(left, vars);
                 collect_expr_variables(right, vars);
             }
-            HirExprKind::Matrix(rows) => {
+            HirExprKind::Tensor(rows) => {
                 for row in rows {
                     for e in row {
                         collect_expr_variables(e, vars);
                     }
+                }
+            }
+            HirExprKind::Cell(rows) => {
+                for row in rows {
+                    for e in row { collect_expr_variables(e, vars); }
                 }
             }
             HirExprKind::Index(base, indices) => {
@@ -306,6 +475,10 @@ pub mod remapping {
                     collect_expr_variables(idx, vars);
                 }
             }
+            HirExprKind::IndexCell(base, indices) => {
+                collect_expr_variables(base, vars);
+                for idx in indices { collect_expr_variables(idx, vars); }
+            }
             HirExprKind::Range(start, step, end) => {
                 collect_expr_variables(start, vars);
                 if let Some(step_expr) = step {
@@ -313,6 +486,13 @@ pub mod remapping {
                 }
                 collect_expr_variables(end, vars);
             }
+            HirExprKind::Member(base, _) => collect_expr_variables(base, vars),
+            HirExprKind::MethodCall(base, _, args) => {
+                collect_expr_variables(base, vars);
+                for a in args { collect_expr_variables(a, vars); }
+            }
+            HirExprKind::AnonFunc { body, .. } => collect_expr_variables(body, vars),
+            HirExprKind::FuncHandle(_) => {}
             HirExprKind::FuncCall(_, args) => {
                 for arg in args {
                     collect_expr_variables(arg, vars);
@@ -321,7 +501,9 @@ pub mod remapping {
             HirExprKind::Number(_)
             | HirExprKind::String(_)
             | HirExprKind::Constant(_)
-            | HirExprKind::Colon => {}
+            | HirExprKind::Colon
+            | HirExprKind::End
+            | HirExprKind::MetaClass(_) => {}
         }
     }
 
@@ -485,6 +667,14 @@ impl Ctx {
                 }
                 Ok(HirStmt::Assign(id, value, *semicolon_terminated))
             }
+            AstStmt::MultiAssign(names, expr, semicolon_terminated) => {
+                let ids: Vec<VarId> = names
+                    .iter()
+                    .map(|n| match self.lookup(n) { Some(id) => id, None => self.define(n.clone()) })
+                    .collect();
+                let value = self.lower_expr(expr)?;
+                Ok(HirStmt::MultiAssign(ids, value, *semicolon_terminated))
+            }
             AstStmt::If {
                 cond,
                 then_body,
@@ -525,6 +715,43 @@ impl Ctx {
                     body,
                 })
             }
+            AstStmt::Switch { expr, cases, otherwise } => {
+                let control = self.lower_expr(expr)?;
+                let mut cases_hir: Vec<(HirExpr, Vec<HirStmt>)> = Vec::new();
+                for (v, b) in cases {
+                    let ve = self.lower_expr(v)?;
+                    let vb = self.lower_stmts(b)?;
+                    cases_hir.push((ve, vb));
+                }
+                let otherwise_hir = otherwise
+                    .as_ref()
+                    .map(|b| self.lower_stmts(b))
+                    .transpose()?;
+                Ok(HirStmt::Switch { expr: control, cases: cases_hir, otherwise: otherwise_hir })
+            }
+            AstStmt::TryCatch { try_body, catch_var, catch_body } => {
+                let try_hir = self.lower_stmts(try_body)?;
+                let catch_var_id = match catch_var {
+                    Some(name) => Some(match self.lookup(name) { Some(id) => id, None => self.define(name.clone()) }),
+                    None => None,
+                };
+                let catch_hir = self.lower_stmts(catch_body)?;
+                Ok(HirStmt::TryCatch { try_body: try_hir, catch_var: catch_var_id, catch_body: catch_hir })
+            }
+            AstStmt::Global(names) => {
+                let ids: Vec<VarId> = names
+                    .iter()
+                    .map(|n| match self.lookup(n) { Some(id) => id, None => self.define(n.clone()) })
+                    .collect();
+                Ok(HirStmt::Global(ids))
+            }
+            AstStmt::Persistent(names) => {
+                let ids: Vec<VarId> = names
+                    .iter()
+                    .map(|n| match self.lookup(n) { Some(id) => id, None => self.define(n.clone()) })
+                    .collect();
+                Ok(HirStmt::Persistent(ids))
+            }
             AstStmt::Break => Ok(HirStmt::Break),
             AstStmt::Continue => Ok(HirStmt::Continue),
             AstStmt::Return => Ok(HirStmt::Return),
@@ -553,6 +780,42 @@ impl Ctx {
 
                 Ok(func_stmt)
             }
+            AstStmt::ClassDef { name, super_class, members } => {
+                // Lightweight lowering of class blocks into HIR without deep semantic checks
+                let members_hir = members
+                    .iter()
+                    .map(|m| match m {
+                        parser::ClassMember::Properties(p) => HirClassMember::Properties(p.clone()),
+                        parser::ClassMember::Events(e) => HirClassMember::Events(e.clone()),
+                        parser::ClassMember::Enumeration(e) => HirClassMember::Enumeration(e.clone()),
+                        parser::ClassMember::Arguments(a) => HirClassMember::Arguments(a.clone()),
+                        parser::ClassMember::Methods(stmts) => {
+                            match self.lower_stmts(stmts) {
+                                Ok(s) => HirClassMember::Methods(s),
+                                Err(_) => HirClassMember::Methods(Vec::new()),
+                            }
+                        }
+                    })
+                    .collect();
+                Ok(HirStmt::ClassDef { name: name.clone(), super_class: super_class.clone(), members: members_hir })
+            }
+            AstStmt::AssignLValue(lv, rhs, suppressed) => {
+                // Lower true lvalue assignment into HirStmt::AssignLValue
+                let hir_lv = self.lower_lvalue(lv)?;
+                let value = self.lower_expr(rhs)?;
+                // If target is a plain variable, update its type from RHS
+                if let HirLValue::Var(var_id) = hir_lv {
+                    if var_id.0 < self.var_types.len() { self.var_types[var_id.0] = value.ty.clone(); }
+                    return Ok(HirStmt::Assign(var_id, value, *suppressed));
+                }
+                Ok(HirStmt::AssignLValue(hir_lv, value, *suppressed))
+            }
+            AstStmt::Import { .. } => {
+                // Import statements have no runtime effect in HIR
+                if let AstStmt::Import { path, wildcard } = stmt {
+                    Ok(HirStmt::Import { path: path.clone(), wildcard: *wildcard })
+                } else { unreachable!() }
+            }
         }
     }
 
@@ -562,16 +825,16 @@ impl Ctx {
             Number(n) => (HirExprKind::Number(n.clone()), Type::Num),
             String(s) => (HirExprKind::String(s.clone()), Type::String),
             Ident(name) => {
-                // First check if it's a built-in constant
-                if self.is_constant(name) {
-                    (HirExprKind::Constant(name.clone()), Type::Num)
-                } else if let Some(id) = self.lookup(name) {
+                // First check if it's a variable in scope; variables shadow constants
+                if let Some(id) = self.lookup(name) {
                     let ty = if id.0 < self.var_types.len() {
                         self.var_types[id.0].clone()
                     } else {
                         Type::Unknown
                     };
                     (HirExprKind::Var(id), ty)
+                } else if self.is_constant(name) {
+                    (HirExprKind::Constant(name.clone()), Type::Num)
                 } else if self.is_function(name) {
                     // Treat bare identifier as function call with no arguments (MATLAB style)
                     let return_type = self.infer_function_return_type(name, &[]);
@@ -615,13 +878,15 @@ impl Ctx {
                             Type::Num
                         }
                     }
-                    // Comparison operations always return boolean (represented as Num for now)
+                    // Comparison operations always return boolean
                     BinOp::Equal
                     | BinOp::NotEqual
                     | BinOp::Less
                     | BinOp::LessEqual
                     | BinOp::Greater
                     | BinOp::GreaterEqual => Type::Bool,
+                    // Logical
+                    BinOp::AndAnd | BinOp::OrOr | BinOp::BitAnd | BinOp::BitOr => Type::Bool,
                     BinOp::Colon => Type::matrix(),
                 };
                 (
@@ -629,6 +894,20 @@ impl Ctx {
                     ty,
                 )
             }
+            AnonFunc { params, body } => {
+                // Lower body in a fresh scope with parameters bound to local VarIds
+                let saved_len = self.scopes.len();
+                self.push_scope();
+                let mut param_ids: Vec<VarId> = Vec::with_capacity(params.len());
+                for p in params {
+                    param_ids.push(self.define(p.clone()));
+                }
+                let lowered_body = self.lower_expr(body)?;
+                // restore scope
+                while self.scopes.len() > saved_len { self.pop_scope(); }
+                (HirExprKind::AnonFunc { params: param_ids, body: Box::new(lowered_body) }, Type::Unknown)
+            }
+            FuncHandle(name) => (HirExprKind::FuncHandle(name.clone()), Type::Unknown),
             FuncCall(name, args) => {
                 let arg_exprs: Result<Vec<_>, _> =
                     args.iter().map(|a| self.lower_expr(a)).collect();
@@ -659,7 +938,7 @@ impl Ctx {
                     (HirExprKind::FuncCall(name.clone(), arg_exprs), return_type)
                 }
             }
-            Matrix(rows) => {
+            Tensor(rows) => {
                 let mut hir_rows = Vec::new();
                 for row in rows {
                     let mut hir_row = Vec::new();
@@ -668,7 +947,18 @@ impl Ctx {
                     }
                     hir_rows.push(hir_row);
                 }
-                (HirExprKind::Matrix(hir_rows), Type::matrix())
+                (HirExprKind::Tensor(hir_rows), Type::matrix())
+            }
+            Cell(rows) => {
+                let mut hir_rows = Vec::new();
+                for row in rows {
+                    let mut hir_row = Vec::new();
+                    for expr in row {
+                        hir_row.push(self.lower_expr(expr)?);
+                    }
+                    hir_rows.push(hir_row);
+                }
+                (HirExprKind::Cell(hir_rows), Type::Unknown)
             }
             Index(expr, indices) => {
                 let base = self.lower_expr(expr)?;
@@ -677,6 +967,13 @@ impl Ctx {
                 let idx_exprs = idx_exprs?;
                 let ty = base.ty.clone(); // Indexing preserves base type for now
                 (HirExprKind::Index(Box::new(base), idx_exprs), ty)
+            }
+            IndexCell(expr, indices) => {
+                let base = self.lower_expr(expr)?;
+                let idx_exprs: Result<Vec<_>, _> =
+                    indices.iter().map(|i| self.lower_expr(i)).collect();
+                let idx_exprs = idx_exprs?;
+                (HirExprKind::IndexCell(Box::new(base), idx_exprs), Type::Unknown)
             }
             Range(start, step, end) => {
                 let start_hir = self.lower_expr(start)?;
@@ -692,8 +989,43 @@ impl Ctx {
                 )
             }
             Colon => (HirExprKind::Colon, Type::matrix()),
+            EndKeyword => (HirExprKind::End, Type::Unknown),
+            Member(base, name) => {
+                let b = self.lower_expr(base)?;
+                (HirExprKind::Member(Box::new(b), name.clone()), Type::Unknown)
+            }
+            MethodCall(base, name, args) => {
+                let b = self.lower_expr(base)?;
+                let lowered_args: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();
+                (HirExprKind::MethodCall(Box::new(b), name.clone(), lowered_args?), Type::Unknown)
+            }
+            MetaClass(name) => (HirExprKind::MetaClass(name.clone()), Type::String),
         };
         Ok(HirExpr { kind, ty })
+    }
+
+    fn lower_lvalue(&mut self, lv: &parser::LValue) -> Result<HirLValue, String> {
+        use parser::LValue as ALV;
+        Ok(match lv {
+            ALV::Var(name) => {
+                let id = match self.lookup(name) { Some(id) => id, None => self.define(name.clone()) };
+                HirLValue::Var(id)
+            }
+            ALV::Member(base, name) => {
+                let b = self.lower_expr(base)?;
+                HirLValue::Member(Box::new(b), name.clone())
+            }
+            ALV::Index(base, idxs) => {
+                let b = self.lower_expr(base)?;
+                let lowered: Result<Vec<_>, _> = idxs.iter().map(|e| self.lower_expr(e)).collect();
+                HirLValue::Index(Box::new(b), lowered?)
+            }
+            ALV::IndexCell(base, idxs) => {
+                let b = self.lower_expr(base)?;
+                let lowered: Result<Vec<_>, _> = idxs.iter().map(|e| self.lower_expr(e)).collect();
+                HirLValue::IndexCell(Box::new(b), lowered?)
+            }
+        })
     }
 
     /// Infer the return type of a function call based on the function name and arguments
@@ -720,16 +1052,161 @@ impl Ctx {
     fn infer_user_function_return_type(
         &self,
         outputs: &[VarId],
-        _body: &[HirStmt],
+        body: &[HirStmt],
         _args: &[HirExpr],
     ) -> Type {
-        // For now, return Unknown for user-defined functions
-        // TODO: Implement proper type inference by analyzing the function body
-        // We could track variable assignments and infer types from expressions
         if outputs.is_empty() {
-            Type::Void
-        } else {
-            Type::Unknown // Conservative default until we implement full type analysis
+            return Type::Void;
         }
+        let result_types = self.infer_outputs_types(outputs, body);
+        // If multiple outputs supported, pick the first for scalar function calls context
+        result_types.get(0).cloned().unwrap_or(Type::Unknown)
+    }
+
+    fn infer_outputs_types(&self, outputs: &[VarId], body: &[HirStmt]) -> Vec<Type> {
+        use std::collections::HashMap;
+
+        #[derive(Clone)]
+        struct Analysis {
+            exits: Vec<HashMap<VarId, Type>>,           // envs at return points
+            fallthrough: Option<HashMap<VarId, Type>>, // env after block if not returned
+        }
+
+        fn join_type(a: &Type, b: &Type) -> Type {
+            if a == b {
+                return a.clone();
+            }
+            if matches!(a, Type::Unknown) {
+                return b.clone();
+            }
+            if matches!(b, Type::Unknown) {
+                return a.clone();
+            }
+            Type::Unknown
+        }
+
+        fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
+            let mut out = a.clone();
+            for (k, v) in b {
+                out.entry(*k)
+                    .and_modify(|t| *t = join_type(t, v))
+                    .or_insert_with(|| v.clone());
+            }
+            out
+        }
+
+        fn analyze_stmts(
+            outputs: &[VarId],
+            stmts: &[HirStmt],
+            mut env: HashMap<VarId, Type>,
+        ) -> Analysis {
+            let mut exits = Vec::new();
+            let mut i = 0usize;
+            while i < stmts.len() {
+                match &stmts[i] {
+                    HirStmt::Assign(var, expr, _) => {
+                        env.insert(*var, expr.ty.clone());
+                    }
+                    HirStmt::MultiAssign(vars, expr, _) => {
+                        for v in vars {
+                            env.insert(*v, expr.ty.clone());
+                        }
+                    }
+                    HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
+                    HirStmt::Return => {
+                        exits.push(env.clone());
+                        return Analysis { exits, fallthrough: None };
+                    }
+                    HirStmt::If { cond: _, then_body, elseif_blocks, else_body } => {
+                        let then_a = analyze_stmts(outputs, then_body, env.clone());
+                        let mut out_env = then_a.fallthrough.unwrap_or_else(|| env.clone());
+                        let mut all_exits = then_a.exits;
+                        for (c, b) in elseif_blocks {
+                            let _ = c; // cond type unused in analysis
+                            let a = analyze_stmts(outputs, b, env.clone());
+                            if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); }
+                            all_exits.extend(a.exits);
+                        }
+                        if let Some(else_body) = else_body {
+                            let a = analyze_stmts(outputs, else_body, env.clone());
+                            if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); }
+                            all_exits.extend(a.exits);
+                        } else {
+                            // no else: join with incoming env
+                            out_env = join_env(&out_env, &env);
+                        }
+                        env = out_env;
+                        exits.extend(all_exits);
+                    }
+                    HirStmt::While { cond: _, body } => {
+                        // Approximate: analyze once and join with incoming env
+                        let a = analyze_stmts(outputs, body, env.clone());
+                        if let Some(f) = a.fallthrough { env = join_env(&env, &f); }
+                        exits.extend(a.exits);
+                    }
+                    HirStmt::For { var, expr, body } => {
+                        // Assign loop var type from expr type
+                        env.insert(*var, expr.ty.clone());
+                        let a = analyze_stmts(outputs, body, env.clone());
+                        if let Some(f) = a.fallthrough { env = join_env(&env, &f); }
+                        exits.extend(a.exits);
+                    }
+                    HirStmt::Switch { expr: _, cases, otherwise } => {
+                        let mut out_env: Option<HashMap<VarId, Type>> = None;
+                        for (_v, b) in cases {
+                            let a = analyze_stmts(outputs, b, env.clone());
+                            if let Some(f) = a.fallthrough {
+                                out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f });
+                            }
+                            exits.extend(a.exits);
+                        }
+                        if let Some(otherwise) = otherwise {
+                            let a = analyze_stmts(outputs, otherwise, env.clone());
+                            if let Some(f) = a.fallthrough {
+                                out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f });
+                            }
+                            exits.extend(a.exits);
+                        } else {
+                            out_env = Some(match out_env { Some(curr) => join_env(&curr, &env), None => env.clone() });
+                        }
+                        if let Some(f) = out_env { env = f; }
+                    }
+                    HirStmt::TryCatch { try_body, catch_var: _, catch_body } => {
+                        let a_try = analyze_stmts(outputs, try_body, env.clone());
+                        let a_catch = analyze_stmts(outputs, catch_body, env.clone());
+                        let mut out_env = a_try.fallthrough.unwrap_or_else(|| env.clone());
+                        if let Some(f) = a_catch.fallthrough { out_env = join_env(&out_env, &f); }
+                        env = out_env;
+                        exits.extend(a_try.exits);
+                        exits.extend(a_catch.exits);
+                    }
+                    HirStmt::Global(_) | HirStmt::Persistent(_) => {}
+                    HirStmt::Function { .. } => {}
+                    HirStmt::ClassDef { .. } => {}
+                    HirStmt::AssignLValue(_, expr, _) => {
+                        // Update env conservatively based on RHS type (specific lvalue target unknown)
+                        // No binding updated unless it's a plain variable (handled elsewhere)
+                        let _ = &expr.ty;
+                    }
+                    HirStmt::Import { .. } => {}
+                }
+                i += 1;
+            }
+            Analysis { exits, fallthrough: Some(env) }
+        }
+
+        let initial_env: HashMap<VarId, Type> = HashMap::new();
+        let analysis = analyze_stmts(outputs, body, initial_env);
+        let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
+        let mut accumulate = |env: &std::collections::HashMap<VarId, Type>| {
+            for (i, out) in outputs.iter().enumerate() {
+                if let Some(t) = env.get(out) {
+                    per_output[i] = join_type(&per_output[i], t);
+                }
+            }
+        };
+        for e in &analysis.exits { accumulate(e); }
+        if let Some(f) = &analysis.fallthrough { accumulate(f); }
+        per_output
     }
 }

@@ -336,7 +336,7 @@ impl HighPerformanceGC {
 
         match &obj.value {
             Value::Cell(cells) => {
-                for cell_value in cells {
+                for cell_value in &cells.data {
                     if let Some(referenced_obj) = self.find_object_for_value(cell_value) {
                         if referenced_obj.mark() {
                             marked += 1;

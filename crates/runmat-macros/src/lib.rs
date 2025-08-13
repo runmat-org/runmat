@@ -72,22 +72,61 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         syn::ReturnType::Type(_, ty) => infer_builtin_type(ty),
     };
 
+    // Detect if last parameter is variadic Vec<Value>
+    let is_last_variadic = param_types.last().map(|ty| {
+        // crude detection: type path starts with Vec and inner type is runmat_builtins::Value or Value
+        if let syn::Type::Path(tp) = ty {
+            if tp.path.segments.last().map(|s| s.ident == "Vec").unwrap_or(false) {
+                if let syn::PathArguments::AngleBracketed(ab) = &tp.path.segments.last().unwrap().arguments {
+                    if let Some(syn::GenericArgument::Type(syn::Type::Path(inner))) = ab.args.first() {
+                        return inner.path.segments.last().map(|s| s.ident == "Value").unwrap_or(false);
+                    }
+                }
+            }
+        }
+        false
+    }).unwrap_or(false);
+
     // Generate wrapper ident
     let wrapper_ident = format_ident!("__rt_wrap_{}", ident);
 
-    let conv_stmts: Vec<proc_macro2::TokenStream> = param_idents
-        .iter()
-        .zip(param_types.iter())
-        .enumerate()
-        .map(|(i, (ident, ty))| {
-            quote! { let #ident : #ty = std::convert::TryInto::try_into(&args[#i])?; }
-        })
-        .collect();
+    let conv_stmts: Vec<proc_macro2::TokenStream> = if is_last_variadic && param_len > 0 {
+        let mut stmts = Vec::new();
+        // Convert fixed params (all but last)
+        for (i, (ident, ty)) in param_idents.iter().zip(param_types.iter()).enumerate().take(param_len-1) {
+            stmts.push(quote! { let #ident : #ty = std::convert::TryInto::try_into(&args[#i])?; });
+        }
+        // Collect the rest into Vec<Value>
+        let last_ident = &param_idents[param_len-1];
+        stmts.push(quote! {
+            let #last_ident : Vec<runmat_builtins::Value> = {
+                let mut v = Vec::new();
+                for j in (#param_len-1)..args.len() {
+                    let item : runmat_builtins::Value = std::convert::TryInto::try_into(&args[j])?;
+                    v.push(item);
+                }
+                v
+            };
+        });
+        stmts
+    } else {
+        param_idents
+            .iter()
+            .zip(param_types.iter())
+            .enumerate()
+            .map(|(i, (ident, ty))| {
+                quote! { let #ident : #ty = std::convert::TryInto::try_into(&args[#i])?; }
+            })
+            .collect()
+    };
 
     let wrapper = quote! {
         fn #wrapper_ident(args: &[runmat_builtins::Value]) -> Result<runmat_builtins::Value, String> {
-            if args.len() != #param_len {
-                return Err(format!("expected {} args, got {}", #param_len, args.len()));
+            #![allow(unused_variables)]
+            if #is_last_variadic {
+                if args.len() < #param_len - 1 { return Err(format!("expected at least {} args, got {}", #param_len - 1, args.len())); }
+            } else {
+                if args.len() != #param_len { return Err(format!("expected {} args, got {}", #param_len, args.len())); }
             }
             #(#conv_stmts)*
             let res = #ident(#(#param_idents),*)?;
@@ -100,6 +139,9 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             runmat_builtins::BuiltinFunction::new(
                 #name_str,
                 "Runtime builtin function",
+                "general",
+                "",
+                "",
                 vec![#(#inferred_param_types),*],
                 #inferred_return_type,
                 #wrapper_ident

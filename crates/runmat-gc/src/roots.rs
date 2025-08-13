@@ -101,7 +101,7 @@ impl StackRoot {
     #[allow(clippy::only_used_in_recursion)]
     fn collect_value_roots(&self, value: &Value, _roots: &mut Vec<GcPtr<Value>>) {
         if let Value::Cell(cells) = value {
-            for cell_value in cells {
+            for cell_value in &cells.data {
                 self.collect_value_roots(cell_value, _roots);
             }
         }
@@ -178,7 +178,7 @@ impl VariableArrayRoot {
     #[allow(clippy::only_used_in_recursion)]
     fn collect_value_roots(&self, value: &Value, _roots: &mut Vec<GcPtr<Value>>) {
         if let Value::Cell(cells) = value {
-            for cell_value in cells {
+            for cell_value in &cells.data {
                 self.collect_value_roots(cell_value, _roots);
             }
         }
@@ -235,7 +235,7 @@ impl GlobalRoot {
     #[allow(clippy::only_used_in_recursion)]
     fn collect_value_roots(&self, value: &Value, _roots: &mut Vec<GcPtr<Value>>) {
         if let Value::Cell(cells) = value {
-            for cell_value in cells {
+            for cell_value in &cells.data {
                 self.collect_value_roots(cell_value, _roots);
             }
         }

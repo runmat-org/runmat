@@ -3,19 +3,19 @@
 //! This module provides MATLAB-compatible array generation functions like linspace, logspace,
 //! zeros, ones, eye, etc. These functions are optimized for performance and memory efficiency.
 
-use runmat_builtins::{Matrix, Value};
+use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 /// Generate linearly spaced vector
 /// linspace(x1, x2, n) generates n points between x1 and x2 (inclusive)
 #[runtime_builtin(name = "linspace")]
-fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Matrix, String> {
+fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Tensor, String> {
     if n < 1 {
         return Err("Number of points must be positive".to_string());
     }
 
     if n == 1 {
-        return Matrix::new(vec![x2], 1, 1);
+        return Tensor::new_2d(vec![x2], 1, 1);
     }
 
     let n_usize = n as usize;
@@ -33,13 +33,13 @@ fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Matrix, String> {
         data[n_usize - 1] = x2;
     }
 
-    Matrix::new(data, 1, n_usize)
+    Tensor::new_2d(data, 1, n_usize)
 }
 
 /// Generate logarithmically spaced vector
 /// logspace(a, b, n) generates n points between 10^a and 10^b
 #[runtime_builtin(name = "logspace")]
-fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Matrix, String> {
+fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Tensor, String> {
     if n < 1 {
         return Err("Number of points must be positive".to_string());
     }
@@ -57,33 +57,33 @@ fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Matrix, String> {
         }
     }
 
-    Matrix::new(data, 1, n_usize)
+    Tensor::new_2d(data, 1, n_usize)
 }
 
 /// Generate zeros matrix
 /// zeros(m, n) creates an m×n matrix of zeros
 #[runtime_builtin(name = "zeros")]
-fn zeros_builtin(m: i32, n: i32) -> Result<Matrix, String> {
+fn zeros_builtin(m: i32, n: i32) -> Result<Tensor, String> {
     if m < 0 || n < 0 {
         return Err("Matrix dimensions must be non-negative".to_string());
     }
-    Ok(Matrix::zeros(m as usize, n as usize))
+    Ok(Tensor::zeros(vec![m as usize, n as usize]))
 }
 
 /// Generate ones matrix
 /// ones(m, n) creates an m×n matrix of ones
 #[runtime_builtin(name = "ones")]
-fn ones_builtin(m: i32, n: i32) -> Result<Matrix, String> {
+fn ones_builtin(m: i32, n: i32) -> Result<Tensor, String> {
     if m < 0 || n < 0 {
         return Err("Matrix dimensions must be non-negative".to_string());
     }
-    Ok(Matrix::ones(m as usize, n as usize))
+    Ok(Tensor::ones(vec![m as usize, n as usize]))
 }
 
 /// Generate identity matrix
 /// eye(n) creates an n×n identity matrix
 #[runtime_builtin(name = "eye")]
-fn eye_builtin(n: i32) -> Result<Matrix, String> {
+fn eye_builtin(n: i32) -> Result<Tensor, String> {
     if n < 0 {
         return Err("Matrix size must be non-negative".to_string());
     }
@@ -95,13 +95,13 @@ fn eye_builtin(n: i32) -> Result<Matrix, String> {
         data[i * n_usize + i] = 1.0;
     }
 
-    Matrix::new(data, n_usize, n_usize)
+    Tensor::new_2d(data, n_usize, n_usize)
 }
 
 /// Generate random matrix with uniform distribution [0,1)
 /// rand(m, n) creates an m×n matrix of random numbers
 #[runtime_builtin(name = "rand")]
-fn rand_builtin(m: i32, n: i32) -> Result<Matrix, String> {
+fn rand_builtin(m: i32, n: i32) -> Result<Tensor, String> {
     if m < 0 || n < 0 {
         return Err("Matrix dimensions must be non-negative".to_string());
     }
@@ -123,13 +123,13 @@ fn rand_builtin(m: i32, n: i32) -> Result<Matrix, String> {
         }
     }
 
-    Matrix::new(data, rows, cols)
+    Tensor::new_2d(data, rows, cols)
 }
 
 /// Generate matrix filled with specific value
 /// fill(value, m, n) creates an m×n matrix filled with value
 #[runtime_builtin(name = "fill")]
-fn fill_builtin(value: f64, m: i32, n: i32) -> Result<Matrix, String> {
+fn fill_builtin(value: f64, m: i32, n: i32) -> Result<Tensor, String> {
     if m < 0 || n < 0 {
         return Err("Matrix dimensions must be non-negative".to_string());
     }
@@ -138,13 +138,13 @@ fn fill_builtin(value: f64, m: i32, n: i32) -> Result<Matrix, String> {
     let cols = n as usize;
     let data = vec![value; rows * cols];
 
-    Matrix::new(data, rows, cols)
+    Tensor::new_2d(data, rows, cols)
 }
 
 /// Generate random matrix with normal distribution (mean=0, std=1)
 /// randn(m, n) creates an m×n matrix of normally distributed random numbers
 #[runtime_builtin(name = "randn")]
-fn randn_builtin(m: i32, n: i32) -> Result<Matrix, String> {
+fn randn_builtin(m: i32, n: i32) -> Result<Tensor, String> {
     if m < 0 || n < 0 {
         return Err("Matrix dimensions must be non-negative".to_string());
     }
@@ -182,27 +182,27 @@ fn randn_builtin(m: i32, n: i32) -> Result<Matrix, String> {
         data.push(normal_val);
     }
 
-    Matrix::new(data, rows, cols)
+    Tensor::new_2d(data, rows, cols)
 }
 
 /// Get the length of the largest dimension of a matrix
 /// length(X) returns the size of the largest dimension of matrix X
 #[runtime_builtin(name = "length")]
-fn length_builtin(matrix: Matrix) -> Result<f64, String> {
-    Ok(matrix.rows.max(matrix.cols) as f64)
+fn length_builtin(matrix: Tensor) -> Result<f64, String> {
+    Ok(matrix.rows().max(matrix.cols()) as f64)
 }
 
 /// Generate range vector
 /// range(start, step, stop) creates a vector from start to stop with given step
 #[runtime_builtin(name = "range")]
-fn range_builtin(start: f64, step: f64, stop: f64) -> Result<Matrix, String> {
+fn range_builtin(start: f64, step: f64, stop: f64) -> Result<Tensor, String> {
     if step == 0.0 {
         return Err("Step size cannot be zero".to_string());
     }
 
     if (step > 0.0 && start > stop) || (step < 0.0 && start < stop) {
         // Empty range
-        return Matrix::new(vec![], 1, 0);
+        return Tensor::new_2d(vec![], 1, 0);
     }
 
     let mut data = Vec::new();
@@ -221,19 +221,19 @@ fn range_builtin(start: f64, step: f64, stop: f64) -> Result<Matrix, String> {
     }
 
     let len = data.len();
-    Matrix::new(data, 1, len)
+    Tensor::new_2d(data, 1, len)
 }
 
 /// Generate meshgrid for 2D plotting
 /// [X, Y] = meshgrid(x, y) creates 2D coordinate arrays
 #[runtime_builtin(name = "meshgrid")]
-fn meshgrid_builtin(x: Matrix, y: Matrix) -> Result<Matrix, String> {
+fn meshgrid_builtin(x: Tensor, y: Tensor) -> Result<Tensor, String> {
     // For simplicity, return flattened coordinate matrices
     // In a full implementation, this would return two separate matrices
-    if x.rows != 1 && x.cols != 1 {
+    if x.rows() != 1 && x.cols() != 1 {
         return Err("Input x must be a vector".to_string());
     }
-    if y.rows != 1 && y.cols != 1 {
+    if y.rows() != 1 && y.cols() != 1 {
         return Err("Input y must be a vector".to_string());
     }
 
@@ -248,7 +248,7 @@ fn meshgrid_builtin(x: Matrix, y: Matrix) -> Result<Matrix, String> {
         x_data.extend_from_slice(x_vec);
     }
 
-    Matrix::new(x_data, ny, nx)
+    Tensor::new_2d(x_data, ny, nx)
 }
 
 /// Create a range vector (equivalent to start:end or start:step:end in MATLAB)
@@ -277,13 +277,13 @@ pub fn create_range(start: f64, step: Option<f64>, end: f64) -> Result<Value, St
 
     if values.is_empty() {
         // Return empty matrix for invalid ranges
-        return Ok(Value::Matrix(Matrix::new(vec![], 0, 0)?));
+        return Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0])?));
     }
 
     // Create a row vector (1 x n)
     let cols = values.len();
-    let matrix = Matrix::new(values, 1, cols)?;
-    Ok(Value::Matrix(matrix))
+    let matrix = Tensor::new_2d(values, 1, cols)?;
+    Ok(Value::Tensor(matrix))
 }
 
 #[cfg(test)]
