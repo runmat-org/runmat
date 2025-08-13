@@ -608,7 +608,8 @@ pub enum Access { Public, Private }
 pub struct PropertyDef {
     pub name: String,
     pub is_static: bool,
-    pub access: Access,
+    pub get_access: Access,
+    pub set_access: Access,
     pub default_value: Option<Value>,
 }
 
@@ -646,6 +647,44 @@ pub fn get_class(name: &str) -> Option<ClassDef> {
     registry().lock().unwrap().get(name).cloned()
 }
 
+/// Resolve a property through the inheritance chain, returning the property definition and
+/// the name of the class where it was defined.
+pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, String)> {
+    let reg = registry().lock().unwrap();
+    let mut current = Some(class_name.to_string());
+    let guard: Option<std::sync::MutexGuard<'_, std::collections::HashMap<String, ClassDef>>> = None;
+    drop(guard);
+    while let Some(name) = current {
+        if let Some(cls) = reg.get(&name) {
+            if let Some(p) = cls.properties.get(prop) {
+                return Some((p.clone(), name));
+            }
+            current = cls.parent.clone();
+        } else {
+            break;
+        }
+    }
+    None
+}
+
+/// Resolve a method through the inheritance chain, returning the method definition and
+/// the name of the class where it was defined.
+pub fn lookup_method(class_name: &str, method: &str) -> Option<(MethodDef, String)> {
+    let reg = registry().lock().unwrap();
+    let mut current = Some(class_name.to_string());
+    while let Some(name) = current {
+        if let Some(cls) = reg.get(&name) {
+            if let Some(m) = cls.methods.get(method) {
+                return Some((m.clone(), name));
+            }
+            current = cls.parent.clone();
+        } else {
+            break;
+        }
+    }
+    None
+}
+
 fn static_values() -> &'static Mutex<HashMap<(String, String), Value>> {
     STATIC_VALUES.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -656,4 +695,14 @@ pub fn get_static_property_value(class_name: &str, prop: &str) -> Option<Value> 
 
 pub fn set_static_property_value(class_name: &str, prop: &str, value: Value) {
     static_values().lock().unwrap().insert((class_name.to_string(), prop.to_string()), value);
+}
+
+/// Set a static property, resolving the defining ancestor class for storage.
+pub fn set_static_property_value_in_owner(class_name: &str, prop: &str, value: Value) -> Result<(), String> {
+    if let Some((_p, owner)) = lookup_property(class_name, prop) {
+        set_static_property_value(&owner, prop, value);
+        Ok(())
+    } else {
+        Err(format!("Unknown static property '{}.{}'", class_name, prop))
+    }
 }

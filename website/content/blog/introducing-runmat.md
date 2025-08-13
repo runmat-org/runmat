@@ -1,12 +1,12 @@
 ---
 title: "Introducing RunMat: A Fast, Free, Modern MATLAB Runtime"
-description: "A blazing-fast, memory-safe, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler, advanced garbage collection, and GPU-accelerated plotting."
+description: "A blazing-fast, open-source, modern runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler, advanced garbage collection, and GPU-accelerated plotting."
 date: "2025-08-07"
 author: "Nabeel Allana"
 readTime: "8 min read"
 slug: "introducing-runmat"
-tags: ["MATLAB", "Rust", "JIT", "scientific computing", "open source"]
-keywords: "MATLAB alternative, Rust scientific computing, JIT compiler, numerical computing, open source MATLAB, GNU Octave replacement"
+tags: ["MATLAB", "Rust", "JIT", "Octave", "scientific computing", "open source"]
+keywords: "MATLAB alternative, GNU Octave replacement, Rust scientific computing, JIT compiler, numerical computing, open source MATLAB"
 excerpt: "RunMat solves scientific computing's triple bind: expensive MATLAB licenses, slow free alternatives, and memory safety issues. Run MATLAB code with high performance and Rust safety, completely free."
 image: "/images/blog/runmat-hero.png"
 imageAlt: "RunMat logo with performance charts showing 10x speedup over GNU Octave"

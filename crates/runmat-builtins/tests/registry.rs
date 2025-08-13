@@ -70,7 +70,8 @@ fn test_matrix_operations() {
     // Test matrix creation
     let data = vec![1.0, 2.0, 3.0, 4.0];
     let matrix2 = Tensor::new_2d(data, 2, 2).unwrap();
-    assert_eq!(matrix2.get2(0, 1).unwrap(), 2.0);
+    // Column-major: data = [1,2,3,4] laid out as [[1,3];[2,4]] for 2x2
+    assert_eq!(matrix2.get2(0, 1).unwrap(), 3.0);
     assert_eq!(matrix2.get2(1, 1).unwrap(), 4.0);
 
     // Test invalid dimensions

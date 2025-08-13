@@ -118,13 +118,19 @@ pub enum LValue {
     IndexCell(Box<Expr>, Vec<Expr>),
 }
 
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Attr {
+    pub name: String,
+    pub value: Option<String>,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum ClassMember {
-    Properties(Vec<String>),
-    Methods(Vec<Stmt>),
-    Events(Vec<String>),
-    Enumeration(Vec<String>),
-    Arguments(Vec<String>),
+    Properties { attributes: Vec<Attr>, names: Vec<String> },
+    Methods { attributes: Vec<Attr>, body: Vec<Stmt> },
+    Events { attributes: Vec<Attr>, names: Vec<String> },
+    Enumeration { attributes: Vec<Attr>, names: Vec<String> },
+    Arguments { attributes: Vec<Attr>, names: Vec<String> },
 }
 
 #[derive(Debug, PartialEq)]
@@ -1103,41 +1109,45 @@ impl Parser {
         }
         let mut members: Vec<ClassMember> = Vec::new();
         loop {
+            // Skip layout separators between member blocks
+            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+                continue;
+            }
             match self.peek_token() {
                 Some(Token::Properties) => {
                     self.pos += 1;
-                    self.parse_optional_attr_list();
+                    let attrs = self.parse_optional_attr_list();
                     let props = self.parse_properties_names_block()?;
                     if !self.consume(&Token::End) { return Err("expected 'end' after properties".into()); }
-                    members.push(ClassMember::Properties(props));
+                    members.push(ClassMember::Properties { attributes: attrs, names: props });
                 }
                 Some(Token::Methods) => {
                     self.pos += 1;
-                    self.parse_optional_attr_list();
+                    let attrs = self.parse_optional_attr_list();
                     let body = self.parse_block(|t| matches!(t, Token::End))?;
                     if !self.consume(&Token::End) { return Err("expected 'end' after methods".into()); }
-                    members.push(ClassMember::Methods(body));
+                    members.push(ClassMember::Methods { attributes: attrs, body });
                 }
                 Some(Token::Events) => {
                     self.pos += 1;
-                    self.parse_optional_attr_list();
+                    let attrs = self.parse_optional_attr_list();
                     let names = self.parse_name_block()?;
                     if !self.consume(&Token::End) { return Err("expected 'end' after events".into()); }
-                    members.push(ClassMember::Events(names));
+                    members.push(ClassMember::Events { attributes: attrs, names });
                 }
                 Some(Token::Enumeration) => {
                     self.pos += 1;
-                    self.parse_optional_attr_list();
+                    let attrs = self.parse_optional_attr_list();
                     let names = self.parse_name_block()?;
                     if !self.consume(&Token::End) { return Err("expected 'end' after enumeration".into()); }
-                    members.push(ClassMember::Enumeration(names));
+                    members.push(ClassMember::Enumeration { attributes: attrs, names });
                 }
                 Some(Token::Arguments) => {
                     self.pos += 1;
-                    self.parse_optional_attr_list();
+                    let attrs = self.parse_optional_attr_list();
                     let names = self.parse_name_block()?;
                     if !self.consume(&Token::End) { return Err("expected 'end' after arguments".into()); }
-                    members.push(ClassMember::Arguments(names));
+                    members.push(ClassMember::Arguments { attributes: attrs, names });
                 }
                 Some(Token::End) => { self.pos += 1; break; }
                 _ => break,
@@ -1180,20 +1190,30 @@ impl Parser {
         Ok(names)
     }
 
-    fn parse_optional_attr_list(&mut self) {
-        // Minimal acceptance of attribute lists in parentheses: (Attr, Attr=Value, ...)
-        if self.consume(&Token::LParen) {
-            // Consume a sequence of identifiers/assignments until ')'
-            loop {
-                if self.consume(&Token::RParen) { break; }
-                match self.peek_token() {
-                    Some(Token::Ident) | Some(Token::Str) | Some(Token::Integer) | Some(Token::Float) => { self.pos += 1; }
-                    Some(Token::Assign) | Some(Token::Comma) => { self.pos += 1; }
-                    Some(_) => { break; }
-                    None => { break; }
+    fn parse_optional_attr_list(&mut self) -> Vec<Attr> {
+        // Minimal parsing of attribute lists: (Attr, Attr=Value, ...)
+        let mut attrs: Vec<Attr> = Vec::new();
+        if !self.consume(&Token::LParen) { return attrs; }
+        loop {
+            if self.consume(&Token::RParen) { break; }
+            match self.peek_token() {
+                Some(Token::Ident) => {
+                    let name = self.expect_ident().unwrap_or_else(|_| "".to_string());
+                    let mut value: Option<String> = None;
+                    if self.consume(&Token::Assign) {
+                        // Value could be ident, string or number; capture raw lexeme
+                        if let Some(tok) = self.next() { value = Some(tok.lexeme); }
+                    }
+                    attrs.push(Attr { name, value });
+                    let _ = self.consume(&Token::Comma);
                 }
+                Some(Token::Comma) => { self.pos += 1; }
+                Some(Token::RParen) => { self.pos += 1; break; }
+                Some(_) => { self.pos += 1; }
+                None => { break; }
             }
         }
+        attrs
     }
 
     fn parse_global(&mut self) -> Result<Stmt, String> {

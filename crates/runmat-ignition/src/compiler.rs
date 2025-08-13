@@ -13,9 +13,46 @@ pub struct Compiler {
     pub var_count: usize,
     pub loop_stack: Vec<LoopLabels>,
     pub functions: HashMap<String, UserFunction>,
+    pub imports: Vec<(Vec<String>, bool)>,
 }
 
 impl Compiler {
+    fn attr_access_from_str(s: &str) -> runmat_builtins::Access {
+        match s.to_ascii_lowercase().as_str() { "private" => runmat_builtins::Access::Private, _ => runmat_builtins::Access::Public }
+    }
+    fn parse_prop_attrs(attrs: &Vec<runmat_parser::Attr>) -> (bool, String, String) {
+        // Defaults
+        let mut is_static = false;
+        let mut get_acc = runmat_builtins::Access::Public;
+        let mut set_acc = runmat_builtins::Access::Public;
+        for a in attrs {
+            if a.name.eq_ignore_ascii_case("Static") { is_static = true; }
+            if a.name.eq_ignore_ascii_case("Access") {
+                if let Some(v) = &a.value { let acc = Self::attr_access_from_str(v.trim_matches('\'').trim()); get_acc = acc.clone(); set_acc = acc; }
+            }
+            if a.name.eq_ignore_ascii_case("GetAccess") {
+                if let Some(v) = &a.value { get_acc = Self::attr_access_from_str(v.trim_matches('\'').trim()); }
+            }
+            if a.name.eq_ignore_ascii_case("SetAccess") {
+                if let Some(v) = &a.value { set_acc = Self::attr_access_from_str(v.trim_matches('\'').trim()); }
+            }
+        }
+        let gs = match get_acc { runmat_builtins::Access::Private => "private".to_string(), _ => "public".to_string() };
+        let ss = match set_acc { runmat_builtins::Access::Private => "private".to_string(), _ => "public".to_string() };
+        (is_static, gs, ss)
+    }
+    fn parse_method_attrs(attrs: &Vec<runmat_parser::Attr>) -> (bool, String) {
+        let mut is_static = false;
+        let mut access = runmat_builtins::Access::Public;
+        for a in attrs {
+            if a.name.eq_ignore_ascii_case("Static") { is_static = true; }
+            if a.name.eq_ignore_ascii_case("Access") {
+                if let Some(v) = &a.value { access = Self::attr_access_from_str(v.trim_matches('\'').trim()); }
+            }
+        }
+        let acc_str = match access { runmat_builtins::Access::Private => "private".to_string(), _ => "public".to_string() };
+        (is_static, acc_str)
+    }
     fn collect_free_vars(
         &self,
         expr: &runmat_hir::HirExpr,
@@ -142,7 +179,7 @@ impl Compiler {
                     }
                     HirStmt::AssignLValue(_, expr, _) => visit_expr(expr, max),
                     HirStmt::MultiAssign(vars, expr, _) => {
-                        for v in vars { if v.0 + 1 > *max { *max = v.0 + 1; } }
+                        for v in vars { if let Some(v) = v { if v.0 + 1 > *max { *max = v.0 + 1; } } }
                         visit_expr(expr, max);
                     }
                     HirStmt::Function { .. } | HirStmt::ClassDef { .. } | HirStmt::Import { .. }
@@ -152,7 +189,7 @@ impl Compiler {
         }
 
         visit_stmts(&prog.body, &mut max_var);
-        Self { instructions: Vec::new(), var_count: max_var, loop_stack: Vec::new(), functions: HashMap::new() }
+        Self { instructions: Vec::new(), var_count: max_var, loop_stack: Vec::new(), functions: HashMap::new(), imports: Vec::new() }
     }
 
     pub fn emit(&mut self, instr: Instr) -> usize {
@@ -164,7 +201,14 @@ impl Compiler {
     pub fn patch(&mut self, idx: usize, instr: Instr) { self.instructions[idx] = instr; }
 
     pub fn compile_program(&mut self, prog: &HirProgram) -> Result<(), String> {
-        for stmt in &prog.body { self.compile_stmt(stmt)?; }
+        // Pre-collect imports
+        for stmt in &prog.body {
+            if let HirStmt::Import { path, wildcard } = stmt {
+                self.imports.push((path.clone(), *wildcard));
+                self.emit(Instr::RegisterImport { path: path.clone(), wildcard: *wildcard });
+            }
+        }
+        for stmt in &prog.body { if !matches!(stmt, HirStmt::Import { .. }) { self.compile_stmt(stmt)?; } }
         Ok(())
     }
 
@@ -316,7 +360,7 @@ impl Compiler {
                         HirStmt::TryCatch { try_body, catch_var, catch_body } => { if let Some(v) = catch_var { if v.0 + 1 > *max { *max = v.0 + 1; } } for s in try_body { visit_stmt_for_vars(s, max); } for s in catch_body { visit_stmt_for_vars(s, max); } }
                         HirStmt::Global(vars) | HirStmt::Persistent(vars) => { for v in vars { if v.0 + 1 > *max { *max = v.0 + 1; } } }
                         HirStmt::AssignLValue(_, expr, _) => visit_expr_for_vars(expr, max),
-                        HirStmt::MultiAssign(vars, expr, _) => { for v in vars { if v.0 + 1 > *max { *max = v.0 + 1; } } visit_expr_for_vars(expr, max); }
+                        HirStmt::MultiAssign(vars, expr, _) => { for v in vars { if let Some(v) = v { if v.0 + 1 > *max { *max = v.0 + 1; } } } visit_expr_for_vars(expr, max); }
                         HirStmt::Function { .. } | HirStmt::ClassDef { .. } | HirStmt::Import { .. } => {}
                     }
                 }
@@ -478,27 +522,68 @@ impl Compiler {
                     _ => return Err("unsupported lvalue target".into()),
                 }
             }
-            HirStmt::Global(_) | HirStmt::Persistent(_) | HirStmt::ClassDef { .. } | HirStmt::Import { .. } => {}
+            HirStmt::Global(_) | HirStmt::Persistent(_) => {}
+            HirStmt::Import { path, wildcard } => {
+                self.emit(Instr::RegisterImport { path: path.clone(), wildcard: *wildcard });
+            }
+            HirStmt::ClassDef { name, super_class, members } => {
+                // Synthesize a minimal RegisterClass instruction by extracting property names and method names
+                let mut props: Vec<(String, bool, String, String)> = Vec::new();
+                let mut methods: Vec<(String, String, bool, String)> = Vec::new();
+                for m in members {
+                    match m {
+                        runmat_hir::HirClassMember::Properties { names, attributes } => {
+                            let (is_static, get_access, set_access) = Self::parse_prop_attrs(attributes);
+                            for n in names { props.push((n.clone(), is_static, get_access.clone(), set_access.clone())); }
+                        }
+                        runmat_hir::HirClassMember::Methods { body, attributes } => {
+                            let (is_static, access) = Self::parse_method_attrs(attributes);
+                            for s in body {
+                                if let runmat_hir::HirStmt::Function { name: mname, .. } = s { methods.push((mname.clone(), mname.clone(), is_static, access.clone())); }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                self.emit(Instr::RegisterClass { name: name.clone(), super_class: super_class.clone(), properties: props, methods });
+            }
             HirStmt::MultiAssign(vars, expr, _) => {
                 // Compile RHS once; if function call or value, arrange to extract multiple
                 match &expr.kind {
                     HirExprKind::FuncCall(name, args) => {
-                        for arg in args { self.compile_expr(arg)?; }
-                        // Emit multi-call to request N outputs
-                        self.emit(Instr::CallFunctionMulti(name.clone(), args.len(), vars.len()));
-                        // Store outputs in order
-                        for (_i, var) in vars.iter().enumerate().rev() {
-                            // Values are pushed left-to-right; pop in reverse to assign
-                            self.emit(Instr::StoreVar(var.0));
+                        if self.functions.contains_key(name) {
+                            for arg in args { self.compile_expr(arg)?; }
+                            // Emit multi-call to request N outputs
+                            self.emit(Instr::CallFunctionMulti(name.clone(), args.len(), vars.len()));
+                            // Store outputs in order
+                            for (_i, var) in vars.iter().enumerate().rev() {
+                                if let Some(v) = var { self.emit(Instr::StoreVar(v.0)); } else { self.emit(Instr::Pop); }
+                            }
+                        } else {
+                            // Builtin or unknown: treat as single return value
+                            for arg in args { self.compile_expr(arg)?; }
+                            self.emit(Instr::CallBuiltinMulti(name.clone(), args.len(), vars.len()));
+                            for (_i, var) in vars.iter().enumerate().rev() { if let Some(v) = var { self.emit(Instr::StoreVar(v.0)); } else { self.emit(Instr::Pop); } }
                         }
                     }
+                    HirExprKind::IndexCell(base, indices) => {
+                        // Support comma-list expansion from cell indexing: [a,b,...] = C{idx}
+                        self.compile_expr(base)?;
+                        for index in indices { self.compile_expr(index)?; }
+                        // Expand into N outputs
+                        self.emit(Instr::IndexCellExpand(indices.len(), vars.len()));
+                        for (_i, var) in vars.iter().enumerate().rev() { if let Some(v) = var { self.emit(Instr::StoreVar(v.0)); } else { self.emit(Instr::Pop); } }
+                    }
                     _ => {
-                        // Non-call: broadcast single value to first, zeros to rest
-                        self.compile_expr(expr)?;
-                        if let Some(first) = vars.first() { self.emit(Instr::StoreVar(first.0)); }
-                        for var in vars.iter().skip(1) {
-                            self.emit(Instr::LoadConst(0.0));
-                            self.emit(Instr::StoreVar(var.0));
+                        // Non-call: assign expr to first non-placeholder, zeros to remaining non-placeholders
+                        let first_real = vars.iter().position(|v| v.is_some());
+                        if let Some(first_idx) = first_real {
+                            self.compile_expr(expr)?;
+                            if let Some(Some(first_var)) = vars.get(first_idx) { self.emit(Instr::StoreVar(first_var.0)); }
+                        }
+                        for (i, var) in vars.iter().enumerate() {
+                            if Some(i) == first_real { continue; }
+                            if let Some(v) = var { self.emit(Instr::LoadConst(0.0)); self.emit(Instr::StoreVar(v.0)); }
                         }
                     }
                 }
@@ -625,8 +710,71 @@ impl Compiler {
                     self.emit(Instr::CallFeval(args.len()-1));
                     return Ok(());
                 }
-                for arg in args { self.compile_expr(arg)?; }
-                if self.functions.contains_key(name) { self.emit(Instr::CallFunction(name.clone(), args.len())); } else { self.emit(Instr::CallBuiltin(name.clone(), args.len())); }
+                // Detect all arguments that are cell indexing expressions for expansion
+                let has_any_expand = args.iter().any(|e| matches!(e.kind, HirExprKind::IndexCell(_, _)));
+                if self.functions.contains_key(name) {
+                    if has_any_expand {
+                        // Build ArgSpec list and push stack values in proper order
+                        let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(args.len());
+                        for arg in args {
+                            if let HirExprKind::IndexCell(base, indices) = &arg.kind {
+                                let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon);
+                                if is_expand_all {
+                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true });
+                                    self.compile_expr(base)?;
+                                } else {
+                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false });
+                                    self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; }
+                                }
+                            } else {
+                                specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false });
+                                self.compile_expr(arg)?;
+                            }
+                        }
+                        self.emit(Instr::CallFunctionExpandMulti(name.clone(), specs));
+                    } else {
+                        for arg in args { self.compile_expr(arg)?; }
+                        self.emit(Instr::CallFunction(name.clone(), args.len()));
+                    }
+                } else {
+                    // Attempt compile-time import resolution for builtins
+                    let mut resolved = name.clone();
+                    if !runmat_builtins::builtin_functions().iter().any(|b| b.name == resolved) {
+                        for (path, wildcard) in &self.imports {
+                            if !*wildcard { continue; }
+                            if path.is_empty() { continue; }
+                            let mut qual = String::new();
+                            for (i, part) in path.iter().enumerate() { if i>0 { qual.push('.'); } qual.push_str(part); }
+                            qual.push('.'); qual.push_str(name);
+                            if runmat_builtins::builtin_functions().iter().any(|b| b.name == qual) {
+                                resolved = qual;
+                                break;
+                            }
+                        }
+                    }
+                    if has_any_expand {
+                        let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(args.len());
+                        for arg in args {
+                            if let HirExprKind::IndexCell(base, indices) = &arg.kind {
+                                let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon);
+                                if is_expand_all {
+                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true });
+                                    self.compile_expr(base)?;
+                                } else {
+                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false });
+                                    self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; }
+                                }
+                            } else {
+                                specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false });
+                                self.compile_expr(arg)?;
+                            }
+                        }
+                        self.emit(Instr::CallBuiltinExpandMulti(resolved, specs));
+                    } else {
+                        for arg in args { self.compile_expr(arg)?; }
+                        self.emit(Instr::CallBuiltin(resolved, args.len()));
+                    }
+                }
             }
             HirExprKind::Tensor(matrix_data) | HirExprKind::Cell(matrix_data) => {
                 let rows = matrix_data.len();

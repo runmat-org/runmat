@@ -14,6 +14,8 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
     let _gc_context = InterpretContext::new(&stack, &vars)?;
     // Stack of (catch_pc, catch_var_global_index)
     let mut try_stack: Vec<(usize, Option<usize>)> = Vec::new();
+    // Runtime import registry for this execution
+    let mut imports: Vec<(Vec<String>, bool)> = Vec::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
             let e: String = $err;
@@ -61,6 +63,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
             }
             Instr::EnterScope(local_count) => { for _ in 0..local_count { context.locals.push(Value::Num(0.0)); } }
             Instr::ExitScope(local_count) => { for _ in 0..local_count { context.locals.pop(); } }
+            Instr::RegisterImport { path, wildcard } => { imports.push((path, wildcard)); }
             Instr::Add => element_binary(&mut stack, runmat_runtime::elementwise_add)?,
             Instr::Sub => element_binary(&mut stack, runmat_runtime::elementwise_sub)?,
             Instr::Mul => element_binary(&mut stack, runmat_runtime::elementwise_mul)?,
@@ -85,6 +88,19 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 match call_builtin(&name, &args) {
                     Ok(result) => stack.push(result),
                     Err(e) => {
+                        // Try resolving via wildcard imports: import pkg.* -> try pkg.name
+                        let mut resolved = false;
+                        if e.contains("unknown builtin") {
+                            for (path, wildcard) in &imports {
+                                if !*wildcard { continue; }
+                                if path.is_empty() { continue; }
+                                let mut qual = String::new();
+                                for (i, part) in path.iter().enumerate() { if i>0 { qual.push('.'); } qual.push_str(part); }
+                                qual.push('.'); qual.push_str(&name);
+                                if let Ok(v) = call_builtin(&qual, &args) { stack.push(v); resolved = true; break; }
+                            }
+                        }
+                        if resolved { /* ok */ } else {
                         if let Some((catch_pc, catch_var)) = try_stack.pop() {
                             // Set catch var (global) if present
                             if let Some(var_idx) = catch_var {
@@ -94,10 +110,269 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                             pc = catch_pc; // Jump to catch
                             continue;
                         } else {
-                            return Err(e);
+                                // Fallback: treat as function call to user-defined or error
+                                return Err(e);
+                        }
                         }
                     }
                 }
+            }
+            Instr::CallBuiltinExpandLast(name, fixed_argc, num_indices) => {
+                // Stack layout: [..., a1, a2, ..., a_fixed, base_for_cell, idx1, idx2, ...]
+                // Build args vector by first collecting fixed args, then expanding cell indexing into comma-list
+                // Evaluate indices and base
+                let mut indices = Vec::with_capacity(num_indices);
+                for _ in 0..num_indices { let v = stack.pop().ok_or("stack underflow")?; indices.push(v); }
+                indices.reverse();
+                let base = stack.pop().ok_or("stack underflow")?;
+                // Collect fixed args
+                let mut fixed = Vec::with_capacity(fixed_argc);
+                for _ in 0..fixed_argc { fixed.push(stack.pop().ok_or("stack underflow")?); }
+                fixed.reverse();
+                // Evaluate cell indexing, then flatten cell contents to extend args
+                let expanded = match (base, indices.len()) {
+                    (Value::Cell(ca), 1) => {
+                        match &indices[0] {
+                            Value::Num(n) => {
+                                let i = *n as usize; if i==0 || i>ca.data.len() { return Err("Cell index out of bounds".to_string()); }
+                                vec![ca.data[i-1].clone()]
+                            }
+                            Value::Int(i) => {
+                                let iu = *i as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); }
+                                vec![ca.data[iu-1].clone()]
+                            }
+                            Value::Tensor(t) => {
+                                // Treat as list of 1-based indices; expand each
+                                let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
+                                for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); }
+                                out
+                            }
+                            _ => return Err("Unsupported cell index type".to_string()),
+                        }
+                    }
+                    (Value::Cell(ca), 2) => {
+                        let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
+                        let (ir, ic) = (r as usize, c as usize);
+                        if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                        vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                    }
+                    (other, _) => {
+                        // Route to subsref(obj,'{}',{indices...}) if object
+                        match other {
+                            Value::Object(obj) => {
+                                let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
+                                let v = match runmat_runtime::call_builtin("call_method", &[
+                                    Value::Object(obj),
+                                    Value::String("subsref".to_string()),
+                                    Value::String("{}".to_string()),
+                                    Value::Cell(cell),
+                                ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                                vec![v]
+                            }
+                            _ => return Err("CallBuiltinExpandLast requires cell or object cell access".to_string()),
+                        }
+                    }
+                };
+                let mut args = fixed; args.extend(expanded.into_iter());
+                match call_builtin(&name, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
+            }
+            Instr::CallBuiltinExpandAt(name, before_count, num_indices, after_count) => {
+                // Stack layout: [..., a1..abefore, base, idx..., a_after...]
+                let mut after: Vec<Value> = Vec::with_capacity(after_count);
+                for _ in 0..after_count { after.push(stack.pop().ok_or("stack underflow")?); }
+                after.reverse();
+                let mut indices = Vec::with_capacity(num_indices);
+                for _ in 0..num_indices { indices.push(stack.pop().ok_or("stack underflow")?); }
+                indices.reverse();
+                let base = stack.pop().ok_or("stack underflow")?;
+                let mut before: Vec<Value> = Vec::with_capacity(before_count);
+                for _ in 0..before_count { before.push(stack.pop().ok_or("stack underflow")?); }
+                before.reverse();
+                let expanded = match (base, indices.len()) {
+                    (Value::Cell(ca), 1) => {
+                        match &indices[0] {
+                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
+                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
+                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
+                            _ => return Err("Unsupported cell index type".to_string()),
+                        }
+                    }
+                    (Value::Cell(ca), 2) => {
+                        let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
+                        let (ir, ic) = (r as usize, c as usize);
+                        if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                        vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                    }
+                    (Value::Object(obj), _) => {
+                        let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
+                        let v = match runmat_runtime::call_builtin("call_method", &[
+                            Value::Object(obj),
+                            Value::String("subsref".to_string()),
+                            Value::String("{}".to_string()),
+                            Value::Cell(cell),
+                        ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                        vec![v]
+                    }
+                    _ => return Err("CallBuiltinExpandAt requires cell or object cell access".to_string()),
+                };
+                let mut args = before; args.extend(expanded.into_iter()); args.extend(after.into_iter());
+                match call_builtin(&name, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
+            }
+            Instr::CallBuiltinExpandMulti(name, specs) => {
+                // Build final args by walking specs left-to-right and popping from stack accordingly.
+                let mut args: Vec<Value> = Vec::with_capacity(specs.len());
+                // We'll reconstruct by first collecting a temporary vector and then reversing (since stack is LIFO)
+                let mut temp: Vec<Value> = Vec::new();
+                for spec in specs.iter().rev() {
+                    if spec.is_expand {
+                        let mut indices = Vec::with_capacity(spec.num_indices);
+                        for _ in 0..spec.num_indices { indices.push(stack.pop().ok_or("stack underflow")?); }
+                        indices.reverse();
+                        let base = stack.pop().ok_or("stack underflow")?;
+                        let expanded = if spec.expand_all {
+                            match base {
+                                Value::Cell(ca) => ca.data.clone(),
+                                Value::Object(obj) => {
+                                    // subsref(obj,'{}', {}) with empty indices; expect a cell or value
+                                    let empty = runmat_builtins::CellArray::new(vec![], 1, 0).map_err(|e| format!("subsref build error: {e}"))?;
+                                    let v = match runmat_runtime::call_builtin("call_method", &[
+                                        Value::Object(obj),
+                                        Value::String("subsref".to_string()),
+                                        Value::String("{}".to_string()),
+                                        Value::Cell(empty),
+                                    ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                                    match v { Value::Cell(ca) => ca.data, other => vec![other] }
+                                }
+                                _ => return Err("CallBuiltinExpandMulti requires cell or object for expand_all".to_string()),
+                            }
+                        } else { match (base, indices.len()) {
+                            (Value::Cell(ca), 1) => {
+                                if spec.expand_all {
+                                    // Expand all elements of the cell row-major
+                                    let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
+                                    for v in &ca.data { out.push(v.clone()); }
+                                    out
+                                } else {
+                                    match &indices[0] {
+                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
+                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
+                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
+                                    _ => return Err("Unsupported cell index type".to_string()),
+                                    }
+                                }
+                            }
+                            (Value::Cell(ca), 2) => {
+                                let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
+                                let (ir, ic) = (r as usize, c as usize);
+                                if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                                vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                            }
+                            (Value::Object(obj), _) => {
+                                let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
+                                let v = match runmat_runtime::call_builtin("call_method", &[
+                                    Value::Object(obj),
+                                    Value::String("subsref".to_string()),
+                                    Value::String("{}".to_string()),
+                                    Value::Cell(cell),
+                                ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                                vec![v]
+                            }
+                            _ => return Err("CallBuiltinExpandMulti requires cell or object cell access".to_string()),
+                        }};
+                        for v in expanded { temp.push(v); }
+                    } else {
+                        temp.push(stack.pop().ok_or("stack underflow")?);
+                    }
+                }
+                temp.reverse();
+                args.extend(temp.into_iter());
+                match call_builtin(&name, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
+            }
+            Instr::CallFunctionExpandMulti(name, specs) => {
+                // Build args via specs, then invoke user function similar to CallFunction
+                let mut temp: Vec<Value> = Vec::new();
+                for spec in specs.iter().rev() {
+                    if spec.is_expand {
+                        let mut indices = Vec::with_capacity(spec.num_indices);
+                        for _ in 0..spec.num_indices { indices.push(stack.pop().ok_or("stack underflow")?); }
+                        indices.reverse();
+                        let base = stack.pop().ok_or("stack underflow")?;
+                        let expanded = if spec.expand_all {
+                            match base {
+                                Value::Cell(ca) => ca.data.clone(),
+                                Value::Object(obj) => {
+                                    let empty = runmat_builtins::CellArray::new(vec![], 1, 0).map_err(|e| format!("subsref build error: {e}"))?;
+                                    let v = match runmat_runtime::call_builtin("call_method", &[
+                                        Value::Object(obj),
+                                        Value::String("subsref".to_string()),
+                                        Value::String("{}".to_string()),
+                                        Value::Cell(empty),
+                                    ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                                    match v { Value::Cell(ca) => ca.data, other => vec![other] }
+                                }
+                                _ => return Err("CallFunctionExpandMulti requires cell or object for expand_all".to_string()),
+                            }
+                        } else { match (base, indices.len()) {
+                            (Value::Cell(ca), 1) => {
+                                if spec.expand_all {
+                                    let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
+                                    for v in &ca.data { out.push(v.clone()); }
+                                    out
+                                } else {
+                                    match &indices[0] {
+                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
+                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
+                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
+                                    _ => return Err("Unsupported cell index type".to_string()),
+                                    }
+                                }
+                            }
+                            (Value::Cell(ca), 2) => {
+                                let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
+                                let (ir, ic) = (r as usize, c as usize);
+                                if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                                vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                            }
+                            (Value::Object(obj), _) => {
+                                let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
+                                let v = match runmat_runtime::call_builtin("call_method", &[
+                                    Value::Object(obj),
+                                    Value::String("subsref".to_string()),
+                                    Value::String("{}".to_string()),
+                                    Value::Cell(cell),
+                                ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                                vec![v]
+                            }
+                            _ => return Err("CallFunctionExpandMulti requires cell or object cell access".to_string()),
+                        }};
+                        for v in expanded { temp.push(v); }
+                    } else {
+                        temp.push(stack.pop().ok_or("stack underflow")?);
+                    }
+                }
+                temp.reverse();
+                let args = temp;
+                let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(format!("undefined function: {name}")) };
+                let var_map = runmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
+                let local_var_count = var_map.len();
+                let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
+                let func_vars_count = local_var_count.max(func.params.len());
+                let mut func_vars = vec![Value::Num(0.0); func_vars_count];
+                for (i, _param_id) in func.params.iter().enumerate() { if i < args.len() && i < func_vars.len() { func_vars[i] = args[i].clone(); } }
+                for (original_var_id, local_var_id) in &var_map {
+                    let local_index = local_var_id.0; let global_index = original_var_id.0;
+                    if local_index < func_vars.len() && global_index < vars.len() {
+                        let is_parameter = func.params.iter().any(|param_id| param_id == original_var_id);
+                        if !is_parameter { func_vars[local_index] = vars[global_index].clone(); }
+                    }
+                }
+                let func_program = runmat_hir::HirProgram { body: remapped_body };
+                let func_bytecode = crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                let func_result_vars = match interpret_function(&func_bytecode, func_vars) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                if let Some(output_var_id) = func.outputs.first() {
+                    let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
+                    if local_output_index < func_result_vars.len() { stack.push(func_result_vars[local_output_index].clone()); } else { stack.push(Value::Num(0.0)); }
+                } else { stack.push(Value::Num(0.0)); }
             }
             Instr::CallFunction(name, arg_count) => {
                 let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(format!("undefined function: {name}")) };
@@ -131,6 +406,67 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         } else { vm_bail!(e); }
                     }
                 };
+                if let Some(output_var_id) = func.outputs.first() {
+                    let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
+                    if local_output_index < func_result_vars.len() { stack.push(func_result_vars[local_output_index].clone()); } else { stack.push(Value::Num(0.0)); }
+                } else { stack.push(Value::Num(0.0)); }
+            }
+            Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
+                // Assemble argument list with expansion at position
+                let mut after: Vec<Value> = Vec::with_capacity(after_count);
+                for _ in 0..after_count { after.push(stack.pop().ok_or("stack underflow")?); }
+                after.reverse();
+                let mut indices = Vec::with_capacity(num_indices);
+                for _ in 0..num_indices { indices.push(stack.pop().ok_or("stack underflow")?); }
+                indices.reverse();
+                let base = stack.pop().ok_or("stack underflow")?;
+                let mut before: Vec<Value> = Vec::with_capacity(before_count);
+                for _ in 0..before_count { before.push(stack.pop().ok_or("stack underflow")?); }
+                before.reverse();
+                let expanded = match (base, indices.len()) {
+                    (Value::Cell(ca), 1) => {
+                        let i: f64 = (&indices[0]).try_into()?; let idx = i as usize;
+                        if idx == 0 || idx > ca.data.len() { return Err("Cell index out of bounds".to_string()); }
+                        vec![ca.data[idx-1].clone()]
+                    }
+                    (Value::Cell(ca), 2) => {
+                        let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
+                        let (ir, ic) = (r as usize, c as usize);
+                        if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                        vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                    }
+                    (Value::Object(obj), _) => {
+                        let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
+                        let v = match runmat_runtime::call_builtin("call_method", &[
+                            Value::Object(obj),
+                            Value::String("subsref".to_string()),
+                            Value::String("{}".to_string()),
+                            Value::Cell(cell),
+                        ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                        vec![v]
+                    }
+                    _ => return Err("CallFunctionExpandAt requires cell or object cell access".to_string()),
+                };
+                let mut arg_values = before; arg_values.extend(expanded.into_iter()); arg_values.extend(after.into_iter());
+                // Lookup user function definition
+                let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(format!("undefined function: {name}")) };
+                let var_map = runmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
+                let local_var_count = var_map.len();
+                let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
+                let func_vars_count = local_var_count.max(func.params.len());
+                let mut func_vars = vec![Value::Num(0.0); func_vars_count];
+                for (i, _param_id) in func.params.iter().enumerate() { if i < arg_values.len() && i < func_vars.len() { func_vars[i] = arg_values[i].clone(); } }
+                // Copy referenced globals into local frame
+                for (original_var_id, local_var_id) in &var_map {
+                    let local_index = local_var_id.0; let global_index = original_var_id.0;
+                    if local_index < func_vars.len() && global_index < vars.len() {
+                        let is_parameter = func.params.iter().any(|param_id| param_id == original_var_id);
+                        if !is_parameter { func_vars[local_index] = vars[global_index].clone(); }
+                    }
+                }
+                let func_program = runmat_hir::HirProgram { body: remapped_body };
+                let func_bytecode = crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                let func_result_vars = match interpret_function(&func_bytecode, func_vars) { Ok(v) => v, Err(e) => vm_bail!(e) };
                 if let Some(output_var_id) = func.outputs.first() {
                     let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
                     if local_output_index < func_result_vars.len() { stack.push(func_result_vars[local_output_index].clone()); } else { stack.push(Value::Num(0.0)); }
@@ -172,6 +508,98 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                     let v = func.outputs.get(i).and_then(|oid| var_map.get(oid)).map(|lid| lid.0)
                         .and_then(|idx| func_result_vars.get(idx)).cloned().unwrap_or(Value::Num(0.0));
                     stack.push(v);
+                }
+            }
+            Instr::CallBuiltinMulti(name, arg_count, out_count) => {
+                // Default behavior: try to call builtin; if success, use first output; pad rest with 0.0
+                let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); } args.reverse();
+                // Special-case for 'find' to support [i,j,v] = find(A)
+                if name == "find" && !args.is_empty() {
+                    match &args[0] {
+                        Value::Tensor(t) => {
+                            let rows = *t.shape.get(0).unwrap_or(&1);
+                            let _cols = *t.shape.get(1).unwrap_or(&1);
+                            let mut lin_idx: Vec<usize> = Vec::new();
+                            for (k, &v) in t.data.iter().enumerate() { if v != 0.0 { lin_idx.push(k + 1); } }
+                            if out_count <= 1 {
+                                let data: Vec<f64> = lin_idx.iter().map(|&k| k as f64).collect();
+                                let tens = runmat_builtins::Tensor::new(data, vec![lin_idx.len(), 1]).map_err(|e| format!("find: {e}"))?;
+                                stack.push(Value::Tensor(tens));
+                                for _ in 1..out_count { stack.push(Value::Num(0.0)); }
+                            } else {
+                                let mut rows_out: Vec<f64> = Vec::with_capacity(lin_idx.len());
+                                let mut cols_out: Vec<f64> = Vec::with_capacity(lin_idx.len());
+                                for &k in &lin_idx { let k0 = k - 1; let r = (k0 % rows) + 1; let c = (k0 / rows) + 1; rows_out.push(r as f64); cols_out.push(c as f64); }
+                                let r_t = runmat_builtins::Tensor::new(rows_out, vec![lin_idx.len(), 1]).map_err(|e| format!("find: {e}"))?;
+                                let c_t = runmat_builtins::Tensor::new(cols_out, vec![lin_idx.len(), 1]).map_err(|e| format!("find: {e}"))?;
+                                stack.push(Value::Tensor(r_t));
+                                if out_count >= 2 { stack.push(Value::Tensor(c_t)); }
+                                if out_count >= 3 {
+                                    let mut vals: Vec<f64> = Vec::with_capacity(lin_idx.len());
+                                    for &k in &lin_idx { vals.push(t.data[k-1]); }
+                                    let v_t = runmat_builtins::Tensor::new(vals, vec![lin_idx.len(), 1]).map_err(|e| format!("find: {e}"))?;
+                                    stack.push(Value::Tensor(v_t));
+                                }
+                                // pad beyond 3 if requested
+                                if out_count > 3 { for _ in 3..out_count { stack.push(Value::Num(0.0)); } }
+                            }
+                            continue;
+                        }
+                        _ => { /* fallthrough to generic */ }
+                    }
+                }
+                match call_builtin(&name, &args) {
+                    Ok(v) => {
+                        match v {
+                            Value::Tensor(t) => {
+                                let mut pushed = 0usize;
+                                for &val in t.data.iter() {
+                                    if pushed >= out_count { break; }
+                                    stack.push(Value::Num(val));
+                                    pushed += 1;
+                                }
+                                for _ in pushed..out_count { stack.push(Value::Num(0.0)); }
+                            }
+                            Value::Cell(ca) => {
+                                let mut pushed = 0usize;
+                                for v in &ca.data {
+                                    if pushed >= out_count { break; }
+                                    stack.push(v.clone());
+                                    pushed += 1;
+                                }
+                                for _ in pushed..out_count { stack.push(Value::Num(0.0)); }
+                            }
+                            other => {
+                                stack.push(other);
+                                for _ in 1..out_count { stack.push(Value::Num(0.0)); }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Try wildcard imports resolution similar to CallBuiltin
+                        let mut resolved = None;
+                        for (path, wildcard) in &imports { if !*wildcard { continue; } let mut qual = String::new(); for (i, part) in path.iter().enumerate() { if i>0 { qual.push('.'); } qual.push_str(part); } qual.push('.'); qual.push_str(&name); if let Ok(v) = call_builtin(&qual, &args) { resolved = Some(v); break; } }
+                        if let Some(v) = resolved {
+                            match v {
+                                Value::Tensor(t) => {
+                                    let mut pushed = 0usize;
+                                    for &val in t.data.iter() { if pushed >= out_count { break; } stack.push(Value::Num(val)); pushed += 1; }
+                                    for _ in pushed..out_count { stack.push(Value::Num(0.0)); }
+                                }
+                                Value::Cell(ca) => {
+                                    let mut pushed = 0usize;
+                                    for v in &ca.data { if pushed >= out_count { break; } stack.push(v.clone()); pushed += 1; }
+                                    for _ in pushed..out_count { stack.push(Value::Num(0.0)); }
+                                }
+                                other => {
+                                    stack.push(other);
+                                    for _ in 1..out_count { stack.push(Value::Num(0.0)); }
+                                }
+                            }
+                        } else {
+                            vm_bail!(e);
+                        }
+                    }
                 }
             }
             Instr::EnterTry(catch_pc, catch_var) => { try_stack.push((catch_pc, catch_var)); }
@@ -561,6 +989,48 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                     _ => return Err("Cell indexing on non-cell".to_string()),
                 }
             }
+            Instr::IndexCellExpand(num_indices, out_count) => {
+                // Same as IndexCell but flatten cell contents into multiple outputs
+                let mut indices = Vec::with_capacity(num_indices);
+                for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; indices.push(v as usize); }
+                indices.reverse();
+                let base = stack.pop().ok_or("stack underflow")?;
+                match base {
+                    Value::Cell(ca) => {
+                        // Expand in column-major order up to out_count elements
+                        let mut values: Vec<Value> = Vec::new();
+                        match indices.len() {
+                            1 => {
+                                let i = indices[0]; if i == 0 || i > ca.data.len() { return Err("Cell index out of bounds".to_string()); }
+                                values.push(ca.data[i-1].clone());
+                            }
+                            2 => {
+                                let r = indices[0]; let c = indices[1]; if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                                values.push(ca.data[(r-1)*ca.cols + (c-1)].clone());
+                            }
+                            _ => return Err("Unsupported number of cell indices".to_string()),
+                        }
+                        // Pad or truncate to out_count
+                        if values.len() >= out_count { for i in 0..out_count { stack.push(values[i].clone()); } }
+                        else { for v in &values { stack.push(v.clone()); } for _ in values.len()..out_count { stack.push(Value::Num(0.0)); } }
+                    }
+                    Value::Object(obj) => {
+                        // Defer to subsref; expect a cell back; then expand one element
+                        let cell = runmat_builtins::CellArray::new(indices.iter().map(|n| Value::Num(*n as f64)).collect(), 1, indices.len())
+                            .map_err(|e| format!("subsref build error: {e}"))?;
+                        let v = match runmat_runtime::call_builtin("call_method", &[
+                            Value::Object(obj),
+                            Value::String("subsref".to_string()),
+                            Value::String("{}".to_string()),
+                            Value::Cell(cell),
+                        ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                        // Push returned value and pad to out_count
+                        stack.push(v);
+                        for _ in 1..out_count { stack.push(Value::Num(0.0)); }
+                    }
+                    _ => return Err("Cell expansion on non-cell".to_string()),
+                }
+            }
             Instr::Pop => { stack.pop(); }
             Instr::Return => { break; }
             Instr::ReturnValue => { let return_value = stack.pop().ok_or("stack underflow")?; stack.push(return_value); break; }
@@ -655,21 +1125,19 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 let base = stack.pop().ok_or("stack underflow")?;
                 match base {
                     Value::Object(obj) => {
-                        if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                            if let Some(p) = cls.properties.get(&field) {
-                                if p.is_static { vm_bail!(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
-                                match p.access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", field)), _ => {} }
-                            }
-                            if let Some(v) = obj.properties.get(&field) { stack.push(v.clone()); }
-                            else if cls.methods.contains_key("subsref") {
-                                match runmat_runtime::call_builtin("call_method", &[
-                                    Value::Object(obj),
-                                    Value::String("subsref".to_string()),
-                                    Value::String(".".to_string()),
-                                    Value::String(field),
-                                ]) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
-                            } else { vm_bail!(format!("Undefined property '{}' for class {}", field, obj.class_name)); }
-                        } else { vm_bail!(format!("Unknown class {}", obj.class_name)); }
+                        if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
+                            if p.is_static { vm_bail!(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
+                            match p.get_access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", field)), _ => {} }
+                        }
+                        if let Some(v) = obj.properties.get(&field) { stack.push(v.clone()); }
+                        else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) { if cls.methods.contains_key("subsref") {
+                            match runmat_runtime::call_builtin("call_method", &[
+                                Value::Object(obj),
+                                Value::String("subsref".to_string()),
+                                Value::String(".".to_string()),
+                                Value::String(field),
+                            ]) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
+                        } else { vm_bail!(format!("Undefined property '{}' for class {}", field, obj.class_name)); } } else { vm_bail!(format!("Unknown class {}", obj.class_name)); }
                     }
                     _ => vm_bail!("LoadMember on non-object".into()),
                 }
@@ -679,21 +1147,27 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 let base = stack.pop().ok_or("stack underflow")?;
                 match base {
                     Value::Object(mut obj) => {
-                        if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                            if let Some(p) = cls.properties.get(&field) {
-                                if p.is_static { vm_bail!(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
-                                match p.access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", field)), _ => {} }
-                                obj.properties.insert(field, rhs); stack.push(Value::Object(obj));
-                            } else if cls.methods.contains_key("subsasgn") {
-                                match runmat_runtime::call_builtin("call_method", &[
-                                    Value::Object(obj),
-                                    Value::String("subsasgn".to_string()),
-                                    Value::String(".".to_string()),
-                                    Value::String(field),
-                                    rhs,
-                                ]) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
-                            } else { vm_bail!(format!("Undefined property '{}' for class {}", field, obj.class_name)); }
-                        } else { vm_bail!(format!("Unknown class {}", obj.class_name)); }
+                        if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
+                            if p.is_static { vm_bail!(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
+                            match p.set_access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", field)), _ => {} }
+                            obj.properties.insert(field, rhs); stack.push(Value::Object(obj));
+                        } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) { if cls.methods.contains_key("subsasgn") {
+                            match runmat_runtime::call_builtin("call_method", &[
+                                Value::Object(obj),
+                                Value::String("subsasgn".to_string()),
+                                Value::String(".".to_string()),
+                                Value::String(field),
+                                rhs,
+                            ]) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
+                        } else { vm_bail!(format!("Undefined property '{}' for class {}", field, obj.class_name)); } } else { vm_bail!(format!("Unknown class {}", obj.class_name)); }
+                    }
+                    Value::ClassRef(cls) => {
+                        if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &field) {
+                            if !p.is_static { vm_bail!(format!("Property '{}' is not static", field)); }
+                            match p.set_access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", field)), _ => {} }
+                            runmat_builtins::set_static_property_value_in_owner(&owner, &field, rhs).map_err(|e| e)?;
+                            stack.push(Value::ClassRef(cls));
+                        } else { vm_bail!(format!("Unknown property '{}' on class {}", field, cls)); }
                     }
                     _ => vm_bail!("StoreMember on non-object".into()),
                 }
@@ -707,15 +1181,13 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 match base {
                     Value::Object(obj) => {
                         // Compose qualified and try runtime builtin dispatch, passing receiver first
-                        if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                            if let Some(m) = cls.methods.get(&name) {
-                                if m.is_static { vm_bail!(format!("Method '{}' is static; use classref({}).{}", name, obj.class_name, name)); }
-                                match m.access { runmat_builtins::Access::Private => vm_bail!(format!("Method '{}' is private", name)), _ => {} }
-                                let mut full_args = Vec::with_capacity(1 + args.len());
-                                full_args.push(Value::Object(obj));
-                                full_args.extend(args.into_iter());
-                                let v = runmat_runtime::call_builtin(&m.function_name, &full_args)?; stack.push(v); continue;
-                            }
+                        if let Some((m, _owner)) = runmat_builtins::lookup_method(&obj.class_name, &name) {
+                            if m.is_static { vm_bail!(format!("Method '{}' is static; use classref({}).{}", name, obj.class_name, name)); }
+                            match m.access { runmat_builtins::Access::Private => vm_bail!(format!("Method '{}' is private", name)), _ => {} }
+                            let mut full_args = Vec::with_capacity(1 + args.len());
+                            full_args.push(Value::Object(obj));
+                            full_args.extend(args.into_iter());
+                            let v = runmat_runtime::call_builtin(&m.function_name, &full_args)?; stack.push(v); continue;
                         }
                         let qualified = format!("{}.{}", obj.class_name, name);
                         let mut full_args = Vec::with_capacity(1 + args.len());
@@ -741,9 +1213,13 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         stack.push(Value::Closure(runmat_builtins::Closure { function_name: func_qual, captures: vec![Value::Object(obj)] }));
                     }
                     Value::ClassRef(cls) => {
-                        // Bound static method handle (no receiver capture)
-                        let func_qual = format!("{}.{}", cls, name);
-                        stack.push(Value::Closure(runmat_builtins::Closure { function_name: func_qual, captures: vec![] }));
+                        // Bound static method handle (no receiver capture), resolve via inheritance
+                        if let Some((m, _owner)) = runmat_builtins::lookup_method(&cls, &name) {
+                            if !m.is_static { vm_bail!(format!("Method '{}' is not static", name)); }
+                            stack.push(Value::Closure(runmat_builtins::Closure { function_name: m.function_name, captures: vec![] }));
+                        } else {
+                            vm_bail!(format!("Unknown static method '{}' on class {}", name, cls));
+                        }
                     }
                     _ => vm_bail!("LoadMethod requires object or classref".into()),
                 }
@@ -755,27 +1231,41 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 stack.push(Value::Closure(runmat_builtins::Closure { function_name: func_name, captures }));
             }
             Instr::LoadStaticProperty(class_name, prop) => {
-                // Enforce access and static-ness via registry
-                if let Some(cls) = runmat_builtins::get_class(&class_name) {
-                    if let Some(p) = cls.properties.get(&prop) {
-                        if !p.is_static { vm_bail!(format!("Property '{}' is not static", prop)); }
-                        match p.access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", prop)), _ => {} }
-                        if let Some(v) = runmat_builtins::get_static_property_value(&class_name, &prop) { stack.push(v); } else if let Some(v) = &p.default_value { stack.push(v.clone()); } else { stack.push(Value::Num(0.0)); }
-                    } else { vm_bail!(format!("Unknown property '{}' on class {}", prop, class_name)); }
-                } else { vm_bail!(format!("Unknown class {}", class_name)); }
+                // Enforce access and static-ness via registry (with inheritance)
+                if let Some((p, owner)) = runmat_builtins::lookup_property(&class_name, &prop) {
+                    if !p.is_static { vm_bail!(format!("Property '{}' is not static", prop)); }
+                    match p.get_access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", prop)), _ => {} }
+                    if let Some(v) = runmat_builtins::get_static_property_value(&owner, &prop) { stack.push(v); }
+                    else if let Some(v) = &p.default_value { stack.push(v.clone()); }
+                    else { stack.push(Value::Num(0.0)); }
+                } else { vm_bail!(format!("Unknown property '{}' on class {}", prop, class_name)); }
             }
             Instr::CallStaticMethod(class_name, method, arg_count) => {
                 let mut args = Vec::with_capacity(arg_count);
                 for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); }
                 args.reverse();
-                if let Some(cls) = runmat_builtins::get_class(&class_name) {
-                    if let Some(m) = cls.methods.get(&method) {
-                        if !m.is_static { vm_bail!(format!("Method '{}' is not static", method)); }
-                        match m.access { runmat_builtins::Access::Private => vm_bail!(format!("Method '{}' is private", method)), _ => {} }
-                        let v = match runmat_runtime::call_builtin(&m.function_name, &args) { Ok(v) => v, Err(e) => vm_bail!(e) };
-                        stack.push(v);
-                    } else { vm_bail!(format!("Unknown static method '{}' on class {}", method, class_name)); }
-                } else { vm_bail!(format!("Unknown class {}", class_name)); }
+                if let Some((m, _owner)) = runmat_builtins::lookup_method(&class_name, &method) {
+                    if !m.is_static { vm_bail!(format!("Method '{}' is not static", method)); }
+                    match m.access { runmat_builtins::Access::Private => vm_bail!(format!("Method '{}' is private", method)), _ => {} }
+                    let v = match runmat_runtime::call_builtin(&m.function_name, &args) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                    stack.push(v);
+                } else { vm_bail!(format!("Unknown static method '{}' on class {}", method, class_name)); }
+            }
+            Instr::RegisterClass { name, super_class, properties, methods } => {
+                // Build a minimal ClassDef and register it in runtime builtins registry
+                let mut prop_map = std::collections::HashMap::new();
+                for (p, is_static, get_access, set_access) in properties {
+                    let gacc = if get_access.eq_ignore_ascii_case("private") { runmat_builtins::Access::Private } else { runmat_builtins::Access::Public };
+                    let sacc = if set_access.eq_ignore_ascii_case("private") { runmat_builtins::Access::Private } else { runmat_builtins::Access::Public };
+                    prop_map.insert(p.clone(), runmat_builtins::PropertyDef { name: p.clone(), is_static, get_access: gacc, set_access: sacc, default_value: None });
+                }
+                let mut method_map = std::collections::HashMap::new();
+                for (mname, fname, is_static, access) in methods {
+                    let access = if access.eq_ignore_ascii_case("private") { runmat_builtins::Access::Private } else { runmat_builtins::Access::Public };
+                    method_map.insert(mname.clone(), runmat_builtins::MethodDef { name: mname, is_static, access, function_name: fname });
+                }
+                let def = runmat_builtins::ClassDef { name: name.clone(), parent: super_class.clone(), properties: prop_map, methods: method_map };
+                runmat_builtins::register_class(def);
             }
             Instr::CallFeval(arg_count) => {
                 // Stack layout: [..., f, a1, a2, ...]
@@ -841,6 +1331,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                     }
                     other => vm_bail!(format!("feval: unsupported function value {other:?}")),
                 }
+            }
+            Instr::AndAnd(target) => {
+                // Stack top holds lhs != 0 result (1 or 0). If false (0), jump to target and push 0
+                let cond: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                if cond == 0.0 { pc = target; continue; } else { /* leave evaluation of rhs result already pushed by compiler path */ }
+            }
+            Instr::OrOr(target) => {
+                // Stack top holds lhs != 0 result (1 or 0). If true (non-zero), jump to target and push 1
+                let cond: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                if cond != 0.0 { pc = target; continue; } else { /* evaluate rhs result path */ }
             }
             Instr::Swap => {
                 let a = stack.pop().ok_or("stack underflow")?;

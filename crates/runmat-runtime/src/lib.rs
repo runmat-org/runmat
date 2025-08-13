@@ -87,6 +87,167 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
         last_error
     ))
 }
+
+// Array size helpers
+#[runmat_macros::runtime_builtin(name = "size")]
+fn size_builtin(a: Value) -> Result<Value, String> {
+    let dims: Vec<usize> = match a {
+        Value::Tensor(t) => t.shape,
+        Value::Cell(ca) => vec![ca.rows, ca.cols],
+        Value::GpuTensor(h) => h.shape,
+        Value::String(s) => vec![1, s.len()],
+        _ => vec![1, 1],
+    };
+    let dims_f: Vec<f64> = dims.iter().map(|d| *d as f64).collect();
+    Ok(Value::Tensor(runmat_builtins::Tensor::new(dims_f, vec![dims.len(), 1]).map_err(|e| format!("size: {e}"))?))
+}
+
+#[runmat_macros::runtime_builtin(name = "size")]
+fn size_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
+    let mut dims: Vec<usize> = match a {
+        Value::Tensor(t) => t.shape,
+        Value::Cell(ca) => vec![ca.rows, ca.cols],
+        Value::GpuTensor(h) => h.shape,
+        Value::String(s) => vec![1, s.len()],
+        _ => vec![1, 1],
+    };
+    let d = if dim < 1.0 { 1usize } else { dim as usize };
+    if dims.len() < d { dims.resize(d, 1); }
+    Ok(Value::Num(dims[d - 1] as f64))
+}
+
+// Linear index to subscripts (column-major)
+#[runmat_macros::runtime_builtin(name = "ind2sub")]
+fn ind2sub_builtin(dims_val: Value, idx_val: f64) -> Result<Value, String> {
+    let dims: Vec<usize> = match dims_val {
+        Value::Tensor(t) => {
+            if t.shape.len() == 2 && (t.shape[0] == 1 || t.shape[1] == 1) {
+                t.data.iter().map(|v| *v as usize).collect()
+            } else { return Err("ind2sub: dims must be a vector".to_string()); }
+        }
+        Value::Cell(ca) => {
+            if ca.data.is_empty() { vec![] } else { ca.data.iter().map(|v| match v { Value::Num(n) => *n as usize, Value::Int(i) => *i as usize, _ => 1usize }).collect() }
+        }
+        _ => return Err("ind2sub: dims must be a vector".to_string()),
+    };
+    if dims.is_empty() { return Err("ind2sub: empty dims".to_string()); }
+    let mut subs: Vec<usize> = vec![1; dims.len()];
+    let idx = if idx_val < 1.0 { 1usize } else { idx_val as usize } - 1; // 0-based
+    let mut stride = 1usize;
+    for d in 0..dims.len() {
+        let dim_len = dims[d];
+        let val = (idx / stride) % dim_len;
+        subs[d] = val + 1; // 1-based
+        stride *= dim_len.max(1);
+    }
+    // Return as a tensor column vector for expansion
+    let data: Vec<f64> = subs.iter().map(|s| *s as f64).collect();
+    Ok(Value::Tensor(runmat_builtins::Tensor::new(data, vec![subs.len(), 1]).map_err(|e| format!("ind2sub: {e}"))?))
+}
+
+#[runmat_macros::runtime_builtin(name = "sub2ind")]
+fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> Result<Value, String> {
+    let dims: Vec<usize> = match dims_val {
+        Value::Tensor(t) => {
+            if t.shape.len() == 2 && (t.shape[0] == 1 || t.shape[1] == 1) {
+                t.data.iter().map(|v| *v as usize).collect()
+            } else { return Err("sub2ind: dims must be a vector".to_string()); }
+        }
+        Value::Cell(ca) => {
+            if ca.data.is_empty() { vec![] } else { ca.data.iter().map(|v| match v { Value::Num(n) => *n as usize, Value::Int(i) => *i as usize, _ => 1usize }).collect() }
+        }
+        _ => return Err("sub2ind: dims must be a vector".to_string()),
+    };
+    if dims.is_empty() { return Err("sub2ind: empty dims".to_string()); }
+    if rest.len() != dims.len() { return Err("sub2ind: expected one subscript per dimension".to_string()); }
+    let subs: Vec<usize> = rest.iter().map(|v| match v { Value::Num(n) => (*n as isize) as isize, Value::Int(i) => *i as isize, _ => 1isize } ).map(|x| if x < 1 { 1 } else { x as usize }).collect();
+    // Column-major linear index: 1 + sum_{d=0}^{n-1} (sub[d]-1) * prod_{k<d} dims[k]
+    let mut stride = 1usize;
+    let mut lin0 = 0usize;
+    for d in 0..dims.len() {
+        let dim_len = dims[d];
+        let s = subs[d];
+        if s == 0 || s > dim_len { return Err("sub2ind: subscript out of bounds".to_string()); }
+        lin0 += (s - 1) * stride;
+        stride *= dim_len.max(1);
+    }
+    Ok(Value::Num((lin0 + 1) as f64))
+}
+
+#[runmat_macros::runtime_builtin(name = "numel")]
+fn numel_builtin(a: Value) -> Result<Value, String> {
+    let n = match a {
+        Value::Tensor(t) => t.data.len(),
+        Value::Cell(ca) => ca.data.len(),
+        Value::GpuTensor(h) => h.shape.iter().product(),
+        Value::String(s) => s.len(),
+        _ => 1,
+    };
+    Ok(Value::Num(n as f64))
+}
+
+#[runmat_macros::runtime_builtin(name = "length")]
+fn length_builtin(a: Value) -> Result<Value, String> {
+    let len = match a {
+        Value::Tensor(t) => t.shape.iter().copied().max().unwrap_or(0),
+        Value::Cell(ca) => std::cmp::max(ca.rows, ca.cols),
+        Value::GpuTensor(h) => h.shape.iter().copied().max().unwrap_or(0),
+        Value::String(s) => s.len(),
+        _ => 1,
+    };
+    Ok(Value::Num(len as f64))
+}
+
+#[runmat_macros::runtime_builtin(name = "ndims")]
+fn ndims_builtin(a: Value) -> Result<Value, String> {
+    let n = match a {
+        Value::Tensor(t) => t.shape.len(),
+        Value::Cell(_) => 2,
+        Value::GpuTensor(h) => h.shape.len(),
+        Value::String(_) => 2,
+        _ => 2,
+    };
+    Ok(Value::Num(n as f64))
+}
+
+// deal: distribute inputs to multiple outputs (via cell for expansion)
+#[runmat_macros::runtime_builtin(name = "deal")]
+fn deal_builtin(rest: Vec<Value>) -> Result<Value, String> {
+    // Return cell row vector of inputs for expansion
+    let cols = rest.len();
+    let ca = runmat_builtins::CellArray::new(rest, 1, cols).map_err(|e| format!("deal: {e}"))?;
+    Ok(Value::Cell(ca))
+}
+
+#[runmat_macros::runtime_builtin(name = "find")]
+fn find_builtin(a: Value) -> Result<Value, String> {
+    match a {
+        Value::Tensor(t) => {
+            let mut idxs: Vec<f64> = Vec::new();
+            for (i, &v) in t.data.iter().enumerate() {
+                if v != 0.0 { idxs.push((i + 1) as f64); }
+            }
+            let len = idxs.len();
+            Ok(Value::Tensor(runmat_builtins::Tensor::new(idxs, vec![len, 1]).map_err(|e| format!("find: {e}"))?))
+        }
+        _ => Err("find: expected tensor".to_string()),
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "find")]
+fn find_k_builtin(a: Value, k: f64) -> Result<Value, String> {
+    match a {
+        Value::Tensor(t) => {
+            let mut idxs: Vec<f64> = Vec::new();
+            for (i, &v) in t.data.iter().enumerate() {
+                if v != 0.0 { idxs.push((i + 1) as f64); if (idxs.len() as f64) >= k { break; } }
+            }
+            let len = idxs.len();
+            Ok(Value::Tensor(runmat_builtins::Tensor::new(idxs, vec![len, 1]).map_err(|e| format!("find: {e}"))?))
+        }
+        _ => Err("find: expected tensor".to_string()),
+    }
+}
 // Object/handle utilities used by interpreter lowering for OOP/func handles
 
 #[runmat_macros::runtime_builtin(name = "getfield")]
@@ -100,11 +261,9 @@ fn getfield_builtin(base: Value, field: String) -> Result<Value, String> {
             }
         }
         Value::Object(obj) => {
-            if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                if let Some(p) = cls.properties.get(&field) {
-                    if p.is_static { return Err(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
-                    match p.access { runmat_builtins::Access::Private => return Err(format!("Property '{}' is private", field)), _ => {} }
-                }
+            if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
+                if p.is_static { return Err(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
+                match p.get_access { runmat_builtins::Access::Private => return Err(format!("Property '{}' is private", field)), _ => {} }
             }
             if let Some(v) = obj.properties.get(&field) { Ok(v.clone()) } else { Err(format!("Undefined property '{}' for class {}", field, obj.class_name)) }
         }
@@ -166,11 +325,9 @@ fn reshape_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
 fn setfield_builtin(base: Value, field: String, rhs: Value) -> Result<Value, String> {
     match base {
         Value::Object(mut obj) => {
-            if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                if let Some(p) = cls.properties.get(&field) {
-                    if p.is_static { return Err(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
-                    match p.access { runmat_builtins::Access::Private => return Err(format!("Property '{}' is private", field)), _ => {} }
-                }
+            if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
+                if p.is_static { return Err(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
+                match p.set_access { runmat_builtins::Access::Private => return Err(format!("Property '{}' is private", field)), _ => {} }
             }
             obj.properties.insert(field, rhs); Ok(Value::Object(obj))
         }
@@ -209,10 +366,25 @@ fn make_anon_builtin(params: String, body: String) -> Result<Value, String> {
 #[runmat_macros::runtime_builtin(name = "new_object")]
 fn new_object_builtin(class_name: String) -> Result<Value, String> {
     if let Some(def) = runmat_builtins::get_class(&class_name) {
+        // Collect class hierarchy from root to leaf for default initialization
+        let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
+        // Walk up to root
+        let mut cursor: Option<String> = Some(def.name.clone());
+        while let Some(name) = cursor {
+            if let Some(cd) = runmat_builtins::get_class(&name) {
+                chain.push(cd.clone());
+                cursor = cd.parent.clone();
+            } else { break; }
+        }
+        // Reverse to root-first
+        chain.reverse();
         let mut obj = runmat_builtins::ObjectInstance::new(def.name.clone());
-        for (k, p) in def.properties {
-            if !p.is_static {
-                if let Some(v) = p.default_value.clone() { obj.properties.insert(k.clone(), v); }
+        // Apply defaults from root to leaf (leaf overrides effectively by later assignment)
+        for cd in chain {
+            for (k, p) in cd.properties.iter() {
+                if !p.is_static {
+                    if let Some(v) = &p.default_value { obj.properties.insert(k.clone(), v.clone()); }
+                }
             }
         }
         Ok(Value::Object(obj))
@@ -232,10 +404,10 @@ fn classref_builtin(class_name: String) -> Result<Value, String> {
 fn register_test_classes_builtin() -> Result<Value, String> {
     use runmat_builtins::*;
     let mut props = std::collections::HashMap::new();
-    props.insert("x".to_string(), PropertyDef { name: "x".to_string(), is_static: false, access: Access::Public, default_value: Some(Value::Num(0.0)) });
-    props.insert("y".to_string(), PropertyDef { name: "y".to_string(), is_static: false, access: Access::Public, default_value: Some(Value::Num(0.0)) });
-    props.insert("staticValue".to_string(), PropertyDef { name: "staticValue".to_string(), is_static: true, access: Access::Public, default_value: Some(Value::Num(42.0)) });
-    props.insert("secret".to_string(), PropertyDef { name: "secret".to_string(), is_static: false, access: Access::Private, default_value: Some(Value::Num(99.0)) });
+    props.insert("x".to_string(), PropertyDef { name: "x".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(0.0)) });
+    props.insert("y".to_string(), PropertyDef { name: "y".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(0.0)) });
+    props.insert("staticValue".to_string(), PropertyDef { name: "staticValue".to_string(), is_static: true, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(42.0)) });
+    props.insert("secret".to_string(), PropertyDef { name: "secret".to_string(), is_static: false, get_access: Access::Private, set_access: Access::Private, default_value: Some(Value::Num(99.0)) });
     let mut methods = std::collections::HashMap::new();
     methods.insert("move".to_string(), MethodDef { name: "move".to_string(), is_static: false, access: Access::Public, function_name: "Point.move".to_string() });
     methods.insert("origin".to_string(), MethodDef { name: "origin".to_string(), is_static: true, access: Access::Public, function_name: "Point.origin".to_string() });
@@ -243,8 +415,8 @@ fn register_test_classes_builtin() -> Result<Value, String> {
 
     // Namespaced class example: pkg.PointNS with same shape as Point
     let mut ns_props = std::collections::HashMap::new();
-    ns_props.insert("x".to_string(), PropertyDef { name: "x".to_string(), is_static: false, access: Access::Public, default_value: Some(Value::Num(1.0)) });
-    ns_props.insert("y".to_string(), PropertyDef { name: "y".to_string(), is_static: false, access: Access::Public, default_value: Some(Value::Num(2.0)) });
+    ns_props.insert("x".to_string(), PropertyDef { name: "x".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(1.0)) });
+    ns_props.insert("y".to_string(), PropertyDef { name: "y".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(2.0)) });
     let ns_methods = std::collections::HashMap::new();
     runmat_builtins::register_class(ClassDef { name: "pkg.PointNS".to_string(), parent: None, properties: ns_props, methods: ns_methods });
 
@@ -255,7 +427,7 @@ fn register_test_classes_builtin() -> Result<Value, String> {
     runmat_builtins::register_class(ClassDef { name: "Shape".to_string(), parent: None, properties: shape_props, methods: shape_methods });
 
     let mut circle_props = std::collections::HashMap::new();
-    circle_props.insert("r".to_string(), PropertyDef { name: "r".to_string(), is_static: false, access: Access::Public, default_value: Some(Value::Num(0.0)) });
+    circle_props.insert("r".to_string(), PropertyDef { name: "r".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(0.0)) });
     let mut circle_methods = std::collections::HashMap::new();
     circle_methods.insert("area".to_string(), MethodDef { name: "area".to_string(), is_static: false, access: Access::Public, function_name: "Circle.area".to_string() });
     runmat_builtins::register_class(ClassDef { name: "Circle".to_string(), parent: Some("Shape".to_string()), properties: circle_props, methods: circle_methods });
@@ -449,6 +621,104 @@ fn abs_builtin(x: f64) -> Result<f64, String> {
 #[runtime_builtin(name = "max")]
 fn max_builtin(a: f64, b: f64) -> Result<f64, String> {
     Ok(a.max(b))
+}
+
+#[runtime_builtin(name = "max")]
+fn max_vector_builtin(a: Value) -> Result<Value, String> {
+    match a {
+        Value::Tensor(t) => {
+            if t.shape.len() == 2 && t.shape[1] == 1 {
+                let mut max_val = std::f64::NEG_INFINITY;
+                let mut idx = 1usize;
+                for (i, &v) in t.data.iter().enumerate() {
+                    if v > max_val { max_val = v; idx = i + 1; }
+                }
+                // Return a 2x1 column [max; idx] for expansion (value then index)
+                let out = runmat_builtins::Tensor::new(vec![max_val, idx as f64], vec![2, 1]).map_err(|e| format!("max: {e}"))?;
+                Ok(Value::Tensor(out))
+            } else {
+                // Reduce across all elements -> scalar
+                let max_val = t.data.iter().cloned().fold(std::f64::NEG_INFINITY, f64::max);
+                Ok(Value::Num(max_val))
+            }
+        }
+        Value::Num(n) => Ok(Value::Num(n)),
+        _ => Err("max: unsupported input".to_string()),
+    }
+}
+
+#[runtime_builtin(name = "min")]
+fn min_vector_builtin(a: Value) -> Result<Value, String> {
+    match a {
+        Value::Tensor(t) => {
+            if t.shape.len() == 2 && t.shape[1] == 1 {
+                let mut min_val = std::f64::INFINITY;
+                let mut idx = 1usize;
+                for (i, &v) in t.data.iter().enumerate() {
+                    if v < min_val { min_val = v; idx = i + 1; }
+                }
+                let out = runmat_builtins::Tensor::new(vec![min_val, idx as f64], vec![2, 1]).map_err(|e| format!("min: {e}"))?;
+                Ok(Value::Tensor(out))
+            } else {
+                let min_val = t.data.iter().cloned().fold(std::f64::INFINITY, f64::min);
+                Ok(Value::Num(min_val))
+            }
+        }
+        Value::Num(n) => Ok(Value::Num(n)),
+        _ => Err("min: unsupported input".to_string()),
+    }
+}
+
+#[runtime_builtin(name = "max")]
+fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
+    let t = match a { Value::Tensor(t) => t, _ => return Err("max: expected tensor for dim variant".to_string()) };
+    let dim = if dim < 1.0 { 1usize } else { dim as usize };
+    if t.shape.len() < 2 { return Err("max: dim variant expects 2D tensor".to_string()); }
+    let rows = t.shape[0]; let cols = t.shape[1];
+    if dim == 1 {
+        // column-wise maxima: return {M_row, I_row}
+        let mut m: Vec<f64> = vec![std::f64::NEG_INFINITY; cols];
+        let mut idx: Vec<f64> = vec![1.0; cols];
+        for c in 0..cols { for r in 0..rows { let v = t.data[r + c*rows]; if v > m[c] { m[c] = v; idx[c] = (r+1) as f64; } } }
+        let m_t = runmat_builtins::Tensor::new(m, vec![1, cols]).map_err(|e| format!("max: {e}"))?;
+        let i_t = runmat_builtins::Tensor::new(idx, vec![1, cols]).map_err(|e| format!("max: {e}"))?;
+        let cell = runmat_builtins::CellArray::new(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2).map_err(|e| format!("max: {e}"))?;
+        Ok(Value::Cell(cell))
+    } else if dim == 2 {
+        // row-wise maxima: return {M_col, I_col}
+        let mut m: Vec<f64> = vec![std::f64::NEG_INFINITY; rows];
+        let mut idx: Vec<f64> = vec![1.0; rows];
+        for r in 0..rows { for c in 0..cols { let v = t.data[r + c*rows]; if v > m[r] { m[r] = v; idx[r] = (c+1) as f64; } } }
+        let m_t = runmat_builtins::Tensor::new(m, vec![rows, 1]).map_err(|e| format!("max: {e}"))?;
+        let i_t = runmat_builtins::Tensor::new(idx, vec![rows, 1]).map_err(|e| format!("max: {e}"))?;
+        let cell = runmat_builtins::CellArray::new(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2).map_err(|e| format!("max: {e}"))?;
+        Ok(Value::Cell(cell))
+    } else { Err("max: dim out of range".to_string()) }
+}
+
+#[runtime_builtin(name = "min")]
+fn min_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
+    let t = match a { Value::Tensor(t) => t, _ => return Err("min: expected tensor for dim variant".to_string()) };
+    let dim = if dim < 1.0 { 1usize } else { dim as usize };
+    if t.shape.len() < 2 { return Err("min: dim variant expects 2D tensor".to_string()); }
+    let rows = t.shape[0]; let cols = t.shape[1];
+    if dim == 1 {
+        let mut m: Vec<f64> = vec![std::f64::INFINITY; cols];
+        let mut idx: Vec<f64> = vec![1.0; cols];
+        for c in 0..cols { for r in 0..rows { let v = t.data[r + c*rows]; if v < m[c] { m[c] = v; idx[c] = (r+1) as f64; } } }
+        let m_t = runmat_builtins::Tensor::new(m, vec![1, cols]).map_err(|e| format!("min: {e}"))?;
+        let i_t = runmat_builtins::Tensor::new(idx, vec![1, cols]).map_err(|e| format!("min: {e}"))?;
+        let cell = runmat_builtins::CellArray::new(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2).map_err(|e| format!("min: {e}"))?;
+        Ok(Value::Cell(cell))
+    } else if dim == 2 {
+        let mut m: Vec<f64> = vec![std::f64::INFINITY; rows];
+        let mut idx: Vec<f64> = vec![1.0; rows];
+        for r in 0..rows { for c in 0..cols { let v = t.data[r + c*rows]; if v < m[r] { m[r] = v; idx[r] = (c+1) as f64; } } }
+        let m_t = runmat_builtins::Tensor::new(m, vec![rows, 1]).map_err(|e| format!("min: {e}"))?;
+        let i_t = runmat_builtins::Tensor::new(idx, vec![rows, 1]).map_err(|e| format!("min: {e}"))?;
+        let cell = runmat_builtins::CellArray::new(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2).map_err(|e| format!("min: {e}"))?;
+        Ok(Value::Cell(cell))
+    } else { Err("min: dim out of range".to_string()) }
 }
 
 #[runtime_builtin(name = "min")]

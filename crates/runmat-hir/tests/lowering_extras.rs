@@ -33,10 +33,21 @@ fn lvalue_assignment_lowering_total() {
     let prog = lower_src("A=1; A(1)=2; A{1}=3; s.f = 4");
     // Ensure lowering doesn't panic and produces statements for complex lvalues
     assert_eq!(prog.body.len(), 4);
-    // second, third, fourth become ExprStmt side-effect placeholders
-    assert!(matches!(prog.body[1], HirStmt::ExprStmt(_, _)));
-    assert!(matches!(prog.body[2], HirStmt::ExprStmt(_, _)));
-    assert!(matches!(prog.body[3], HirStmt::ExprStmt(_, _)));
+    // second: paren-index assignment
+    match &prog.body[1] {
+        HirStmt::AssignLValue(_, _, _) => {}
+        other => panic!("expected AssignLValue for second stmt, got {:?}", other),
+    }
+    // third: brace-index assignment
+    match &prog.body[2] {
+        HirStmt::AssignLValue(_, _, _) => {}
+        other => panic!("expected AssignLValue for third stmt, got {:?}", other),
+    }
+    // fourth: member assignment
+    match &prog.body[3] {
+        HirStmt::AssignLValue(_, _, _) => {}
+        other => panic!("expected AssignLValue for fourth stmt, got {:?}", other),
+    }
 }
 
 

@@ -43,7 +43,7 @@ pub enum HirExprKind {
 pub enum HirStmt {
     ExprStmt(HirExpr, bool), // Expression and whether it's semicolon-terminated (suppressed)
     Assign(VarId, HirExpr, bool), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
-    MultiAssign(Vec<VarId>, HirExpr, bool),
+    MultiAssign(Vec<Option<VarId>>, HirExpr, bool),
     AssignLValue(HirLValue, HirExpr, bool),
     If {
         cond: HirExpr,
@@ -91,11 +91,11 @@ pub enum HirStmt {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirClassMember {
-    Properties(Vec<String>),
-    Methods(Vec<HirStmt>),
-    Events(Vec<String>),
-    Enumeration(Vec<String>),
-    Arguments(Vec<String>),
+    Properties { attributes: Vec<parser::Attr>, names: Vec<String> },
+    Methods { attributes: Vec<parser::Attr>, body: Vec<HirStmt> },
+    Events { attributes: Vec<parser::Attr>, names: Vec<String> },
+    Enumeration { attributes: Vec<parser::Attr>, names: Vec<String> },
+    Arguments { attributes: Vec<parser::Attr>, names: Vec<String> },
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -123,6 +123,66 @@ pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
     let mut ctx = Ctx::new();
     let body = ctx.lower_stmts(&prog.body)?;
     Ok(HirProgram { body })
+}
+
+/// Collect all import statements in a program for downstream name resolution
+pub fn collect_imports(prog: &HirProgram) -> Vec<(Vec<String>, bool)> {
+    let mut imports = Vec::new();
+    for stmt in &prog.body {
+        if let HirStmt::Import { path, wildcard } = stmt {
+            imports.push((path.clone(), *wildcard));
+        }
+    }
+    imports
+}
+
+/// Validate classdef declarations for basic semantic correctness
+/// Checks: duplicate property/method names within the same class,
+/// conflicts between property and method names, and trivial superclass cycles (self parent)
+pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
+    use std::collections::HashSet;
+    for stmt in &prog.body {
+        if let HirStmt::ClassDef { name, super_class, members } = stmt {
+            if let Some(sup) = super_class {
+                if sup == name {
+                    return Err(format!("Class '{}' cannot inherit from itself", name));
+                }
+            }
+            let mut prop_names: HashSet<String> = HashSet::new();
+            let mut method_names: HashSet<String> = HashSet::new();
+            for m in members {
+                match m {
+                    HirClassMember::Properties { names: props, .. } => {
+                        for p in props {
+                            if !prop_names.insert(p.clone()) {
+                                return Err(format!("Duplicate property '{}' in class {}", p, name));
+                            }
+                            if method_names.contains(p) {
+                                return Err(format!("Name '{}' used for both property and method in class {}", p, name));
+                            }
+                        }
+                    }
+                    HirClassMember::Methods { body, .. } => {
+                        // Extract method function names at top-level of methods block
+                        for s in body {
+                            if let HirStmt::Function { name: fname, .. } = s {
+                                if !method_names.insert(fname.clone()) {
+                                    return Err(format!("Duplicate method '{}' in class {}", fname, name));
+                                }
+                                if prop_names.contains(fname) {
+                                    return Err(format!("Name '{}' used for both property and method in class {}", fname, name));
+                                }
+                            }
+                        }
+                    }
+                    HirClassMember::Events { .. } | HirClassMember::Enumeration { .. } | HirClassMember::Arguments { .. } => {
+                        // Accepted but not deeply validated yet
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Lower AST to HIR with existing variable context for REPL
@@ -198,9 +258,9 @@ pub mod remapping {
                 HirStmt::Assign(new_var_id, remap_expr(expr, var_map), *suppressed)
             }
             HirStmt::MultiAssign(var_ids, expr, suppressed) => {
-                let mapped: Vec<VarId> = var_ids
+                let mapped: Vec<Option<VarId>> = var_ids
                     .iter()
-                    .map(|v| var_map.get(v).copied().unwrap_or(*v))
+                    .map(|v| v.and_then(|vv| var_map.get(&vv).copied().or(Some(vv))))
                     .collect();
                 HirStmt::MultiAssign(mapped, remap_expr(expr, var_map), *suppressed)
             }
@@ -276,12 +336,12 @@ pub mod remapping {
                 members: members
                     .iter()
                     .map(|m| match m {
-                        HirClassMember::Properties(p) => HirClassMember::Properties(p.clone()),
-                        HirClassMember::Events(e) => HirClassMember::Events(e.clone()),
-                        HirClassMember::Enumeration(e) => HirClassMember::Enumeration(e.clone()),
-                        HirClassMember::Arguments(a) => HirClassMember::Arguments(a.clone()),
-                        HirClassMember::Methods(body) =>
-                            HirClassMember::Methods(remap_function_body(body, var_map)),
+                        HirClassMember::Properties { attributes, names } => HirClassMember::Properties { attributes: attributes.clone(), names: names.clone() },
+                        HirClassMember::Events { attributes, names } => HirClassMember::Events { attributes: attributes.clone(), names: names.clone() },
+                        HirClassMember::Enumeration { attributes, names } => HirClassMember::Enumeration { attributes: attributes.clone(), names: names.clone() },
+                        HirClassMember::Arguments { attributes, names } => HirClassMember::Arguments { attributes: attributes.clone(), names: names.clone() },
+                        HirClassMember::Methods { attributes, body } =>
+                            HirClassMember::Methods { attributes: attributes.clone(), body: remap_function_body(body, var_map) },
                     })
                     .collect(),
             },
@@ -373,7 +433,7 @@ pub mod remapping {
                 collect_expr_variables(expr, vars);
             }
             HirStmt::MultiAssign(var_ids, expr, _) => {
-                for v in var_ids { vars.insert(*v); }
+                for v in var_ids { if let Some(v) = v { vars.insert(*v); } }
                 collect_expr_variables(expr, vars);
             }
             HirStmt::If {
@@ -668,9 +728,9 @@ impl Ctx {
                 Ok(HirStmt::Assign(id, value, *semicolon_terminated))
             }
             AstStmt::MultiAssign(names, expr, semicolon_terminated) => {
-                let ids: Vec<VarId> = names
+                let ids: Vec<Option<VarId>> = names
                     .iter()
-                    .map(|n| match self.lookup(n) { Some(id) => id, None => self.define(n.clone()) })
+                    .map(|n| if n == "~" { None } else { Some(match self.lookup(n) { Some(id) => id, None => self.define(n.clone()) }) })
                     .collect();
                 let value = self.lower_expr(expr)?;
                 Ok(HirStmt::MultiAssign(ids, value, *semicolon_terminated))
@@ -785,14 +845,18 @@ impl Ctx {
                 let members_hir = members
                     .iter()
                     .map(|m| match m {
-                        parser::ClassMember::Properties(p) => HirClassMember::Properties(p.clone()),
-                        parser::ClassMember::Events(e) => HirClassMember::Events(e.clone()),
-                        parser::ClassMember::Enumeration(e) => HirClassMember::Enumeration(e.clone()),
-                        parser::ClassMember::Arguments(a) => HirClassMember::Arguments(a.clone()),
-                        parser::ClassMember::Methods(stmts) => {
-                            match self.lower_stmts(stmts) {
-                                Ok(s) => HirClassMember::Methods(s),
-                                Err(_) => HirClassMember::Methods(Vec::new()),
+                        parser::ClassMember::Properties { attributes, names } =>
+                            HirClassMember::Properties { attributes: attributes.clone(), names: names.clone() },
+                        parser::ClassMember::Events { attributes, names } =>
+                            HirClassMember::Events { attributes: attributes.clone(), names: names.clone() },
+                        parser::ClassMember::Enumeration { attributes, names } =>
+                            HirClassMember::Enumeration { attributes: attributes.clone(), names: names.clone() },
+                        parser::ClassMember::Arguments { attributes, names } =>
+                            HirClassMember::Arguments { attributes: attributes.clone(), names: names.clone() },
+                        parser::ClassMember::Methods { attributes, body } => {
+                            match self.lower_stmts(body) {
+                                Ok(s) => HirClassMember::Methods { attributes: attributes.clone(), body: s },
+                                Err(_) => HirClassMember::Methods { attributes: attributes.clone(), body: Vec::new() },
                             }
                         }
                     })
@@ -1012,8 +1076,16 @@ impl Ctx {
                 HirLValue::Var(id)
             }
             ALV::Member(base, name) => {
-                let b = self.lower_expr(base)?;
-                HirLValue::Member(Box::new(b), name.clone())
+                // Special-case unknown identifier base to allow struct-like creation semantics (e.g., s.f = 4)
+                if let parser::Expr::Ident(var_name) = &**base {
+                    let id = match self.lookup(var_name) { Some(id) => id, None => self.define(var_name.clone()) };
+                    let ty = if id.0 < self.var_types.len() { self.var_types[id.0].clone() } else { Type::Unknown };
+                    let b = HirExpr { kind: HirExprKind::Var(id), ty };
+                    HirLValue::Member(Box::new(b), name.clone())
+                } else {
+                    let b = self.lower_expr(base)?;
+                    HirLValue::Member(Box::new(b), name.clone())
+                }
             }
             ALV::Index(base, idxs) => {
                 let b = self.lower_expr(base)?;
@@ -1109,7 +1181,9 @@ impl Ctx {
                     }
                     HirStmt::MultiAssign(vars, expr, _) => {
                         for v in vars {
-                            env.insert(*v, expr.ty.clone());
+                            if let Some(v) = v {
+                                env.insert(*v, expr.ty.clone());
+                            }
                         }
                     }
                     HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
