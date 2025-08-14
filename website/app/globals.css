@@ -168,7 +168,7 @@
 
   /* Brand text styles to match the logo's magenta gradient */
   .brand-text {
-    background-image: linear-gradient(90deg, #CA26D6 0%, #D500C6 100%);
+    background-image: linear-gradient(90deg, #4F8CFF 0%, #C26CFF 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -177,7 +177,7 @@
   /* Optional moving sheen highlight over brand text */
   .brand-text-sheen {
     background-image:
-      linear-gradient(90deg, #CA26D6 0%, #D500C6 100%),
+      linear-gradient(90deg, #4F8CFF 0%, #C26CFF 100%),
       linear-gradient(120deg, rgba(255,255,255,0) 45%, rgba(255,255,255,0.9) 50%, rgba(255,255,255,0) 55%);
     background-size: 100% 100%, 200% 100%;
     background-position: 0 0, -150% 0;
