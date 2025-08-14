@@ -11,6 +11,8 @@ pub struct UserFunction {
     pub outputs: Vec<VarId>,
     pub body: Vec<HirStmt>,
     pub local_var_count: usize,
+    pub has_varargin: bool,
+    pub has_varargout: bool,
 }
 
 /// Represents a call frame in the call stack

@@ -53,6 +53,20 @@ impl Compiler {
         let acc_str = match access { runmat_builtins::Access::Private => "private".to_string(), _ => "public".to_string() };
         (is_static, acc_str)
     }
+    fn expr_contains_end(expr: &runmat_hir::HirExpr) -> bool {
+        use runmat_hir::HirExprKind as K;
+        match &expr.kind {
+            K::End => true,
+            K::Unary(_, e) => Self::expr_contains_end(e),
+            K::Binary(a, _, b) => Self::expr_contains_end(a) || Self::expr_contains_end(b),
+            K::Tensor(rows) | K::Cell(rows) => rows.iter().flat_map(|r| r.iter()).any(|e| Self::expr_contains_end(e)),
+            K::Index(base, idxs) | K::IndexCell(base, idxs) => {
+                if Self::expr_contains_end(base) { return true; }
+                idxs.iter().any(|e| Self::expr_contains_end(e))
+            }
+            _ => false,
+        }
+    }
     fn collect_free_vars(
         &self,
         expr: &runmat_hir::HirExpr,
@@ -75,6 +89,7 @@ impl Compiler {
             K::Range(s, st, e) => { self.collect_free_vars(s, bound, seen, out); if let Some(st) = st { self.collect_free_vars(st, bound, seen, out); } self.collect_free_vars(e, bound, seen, out); }
             K::FuncCall(_, args) | K::MethodCall(_, _, args) => { for a in args { self.collect_free_vars(a, bound, seen, out); } }
             K::Member(base, _) => self.collect_free_vars(base, bound, seen, out),
+            K::MemberDynamic(base, name) => { self.collect_free_vars(base, bound, seen, out); self.collect_free_vars(name, bound, seen, out); },
             K::AnonFunc { params, body } => {
                 let mut new_bound = bound.clone();
                 for p in params { new_bound.insert(*p); }
@@ -124,6 +139,7 @@ impl Compiler {
                     }
                 }
                 HirExprKind::Member(base, _) => visit_expr(base, max),
+                HirExprKind::MemberDynamic(base, name) => { visit_expr(base, max); visit_expr(name, max); }
                 HirExprKind::AnonFunc { body, .. } => visit_expr(body, max),
                 HirExprKind::Number(_)
                 | HirExprKind::String(_)
@@ -201,7 +217,7 @@ impl Compiler {
     pub fn patch(&mut self, idx: usize, instr: Instr) { self.instructions[idx] = instr; }
 
     pub fn compile_program(&mut self, prog: &HirProgram) -> Result<(), String> {
-        // Pre-collect imports
+        // Pre-collect imports (both wildcard and specific) for name resolution
         for stmt in &prog.body {
             if let HirStmt::Import { path, wildcard } = stmt {
                 self.imports.push((path.clone(), *wildcard));
@@ -321,7 +337,7 @@ impl Compiler {
                 if let Some(labels) = self.loop_stack.last_mut() { let idx = self.instructions.len(); self.instructions.push(Instr::Jump(usize::MAX)); labels.continue_jumps.push(idx); } else { return Err("continue outside loop".into()); }
             }
             HirStmt::Return => { self.emit(Instr::Return); }
-            HirStmt::Function { name, params, outputs, body } => {
+            HirStmt::Function { name, params, outputs, body, has_varargin, has_varargout } => {
                 let mut max_local_var = 0;
                 fn visit_expr_for_vars(expr: &HirExpr, max: &mut usize) {
                     match &expr.kind {
@@ -365,7 +381,7 @@ impl Compiler {
                     }
                 }
                 for stmt in body { visit_stmt_for_vars(stmt, &mut max_local_var); }
-                let user_func = UserFunction { name: name.clone(), params: params.clone(), outputs: outputs.clone(), body: body.clone(), local_var_count: max_local_var };
+                let user_func = UserFunction { name: name.clone(), params: params.clone(), outputs: outputs.clone(), body: body.clone(), local_var_count: max_local_var, has_varargin: *has_varargin, has_varargout: *has_varargout };
                 self.functions.insert(name.clone(), user_func);
             }
             HirStmt::Switch { expr, cases, otherwise } => {
@@ -419,21 +435,94 @@ impl Compiler {
                                 let mut colon_mask: u32 = 0;
                                 let mut end_mask: u32 = 0;
                                 let mut numeric_count = 0usize;
+                                let mut end_offsets: Vec<(usize, i64)> = Vec::new();
+                                let mut lowered_range_end = false;
                                 for (dim, index) in indices.iter().enumerate() {
                                     if matches!(index.kind, runmat_hir::HirExprKind::Colon) {
                                         colon_mask |= 1u32 << dim;
                                     } else if matches!(index.kind, runmat_hir::HirExprKind::End) {
                                         end_mask |= 1u32 << dim;
                                     } else {
-                                        self.compile_expr(index)?;
-                                        numeric_count += 1;
+                                        // If this index is a Range whose end references End (with or without offset),
+                                        // skip compiling it here; it will be handled by StoreRangeEnd.
+                                        if indices.len() > 1 {
+                                            if let runmat_hir::HirExprKind::Range(_start, _step, end) = &index.kind {
+                                            match &end.kind {
+                                                runmat_hir::HirExprKind::End => {
+                                                    // offset 0
+                                                    end_offsets.push((numeric_count, 0));
+                                                    continue;
+                                                }
+                                                runmat_hir::HirExprKind::Binary(left, op, right) => {
+                                                    if matches!(op, runmat_parser::BinOp::Sub) && matches!(left.kind, runmat_hir::HirExprKind::End) {
+                                                        if let runmat_hir::HirExprKind::Number(ref s) = right.kind { if let Ok(k) = s.parse::<i64>() { end_offsets.push((numeric_count, k)); } else { end_offsets.push((numeric_count, 0)); } }
+                                                        else { end_offsets.push((numeric_count, 0)); }
+                                                        continue;
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                            }
+                                        }
+                                        // Special-case 1-D range with end arithmetic when dims == 1
+                                        if indices.len() == 1 {
+                                            if let runmat_hir::HirExprKind::Range(start, step, end) = &index.kind {
+                                                if let runmat_hir::HirExprKind::Binary(left, op, right) = &end.kind {
+                                                    if matches!(op, runmat_parser::BinOp::Sub) && matches!(left.kind, runmat_hir::HirExprKind::End) {
+                                                        // Emit StoreSlice1DRangeEnd: base is already on stack
+                                                        self.compile_expr(start)?;
+                                                        if let Some(st) = step { self.compile_expr(st)?; self.compile_expr(rhs)?; self.emit(Instr::StoreSlice1DRangeEnd { has_step: true, offset: match right.kind { runmat_hir::HirExprKind::Number(ref s) => s.parse::<i64>().unwrap_or(0), _ => 0 } }); }
+                                                        else { self.compile_expr(rhs)?; self.emit(Instr::StoreSlice1DRangeEnd { has_step: false, offset: match right.kind { runmat_hir::HirExprKind::Number(ref s) => s.parse::<i64>().unwrap_or(0), _ => 0 } }); }
+                                                        lowered_range_end = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if !lowered_range_end { self.compile_expr(index)?; numeric_count += 1; }
                                     }
                                 }
-                                // Push RHS last so VM pops it first
-                                self.compile_expr(rhs)?;
-                                self.emit(Instr::StoreSlice(indices.len(), numeric_count, colon_mask, end_mask));
-                                // Store updated base back to variable
-                                self.emit(Instr::StoreVar(var_id.0));
+                                if lowered_range_end {
+                                    // VM already pushed updated tensor; store back to var
+                                    self.emit(Instr::StoreVar(var_id.0));
+                                } else {
+                                    // Push RHS last so VM pops it first
+                                    // Detect any ranges with end arithmetic across dims
+                                    let mut has_any_range_end = false;
+                                    let mut range_dims: Vec<usize> = Vec::new();
+                                    let mut range_has_step: Vec<bool> = Vec::new();
+                                    let mut end_offs: Vec<i64> = Vec::new();
+                                    for (dim, index) in indices.iter().enumerate() {
+                                        if let runmat_hir::HirExprKind::Range(_start, step, end) = &index.kind {
+                                            match &end.kind {
+                                                runmat_hir::HirExprKind::End => {
+                                                    has_any_range_end = true; range_dims.push(dim); range_has_step.push(step.is_some()); end_offs.push(0);
+                                                }
+                                                runmat_hir::HirExprKind::Binary(left, op, right) => {
+                                                    if matches!(op, runmat_parser::BinOp::Sub) && matches!(left.kind, runmat_hir::HirExprKind::End) {
+                                                        has_any_range_end = true; range_dims.push(dim); range_has_step.push(step.is_some());
+                                                        if let runmat_hir::HirExprKind::Number(ref s) = right.kind { end_offs.push(s.parse::<i64>().unwrap_or(0)); } else { end_offs.push(0); }
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    if has_any_range_end {
+                                        // Push start[, step] for each range in dim order
+                                        for &dim in &range_dims {
+                                            if let runmat_hir::HirExprKind::Range(start, step, _end) = &indices[dim].kind { self.compile_expr(start)?; if let Some(st) = step { self.compile_expr(st)?; } }
+                                        }
+                                        self.compile_expr(rhs)?;
+                                        self.emit(Instr::StoreRangeEnd { dims: indices.len(), numeric_count, colon_mask, end_mask, range_dims, range_has_step, end_offsets: end_offs });
+                                    } else {
+                                        self.compile_expr(rhs)?;
+                                        if end_offsets.is_empty() { self.emit(Instr::StoreSlice(indices.len(), numeric_count, colon_mask, end_mask)); }
+                                        else { self.emit(Instr::StoreSliceEx(indices.len(), numeric_count, colon_mask, end_mask, end_offsets)); }
+                                    }
+                                    // Store updated base back to variable
+                                    self.emit(Instr::StoreVar(var_id.0));
+                                }
                             } else {
                                 // Pure numeric indexing
                                 for index in indices { self.compile_expr(index)?; }
@@ -517,6 +606,20 @@ impl Compiler {
                             self.compile_expr(base)?;
                             self.compile_expr(rhs)?;
                             self.emit(Instr::StoreMember(field.clone()));
+                        }
+                    }
+                    runmat_hir::HirLValue::MemberDynamic(base, name_expr) => {
+                        if let runmat_hir::HirExprKind::Var(var_id) = base.kind.clone() {
+                            self.emit(Instr::LoadVar(var_id.0));
+                            self.compile_expr(name_expr)?;
+                            self.compile_expr(rhs)?;
+                            self.emit(Instr::StoreMemberDynamic);
+                            self.emit(Instr::StoreVar(var_id.0));
+                        } else {
+                            self.compile_expr(base)?;
+                            self.compile_expr(name_expr)?;
+                            self.compile_expr(rhs)?;
+                            self.emit(Instr::StoreMemberDynamic);
                         }
                     }
                     _ => return Err("unsupported lvalue target".into()),
@@ -612,7 +715,7 @@ impl Compiler {
             HirExprKind::Unary(op, e) => {
                 self.compile_expr(e)?;
                 match op {
-                    runmat_parser::UnOp::Plus => {}
+                    runmat_parser::UnOp::Plus => { self.emit(Instr::UPlus); }
                     runmat_parser::UnOp::Minus => { self.emit(Instr::Neg); }
                     runmat_parser::UnOp::Transpose => { self.emit(Instr::Transpose); }
                     runmat_parser::UnOp::NonConjugateTranspose => { self.emit(Instr::Transpose); }
@@ -659,12 +762,13 @@ impl Compiler {
                     BinOp::BitAnd => {
                         self.compile_expr(a)?; self.emit(Instr::LoadConst(0.0)); self.emit(Instr::NotEqual);
                         self.compile_expr(b)?; self.emit(Instr::LoadConst(0.0)); self.emit(Instr::NotEqual);
-                        self.emit(Instr::Mul);
+                        self.emit(Instr::ElemMul);
                     }
                     BinOp::BitOr => {
                         self.compile_expr(a)?; self.emit(Instr::LoadConst(0.0)); self.emit(Instr::NotEqual);
                         self.compile_expr(b)?; self.emit(Instr::LoadConst(0.0)); self.emit(Instr::NotEqual);
                         self.emit(Instr::Add); self.emit(Instr::LoadConst(0.0)); self.emit(Instr::NotEqual);
+                        // Stay element-wise by folding through elementwise ops
                     }
                     _ => {
                         self.compile_expr(a)?; self.compile_expr(b)?;
@@ -705,14 +809,92 @@ impl Compiler {
                 }
                 // Lower feval(f, args...) specially when name == "feval"
                 if name == "feval" && !args.is_empty() {
-                    // Compile f then each arg
-                    for arg in args { self.compile_expr(arg)?; }
-                    self.emit(Instr::CallFeval(args.len()-1));
-                    return Ok(());
+                    // If any arg is a cell-index expansion like varargin{:}, lower to expansion-aware feval
+                    let has_any_expand = args[1..].iter().any(|e| matches!(e.kind, HirExprKind::IndexCell(_, _)));
+                    if has_any_expand {
+                        // Emit f first
+                        self.compile_expr(&args[0])?;
+                        // Then build ArgSpec for remaining args
+                        let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(args.len()-1);
+                        for arg in &args[1..] {
+                            if let HirExprKind::IndexCell(base, indices) = &arg.kind {
+                                let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon);
+                                if is_expand_all {
+                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true });
+                                    self.compile_expr(base)?;
+                                } else {
+                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false });
+                                    self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; }
+                                }
+                            } else {
+                                specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false });
+                                self.compile_expr(arg)?;
+                            }
+                        }
+                        self.emit(Instr::CallFevalExpandMulti(specs));
+                        return Ok(());
+                    } else {
+                        for arg in args { self.compile_expr(arg)?; }
+                        self.emit(Instr::CallFeval(args.len()-1));
+                        return Ok(());
+                    }
                 }
                 // Detect all arguments that are cell indexing expressions for expansion
                 let has_any_expand = args.iter().any(|e| matches!(e.kind, HirExprKind::IndexCell(_, _)));
                 if self.functions.contains_key(name) {
+                    // Support function-return comma-list propagation when there are no cell-expansion args.
+                    // We expand inner user-function calls into multiple arguments to match callee arity.
+                    if !has_any_expand {
+                        // Identify inner function-call arguments eligible for expansion
+                        let mut expand_plan: Vec<Option<usize>> = Vec::with_capacity(args.len());
+                        let expected_params = self.functions.get(name).map(|f| f.params.len()).unwrap_or(args.len());
+                        let mut fixed_count = 0usize;
+                        for arg in args {
+                            if let HirExprKind::FuncCall(inner, _) = &arg.kind {
+                                if self.functions.contains_key(inner) {
+                                    expand_plan.push(Some(0)); // placeholder, fill later
+                                } else {
+                                    expand_plan.push(None); fixed_count += 1;
+                                }
+                            } else {
+                                expand_plan.push(None); fixed_count += 1;
+                            }
+                        }
+                        // Decide how many outputs to take from each inner call (left-to-right) to meet arity
+                        let mut needed = expected_params.saturating_sub(fixed_count);
+                        for (i, arg) in args.iter().enumerate() {
+                            if needed == 0 { break; }
+                            if let HirExprKind::FuncCall(inner, _) = &arg.kind {
+                                if let Some(f) = self.functions.get(inner) {
+                                    // If inner has varargout, it can supply arbitrary additional outputs.
+                                    // Otherwise, limit to its declared outputs (at least 1).
+                                    let can_supply_unbounded = f.has_varargout;
+                                    let inner_fixed_max = f.outputs.len().max(1);
+                                    let take = if can_supply_unbounded { needed } else { inner_fixed_max.min(needed) };
+                                    if take > 0 { expand_plan[i] = Some(take); needed -= take; }
+                                }
+                            }
+                        }
+                        // If we satisfied the arity exactly via expansions, emit flattened call
+                        if needed == 0 && expand_plan.iter().any(|o| o.unwrap_or(0) > 1) {
+                            for (i, arg) in args.iter().enumerate() {
+                                if let (HirExprKind::FuncCall(inner, inner_args), Some(take)) = (&arg.kind, expand_plan[i]) {
+                                    // Compile inner args then call multi to push `take` outputs (may exceed declared outputs if varargout)
+                                    for a in inner_args { self.compile_expr(a)?; }
+                                    self.emit(Instr::CallFunctionMulti(inner.clone(), inner_args.len(), take));
+                                } else if let HirExprKind::FuncCall(inner, inner_args) = &arg.kind {
+                                    // Single output case
+                                    for a in inner_args { self.compile_expr(a)?; }
+                                    self.emit(Instr::CallFunction(inner.clone(), inner_args.len()));
+                                } else {
+                                    self.compile_expr(arg)?;
+                                }
+                            }
+                            // Total argc equals expected_params by construction
+                            self.emit(Instr::CallFunction(name.clone(), expected_params));
+                            return Ok(());
+                        }
+                    }
                     if has_any_expand {
                         // Build ArgSpec list and push stack values in proper order
                         let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(args.len());
@@ -738,18 +920,60 @@ impl Compiler {
                     }
                 } else {
                     // Attempt compile-time import resolution for builtins
+                    // 1) Specific imports: import pkg.foo => resolve 'foo'
+                    // 2) Wildcard imports: import pkg.* => resolve 'pkg.foo'
                     let mut resolved = name.clone();
                     if !runmat_builtins::builtin_functions().iter().any(|b| b.name == resolved) {
+                        // First specific imports
                         for (path, wildcard) in &self.imports {
-                            if !*wildcard { continue; }
-                            if path.is_empty() { continue; }
-                            let mut qual = String::new();
-                            for (i, part) in path.iter().enumerate() { if i>0 { qual.push('.'); } qual.push_str(part); }
-                            qual.push('.'); qual.push_str(name);
-                            if runmat_builtins::builtin_functions().iter().any(|b| b.name == qual) {
-                                resolved = qual;
-                                break;
+                            if *wildcard { continue; }
+                            if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
+                                let qual = path.join(".");
+                                if runmat_builtins::builtin_functions().iter().any(|b| b.name == qual) {
+                                    resolved = qual; break;
+                                }
                             }
+                        }
+                        if resolved == *name {
+                            // Then wildcard imports
+                            for (path, wildcard) in &self.imports {
+                                if !*wildcard { continue; }
+                                if path.is_empty() { continue; }
+                                let mut qual = String::new();
+                                for (i, part) in path.iter().enumerate() { if i>0 { qual.push('.'); } qual.push_str(part); }
+                                qual.push('.'); qual.push_str(name);
+                                if runmat_builtins::builtin_functions().iter().any(|b| b.name == qual) {
+                                    resolved = qual; break;
+                                }
+                            }
+                        }
+                    }
+                    // If no cell-expansion args, propagate inner user-function returns into argument list
+                    if !has_any_expand {
+                        let mut total_argc = 0usize;
+                        let mut did_expand_inner = false;
+                        for arg in args {
+                            if let HirExprKind::FuncCall(inner, inner_args) = &arg.kind {
+                                if self.functions.contains_key(inner) {
+                                    for a in inner_args { self.compile_expr(a)?; }
+                                    let outc = self.functions.get(inner).map(|f| {
+                                        if f.has_varargout { // allow unbounded; conservatively request as many as outer builtin can take? we don't know here, so take fixed declared
+                                            f.outputs.len().max(1)
+                                        } else { f.outputs.len().max(1) }
+                                    }).unwrap_or(1);
+                                    self.emit(Instr::CallFunctionMulti(inner.clone(), inner_args.len(), outc));
+                                    total_argc += outc; did_expand_inner = true;
+                                } else {
+                                    // Non-user function call, compile normally
+                                    self.compile_expr(arg)?; total_argc += 1;
+                                }
+                            } else {
+                                self.compile_expr(arg)?; total_argc += 1;
+                            }
+                        }
+                        if did_expand_inner {
+                            self.emit(Instr::CallBuiltin(resolved, total_argc));
+                            return Ok(());
                         }
                     }
                     if has_any_expand {
@@ -778,6 +1002,24 @@ impl Compiler {
             }
             HirExprKind::Tensor(matrix_data) | HirExprKind::Cell(matrix_data) => {
                 let rows = matrix_data.len();
+                // Special case: 1-row tensor literal with a single element that is IndexCell(base, {:})
+                // Lower "[C{:}]" into cat(2, C{:}) so downstream expansion works without colon compilation
+                if matches!(expr.kind, HirExprKind::Tensor(_)) && rows == 1 && matrix_data.get(0).map(|r| r.len()).unwrap_or(0) == 1 {
+                    if let HirExprKind::IndexCell(base, indices) = &matrix_data[0][0].kind {
+                        if indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon) {
+                            // Build specs: first fixed dim=2, then expand_all for base
+                            let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(2);
+                            // Fixed dimension 2
+                            specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false });
+                            self.emit(Instr::LoadConst(2.0));
+                            // Expand all from base cell
+                            specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true });
+                            self.compile_expr(base)?;
+                            self.emit(Instr::CallBuiltinExpandMulti("cat".to_string(), specs));
+                            return Ok(());
+                        }
+                    }
+                }
                 let has_non_literals = matrix_data.iter().any(|row| row.iter().any(|expr| {
                     !matches!(expr.kind, HirExprKind::Number(_) | HirExprKind::String(_) | HirExprKind::Constant(_))
                 }));
@@ -813,33 +1055,108 @@ impl Compiler {
                 let has_colon = indices.iter().any(|e| matches!(e.kind, HirExprKind::Colon));
                 let has_end = indices.iter().any(|e| matches!(e.kind, HirExprKind::End));
                 let has_vector = indices.iter().any(|e| matches!(e.kind, HirExprKind::Range(_,_,_) | HirExprKind::Tensor(_)) || matches!(e.ty, runmat_hir::Type::Matrix{..}));
-                if has_colon || has_vector || has_end || indices.len() > 2 {
+                // General case: any-dimension ranges with end arithmetic (e.g., A(:,2:2:end-1,...))
+                // We lower into IndexRangeEnd: push base, then per-range start[, step] in increasing dimension order,
+                // then any numeric scalar indices (in order). Colon and plain end dims are marked in masks.
+                {
+                    let mut has_any_range_end = false;
+                    let mut range_dims: Vec<usize> = Vec::new();
+                    let mut range_has_step: Vec<bool> = Vec::new();
+                    let mut end_offsets: Vec<i64> = Vec::new();
+                    // First pass: detect any Range with End-Sub on end expression
+                    for (dim, index) in indices.iter().enumerate() {
+                        if let HirExprKind::Range(_start, step, end) = &index.kind {
+                            if let HirExprKind::Binary(left, op, right) = &end.kind {
+                                if matches!(op, runmat_parser::BinOp::Sub) && matches!(left.kind, HirExprKind::End) {
+                                    has_any_range_end = true;
+                                    range_dims.push(dim);
+                                    range_has_step.push(step.is_some());
+                                    let off = if let HirExprKind::Number(ref s) = right.kind { s.parse::<i64>().unwrap_or(0) } else { 0 };
+                                    end_offsets.push(off);
+                                }
+                            }
+                        }
+                    }
+                    if has_any_range_end {
+                        self.compile_expr(base)?;
+                        // Push per-range start and optional step in dimension order
+                        for &dim in &range_dims {
+                            if let HirExprKind::Range(start, step, _end) = &indices[dim].kind {
+                                self.compile_expr(start)?;
+                                if let Some(st) = step { self.compile_expr(st)?; }
+                            }
+                        }
+                        // Count numeric scalar indices and push them
+                        let mut colon_mask: u32 = 0; let mut end_mask: u32 = 0; let mut numeric_count = 0usize;
+                        for (dim, index) in indices.iter().enumerate() {
+                            match &index.kind {
+                                HirExprKind::Colon => { colon_mask |= 1u32 << dim; }
+                                HirExprKind::End => { end_mask |= 1u32 << dim; }
+                                HirExprKind::Range(_,_,end) => {
+                                    // If this range used end arithmetic, we already handled; otherwise treat as plain numeric idx vector at runtime via VM
+                                    if let HirExprKind::Binary(left, op, _right) = &end.kind {
+                                        if matches!(op, runmat_parser::BinOp::Sub) && matches!(left.kind, HirExprKind::End) {
+                                            // skip pushing numeric for this dim
+                                            continue;
+                                        }
+                                    }
+                                    // For non-end ranges, we will resolve via VM range gather; push placeholders via numeric_count == 0 (no need to push indices)
+                                }
+                                _ => { self.compile_expr(index)?; numeric_count += 1; }
+                            }
+                        }
+                        // For pure 1-D case with a single range_dim, degrade to legacy Index1DRangeEnd to keep existing test stable
+                        if indices.len() == 1 && range_dims.len() == 1 {
+                            // We pushed start[, step] already. Emit Index1DRangeEnd.
+                            self.emit(Instr::Index1DRangeEnd { has_step: range_has_step[0], offset: end_offsets[0] });
+                        } else {
+                            self.emit(Instr::IndexRangeEnd { dims: indices.len(), numeric_count, colon_mask, end_mask, range_dims, range_has_step, end_offsets });
+                        }
+                        return Ok(());
+                    }
+                }
+                if has_colon || has_vector || has_end || indices.len() > 2 || Self::expr_contains_end(base) {
                     // Push base first, then numeric indices in order; compute colon mask
                     self.compile_expr(base)?;
                     let mut colon_mask: u32 = 0;
                     let mut end_mask: u32 = 0;
                     let mut numeric_count = 0usize;
+                    let mut end_offsets: Vec<(usize, i64)> = Vec::new();
                     for (dim, index) in indices.iter().enumerate() {
                         if matches!(index.kind, HirExprKind::Colon) {
                             colon_mask |= 1u32 << dim;
                         } else if matches!(index.kind, HirExprKind::End) {
                             end_mask |= 1u32 << dim;
                         } else {
+                            // Detect simple end arithmetic forms: end-1, end-2 etc.
+                            if let HirExprKind::Binary(left, op, right) = &index.kind {
+                                if matches!(op, runmat_parser::BinOp::Sub) && matches!(left.kind, HirExprKind::End) {
+                                    // Right should be number literal string; parse as integer offset if possible
+                                    if let HirExprKind::Number(ref s) = right.kind {
+                                        if let Ok(k) = s.parse::<i64>() {
+                                            // Reserve a numeric slot: push placeholder and count it
+                                            self.emit(Instr::LoadConst(0.0));
+                                            end_offsets.push((numeric_count, k));
+                                            numeric_count += 1;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
                             self.compile_expr(index)?;
                             numeric_count += 1;
                         }
                     }
-                    self.emit(Instr::IndexSlice(indices.len(), numeric_count, colon_mask, end_mask));
+                    if end_offsets.is_empty() {
+                        self.emit(Instr::IndexSlice(indices.len(), numeric_count, colon_mask, end_mask));
+                    } else {
+                        self.emit(Instr::IndexSliceEx(indices.len(), numeric_count, colon_mask, end_mask, end_offsets));
+                    }
                 } else {
                     self.compile_expr(base)?;
                     for index in indices { self.compile_expr(index)?; }
                     self.emit(Instr::Index(indices.len()));
                 }
-            }
-            HirExprKind::IndexCell(base, indices) => {
-                self.compile_expr(base)?;
-                for index in indices { self.compile_expr(index)?; }
-                self.emit(Instr::IndexCell(indices.len()));
             }
             HirExprKind::Colon => { return Err("colon expression not supported".into()); }
             HirExprKind::End => { self.emit(Instr::LoadConst(-0.0)); /* placeholder, resolved via end_mask in IndexSlice */ }
@@ -862,6 +1179,16 @@ impl Compiler {
                         self.emit(Instr::LoadMember(field.clone()));
                     }
                 }
+            }
+            HirExprKind::MemberDynamic(base, name_expr) => {
+                self.compile_expr(base)?;
+                self.compile_expr(name_expr)?;
+                self.emit(Instr::LoadMemberDynamic);
+            }
+            // Dynamic member s.(expr)
+            HirExprKind::MethodCall(b, m, a) if m == &"()".to_string() && a.len()==1 => {
+                // Note: parser currently doesn’t produce this form; placeholder for dynamic
+                self.compile_expr(b)?; self.compile_expr(&a[0])?; self.emit(Instr::LoadMemberDynamic);
             }
             HirExprKind::MethodCall(base, method, args) => {
                 match &base.kind {
@@ -907,7 +1234,7 @@ impl Compiler {
 
                 // Synthesize function name and register
                 let synthesized = format!("__anon_{}", self.functions.len());
-                let user_func = UserFunction { name: synthesized.clone(), params: placeholder_params, outputs: vec![output_id], body: func_body, local_var_count: capture_count + params.len() + 1 };
+                let user_func = UserFunction { name: synthesized.clone(), params: placeholder_params, outputs: vec![output_id], body: func_body, local_var_count: capture_count + params.len() + 1, has_varargin: false, has_varargout: false };
                 self.functions.insert(synthesized.clone(), user_func);
 
                 // Emit capture values on stack then create closure
@@ -919,6 +1246,11 @@ impl Compiler {
                 self.emit(Instr::CallBuiltin("make_handle".to_string(), 1));
             }
             HirExprKind::MetaClass(name) => { self.emit(Instr::LoadString(name.clone())); }
+            HirExprKind::IndexCell(base, indices) => {
+                self.compile_expr(base)?;
+                for index in indices { self.compile_expr(index)?; }
+                self.emit(Instr::IndexCell(indices.len()));
+            }
         }
         Ok(())
     }

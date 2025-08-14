@@ -11,6 +11,9 @@ pub enum Value {
     String(String),
     Tensor(Tensor),
     Cell(CellArray),
+    // MATLAB struct (scalar or nested). Struct arrays are represented in higher layers;
+    // this variant holds a single struct's fields.
+    Struct(StructValue),
     // GPU-resident tensor handle (opaque; buffer managed by backend)
     GpuTensor(runmat_accelerate_api::GpuTensorHandle),
     // Simple object instance until full class system lands
@@ -21,6 +24,15 @@ pub enum Value {
     ClassRef(String),
     MException(MException),
 }
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructValue {
+    pub fields: HashMap<String, Value>,
+}
+
+impl StructValue {
+    pub fn new() -> Self { Self { fields: HashMap::new() } }
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
@@ -370,6 +382,7 @@ impl Type {
                 }
             }
             Value::Object(_) => Type::Unknown,
+            Value::Struct(_) => Type::Unknown,
             Value::FunctionHandle(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
             Value::Closure(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
             Value::ClassRef(_) => Type::Unknown,
@@ -544,6 +557,7 @@ impl fmt::Display for Value {
             Value::Cell(ca) => ca.fmt(f),
             Value::GpuTensor(h) => write!(f, "GpuTensor(shape={:?}, device={}, buffer={})", h.shape, h.device_id, h.buffer_id),
             Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
+            Value::Struct(st) => write!(f, "struct(fields={})", st.fields.len()),
             Value::FunctionHandle(name) => write!(f, "@{}", name),
             Value::Closure(c) => write!(f, "<closure {} captures={}>", c.function_name, c.captures.len()),
             Value::ClassRef(name) => write!(f, "<class {}>", name),

@@ -1170,6 +1170,7 @@ impl TurbineEngine {
                 Instr::EnterTry(catch_pc, catch_var) => { "EnterTry".hash(&mut hasher); catch_pc.hash(&mut hasher); catch_var.hash(&mut hasher); }
                 Instr::PopTry => { "PopTry".hash(&mut hasher); }
                 Instr::CallFeval(argc) => { "CallFeval".hash(&mut hasher); argc.hash(&mut hasher); }
+                _ => { "Other".hash(&mut hasher); }
             }
         }
 

@@ -47,6 +47,90 @@ impl AccelProvider for InProcessProvider {
     fn device_info(&self) -> String {
         "in-process provider (host registry)".to_string()
     }
+
+    fn elem_add(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let bbuf = guard.get(&b.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+        if a.shape != b.shape { return Err(anyhow::anyhow!("shape mismatch")); }
+        let mut out = vec![0.0; abuf.len()];
+        for i in 0..abuf.len() { out[i] = abuf[i] + bbuf[i]; }
+        drop(guard);
+        // Upload new buffer to registry
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn elem_mul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let bbuf = guard.get(&b.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+        if a.shape != b.shape { return Err(anyhow::anyhow!("shape mismatch")); }
+        let mut out = vec![0.0; abuf.len()];
+        for i in 0..abuf.len() { out[i] = abuf[i] * bbuf[i]; }
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn elem_sub(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let bbuf = guard.get(&b.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+        if a.shape != b.shape { return Err(anyhow::anyhow!("shape mismatch")); }
+        let mut out = vec![0.0; abuf.len()];
+        for i in 0..abuf.len() { out[i] = abuf[i] - bbuf[i]; }
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn elem_div(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let bbuf = guard.get(&b.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+        if a.shape != b.shape { return Err(anyhow::anyhow!("shape mismatch")); }
+        let mut out = vec![0.0; abuf.len()];
+        for i in 0..abuf.len() { out[i] = if bbuf[i]==0.0 { f64::INFINITY * abuf[i].signum() } else { abuf[i] / bbuf[i] }; }
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn matmul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        // Only support 2D shapes for reference provider
+        if a.shape.len() != 2 || b.shape.len() != 2 { return Err(anyhow::anyhow!("matmul: only 2D supported")); }
+        let (ar, ac) = (a.shape[0], a.shape[1]);
+        let (br, bc) = (b.shape[0], b.shape[1]);
+        if ac != br { return Err(anyhow::anyhow!("matmul: inner dims must agree")); }
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let bbuf = guard.get(&b.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+        let mut out = vec![0.0; ar * bc];
+        // Column-major multiplication
+        for j in 0..bc {
+            for i in 0..ar {
+                let mut sum = 0.0;
+                for k in 0..ac {
+                    sum += abuf[i + k*ar] * bbuf[k + j*br];
+                }
+                out[i + j*ar] = sum;
+            }
+        }
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: vec![ar, bc], device_id: 0, buffer_id: id })
+    }
 }
 
 static INSTANCE: OnceCell<InProcessProvider> = OnceCell::new();

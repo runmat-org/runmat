@@ -12,6 +12,7 @@ pub enum Instr {
     Div,
     Pow,
     Neg,
+    UPlus,
     Transpose,
     // Element-wise operations
     ElemMul,
@@ -41,6 +42,17 @@ pub enum Instr {
     // colon_mask bit i set => dim i is colon (0-based),
     // end_mask bit i set => dim i is plain 'end' (no arithmetic) and should resolve to that dim's length
     IndexSlice(usize, usize, u32, u32),
+    // N-D range/selectors with per-dimension modes and end arithmetic offsets for ranges
+    // dims: total dims; numeric_count: count of extra numeric scalar indices following; colon_mask/end_mask like IndexSlice;
+    // range_dims: list of dimension indices that are ranges; for each, we expect start [, step] pushed in order; end_offsets align with range_dims
+    IndexRangeEnd { dims: usize, numeric_count: usize, colon_mask: u32, end_mask: u32, range_dims: Vec<usize>, range_has_step: Vec<bool>, end_offsets: Vec<i64> },
+    // 1-D range with end arithmetic: base on stack, then start [, step]
+    Index1DRangeEnd { has_step: bool, offset: i64 },
+    // Store with range+end arithmetic across dims; stack layout mirrors IndexRangeEnd plus RHS (on top)
+    StoreRangeEnd { dims: usize, numeric_count: usize, colon_mask: u32, end_mask: u32, range_dims: Vec<usize>, range_has_step: Vec<bool>, end_offsets: Vec<i64> },
+    // Extended slice: supports end arithmetic per-numeric index via offsets list.
+    // Tuple items are (numeric_position_in_order, offset) representing 'end - offset'.
+    IndexSliceEx(usize, usize, u32, u32, Vec<(usize, i64)>),
     // Cell arrays
     CreateCell2D(usize, usize), // rows, cols; pops rows*cols elements
     IndexCell(usize),           // Number of indices (1D or 2D supported)
@@ -52,9 +64,15 @@ pub enum Instr {
     StoreIndexCell(usize),      // like IndexCell, but for cell arrays; pops RHS and updates base
     // Store slice with colon/end semantics (mirrors IndexSlice)
     StoreSlice(usize, usize, u32, u32),
+    // Store slice with end arithmetic offsets applied to numeric indices
+    StoreSliceEx(usize, usize, u32, u32, Vec<(usize, i64)>),
+    // Store with 1-D range having end arithmetic: base, start, [step], rhs
+    StoreSlice1DRangeEnd { has_step: bool, offset: i64 },
     // Object/Class member/method operations
     LoadMember(String),          // base on stack -> member value
+    LoadMemberDynamic,           // base, name on stack -> member value (structs and objects)
     StoreMember(String),         // base, rhs on stack -> updated base
+    StoreMemberDynamic,          // base, name, rhs on stack -> updated base
     LoadMethod(String),          // base on stack -> method handle
     CallMethod(String, usize),   // base on stack along with args
     // Closures and handle invocation
@@ -71,6 +89,8 @@ pub enum Instr {
     },
     // feval special path to support closures/user functions/method handles
     CallFeval(usize), // argc
+    // feval with expansion specs for arguments
+    CallFevalExpandMulti(Vec<ArgSpec>),
     // Stack manipulation
     Swap, // swap top two stack values
     // Try/Catch control flow

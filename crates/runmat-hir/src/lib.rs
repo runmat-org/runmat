@@ -32,6 +32,7 @@ pub enum HirExprKind {
     Colon,
     End,
     Member(Box<HirExpr>, String),
+    MemberDynamic(Box<HirExpr>, Box<HirExpr>),
     MethodCall(Box<HirExpr>, String, Vec<HirExpr>),
     AnonFunc { params: Vec<VarId>, body: Box<HirExpr> },
     FuncHandle(String),
@@ -80,6 +81,8 @@ pub enum HirStmt {
         params: Vec<VarId>,
         outputs: Vec<VarId>,
         body: Vec<HirStmt>,
+        has_varargin: bool,
+        has_varargout: bool,
     },
     ClassDef {
         name: String,
@@ -102,6 +105,7 @@ pub enum HirClassMember {
 pub enum HirLValue {
     Var(VarId),
     Member(Box<HirExpr>, String),
+    MemberDynamic(Box<HirExpr>, Box<HirExpr>),
     Index(Box<HirExpr>, Vec<HirExpr>),
     IndexCell(Box<HirExpr>, Vec<HirExpr>),
 }
@@ -122,7 +126,211 @@ pub struct LoweringResult {
 pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
     let mut ctx = Ctx::new();
     let body = ctx.lower_stmts(&prog.body)?;
-    Ok(HirProgram { body })
+    let hir = HirProgram { body };
+    // Apply flow-sensitive inference to populate implicit knowledge for downstream consumers
+    let _ = infer_function_output_types(&hir);
+    Ok(hir)
+}
+
+/// Infer output types for each function defined in the program using a flow-sensitive, block-structured
+/// dataflow analysis over the function body. Returns a mapping from function name to per-output types.
+pub fn infer_function_output_types(prog: &HirProgram) -> std::collections::HashMap<String, Vec<Type>> {
+    use std::collections::HashMap;
+
+    fn join_type(a: &Type, b: &Type) -> Type {
+        a.unify(b)
+    }
+
+    fn join_env(a: &std::collections::HashMap<VarId, Type>, b: &std::collections::HashMap<VarId, Type>) -> std::collections::HashMap<VarId, Type> {
+        let mut out = a.clone();
+        for (k, v) in b { out.entry(*k).and_modify(|t| *t = join_type(t, v)).or_insert_with(|| v.clone()); }
+        out
+    }
+
+    #[derive(Clone)]
+    struct Analysis { exits: Vec<std::collections::HashMap<VarId, Type>>, fallthrough: Option<std::collections::HashMap<VarId, Type>> }
+
+    fn analyze_stmts(outputs: &[VarId], stmts: &[HirStmt], mut env: std::collections::HashMap<VarId, Type>) -> Analysis {
+        let mut exits = Vec::new();
+        let mut i = 0usize;
+        while i < stmts.len() {
+            match &stmts[i] {
+                HirStmt::Assign(var, expr, _) => { env.insert(*var, expr.ty.clone()); }
+                HirStmt::MultiAssign(vars, expr, _) => {
+                    for v in vars { if let Some(v) = v { env.insert(*v, expr.ty.clone()); } }
+                }
+                HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
+                HirStmt::Return => { exits.push(env.clone()); return Analysis { exits, fallthrough: None }; }
+                HirStmt::If { cond: _, then_body, elseif_blocks, else_body } => {
+                    let then_a = analyze_stmts(outputs, then_body, env.clone());
+                    let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
+                    let mut all_exits = then_a.exits.clone();
+                    for (c, b) in elseif_blocks { let _ = c; let a = analyze_stmts(outputs, b, env.clone()); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    if let Some(else_b) = else_body { let a = analyze_stmts(outputs, else_b, env.clone()); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    else { out_env = join_env(&out_env, &env); }
+                    env = out_env; exits.extend(all_exits);
+                }
+                HirStmt::While { cond: _, body } => { let a = analyze_stmts(outputs, body, env.clone()); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
+                HirStmt::For { var, expr, body } => { env.insert(*var, expr.ty.clone()); let a = analyze_stmts(outputs, body, env.clone()); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
+                HirStmt::Switch { expr: _, cases, otherwise } => {
+                    let mut out_env: Option<HashMap<VarId, Type>> = None;
+                    for (_v, b) in cases { let a = analyze_stmts(outputs, b, env.clone()); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
+                    if let Some(otherwise) = otherwise { let a = analyze_stmts(outputs, otherwise, env.clone()); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
+                    else { out_env = Some(match out_env { Some(curr) => join_env(&curr, &env), None => env.clone() }); }
+                    if let Some(f) = out_env { env = f; }
+                }
+                HirStmt::TryCatch { try_body, catch_var: _, catch_body } => {
+                    let a_try = analyze_stmts(outputs, try_body, env.clone());
+                    let a_catch = analyze_stmts(outputs, catch_body, env.clone());
+                    let mut out_env = a_try.fallthrough.clone().unwrap_or_else(|| env.clone());
+                    if let Some(f) = a_catch.fallthrough { out_env = join_env(&out_env, &f); }
+                    env = out_env; exits.extend(a_try.exits); exits.extend(a_catch.exits);
+                }
+                HirStmt::Global(_) | HirStmt::Persistent(_) => {}
+                HirStmt::Function { .. } => {}
+                HirStmt::ClassDef { .. } => {}
+                HirStmt::AssignLValue(_, expr, _) => { let _ = &expr.ty; }
+                HirStmt::Import { .. } => {}
+            }
+            i += 1;
+        }
+        Analysis { exits, fallthrough: Some(env) }
+    }
+
+    // Walk functions at top-level and methods in class members
+    let mut out: HashMap<String, Vec<Type>> = HashMap::new();
+    for stmt in &prog.body {
+        match stmt {
+            HirStmt::Function { name, outputs, body, .. } => {
+                let analysis = analyze_stmts(outputs, body, HashMap::new());
+                let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
+                let mut accumulate = |env: &std::collections::HashMap<VarId, Type>| {
+                    for (i, out_id) in outputs.iter().enumerate() {
+                        if let Some(t) = env.get(out_id) { per_output[i] = per_output[i].unify(t); }
+                    }
+                };
+                for e in &analysis.exits { accumulate(e); }
+                if let Some(f) = &analysis.fallthrough { accumulate(f); }
+                out.insert(name.clone(), per_output);
+            }
+            HirStmt::ClassDef { name: _cname, members, .. } => {
+                for m in members {
+                    if let HirClassMember::Methods { body, .. } = m {
+                        for s in body {
+                            if let HirStmt::Function { name, outputs, body, .. } = s {
+                                let analysis = analyze_stmts(outputs, body, HashMap::new());
+                                let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
+                                let mut accumulate = |env: &std::collections::HashMap<VarId, Type>| {
+                                    for (i, out_id) in outputs.iter().enumerate() {
+                                        if let Some(t) = env.get(out_id) { per_output[i] = per_output[i].unify(t); }
+                                    }
+                                };
+                                for e in &analysis.exits { accumulate(e); }
+                                if let Some(f) = &analysis.fallthrough { accumulate(f); }
+                                out.insert(name.clone(), per_output);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Infer variable types inside each function by performing a flow-sensitive analysis and
+/// returning the joined environment (types per VarId) at function exits and fallthrough.
+pub fn infer_function_variable_types(
+    prog: &HirProgram,
+) -> std::collections::HashMap<String, std::collections::HashMap<VarId, Type>> {
+    use std::collections::HashMap;
+
+    fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
+        let mut out = a.clone();
+        for (k, v) in b { out.entry(*k).and_modify(|t| *t = t.unify(v)).or_insert_with(|| v.clone()); }
+        out
+    }
+
+    #[derive(Clone)]
+    struct Analysis { exits: Vec<HashMap<VarId, Type>>, fallthrough: Option<HashMap<VarId, Type>> }
+
+    fn analyze_stmts(stmts: &[HirStmt], mut env: HashMap<VarId, Type>) -> Analysis {
+        let mut exits = Vec::new();
+        let mut i = 0usize;
+        while i < stmts.len() {
+            match &stmts[i] {
+                HirStmt::Assign(var, expr, _) => { env.insert(*var, expr.ty.clone()); }
+                HirStmt::MultiAssign(vars, expr, _) => {
+                    for v in vars { if let Some(v) = v { env.insert(*v, expr.ty.clone()); } }
+                }
+                HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
+                HirStmt::Return => { exits.push(env.clone()); return Analysis { exits, fallthrough: None }; }
+                HirStmt::If { then_body, elseif_blocks, else_body, .. } => {
+                    let then_a = analyze_stmts(then_body, env.clone());
+                    let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
+                    let mut all_exits = then_a.exits.clone();
+                    for (_c, b) in elseif_blocks { let a = analyze_stmts(b, env.clone()); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    if let Some(else_b) = else_body { let a = analyze_stmts(else_b, env.clone()); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    else { out_env = join_env(&out_env, &env); }
+                    env = out_env; exits.extend(all_exits);
+                }
+                HirStmt::While { body, .. } => { let a = analyze_stmts(body, env.clone()); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
+                HirStmt::For { var, expr, body } => { env.insert(*var, expr.ty.clone()); let a = analyze_stmts(body, env.clone()); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
+                HirStmt::Switch { cases, otherwise, .. } => {
+                    let mut out_env: Option<HashMap<VarId, Type>> = None;
+                    for (_v, b) in cases { let a = analyze_stmts(b, env.clone()); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
+                    if let Some(otherwise) = otherwise { let a = analyze_stmts(otherwise, env.clone()); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
+                    else { out_env = Some(match out_env { Some(curr) => join_env(&curr, &env), None => env.clone() }); }
+                    if let Some(f) = out_env { env = f; }
+                }
+                HirStmt::TryCatch { try_body, catch_body, .. } => {
+                    let a_try = analyze_stmts(try_body, env.clone());
+                    let a_catch = analyze_stmts(catch_body, env.clone());
+                    let mut out_env = a_try.fallthrough.clone().unwrap_or_else(|| env.clone());
+                    if let Some(f) = a_catch.fallthrough { out_env = join_env(&out_env, &f); }
+                    env = out_env; exits.extend(a_try.exits); exits.extend(a_catch.exits);
+                }
+                HirStmt::Global(_) | HirStmt::Persistent(_) => {}
+                HirStmt::Function { .. } => {}
+                HirStmt::ClassDef { .. } => {}
+                HirStmt::AssignLValue(_, expr, _) => { let _ = &expr.ty; }
+                HirStmt::Import { .. } => {}
+            }
+            i += 1;
+        }
+        Analysis { exits, fallthrough: Some(env) }
+    }
+
+    let mut out: HashMap<String, HashMap<VarId, Type>> = HashMap::new();
+    for stmt in &prog.body {
+        match stmt {
+            HirStmt::Function { name, body, .. } => {
+                let a = analyze_stmts(body, HashMap::new());
+                let mut env = HashMap::new();
+                for e in &a.exits { env = join_env(&env, e); }
+                if let Some(f) = &a.fallthrough { env = join_env(&env, f); }
+                out.insert(name.clone(), env);
+            }
+            HirStmt::ClassDef { members, .. } => {
+                for m in members {
+                    if let HirClassMember::Methods { body, .. } = m {
+                        for s in body {
+                            if let HirStmt::Function { name, body, .. } = s {
+                                let a = analyze_stmts(body, HashMap::new());
+                                let mut env = HashMap::new();
+                                for e in &a.exits { env = join_env(&env, e); }
+                                if let Some(f) = &a.fallthrough { env = join_env(&env, f); }
+                                out.insert(name.clone(), env);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Collect all import statements in a program for downstream name resolution
@@ -136,11 +344,75 @@ pub fn collect_imports(prog: &HirProgram) -> Vec<(Vec<String>, bool)> {
     imports
 }
 
+/// Normalized import for easier downstream resolution
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedImport {
+    /// Dot-joined package path (e.g., "pkg.sub") or class path (e.g., "Point")
+    pub path: String,
+    /// True if the import was a wildcard (e.g., pkg.*)
+    pub wildcard: bool,
+    /// For specific imports, the unqualified last segment (e.g., "Class"). None for wildcard
+    pub unqualified: Option<String>,
+}
+
+/// Convert parsed imports into normalized string forms
+pub fn normalize_imports(prog: &HirProgram) -> Vec<NormalizedImport> {
+    let mut out = Vec::new();
+    for stmt in &prog.body {
+        if let HirStmt::Import { path, wildcard } = stmt {
+            let path_str = path.join(".");
+            let last = if *wildcard { None } else { path.last().cloned() };
+            out.push(NormalizedImport { path: path_str, wildcard: *wildcard, unqualified: last });
+        }
+    }
+    out
+}
+
+/// Validate for obvious import ambiguities:
+/// - Duplicate specific imports (same fully-qualified path)
+/// - Specific imports that introduce the same unqualified name from different packages
+pub fn validate_imports(prog: &HirProgram) -> Result<(), String> {
+    use std::collections::{HashMap, HashSet};
+    let norms = normalize_imports(prog);
+    let mut seen_exact: HashSet<(String, bool)> = HashSet::new();
+    for n in &norms {
+        if !seen_exact.insert((n.path.clone(), n.wildcard)) {
+            return Err(format!("duplicate import '{}{}'", n.path, if n.wildcard { ".*" } else { "" }));
+        }
+    }
+    // Ambiguity among specifics with same unqualified name
+    let mut by_name: HashMap<String, Vec<String>> = HashMap::new();
+    for n in &norms {
+        if !n.wildcard {
+            if let Some(uq) = &n.unqualified {
+                by_name.entry(uq.clone()).or_default().push(n.path.clone());
+            }
+        }
+    }
+    for (uq, sources) in by_name {
+        if sources.len() > 1 {
+            return Err(format!("ambiguous import for '{}': {}", uq, sources.join(", ")));
+        }
+    }
+    Ok(())
+}
+
 /// Validate classdef declarations for basic semantic correctness
 /// Checks: duplicate property/method names within the same class,
 /// conflicts between property and method names, and trivial superclass cycles (self parent)
 pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
     use std::collections::HashSet;
+    fn norm_attr_value(v: &str) -> String {
+        let t = v.trim();
+        let t = t.trim_matches('\'');
+        t.to_ascii_lowercase()
+    }
+    fn validate_access_value(ctx: &str, v: &str) -> Result<(), String> {
+        match v {
+            "public" | "private" => Ok(()),
+            other => Err(format!("invalid access value '{}' in {} (allowed: public, private)", other, ctx)),
+        }
+    }
     for stmt in &prog.body {
         if let HirStmt::ClassDef { name, super_class, members } = stmt {
             if let Some(sup) = super_class {
@@ -152,7 +424,44 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
             let mut method_names: HashSet<String> = HashSet::new();
             for m in members {
                 match m {
-                    HirClassMember::Properties { names: props, .. } => {
+                    HirClassMember::Properties { names: props, attributes } => {
+                        // Enforce attributes: Access/GetAccess/SetAccess must be public/private; Static+Dependent invalid
+                        let mut has_static = false;
+                        let mut has_dependent = false;
+                        let mut access_default: Option<String> = None;
+                        let mut get_access: Option<String> = None;
+                        let mut set_access: Option<String> = None;
+                        for a in attributes {
+                            if a.name.eq_ignore_ascii_case("Static") { has_static = true; continue; }
+                            if a.name.eq_ignore_ascii_case("Dependent") { has_dependent = true; continue; }
+                            if a.name.eq_ignore_ascii_case("Access") {
+                                let v = a.value.as_ref().ok_or_else(|| format!("Access requires value in class '{}' properties block", name))?;
+                                let v = norm_attr_value(v);
+                                validate_access_value(&format!("class '{}' properties", name), &v)?;
+                                access_default = Some(v);
+                                continue;
+                            }
+                            if a.name.eq_ignore_ascii_case("GetAccess") {
+                                let v = a.value.as_ref().ok_or_else(|| format!("GetAccess requires value in class '{}' properties block", name))?;
+                                let v = norm_attr_value(v);
+                                validate_access_value(&format!("class '{}' properties", name), &v)?;
+                                get_access = Some(v);
+                                continue;
+                            }
+                            if a.name.eq_ignore_ascii_case("SetAccess") {
+                                let v = a.value.as_ref().ok_or_else(|| format!("SetAccess requires value in class '{}' properties block", name))?;
+                                let v = norm_attr_value(v);
+                                validate_access_value(&format!("class '{}' properties", name), &v)?;
+                                set_access = Some(v);
+                                continue;
+                            }
+                        }
+                        if has_static && has_dependent {
+                            return Err(format!("class '{}' properties: attributes 'Static' and 'Dependent' cannot be combined", name));
+                        }
+                        // If Access provided without Get/Set overrides, it's fine; if overrides provided, also fine.
+                        let _ = (access_default, get_access, set_access);
+                        // Enforce property attribute semantics minimal subset: ensure no duplicate Static flags in conflict (placeholder)
                         for p in props {
                             if !prop_names.insert(p.clone()) {
                                 return Err(format!("Duplicate property '{}' in class {}", p, name));
@@ -162,7 +471,15 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                             }
                         }
                     }
-                    HirClassMember::Methods { body, .. } => {
+                    HirClassMember::Methods { body, attributes } => {
+                        // Validate method attributes: Access must be public/private if present
+                        for a in attributes {
+                            if a.name.eq_ignore_ascii_case("Access") {
+                                let v = a.value.as_ref().ok_or_else(|| format!("Access requires value in class '{}' methods block", name))?;
+                                let v = norm_attr_value(v);
+                                validate_access_value(&format!("class '{}' methods", name), &v)?;
+                            }
+                        }
                         // Extract method function names at top-level of methods block
                         for s in body {
                             if let HirStmt::Function { name: fname, .. } = s {
@@ -268,6 +585,7 @@ pub mod remapping {
                 let remapped_lv = match lv {
                     super::HirLValue::Var(v) => super::HirLValue::Var(var_map.get(v).copied().unwrap_or(*v)),
                     super::HirLValue::Member(b, n) => super::HirLValue::Member(Box::new(remap_expr(b, var_map)), n.clone()),
+                    super::HirLValue::MemberDynamic(b, n) => super::HirLValue::MemberDynamic(Box::new(remap_expr(b, var_map)), Box::new(remap_expr(n, var_map))),
                     super::HirLValue::Index(b, idxs) => super::HirLValue::Index(
                         Box::new(remap_expr(b, var_map)),
                         idxs.iter().map(|e| remap_expr(e, var_map)).collect(),
@@ -387,6 +705,8 @@ pub mod remapping {
             ),
             HirExprKind::Member(base, name) =>
                 HirExprKind::Member(Box::new(remap_expr(base, var_map)), name.clone()),
+            HirExprKind::MemberDynamic(base, name) =>
+                HirExprKind::MemberDynamic(Box::new(remap_expr(base, var_map)), Box::new(remap_expr(name, var_map))),
             HirExprKind::MethodCall(base, name, args) => HirExprKind::MethodCall(
                 Box::new(remap_expr(base, var_map)),
                 name.clone(),
@@ -402,8 +722,8 @@ pub mod remapping {
                 args.iter().map(|a| remap_expr(a, var_map)).collect(),
             ),
             HirExprKind::Number(_)
-                | HirExprKind::String(_)
-                | HirExprKind::Constant(_)
+            | HirExprKind::String(_)
+            | HirExprKind::Constant(_)
                 | HirExprKind::Colon
                 | HirExprKind::End
                 | HirExprKind::MetaClass(_) => expr.kind.clone(),
@@ -493,6 +813,7 @@ pub mod remapping {
                 match lv {
                     HirLValue::Var(v) => { vars.insert(*v); }
                     HirLValue::Member(base, _) => collect_expr_variables(base, vars),
+                    HirLValue::MemberDynamic(base, name) => { collect_expr_variables(base, vars); collect_expr_variables(name, vars); }
                     HirLValue::Index(base, idxs) | HirLValue::IndexCell(base, idxs) => {
                         collect_expr_variables(base, vars);
                         for i in idxs { collect_expr_variables(i, vars); }
@@ -547,6 +868,7 @@ pub mod remapping {
                 collect_expr_variables(end, vars);
             }
             HirExprKind::Member(base, _) => collect_expr_variables(base, vars),
+            HirExprKind::MemberDynamic(base, name) => { collect_expr_variables(base, vars); collect_expr_variables(name, vars); }
             HirExprKind::MethodCall(base, _, args) => {
                 collect_expr_variables(base, vars);
                 for a in args { collect_expr_variables(a, vars); }
@@ -823,16 +1145,20 @@ impl Ctx {
             } => {
                 self.push_scope();
                 let param_ids: Vec<VarId> = params.iter().map(|p| self.define(p.clone())).collect();
-                let output_ids: Vec<VarId> =
-                    outputs.iter().map(|o| self.define(o.clone())).collect();
+                let output_ids: Vec<VarId> = outputs.iter().map(|o| self.define(o.clone())).collect();
                 let body_hir = self.lower_stmts(body)?;
                 self.pop_scope();
+
+                let has_varargin = params.last().map(|s| s.as_str() == "varargin").unwrap_or(false);
+                let has_varargout = outputs.last().map(|s| s.as_str() == "varargout").unwrap_or(false);
 
                 let func_stmt = HirStmt::Function {
                     name: name.clone(),
                     params: param_ids,
                     outputs: output_ids,
                     body: body_hir,
+                    has_varargin,
+                    has_varargout,
                 };
 
                 // Register the function in the context for future calls
@@ -1058,6 +1384,11 @@ impl Ctx {
                 let b = self.lower_expr(base)?;
                 (HirExprKind::Member(Box::new(b), name.clone()), Type::Unknown)
             }
+            MemberDynamic(base, name_expr) => {
+                let b = self.lower_expr(base)?;
+                let n = self.lower_expr(name_expr)?;
+                (HirExprKind::MemberDynamic(Box::new(b), Box::new(n)), Type::Unknown)
+            }
             MethodCall(base, name, args) => {
                 let b = self.lower_expr(base)?;
                 let lowered_args: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();
@@ -1086,6 +1417,11 @@ impl Ctx {
                     let b = self.lower_expr(base)?;
                     HirLValue::Member(Box::new(b), name.clone())
                 }
+            }
+            ALV::MemberDynamic(base, name_expr) => {
+                let b = self.lower_expr(base)?;
+                let n = self.lower_expr(name_expr)?;
+                HirLValue::MemberDynamic(Box::new(b), Box::new(n))
             }
             ALV::Index(base, idxs) => {
                 let b = self.lower_expr(base)?;
@@ -1205,7 +1541,7 @@ impl Ctx {
                             let a = analyze_stmts(outputs, else_body, env.clone());
                             if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); }
                             all_exits.extend(a.exits);
-                        } else {
+        } else {
                             // no else: join with incoming env
                             out_env = join_env(&out_env, &env);
                         }

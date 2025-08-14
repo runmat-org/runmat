@@ -364,6 +364,9 @@ impl GenerationalAllocator {
             Value::ClassRef(name) => std::mem::size_of::<Value>() + name.len(),
             Value::Closure(c) => std::mem::size_of::<Value>() + c.function_name.len() + c.captures.iter().map(|v| self.estimate_value_size(v)).sum::<usize>(),
             Value::MException(e) => std::mem::size_of::<Value>() + e.identifier.len() + e.message.len() + e.stack.iter().map(|s| s.len()).sum::<usize>(),
+            Value::Struct(st) => {
+                std::mem::size_of::<Value>() + st.fields.iter().map(|(k, v)| k.len() + self.estimate_value_size(v)).sum::<usize>()
+            }
         }
     }
 

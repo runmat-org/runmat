@@ -50,4 +50,13 @@ fn lvalue_assignment_lowering_total() {
     }
 }
 
+#[test]
+fn import_normalization_and_ambiguity() {
+    use runmat_parser::parse_simple as parse;
+    let ast = parse("import pkg.*; import pkg.sub.Class; import other.Class").unwrap();
+    let hir = lower(&ast).unwrap();
+    let err = runmat_hir::validate_imports(&hir);
+    assert!(err.is_err());
+}
+
 

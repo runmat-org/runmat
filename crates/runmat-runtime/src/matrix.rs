@@ -45,6 +45,8 @@ pub fn matrix_sub(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 
 /// Matrix multiplication: C = A * B
 pub fn matrix_mul(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+    // If a or b originate from GPUArray handles (future: track provenance), a GPU provider could handle this.
+    // For now, keep CPU implementation, but allow accelerator facade to be invoked when Value::GpuTensor is used via a separate entry point.
     if a.cols() != b.rows() {
         return Err(format!(
             "Inner matrix dimensions must agree: {}x{} * {}x{}",
@@ -69,6 +71,72 @@ pub fn matrix_mul(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
     }
 
     Tensor::new_2d(data, rows, cols)
+}
+
+/// GPU-aware matmul entry: if both inputs are GpuTensor handles, call provider; otherwise fall back to CPU.
+pub fn value_matmul(a: &runmat_builtins::Value, b: &runmat_builtins::Value) -> Result<runmat_builtins::Value, String> {
+    use runmat_builtins::Value;
+    // GPU path first
+    if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
+        if let Some(p) = runmat_accelerate_api::provider() {
+            match p.matmul(ha, hb) {
+                Ok(hc) => {
+                    let ht = p.download(&hc).map_err(|e| e.to_string())?;
+                    return Ok(Value::Tensor(runmat_builtins::Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?));
+                }
+                Err(_) => {
+                    // Fallback: download and compute on CPU
+                    let ta = p.download(ha).map_err(|e| e.to_string())?;
+                    let tb = p.download(hb).map_err(|e| e.to_string())?;
+                    let ca = runmat_builtins::Tensor::new(ta.data, ta.shape).map_err(|e| e.to_string())?;
+                    let cb = runmat_builtins::Tensor::new(tb.data, tb.shape).map_err(|e| e.to_string())?;
+                    return Ok(Value::Tensor(matrix_mul(&ca, &cb)?));
+                }
+            }
+        }
+    }
+    // Mixed GPU/CPU: gather GPU tensor(s) and recurse
+    if matches!(a, Value::GpuTensor(_)) || matches!(b, Value::GpuTensor(_)) {
+        let to_host = |v: &Value| -> Result<Value, String> { match v {
+            Value::GpuTensor(h) => {
+                if let Some(p) = runmat_accelerate_api::provider() {
+                    let ht = p.download(h).map_err(|e| e.to_string())?;
+                    Ok(Value::Tensor(runmat_builtins::Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?))
+                } else {
+                    let total: usize = h.shape.iter().product();
+                    Ok(Value::Tensor(runmat_builtins::Tensor::new(vec![0.0; total], h.shape.clone()).map_err(|e| e.to_string())?))
+                }
+            }
+            other => Ok(other.clone()) } };
+        let ah = to_host(a)?; let bh = to_host(b)?;
+        return value_matmul(&ah, &bh);
+    }
+    // CPU cases
+    match (a, b) {
+        (Value::Tensor(ta), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_mul(ta, tb)?)),
+        (Value::Tensor(ta), Value::Num(s)) => Ok(Value::Tensor(matrix_scalar_mul(ta, *s))),
+        (Value::Num(s), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_scalar_mul(tb, *s))),
+        (Value::Tensor(ta), Value::Int(i)) => Ok(Value::Tensor(matrix_scalar_mul(ta, *i as f64))),
+        (Value::Int(i), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_scalar_mul(tb, *i as f64))),
+        (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x * y)),
+        (Value::Int(x), Value::Num(y)) => Ok(Value::Num((*x as f64) * y)),
+        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x * (*y as f64))),
+        (Value::Int(x), Value::Int(y)) => Ok(Value::Num((*x as f64) * (*y as f64))),
+        _ => Err("matmul: unsupported operand types".to_string()),
+    }
+}
+
+#[runtime_builtin(name = "mtimes")]
+fn mtimes_builtin(a: runmat_builtins::Value, b: runmat_builtins::Value) -> Result<runmat_builtins::Value, String> {
+    use runmat_builtins::Value;
+    match (&a, &b) {
+        (Value::GpuTensor(_), Value::GpuTensor(_)) => value_matmul(&a, &b),
+        (Value::Tensor(ta), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_mul(ta, tb)?)),
+        (Value::Tensor(ta), Value::Num(s)) => Ok(Value::Tensor(matrix_scalar_mul(ta, *s))),
+        (Value::Num(s), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_scalar_mul(tb, *s))),
+        (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x * y)),
+        _ => Err("mtimes: unsupported operand types".to_string()),
+    }
 }
 
 /// Scalar multiplication: C = A * s

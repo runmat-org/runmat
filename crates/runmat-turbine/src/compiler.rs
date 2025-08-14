@@ -581,7 +581,39 @@ impl BytecodeCompiler {
                     | Instr::LoadStaticProperty(_, _)
                     | Instr::CallStaticMethod(_, _, _)
                     | Instr::EnterTry(_, _)
-                    | Instr::PopTry => {
+                    | Instr::PopTry
+                    | Instr::UPlus
+                    | Instr::AndAnd(_)
+                    | Instr::OrOr(_)
+                    | Instr::IndexSliceEx(_, _, _, _, _)
+                    | Instr::IndexRangeEnd { .. }
+                    | Instr::Index1DRangeEnd { .. }
+                    | Instr::StoreRangeEnd { .. }
+                    | Instr::StoreSlice(_, _, _, _)
+                    | Instr::StoreSliceEx(_, _, _, _, _)
+                    | Instr::StoreSlice1DRangeEnd { .. }
+                    | Instr::LoadMember(_)
+                    | Instr::LoadMemberDynamic
+                    | Instr::StoreMember(_)
+                    | Instr::StoreMemberDynamic
+                    | Instr::CreateClosure(_, _)
+                    | Instr::CallMethod(_, _)
+                    | Instr::IndexCellExpand(_, _)
+                    | Instr::StoreIndex(_)
+                    | Instr::StoreIndexCell(_)
+                    | Instr::LoadMethod(_)
+                    | Instr::RegisterClass { .. }
+                    | Instr::CallBuiltinExpandLast(_, _, _)
+                    | Instr::CallBuiltinExpandAt(_, _, _, _)
+                    | Instr::CallBuiltinExpandMulti(_, _)
+                    | Instr::CallFunctionExpandMulti(_, _)
+                    | Instr::CallFunctionMulti(_, _, _)
+                    | Instr::CallBuiltinMulti(_, _, _)
+                    | Instr::CallFunctionExpandAt(_, _, _, _)
+                    | Instr::Swap
+                    | Instr::RegisterImport { .. }
+                    | Instr::CallFeval(_)
+                    | Instr::CallFevalExpandMulti(_) => {
                         return Err(TurbineError::ExecutionError(
                             "Unsupported instruction in JIT; use interpreter".to_string(),
                         ));

@@ -47,10 +47,8 @@ fn test_large_matrix_stress() {
     for i in 0..100 {
         let size = 100; // 100x100 matrix = 10,000 elements
         let data = vec![i as f64; size * size];
-        let matrix =
-            runmat_builtins::Matrix::new(data, size, size).expect("matrix creation should succeed");
-
-        let ptr = gc_allocate(Value::Tensor(matrix)).expect("tensor allocation should succeed");
+        let tensor = runmat_builtins::Tensor::new_2d(data, size, size).expect("tensor creation should succeed");
+        let ptr = gc_allocate(Value::Tensor(tensor)).expect("tensor allocation should succeed");
         matrices.push(ptr);
 
         // Trigger collection periodically
@@ -80,7 +78,8 @@ fn test_nested_cell_stress() {
             for _ in 0..width {
                 cells.push(create_nested_cell(depth - 1, width));
             }
-            Value::Cell(cells)
+            let ca = runmat_builtins::CellArray::new(cells, 1, width).expect("cell creation");
+            Value::Cell(ca)
         }
     }
 
@@ -205,7 +204,10 @@ fn test_gc_under_memory_pressure() {
             0 => Value::Num(i as f64),
             1 => Value::String(format!("pressure_test_{i}")),
             2 => Value::Tensor(runmat_builtins::Tensor::new_2d(vec![i as f64; 100], 10, 10).unwrap()),
-            3 => Value::Cell(vec![Value::Num(i as f64), Value::Int(i)]),
+            3 => {
+                let ca = runmat_builtins::CellArray::new(vec![Value::Num(i as f64), Value::Int(i)], 1, 2).unwrap();
+                Value::Cell(ca)
+            },
             _ => Value::Bool(i % 2 == 0),
         };
 

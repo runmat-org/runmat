@@ -58,4 +58,24 @@ fn classdef_method_attributes_round_trip() {
     assert!(found, "No classdef methods block found");
 }
 
+#[test]
+fn classdef_property_attributes_enforced() {
+    // Static + Dependent invalid
+    let src = "classdef C\n  properties(Static, Dependent)\n    p\n  end\nend";
+    let ast = parse(src).unwrap();
+    let hir = lower(&ast).unwrap();
+    let res = runmat_hir::validate_classdefs(&hir);
+    assert!(res.is_err());
+}
+
+#[test]
+fn classdef_access_values_validated() {
+    // Invalid Access value
+    let src = "classdef D\n  properties(Access=protected)\n    p\n  end\n  methods(Access=internal)\n    function y = f(x); y = x; end\n  end\nend";
+    let ast = parse(src).unwrap();
+    let hir = lower(&ast).unwrap();
+    let res = runmat_hir::validate_classdefs(&hir);
+    assert!(res.is_err());
+}
+
 

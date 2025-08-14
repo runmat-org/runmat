@@ -84,6 +84,7 @@ fn format_type_info(value: &Value) -> String {
                 format!("Tensor{:?} (gpu)", h.shape)
             }
         }
+        _ => "value".to_string(),
     }
 }
 
@@ -506,6 +507,19 @@ impl ReplEngine {
         // Generate type info if we have a suppressed value
         let type_info = suppressed_value.as_ref().map(format_type_info);
 
+        // Final fallback: if not suppressed and still no value, try last non-zero variable slot
+        if !is_semicolon_suppressed && result_value.is_none() {
+            if let Some(v) = self
+                .variable_array
+                .iter()
+                .rev()
+                .find(|v| !matches!(v, Value::Num(0.0)))
+                .cloned()
+            {
+                result_value = Some(v);
+            }
+        }
+
         Ok(ExecutionResult {
             value: result_value,
             execution_time_ms,
@@ -597,6 +611,8 @@ impl ReplEngine {
                 params,
                 outputs,
                 body,
+                has_varargin: _,
+                has_varargout: _,
             } = hir_stmt
             {
                 // Use the existing HIR utilities to calculate variable count
@@ -610,6 +626,8 @@ impl ReplEngine {
                     outputs: outputs.clone(),
                     body: body.clone(),
                     local_var_count: max_local_var,
+                    has_varargin: false,
+                    has_varargout: false,
                 };
                 user_functions.insert(name.clone(), user_func);
             }

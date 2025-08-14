@@ -17,6 +17,8 @@ pub enum Expr {
     Colon,
     FuncCall(String, Vec<Expr>),
     Member(Box<Expr>, String),
+    // Dynamic field: s.(expr)
+    MemberDynamic(Box<Expr>, Box<Expr>),
     MethodCall(Box<Expr>, String, Vec<Expr>),
     AnonFunc { params: Vec<String>, body: Box<Expr> },
     FuncHandle(String),
@@ -114,6 +116,7 @@ pub enum Stmt {
 pub enum LValue {
     Var(String),
     Member(Box<Expr>, String),
+    MemberDynamic(Box<Expr>, Box<Expr>),
     Index(Box<Expr>, Vec<Expr>),
     IndexCell(Box<Expr>, Vec<Expr>),
 }
@@ -349,7 +352,17 @@ impl Parser {
                 } else if self.peek_token() == Some(&Token::Ident)
                     && !matches!(
                         self.peek_token_at(1),
-                        Some(Token::Assign | Token::LParen | Token::Dot | Token::LBracket | Token::LBrace)
+                        Some(
+                            Token::Assign
+                                | Token::LParen
+                                | Token::Dot
+                                | Token::LBracket
+                                | Token::LBrace
+                                | Token::Plus
+                                | Token::Minus
+                                | Token::Star
+                                | Token::Transpose
+                        )
                     )
                     && !matches!(
                         self.peek_token_at(1),
@@ -441,8 +454,15 @@ impl Parser {
                     }
                     // Otherwise, member access
                     self.pos += 1; // consume '.'
-                    let name = self.expect_ident()?;
-                    base = Expr::Member(Box::new(base), name);
+                    // Support dynamic field: .(expr) or static .ident
+                    if self.consume(&Token::LParen) {
+                        let name_expr = self.parse_expr()?;
+                        if !self.consume(&Token::RParen) { return Err(self.error_with_expected("expected ')' after dynamic field expression", ")")); }
+                        base = Expr::MemberDynamic(Box::new(base), Box::new(name_expr));
+                    } else {
+                        let name = self.expect_ident()?;
+                        base = Expr::Member(Box::new(base), name);
+                    }
                 } else {
                     break;
                 }
@@ -455,6 +475,7 @@ impl Parser {
         let rhs = self.parse_expr()?;
         let stmt = match lvalue {
             Expr::Member(b, name) => Stmt::AssignLValue(LValue::Member(b, name), rhs, false),
+            Expr::MemberDynamic(b, n) => Stmt::AssignLValue(LValue::MemberDynamic(b, n), rhs, false),
             Expr::Index(b, idxs) => Stmt::AssignLValue(LValue::Index(b, idxs), rhs, false),
             Expr::IndexCell(b, idxs) => Stmt::AssignLValue(LValue::IndexCell(b, idxs), rhs, false),
             Expr::Ident(v) => Stmt::Assign(v, rhs, false),

@@ -325,8 +325,8 @@ fn test_write_barriers_config() {
         assert!(result.is_ok());
 
         // Test allocation with write barriers enabled
-        let matrix = runmat_builtins::Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-        let value = Value::Tensor(matrix);
+        let tensor = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+        let value = Value::Tensor(tensor);
         let ptr = gc_allocate(value);
         assert!(ptr.is_ok());
     });
