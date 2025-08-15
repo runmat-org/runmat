@@ -141,6 +141,9 @@ impl MarkSweepCollector {
             Value::String(_) => {
                 // Strings don't contain references to other GC objects
             }
+            Value::StringArray(_sa) => {
+                // String arrays hold owned Strings; no nested GC Values
+            }
             Value::Int(_) | Value::Num(_) | Value::Bool(_) => {
                 // Primitive values don't contain references
             }
@@ -162,6 +165,7 @@ impl MarkSweepCollector {
             Value::MException(_e) => {
                 // Contains only strings; no GC references
             }
+            Value::CharArray(_ca) => { }
         }
 
         Ok(())
@@ -176,6 +180,7 @@ impl MarkSweepCollector {
                     self.mark_value_contents(cell_value, _max_generation)?;
                 }
             }
+            Value::StringArray(_sa) => {}
             Value::GpuTensor(_) => {}
             Value::FunctionHandle(_) => {}
             Value::ClassRef(_) => {}
@@ -187,6 +192,7 @@ impl MarkSweepCollector {
                 for (_k, v) in &st.fields { self.mark_value_contents(v, _max_generation)?; }
             }
             Value::MException(_e) => {}
+            Value::CharArray(_ca) => {}
             _ => {
                 // Other value types don't contain GC references yet
             }

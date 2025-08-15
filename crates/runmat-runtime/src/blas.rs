@@ -17,15 +17,7 @@ fn transpose_to_column_major(matrix: &Matrix) -> Vec<f64> {
 }
 
 /// Helper function to transpose a matrix from column-major to row-major  
-fn transpose_to_row_major(data: &[f64], rows: usize, cols: usize) -> Vec<f64> {
-    let mut result = vec![0.0; data.len()];
-    for i in 0..rows {
-        for j in 0..cols {
-            result[i * cols + j] = data[j * rows + i];
-        }
-    }
-    result
-}
+// Removed: not needed with column-major everywhere
 
 /// BLAS-accelerated matrix multiplication: C = A * B
 /// Uses DGEMM (double precision general matrix multiply)
@@ -64,9 +56,8 @@ pub fn blas_matrix_mul(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
         );
     }
 
-    // Convert result back to row-major storage
-    let c_row_major = transpose_to_row_major(&c_col_major, a.rows(), b.cols());
-    Matrix::new_2d(c_row_major, a.rows(), b.cols())
+    // Our Tensor uses column-major layout; DGEMM already produced C in column-major
+    Matrix::new_2d(c_col_major, a.rows(), b.cols())
 }
 
 /// BLAS-accelerated matrix-vector multiplication: y = A * x
@@ -157,14 +148,24 @@ pub fn blas_vector_add(alpha: f64, x: &[f64], y: &mut [f64]) -> Result<(), Strin
 
 // Helper function to convert Vec<Value> to Vec<f64>
 fn value_vector_to_f64(values: &[Value]) -> Result<Vec<f64>, String> {
-    values
-        .iter()
-        .map(|v| match v {
-            Value::Num(n) => Ok(*n),
-            Value::Int(i) => Ok(*i as f64),
-            _ => Err(format!("Cannot convert {v:?} to f64")),
-        })
-        .collect()
+    let mut out: Vec<f64> = Vec::new();
+    for v in values {
+        match v {
+            Value::Num(n) => out.push(*n),
+            Value::Int(i) => out.push(*i as f64),
+            Value::Cell(c) => {
+                for elem in &c.data {
+                    match elem {
+                        Value::Num(n) => out.push(*n),
+                        Value::Int(i) => out.push(*i as f64),
+                        _ => return Err(format!("Cannot convert {elem:?} to f64")),
+                    }
+                }
+            }
+            _ => return Err(format!("Cannot convert {v:?} to f64")),
+        }
+    }
+    Ok(out)
 }
 
 // Builtin functions for BLAS operations

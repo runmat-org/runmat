@@ -337,6 +337,10 @@ impl GenerationalAllocator {
         match value {
             Value::Int(_) | Value::Num(_) | Value::Bool(_) => std::mem::size_of::<Value>(),
             Value::String(s) => std::mem::size_of::<Value>() + s.len(),
+            Value::StringArray(sa) => {
+                std::mem::size_of::<Value>()
+                    + sa.data.iter().map(|s| s.len()).sum::<usize>()
+            }
             Value::Tensor(m) => {
                 std::mem::size_of::<Value>()
                     + std::mem::size_of::<runmat_builtins::Tensor>()
@@ -366,6 +370,9 @@ impl GenerationalAllocator {
             Value::MException(e) => std::mem::size_of::<Value>() + e.identifier.len() + e.message.len() + e.stack.iter().map(|s| s.len()).sum::<usize>(),
             Value::Struct(st) => {
                 std::mem::size_of::<Value>() + st.fields.iter().map(|(k, v)| k.len() + self.estimate_value_size(v)).sum::<usize>()
+            }
+            Value::CharArray(ca) => {
+                std::mem::size_of::<Value>() + ca.data.len() * std::mem::size_of::<char>()
             }
         }
     }

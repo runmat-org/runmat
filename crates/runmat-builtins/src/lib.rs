@@ -9,6 +9,10 @@ pub enum Value {
     Num(f64),
     Bool(bool),
     String(String),
+    // MATLAB string array (R2016b+): N-D array of string scalars
+    StringArray(StringArray),
+    // MATLAB char array (single-quoted): 2-D character array (rows x cols)
+    CharArray(CharArray),
     Tensor(Tensor),
     Cell(CellArray),
     // MATLAB struct (scalar or nested). Struct arrays are represented in higher layers;
@@ -40,6 +44,46 @@ pub struct Tensor {
     pub shape: Vec<usize>, // Column-major layout
     pub rows: usize,        // Compatibility for 2D usage
     pub cols: usize,        // Compatibility for 2D usage
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StringArray {
+    pub data: Vec<String>,
+    pub shape: Vec<usize>,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CharArray {
+    pub data: Vec<char>,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+impl CharArray {
+    pub fn new_row(s: &str) -> Self { CharArray { data: s.chars().collect(), rows: 1, cols: s.chars().count() } }
+    pub fn new(data: Vec<char>, rows: usize, cols: usize) -> Result<Self, String> {
+        if rows * cols != data.len() { return Err(format!("Char data length {} doesn't match dimensions {}x{}", data.len(), rows, cols)); }
+        Ok(CharArray { data, rows, cols })
+    }
+}
+
+impl StringArray {
+    pub fn new(data: Vec<String>, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if data.len() != expected {
+            return Err(format!(
+                "StringArray data length {} doesn't match shape {:?} ({} elements)",
+                data.len(), shape, expected
+            ));
+        }
+        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
+        Ok(StringArray { data, shape, rows, cols })
+    }
+    pub fn new_2d(data: Vec<String>, rows: usize, cols: usize) -> Result<Self, String> { Self::new(data, vec![rows, cols]) }
+    pub fn rows(&self) -> usize { self.shape.get(0).copied().unwrap_or(1) }
+    pub fn cols(&self) -> usize { self.shape.get(1).copied().unwrap_or(1) }
 }
 
 // GpuTensorHandle now lives in runmat-accel-api
@@ -136,6 +180,49 @@ impl fmt::Display for Tensor {
     }
 }
 
+impl fmt::Display for StringArray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.shape.len() {
+            0 | 1 => {
+                write!(f, "[")?;
+                for (i, v) in self.data.iter().enumerate() {
+                    if i > 0 { write!(f, " ")?; }
+                    write!(f, "\"{}\"", v.replace('"', "\""))?;
+                }
+                write!(f, "]")
+            }
+            2 => {
+                let rows = self.rows(); let cols = self.cols();
+                write!(f, "[")?;
+                for r in 0..rows {
+                    for c in 0..cols {
+                        if c > 0 { write!(f, " ")?; }
+                        let v = &self.data[r + c * rows];
+                        write!(f, "\"{}\"", v.replace('"', "\""))?;
+                    }
+                    if r + 1 < rows { write!(f, "; ")?; }
+                }
+                write!(f, "]")
+            }
+            _ => write!(f, "StringArray(shape={:?})", self.shape),
+        }
+    }
+}
+
+impl fmt::Display for CharArray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Display as single-quoted rows separated by ;
+        write!(f, "[")?;
+        for r in 0..self.rows {
+            if r > 0 { write!(f, "; ")?; }
+            write!(f, "'")?;
+            for c in 0..self.cols { let ch = self.data[r * self.cols + c]; if ch == '\'' { write!(f, "''")?; } else { write!(f, "{}", ch)?; } }
+            write!(f, "'")?;
+        }
+        write!(f, "]")
+    }
+}
+
 // From implementations for Value
 impl From<i32> for Value {
     fn from(i: i32) -> Self {
@@ -215,6 +302,13 @@ impl TryFrom<&Value> for String {
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
             Value::String(s) => Ok(s.clone()),
+            Value::StringArray(sa) => {
+                if sa.data.len() == 1 { Ok(sa.data[0].clone()) } else { Err("cannot convert string array to scalar string".to_string()) }
+            }
+            Value::CharArray(ca) => {
+                // Convert full char array to one string if it is a single row; else error
+                if ca.rows == 1 { Ok(ca.data.iter().collect()) } else { Err("cannot convert multi-row char array to scalar string".to_string()) }
+            }
             Value::Int(i) => Ok(i.to_string()),
             Value::Num(n) => Ok(n.to_string()),
             Value::Bool(b) => Ok(b.to_string()),
@@ -264,12 +358,10 @@ pub enum Type {
     Bool,
     /// String type
     String,
-    /// Matrix type with optional dimension information
-    Matrix {
-        /// Optional number of rows (None means unknown/dynamic)
-        rows: Option<usize>,
-        /// Optional number of columns (None means unknown/dynamic)
-        cols: Option<usize>,
+    /// Tensor type with optional shape information (column-major semantics in runtime)
+    Tensor {
+        /// Optional full shape; None means unknown/dynamic; individual dims can be omitted by using None
+        shape: Option<Vec<Option<usize>>>,
     },
     /// Cell array type with optional element type information
     Cell {
@@ -294,20 +386,12 @@ pub enum Type {
 }
 
 impl Type {
-    /// Create a matrix type with unknown dimensions
-    pub fn matrix() -> Self {
-        Type::Matrix {
-            rows: None,
-            cols: None,
-        }
-    }
+    /// Create a tensor type with unknown shape
+    pub fn tensor() -> Self { Type::Tensor { shape: None } }
 
-    /// Create a matrix type with known dimensions
-    pub fn matrix_with_dims(rows: usize, cols: usize) -> Self {
-        Type::Matrix {
-            rows: Some(rows),
-            cols: Some(cols),
-        }
+    /// Create a tensor type with known shape
+    pub fn tensor_with_shape(shape: Vec<usize>) -> Self {
+        Type::Tensor { shape: Some(shape.into_iter().map(|d| Some(d)).collect()) }
     }
 
     /// Create a cell array type with unknown element type
@@ -331,7 +415,7 @@ impl Type {
         match (self, other) {
             (Type::Unknown, _) | (_, Type::Unknown) => true,
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => true, // Number compatibility
-            (Type::Matrix { .. }, Type::Matrix { .. }) => true, // Matrix compatibility regardless of dims
+            (Type::Tensor { .. }, Type::Tensor { .. }) => true, // Tensor compatibility regardless of dims for now
             (a, b) => a == b,
         }
     }
@@ -341,7 +425,7 @@ impl Type {
         match (self, other) {
             (Type::Unknown, t) | (t, Type::Unknown) => t.clone(),
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => Type::Num,
-            (Type::Matrix { .. }, Type::Matrix { .. }) => Type::matrix(), // Lose dimension info
+            (Type::Tensor { .. }, Type::Tensor { .. }) => Type::tensor(), // Lose shape info for now
             (a, b) if a == b => a.clone(),
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
@@ -354,13 +438,12 @@ impl Type {
             Value::Num(_) => Type::Num,
             Value::Bool(_) => Type::Bool,
             Value::String(_) => Type::String,
+            Value::StringArray(sa) => {
+                // Model as Cell of String for type system for now
+                if sa.data.is_empty() { Type::cell_of(Type::String) } else { Type::cell_of(Type::String) }
+            }
             Value::Tensor(t) => {
-                if t.shape.len() == 2 {
-                    Type::Matrix { rows: Some(t.shape[0]), cols: Some(t.shape[1]) }
-                } else {
-                    // Treat other ranks conservatively as matrix unknown dims for now
-                    Type::matrix()
-                }
+                Type::Tensor { shape: Some(t.shape.iter().map(|&d| Some(d)).collect()) }
             },
             Value::Cell(cells) => {
                 if cells.data.is_empty() {
@@ -374,19 +457,17 @@ impl Type {
                     }
                 }
             }
-            Value::GpuTensor(h) => {
-                if h.shape.len() == 2 {
-                    Type::Matrix { rows: Some(h.shape[0]), cols: Some(h.shape[1]) }
-                } else {
-                    Type::matrix()
-                }
-            }
+            Value::GpuTensor(h) => { Type::Tensor { shape: Some(h.shape.iter().map(|&d| Some(d)).collect()) } }
             Value::Object(_) => Type::Unknown,
             Value::Struct(_) => Type::Unknown,
             Value::FunctionHandle(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
             Value::Closure(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
             Value::ClassRef(_) => Type::Unknown,
             Value::MException(_) => Type::Unknown,
+            Value::CharArray(ca) => {
+                // Treat as cell of char for type purposes; or a 2-D char matrix conceptually
+                Type::Cell { element_type: Some(Box::new(Type::String)), length: Some(ca.rows * ca.cols) }
+            }
         }
     }
 }
@@ -553,6 +634,8 @@ impl fmt::Display for Value {
             Value::Num(n) => write!(f, "{}", format_number_short_g(*n)),
             Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
             Value::String(s) => write!(f, "'{s}'"),
+            Value::StringArray(sa) => write!(f, "{sa}"),
+            Value::CharArray(ca) => write!(f, "{ca}"),
             Value::Tensor(m) => write!(f, "{m}"),
             Value::Cell(ca) => ca.fmt(f),
             Value::GpuTensor(h) => write!(f, "GpuTensor(shape={:?}, device={}, buffer={})", h.shape, h.device_id, h.buffer_id),
@@ -622,6 +705,7 @@ pub enum Access { Public, Private }
 pub struct PropertyDef {
     pub name: String,
     pub is_static: bool,
+    pub is_dependent: bool,
     pub get_access: Access,
     pub set_access: Access,
     pub default_value: Option<Value>,

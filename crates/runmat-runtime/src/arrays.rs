@@ -70,6 +70,24 @@ fn zeros_builtin(m: i32, n: i32) -> Result<Tensor, String> {
     Ok(Tensor::zeros(vec![m as usize, n as usize]))
 }
 
+/// Generate zeros tensor with arbitrary dimensions
+/// zeros(d1, d2, ..., dk) creates a k-D tensor of zeros
+#[runtime_builtin(name = "zeros")]
+fn zeros_var_builtin(rest: Vec<Value>) -> Result<Tensor, String> {
+    if rest.is_empty() {
+        return Err("zeros: expected at least 1 dimension".to_string());
+    }
+    let mut dims: Vec<usize> = Vec::with_capacity(rest.len());
+    for v in &rest {
+        let n: f64 = v.try_into()?;
+        if n < 0.0 { return Err("Matrix dimensions must be non-negative".to_string()); }
+        dims.push(n as usize);
+    }
+    // MATLAB semantics: zeros(n) -> n x n (2-D). For >1 args, use them as provided.
+    if dims.len() == 1 { dims = vec![dims[0], dims[0]]; }
+    Ok(Tensor::zeros(dims))
+}
+
 /// Generate ones matrix
 /// ones(m, n) creates an m×n matrix of ones
 #[runtime_builtin(name = "ones")]
@@ -78,6 +96,16 @@ fn ones_builtin(m: i32, n: i32) -> Result<Tensor, String> {
         return Err("Matrix dimensions must be non-negative".to_string());
     }
     Ok(Tensor::ones(vec![m as usize, n as usize]))
+}
+
+/// Generate ones tensor with arbitrary dimensions
+#[runtime_builtin(name = "ones")]
+fn ones_var_builtin(rest: Vec<Value>) -> Result<Tensor, String> {
+    if rest.is_empty() { return Err("ones: expected at least 1 dimension".to_string()); }
+    let mut dims: Vec<usize> = Vec::with_capacity(rest.len());
+    for v in &rest { let n: f64 = v.try_into()?; if n < 0.0 { return Err("Matrix dimensions must be non-negative".to_string()); } dims.push(n as usize); }
+    if dims.len() == 1 { dims = vec![dims[0], dims[0]]; }
+    Ok(Tensor::ones(dims))
 }
 
 /// Generate identity matrix

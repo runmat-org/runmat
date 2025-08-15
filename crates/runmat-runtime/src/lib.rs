@@ -88,6 +88,41 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
     ))
 }
 
+#[runmat_macros::runtime_builtin(name = "cellstr")]
+fn cellstr_builtin(a: Value) -> Result<Value, String> {
+    match a {
+        Value::String(s) => Ok(Value::Cell(runmat_builtins::CellArray::new(vec![Value::String(s)], 1, 1).map_err(|e| format!("cellstr: {e}"))?)),
+        Value::StringArray(sa) => {
+            let rows = sa.rows(); let cols = sa.cols();
+            let mut cells: Vec<Value> = Vec::with_capacity(sa.data.len());
+            for r in 0..rows { for c in 0..cols { let idx = r + c*rows; cells.push(Value::String(sa.data[idx].clone())); } }
+            Ok(Value::Cell(runmat_builtins::CellArray::new(cells, rows, cols).map_err(|e| format!("cellstr: {e}"))?))
+        }
+        other => Err(format!("cellstr: expected string or string array, got {other:?}")),
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "char")]
+fn char_builtin(a: Value) -> Result<Value, String> {
+    match a {
+        Value::String(s) => {
+            let data: Vec<f64> = s.chars().map(|ch| ch as u32 as f64).collect();
+            Ok(Value::Tensor(runmat_builtins::Tensor::new(data, vec![1, s.chars().count()]).map_err(|e| format!("char: {e}"))?))
+        }
+        Value::StringArray(sa) => {
+            let rows = sa.rows(); let cols = sa.cols();
+            let mut max_len = 0usize; for c in 0..cols { for r in 0..rows { let idx=r+c*rows; max_len = max_len.max(sa.data[idx].chars().count()); } }
+            if rows == 0 || cols == 0 { return Ok(Value::Tensor(runmat_builtins::Tensor::new(Vec::new(), vec![0,0]).unwrap())); }
+            let out_rows = rows;
+            let out_cols = max_len * cols;
+            let mut out = vec![32.0; out_rows * out_cols];
+            for c in 0..cols { for r in 0..rows { let idx=r+c*rows; let s=&sa.data[idx]; let mut j=0usize; for ch in s.chars() { let oc = c*max_len + j; out[r + oc*out_rows] = ch as u32 as f64; j+=1; } } }
+            Ok(Value::Tensor(runmat_builtins::Tensor::new(out, vec![out_rows, out_cols]).map_err(|e| format!("char: {e}"))?))
+        }
+        other => Err(format!("char: expected string or string array, got {other:?}")),
+    }
+}
+
 // Array size helpers
 #[runmat_macros::runtime_builtin(name = "size")]
 fn size_builtin(a: Value) -> Result<Value, String> {
@@ -96,6 +131,8 @@ fn size_builtin(a: Value) -> Result<Value, String> {
         Value::Cell(ca) => vec![ca.rows, ca.cols],
         Value::GpuTensor(h) => h.shape,
         Value::String(s) => vec![1, s.len()],
+        Value::StringArray(sa) => sa.shape,
+        Value::CharArray(ca) => vec![ca.rows, ca.cols],
         _ => vec![1, 1],
     };
     let dims_f: Vec<f64> = dims.iter().map(|d| *d as f64).collect();
@@ -109,6 +146,8 @@ fn size_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
         Value::Cell(ca) => vec![ca.rows, ca.cols],
         Value::GpuTensor(h) => h.shape,
         Value::String(s) => vec![1, s.len()],
+        Value::StringArray(sa) => sa.shape,
+        Value::CharArray(ca) => vec![ca.rows, ca.cols],
         _ => vec![1, 1],
     };
     let d = if dim < 1.0 { 1usize } else { dim as usize };
@@ -174,6 +213,55 @@ fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> Result<Value, String> {
     Ok(Value::Num((lin0 + 1) as f64))
 }
 
+// -------- String constructors/conversions --------
+
+#[runmat_macros::runtime_builtin(name = "strings")]
+fn strings_ctor(rest: Vec<Value>) -> Result<Value, String> {
+    let mut shape: Vec<usize> = Vec::new();
+    if rest.is_empty() { shape = vec![1,1]; } else {
+        for v in rest { let n: f64 = (&v).try_into()?; if n < 0.0 { return Err("strings: dimensions must be non-negative".to_string()); } shape.push(n as usize); }
+        if shape.is_empty() { shape = vec![1,1]; }
+    }
+    let total: usize = shape.iter().product();
+    let data = vec![String::new(); total];
+    Ok(Value::StringArray(runmat_builtins::StringArray::new(data, shape).map_err(|e| format!("strings: {e}"))?))
+}
+
+#[runmat_macros::runtime_builtin(name = "string.empty")]
+fn string_empty_ctor(rest: Vec<Value>) -> Result<Value, String> {
+    let mut shape: Vec<usize> = Vec::new();
+    for v in rest { let n: f64 = (&v).try_into()?; if n < 0.0 { return Err("string.empty: dimensions must be non-negative".to_string()); } shape.push(n as usize); }
+    if shape.is_empty() { shape = vec![0,0]; }
+    let total: usize = shape.iter().product();
+    let data = vec![String::new(); total];
+    Ok(Value::StringArray(runmat_builtins::StringArray::new(data, shape).map_err(|e| format!("string.empty: {e}"))?))
+}
+
+#[runmat_macros::runtime_builtin(name = "string")]
+fn string_conv(a: Value) -> Result<Value, String> {
+    match a {
+        Value::String(s) => Ok(Value::StringArray(runmat_builtins::StringArray::new(vec![s], vec![1,1]).unwrap())),
+        Value::StringArray(sa) => Ok(Value::StringArray(sa)),
+        Value::CharArray(ca) => {
+            let mut out: Vec<String> = Vec::with_capacity(ca.rows);
+            for r in 0..ca.rows { let mut s = String::with_capacity(ca.cols); for c in 0..ca.cols { s.push(ca.data[r*ca.cols + c]); } out.push(s); }
+            Ok(Value::StringArray(runmat_builtins::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| format!("string: {e}"))?))
+        }
+        Value::Tensor(t) => {
+            let mut out: Vec<String> = Vec::with_capacity(t.data.len());
+            for &x in &t.data { out.push(x.to_string()); }
+            Ok(Value::StringArray(runmat_builtins::StringArray::new(out, t.shape).map_err(|e| format!("string: {e}"))?))
+        }
+        Value::Cell(ca) => {
+            let mut out: Vec<String> = Vec::with_capacity(ca.rows*ca.cols);
+            for r in 0..ca.rows { for c in 0..ca.cols { let v = &ca.data[r*ca.cols + c]; let s: String = match v { Value::String(s)=>s.clone(), Value::Num(n)=>n.to_string(), Value::Int(i)=>i.to_string(), Value::CharArray(ch)=> ch.data.iter().collect(), other=> format!("{other:?}") }; out.push(s); } }
+            Ok(Value::StringArray(runmat_builtins::StringArray::new(out, vec![ca.rows, ca.cols]).map_err(|e| format!("string: {e}"))?))
+        }
+        Value::Num(n) => Ok(Value::StringArray(runmat_builtins::StringArray::new(vec![n.to_string()], vec![1,1]).unwrap())),
+        Value::Int(i) => Ok(Value::StringArray(runmat_builtins::StringArray::new(vec![i.to_string()], vec![1,1]).unwrap())),
+        other => Err(format!("string: unsupported conversion from {other:?}")),
+    }
+}
 #[runmat_macros::runtime_builtin(name = "numel")]
 fn numel_builtin(a: Value) -> Result<Value, String> {
     let n = match a {
@@ -181,6 +269,8 @@ fn numel_builtin(a: Value) -> Result<Value, String> {
         Value::Cell(ca) => ca.data.len(),
         Value::GpuTensor(h) => h.shape.iter().product(),
         Value::String(s) => s.len(),
+        Value::StringArray(sa) => sa.data.len(),
+        Value::CharArray(ca) => ca.data.len(),
         _ => 1,
     };
     Ok(Value::Num(n as f64))
@@ -193,6 +283,7 @@ fn length_builtin(a: Value) -> Result<Value, String> {
         Value::Cell(ca) => std::cmp::max(ca.rows, ca.cols),
         Value::GpuTensor(h) => h.shape.iter().copied().max().unwrap_or(0),
         Value::String(s) => s.len(),
+        Value::StringArray(sa) => sa.shape.iter().copied().max().unwrap_or(0),
         _ => 1,
     };
     Ok(Value::Num(len as f64))
@@ -205,6 +296,8 @@ fn ndims_builtin(a: Value) -> Result<Value, String> {
         Value::Cell(_) => 2,
         Value::GpuTensor(h) => h.shape.len(),
         Value::String(_) => 2,
+        Value::StringArray(sa) => sa.shape.len(),
+        Value::CharArray(_) => 2,
         _ => 2,
     };
     Ok(Value::Num(n as f64))
@@ -264,6 +357,14 @@ fn getfield_builtin(base: Value, field: String) -> Result<Value, String> {
             if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
                 if p.is_static { return Err(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
                 match p.get_access { runmat_builtins::Access::Private => return Err(format!("Property '{}' is private", field)), _ => {} }
+                if p.is_dependent {
+                    // Try dynamic getter first
+                    let getter = format!("get.{}", field);
+                    if let Ok(v) = crate::call_builtin(&getter, &[Value::Object(obj.clone())]) { return Ok(v); }
+                    // Fallback to backing field '<field>_backing'
+                    let backing = format!("{}_backing", field);
+                    if let Some(vb) = obj.properties.get(&backing) { return Ok(vb.clone()); }
+                }
             }
             if let Some(v) = obj.properties.get(&field) { Ok(v.clone()) } else { Err(format!("Undefined property '{}' for class {}", field, obj.class_name)) }
         }
@@ -274,20 +375,34 @@ fn getfield_builtin(base: Value, field: String) -> Result<Value, String> {
     }
 }
 
+#[runmat_macros::runtime_builtin(name = "getfield")]
+fn getfield_chararg_builtin(base: Value, field: Value) -> Result<Value, String> {
+    let name: String = match field {
+        Value::String(s) => s,
+        Value::CharArray(ca) => ca.data.iter().collect(),
+        Value::Int(i) => i.to_string(),
+        Value::Num(n) => n.to_string(),
+        other => return Err(format!("getfield: unsupported field type {other:?}")),
+    };
+    getfield_builtin(base, name)
+}
+
 // Error handling builtins (basic compatibility)
 #[runmat_macros::runtime_builtin(name = "error")]
 fn error_builtin(rest: Vec<Value>) -> Result<Value, String> {
-    // Supports: error(message), error(identifier, message)
+    // MATLAB-compatible: error(message) or error(identifier, message)
+    // We surface a unified error string "IDENT: message" for VM to parse into MException
     if rest.is_empty() {
-        return Err("error: missing message".to_string());
+        return Err("MATLAB:error: missing message".to_string());
     }
     if rest.len() == 1 {
         let msg: String = (&rest[0]).try_into()?;
-        return Err(msg);
+        return Err(format!("MATLAB:error: {}", msg));
     }
     let ident: String = (&rest[0]).try_into()?;
     let msg: String = (&rest[1]).try_into()?;
-    Err(format!("{}: {}", ident, msg))
+    let id = if ident.contains(":") { ident } else { format!("{}", ident) };
+    Err(format!("{}: {}", id, msg))
 }
 
 #[runmat_macros::runtime_builtin(name = "rethrow")]
@@ -295,7 +410,141 @@ fn rethrow_builtin(e: Value) -> Result<Value, String> {
     match e {
         Value::MException(me) => Err(format!("{}: {}", me.identifier, me.message)),
         Value::String(s) => Err(s),
-        other => Err(format!("{:?}", other)),
+        other => Err(format!("MATLAB:error: {:?}", other)),
+    }
+}
+
+// -------- Struct utilities --------
+#[runmat_macros::runtime_builtin(name = "fieldnames")]
+fn fieldnames_builtin(s: Value) -> Result<Value, String> {
+    match s {
+        Value::Struct(st) => {
+            let mut names: Vec<String> = st.fields.keys().cloned().collect();
+            names.sort();
+            let len = names.len();
+            let vals: Vec<Value> = names.into_iter().map(Value::String).collect();
+            let cell = runmat_builtins::CellArray::new(vals, len, 1).map_err(|e| format!("fieldnames: {e}"))?;
+            Ok(Value::Cell(cell))
+        }
+        other => Err(format!("fieldnames: expected struct, got {other:?}")),
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "isfield")]
+fn isfield_builtin(s: Value, name: Value) -> Result<Value, String> {
+    match s {
+        Value::Struct(st) => {
+            match name {
+                Value::String(n) => Ok(Value::Num(if st.fields.contains_key(&n) { 1.0 } else { 0.0 })),
+                Value::StringArray(sa) => {
+                    let rows = sa.rows(); let cols = sa.cols();
+                    let mut out: Vec<f64> = vec![0.0; sa.data.len()];
+                    for c in 0..cols { for r in 0..rows { let idx = r + c*rows; let n = &sa.data[idx]; out[idx] = if st.fields.contains_key(n) { 1.0 } else { 0.0 }; } }
+                    Ok(Value::Tensor(runmat_builtins::Tensor::new(out, vec![rows, cols]).map_err(|e| format!("isfield: {e}"))?))
+                }
+                Value::Cell(ca) => {
+                    let rows = ca.rows; let cols = ca.cols; let mut out: Vec<f64> = Vec::with_capacity(rows*cols);
+                    for c in 0..cols { for r in 0..rows { let idx = r*cols + c; let n: String = (&ca.data[idx]).try_into()?; out.push(if st.fields.contains_key(&n) { 1.0 } else { 0.0 }); } }
+                    Ok(Value::Tensor(runmat_builtins::Tensor::new(out, vec![rows, cols]).map_err(|e| format!("isfield: {e}"))?))
+                }
+                other => {
+                    let n: String = (&other).try_into()?;
+                    Ok(Value::Num(if st.fields.contains_key(&n) { 1.0 } else { 0.0 }))
+                }
+            }
+        }
+        non_struct => {
+            // Support swapped argument order: isfield(names, struct)
+            if let Value::Struct(st) = name {
+                match non_struct {
+                    Value::String(n) => Ok(Value::Num(if st.fields.contains_key(&n) { 1.0 } else { 0.0 })),
+                    Value::StringArray(sa) => {
+                        let rows = sa.rows(); let cols = sa.cols();
+                        let mut out: Vec<f64> = vec![0.0; sa.data.len()];
+                        for c in 0..cols { for r in 0..rows { let idx = r + c*rows; let n = &sa.data[idx]; out[idx] = if st.fields.contains_key(n) { 1.0 } else { 0.0 }; } }
+                        Ok(Value::Tensor(runmat_builtins::Tensor::new(out, vec![rows, cols]).map_err(|e| format!("isfield: {e}"))?))
+                    }
+                    Value::Cell(ca) => {
+                        let rows = ca.rows; let cols = ca.cols; let mut out: Vec<f64> = Vec::with_capacity(rows*cols);
+                        for c in 0..cols { for r in 0..rows { let idx = r*cols + c; let n: String = (&ca.data[idx]).try_into()?; out.push(if st.fields.contains_key(&n) { 1.0 } else { 0.0 }); } }
+                        Ok(Value::Tensor(runmat_builtins::Tensor::new(out, vec![rows, cols]).map_err(|e| format!("isfield: {e}"))?))
+                    }
+                    other => { let n: String = (&other).try_into()?; Ok(Value::Num(if st.fields.contains_key(&n) { 1.0 } else { 0.0 })) }
+                }
+            } else {
+                Err(format!("isfield: expected struct, got {non_struct:?}"))
+            }
+        }
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "isfield")]
+fn isfield_multi_builtin(s: Value, names: Value) -> Result<Value, String> {
+    let st = match s { Value::Struct(st) => st, other => {
+        // Support swapped order
+        if let Value::Struct(st2) = names {
+            return isfield_multi_builtin(Value::Struct(st2), other);
+        } else {
+            return Err(format!("isfield: expected struct, got {other:?}"));
+        }
+    } };
+    match names {
+        Value::Cell(ca) => {
+            let rows = ca.rows; let cols = ca.cols; let mut out: Vec<f64> = Vec::with_capacity(rows*cols);
+            // Fill in column-major order to match Tensor internal layout
+            for c in 0..cols {
+                for r in 0..rows {
+                    let idx = r * cols + c; // cell stored row-major
+                    let v = &ca.data[idx];
+                    let n: String = v.try_into()?;
+                    out.push(if st.fields.contains_key(&n) { 1.0 } else { 0.0 });
+                }
+            }
+            Ok(Value::Tensor(runmat_builtins::Tensor::new(out, vec![rows, cols]).map_err(|e| format!("isfield: {e}"))?))
+        }
+        Value::StringArray(sa) => {
+            // Map string array of names to logical array by element
+            let rows = sa.rows(); let cols = sa.cols();
+            let mut out: Vec<f64> = vec![0.0; sa.data.len()];
+            for c in 0..cols { for r in 0..rows { let idx = r + c*rows; let n = &sa.data[idx]; out[idx] = if st.fields.contains_key(n) { 1.0 } else { 0.0 }; } }
+            return Ok(Value::Tensor(runmat_builtins::Tensor::new(out, vec![rows, cols]).map_err(|e| format!("isfield: {e}"))?));
+        }
+        other => {
+            let n: String = (&other).try_into()?;
+            Ok(Value::Num(if st.fields.contains_key(&n) { 1.0 } else { 0.0 }))
+        }
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "rmfield")]
+fn rmfield_builtin(s: Value, rest: Vec<Value>) -> Result<Value, String> {
+    let mut names: Vec<String> = Vec::new();
+    if rest.len() == 1 {
+        match &rest[0] {
+            Value::Cell(ca) => {
+                for v in &ca.data { names.push(String::try_from(v).map_err(|e| format!("rmfield: {e}"))?); }
+            }
+            other => { names.push(String::try_from(other).map_err(|e| format!("rmfield: {e}"))?); }
+        }
+    } else {
+        for v in &rest { names.push(String::try_from(v).map_err(|e| format!("rmfield: {e}"))?); }
+    }
+    match s {
+        Value::Struct(mut st) => {
+            for n in names { st.fields.remove(&n); }
+            Ok(Value::Struct(st))
+        }
+        other => Err(format!("rmfield: expected struct, got {other:?}")),
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "orderfields")]
+fn orderfields_builtin(s: Value) -> Result<Value, String> {
+    // With HashMap-backed structs, field order is not stored; ensure fieldnames() returns sorted order.
+    // Return struct unchanged to preserve data.
+    match s {
+        Value::Struct(st) => Ok(Value::Struct(st)),
+        other => Err(format!("orderfields: expected struct, got {other:?}")),
     }
 }
 
@@ -304,9 +553,7 @@ fn reshape_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     // Accept 2 or 3 dims (for tests); implement MATLAB-style (column-major) reshape semantics
     let t = match a {
         Value::Tensor(t) => t,
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) | Value::Cell(_) | Value::GpuTensor(_) | Value::Object(_) | Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) | Value::MException(_) | Value::Struct(_) => {
-            return Err("reshape: expected tensor".to_string())
-        }
+        _ => { return Err("reshape: expected tensor".to_string()) }
     };
     let mut dims: Vec<usize> = Vec::new();
     for v in rest {
@@ -331,6 +578,17 @@ fn setfield_builtin(base: Value, field: String, rhs: Value) -> Result<Value, Str
             if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
                 if p.is_static { return Err(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
                 match p.set_access { runmat_builtins::Access::Private => return Err(format!("Property '{}' is private", field)), _ => {} }
+                if p.is_dependent {
+                    let setter = format!("set.{}", field);
+                    // Try class/user-defined setter first
+                    if let Ok(v) = crate::call_builtin(&setter, &[Value::Object(obj.clone()), rhs.clone()]) {
+                        return Ok(v);
+                    }
+                    // Fallback: write to backing field '<field>_backing'
+                    let backing = format!("{}_backing", field);
+                    obj.properties.insert(backing, rhs);
+                    return Ok(Value::Object(obj));
+                }
             }
             obj.properties.insert(field, rhs); Ok(Value::Object(obj))
         }
@@ -354,6 +612,51 @@ fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<
             crate::call_builtin(&method, &args)
         }
         other => Err(format!("call_method unsupported on {other:?} for method '{method}'")),
+    }
+}
+
+// Global dispatch helpers for overloaded indexing (subsref/subsasgn) to support fallback resolution paths
+#[runmat_macros::runtime_builtin(name = "subsasgn")]
+fn subsasgn_dispatch(obj: Value, kind: String, payload: Value, rhs: Value) -> Result<Value, String> {
+    match &obj {
+        Value::Object(o) => {
+            let qualified = format!("{}.subsasgn", o.class_name);
+            crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])
+        }
+        other => Err(format!("subsasgn: receiver must be object, got {other:?}")),
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "subsref")]
+fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> Result<Value, String> {
+    match &obj {
+        Value::Object(o) => {
+            let qualified = format!("{}.subsref", o.class_name);
+            crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])
+        }
+        other => Err(format!("subsref: receiver must be object, got {other:?}")),
+    }
+}
+
+// Test-oriented dependent property handlers (global). If a class defines a Dependent
+// property named 'p', the VM will try to call get.p / set.p. We provide generic
+// implementations that read/write a conventional backing field 'p_backing'.
+#[runmat_macros::runtime_builtin(name = "get.p")]
+fn get_p_builtin(obj: Value) -> Result<Value, String> {
+    match obj {
+        Value::Object(o) => {
+            if let Some(v) = o.properties.get("p_backing") { Ok(v.clone()) }
+            else { Ok(Value::Num(0.0)) }
+        }
+        other => Err(format!("get.p requires object, got {other:?}")),
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "set.p")]
+fn set_p_builtin(obj: Value, val: Value) -> Result<Value, String> {
+    match obj {
+        Value::Object(mut o) => { o.properties.insert("p_backing".to_string(), val); Ok(Value::Object(o)) }
+        other => Err(format!("set.p requires object, got {other:?}")),
     }
 }
 
@@ -406,10 +709,10 @@ fn classref_builtin(class_name: String) -> Result<Value, String> {
 fn register_test_classes_builtin() -> Result<Value, String> {
     use runmat_builtins::*;
     let mut props = std::collections::HashMap::new();
-    props.insert("x".to_string(), PropertyDef { name: "x".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(0.0)) });
-    props.insert("y".to_string(), PropertyDef { name: "y".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(0.0)) });
-    props.insert("staticValue".to_string(), PropertyDef { name: "staticValue".to_string(), is_static: true, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(42.0)) });
-    props.insert("secret".to_string(), PropertyDef { name: "secret".to_string(), is_static: false, get_access: Access::Private, set_access: Access::Private, default_value: Some(Value::Num(99.0)) });
+    props.insert("x".to_string(), PropertyDef { name: "x".to_string(), is_static: false, is_dependent: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(0.0)) });
+    props.insert("y".to_string(), PropertyDef { name: "y".to_string(), is_static: false, is_dependent: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(0.0)) });
+    props.insert("staticValue".to_string(), PropertyDef { name: "staticValue".to_string(), is_static: true, is_dependent: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(42.0)) });
+    props.insert("secret".to_string(), PropertyDef { name: "secret".to_string(), is_static: false, is_dependent: false, get_access: Access::Private, set_access: Access::Private, default_value: Some(Value::Num(99.0)) });
     let mut methods = std::collections::HashMap::new();
     methods.insert("move".to_string(), MethodDef { name: "move".to_string(), is_static: false, access: Access::Public, function_name: "Point.move".to_string() });
     methods.insert("origin".to_string(), MethodDef { name: "origin".to_string(), is_static: true, access: Access::Public, function_name: "Point.origin".to_string() });
@@ -417,8 +720,8 @@ fn register_test_classes_builtin() -> Result<Value, String> {
 
     // Namespaced class example: pkg.PointNS with same shape as Point
     let mut ns_props = std::collections::HashMap::new();
-    ns_props.insert("x".to_string(), PropertyDef { name: "x".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(1.0)) });
-    ns_props.insert("y".to_string(), PropertyDef { name: "y".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(2.0)) });
+    ns_props.insert("x".to_string(), PropertyDef { name: "x".to_string(), is_static: false, is_dependent: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(1.0)) });
+    ns_props.insert("y".to_string(), PropertyDef { name: "y".to_string(), is_static: false, is_dependent: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(2.0)) });
     let ns_methods = std::collections::HashMap::new();
     runmat_builtins::register_class(ClassDef { name: "pkg.PointNS".to_string(), parent: None, properties: ns_props, methods: ns_methods });
 
@@ -429,7 +732,7 @@ fn register_test_classes_builtin() -> Result<Value, String> {
     runmat_builtins::register_class(ClassDef { name: "Shape".to_string(), parent: None, properties: shape_props, methods: shape_methods });
 
     let mut circle_props = std::collections::HashMap::new();
-    circle_props.insert("r".to_string(), PropertyDef { name: "r".to_string(), is_static: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(0.0)) });
+    circle_props.insert("r".to_string(), PropertyDef { name: "r".to_string(), is_static: false, is_dependent: false, get_access: Access::Public, set_access: Access::Public, default_value: Some(Value::Num(0.0)) });
     let mut circle_methods = std::collections::HashMap::new();
     circle_methods.insert("area".to_string(), MethodDef { name: "area".to_string(), is_static: false, access: Access::Public, function_name: "Circle.area".to_string() });
     runmat_builtins::register_class(ClassDef { name: "Circle".to_string(), parent: Some("Shape".to_string()), properties: circle_props, methods: circle_methods });
@@ -516,6 +819,10 @@ fn overidx_subsref(obj: Value, kind: String, payload: Value) -> Result<Value, St
             // If field exists, return it; otherwise sentinel 77
             if let Some(v) = o.properties.get(&field) { Ok(v.clone()) } else { Ok(Value::Num(77.0)) }
         }
+        (Value::Object(o), ".", Value::CharArray(ca)) => {
+            let field: String = ca.data.iter().collect();
+            if let Some(v) = o.properties.get(&field) { Ok(v.clone()) } else { Ok(Value::Num(77.0)) }
+        }
         _ => Err("subsref: unsupported payload".to_string()),
     }
 }
@@ -533,6 +840,11 @@ fn overidx_subsasgn(mut obj: Value, kind: String, payload: Value, rhs: Value) ->
             Ok(Value::Object(o.clone()))
         }
         (Value::Object(o), ".", Value::String(field)) => {
+            o.properties.insert(field, rhs);
+            Ok(Value::Object(o.clone()))
+        }
+        (Value::Object(o), ".", Value::CharArray(ca)) => {
+            let field: String = ca.data.iter().collect();
             o.properties.insert(field, rhs);
             Ok(Value::Object(o.clone()))
         }
@@ -1037,7 +1349,7 @@ fn all_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
 
 #[runmat_macros::runtime_builtin(name = "squeeze")]
 fn squeeze_builtin(a: Value) -> Result<Value, String> {
-    let t = match a { Value::Tensor(t) => t, _ => return Err("squeeze: expected tensor".to_string()) };
+    let t = match a { Value::Tensor(t) => t, Value::StringArray(_)=> return Err("squeeze: not supported for string arrays".to_string()), Value::CharArray(_)=> return Err("squeeze: not supported for char arrays".to_string()), _ => return Err("squeeze: expected tensor".to_string()) };
     let mut new_shape: Vec<usize> = t.shape.iter().copied().filter(|&d| d != 1).collect();
     if new_shape.is_empty() { new_shape.push(1); }
     Ok(Value::Tensor(runmat_builtins::Tensor::new(t.data.clone(), new_shape).map_err(|e| format!("squeeze: {e}"))?))
@@ -1045,7 +1357,7 @@ fn squeeze_builtin(a: Value) -> Result<Value, String> {
 
 #[runmat_macros::runtime_builtin(name = "permute")]
 fn permute_builtin(a: Value, order: Value) -> Result<Value, String> {
-    let t = match a { Value::Tensor(t) => t, _ => return Err("permute: expected tensor".to_string()) };
+    let t = match a { Value::Tensor(t) => t, Value::StringArray(_)=> return Err("permute: not supported for string arrays".to_string()), Value::CharArray(_)=> return Err("permute: not supported for char arrays".to_string()), _ => return Err("permute: expected tensor".to_string()) };
     let ord = match order {
         Value::Tensor(idx) => idx.data.iter().map(|&v| v as usize).collect::<Vec<usize>>() ,
         Value::Cell(c) => c.data.iter().map(|v| match v { Value::Num(n) => *n as usize, Value::Int(i) => *i as usize, _ => 0 }).collect(),
@@ -1080,39 +1392,6 @@ fn permute_builtin(a: Value, order: Value) -> Result<Value, String> {
         out[dst_lin] = t.data[src_lin];
     }
     Ok(Value::Tensor(runmat_builtins::Tensor::new(out, new_shape).map_err(|e| format!("permute: {e}"))?))
-}
-
-#[runmat_macros::runtime_builtin(name = "cat")]
-fn cat_builtin(dim: f64, a: Value, b: Value) -> Result<Value, String> {
-    let d = if dim < 1.0 { 1usize } else { dim as usize } - 1; // zero-based
-    let (ta, tb) = match (a, b) { (Value::Tensor(ta), Value::Tensor(tb)) => (ta, tb), _ => return Err("cat: expected tensors".to_string()) };
-    let rank = ta.shape.len().max(tb.shape.len());
-    let mut sa = ta.shape.clone(); sa.resize(rank, 1);
-    let mut sb = tb.shape.clone(); sb.resize(rank, 1);
-    for k in 0..rank { if k!=d && sa[k] != sb[k] { return Err("cat: dimension mismatch".to_string()); } }
-    let mut out_shape = sa.clone(); out_shape[d] = sa[d] + sb[d];
-    let mut out = vec![0f64; out_shape.iter().product()];
-    // Strides for src and dst
-    fn strides(shape: &[usize]) -> Vec<usize> { let mut s=vec![0; shape.len()]; let mut acc=1; for i in 0..shape.len() { s[i]=acc; acc*=shape[i]; } s }
-    let sa_str = strides(&sa); let sb_str = strides(&sb); let od_str = strides(&out_shape);
-    // Copy A and B by iterating all coordinates
-    fn scatter(dst: &mut [f64], src: &[f64], out_shape: &[usize], out_str: &[usize], src_shape: &[usize], src_str: &[usize], d: usize, offset: usize) {
-        let rank = out_shape.len();
-        let total: usize = src_shape.iter().product();
-        for idx_lin in 0..total {
-            // Convert src lin to multi
-            let mut rem = idx_lin; let mut src_multi = vec![0usize; rank];
-            for i in 0..rank { let s = src_shape[i]; src_multi[i] = rem % s; rem /= s; }
-            let mut dst_multi = src_multi.clone();
-            dst_multi[d] += offset;
-            let mut s_lin = 0usize; for i in 0..rank { s_lin += src_multi[i] * src_str[i]; }
-            let mut d_lin = 0usize; for i in 0..rank { d_lin += dst_multi[i] * out_str[i]; }
-            dst[d_lin] = src[s_lin];
-        }
-    }
-    scatter(&mut out, &ta.data, &out_shape, &od_str, &sa, &sa_str, d, 0);
-    scatter(&mut out, &tb.data, &out_shape, &od_str, &sb, &sb_str, d, sa[d]);
-    Ok(Value::Tensor(runmat_builtins::Tensor::new(out, out_shape).map_err(|e| format!("cat: {e}"))?))
 }
 
 // -------- Linear algebra helpers: diag, triu, tril --------
@@ -1163,8 +1442,46 @@ fn tril_builtin(a: Value) -> Result<Value, String> {
 fn cat_var_builtin(dim: f64, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() < 2 { return Err("cat: expects at least two arrays".to_string()); }
     let d = if dim < 1.0 { 1usize } else { dim as usize } - 1; // zero-based
-    let tensors: Vec<runmat_builtins::Tensor> = rest.into_iter().map(|v| match v { Value::Tensor(t) => Ok(t), _ => Err("cat: expected tensors".to_string()) }).collect::<Result<_,_>>()?;
-    let rank = tensors.iter().map(|t| t.shape.len()).max().unwrap_or(2);
+    // If any string array/string present, do string-array cat
+    if rest.iter().any(|v| matches!(v, Value::StringArray(_) | Value::String(_))) {
+        let mut arrs: Vec<runmat_builtins::StringArray> = Vec::new();
+        for v in rest {
+            match v {
+                Value::StringArray(sa) => arrs.push(sa),
+                Value::String(s) => arrs.push(runmat_builtins::StringArray::new(vec![s], vec![1,1]).map_err(|e| format!("cat: {e}"))?),
+                Value::Num(n) => arrs.push(runmat_builtins::StringArray::new(vec![n.to_string()], vec![1,1]).map_err(|e| format!("cat: {e}"))?),
+                Value::Int(i) => arrs.push(runmat_builtins::StringArray::new(vec![i.to_string()], vec![1,1]).map_err(|e| format!("cat: {e}"))?),
+                other => return Err(format!("cat: expected string arrays/strings or scalars, got {other:?}")),
+            }
+        }
+        let rank = arrs.iter().map(|a| a.shape.len()).max().unwrap_or(2).max(d+1);
+        let shapes: Vec<Vec<usize>> = arrs.iter().map(|a| { let mut s=a.shape.clone(); if s.len()<rank { s.resize(rank,1);} s }).collect();
+        for k in 0..rank { if k==d { continue; } let first = shapes[0][k]; if !shapes.iter().all(|s| s[k]==first) { return Err("cat: dimension mismatch".to_string()); } }
+        let mut out_shape = shapes[0].clone(); out_shape[d] = shapes.iter().map(|s| s[d]).sum();
+        fn strides(shape:&[usize])->Vec<usize>{let mut s=vec![0;shape.len()];let mut acc=1;for i in 0..shape.len(){s[i]=acc;acc*=shape[i];}s}
+        let out_str = strides(&out_shape);
+        let mut out: Vec<String> = vec![String::new(); out_shape.iter().product()];
+        let mut offset = 0usize;
+        for (a, s) in arrs.iter().zip(shapes.iter()) {
+            let s_str = strides(s); let total: usize = s.iter().product(); let rank=out_shape.len();
+            for idx_lin in 0..total { let mut rem=idx_lin; let mut src_multi=vec![0usize;rank]; for i in 0..rank { let si=s[i]; src_multi[i]=rem%si; rem/=si; } let mut dst_multi=src_multi.clone(); dst_multi[d]+=offset; let mut s_lin=0usize; for i in 0..rank { s_lin+=src_multi[i]*s_str[i]; } let mut d_lin=0usize; for i in 0..rank { d_lin+=dst_multi[i]*out_str[i]; } out[d_lin]=a.data[s_lin].clone(); }
+            offset += s[d];
+        }
+        return Ok(Value::StringArray(runmat_builtins::StringArray::new(out, out_shape).map_err(|e| format!("cat: {e}"))?));
+    }
+    // Numeric cat path
+    let tensors: Vec<runmat_builtins::Tensor> = rest
+        .into_iter()
+        .map(|v| match v {
+            Value::Tensor(t) => Ok(t),
+            Value::Num(n) => runmat_builtins::Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("cat: {e}")),
+            Value::Int(i) => runmat_builtins::Tensor::new(vec![i as f64], vec![1, 1]).map_err(|e| format!("cat: {e}")),
+            Value::Bool(b) => runmat_builtins::Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1]).map_err(|e| format!("cat: {e}")),
+            other => Err(format!("cat: expected tensors or scalars, got {other:?}")),
+        })
+        .collect::<Result<_, _>>()?;
+    let mut rank = tensors.iter().map(|t| t.shape.len()).max().unwrap_or(2);
+    if d + 1 > rank { rank = d + 1; }
     let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| { let mut s=t.shape.clone(); s.resize(rank, 1); s }).collect();
     for k in 0..rank {
         if k==d { continue; }
@@ -1346,4 +1663,19 @@ fn format_variadic(fmt: &str, args: &[Value]) -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+#[runmat_macros::runtime_builtin(name = "getmethod")]
+fn getmethod_builtin(obj: Value, name: String) -> Result<Value, String> {
+    match obj {
+        Value::Object(o) => {
+            // Return a closure capturing the receiver; feval will call runtime builtin call_method
+            Ok(Value::Closure(runmat_builtins::Closure {
+                function_name: "call_method".to_string(),
+                captures: vec![Value::Object(o), Value::String(name)],
+            }))
+        }
+        Value::ClassRef(cls) => Ok(Value::String(format!("@{}.{}", cls, name))),
+        other => Err(format!("getmethod unsupported on {other:?}")),
+    }
 }

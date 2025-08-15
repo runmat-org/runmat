@@ -653,7 +653,7 @@ fn execute_user_function_isolated(
     let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;
 
-    let func_result_vars = runmat_ignition::interpret_with_vars(&func_bytecode, &mut func_vars)
+    let func_result_vars = runmat_ignition::interpret_with_vars(&func_bytecode, &mut func_vars, Some(function_def.name.as_str()))
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {e}")))?;
 
     // Copy back the modified variables
@@ -1025,7 +1025,7 @@ impl TurbineEngine {
         debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
 
         // Use the main Ignition interpreter which has full feature support
-        match runmat_ignition::interpret_with_vars(bytecode, vars) {
+        match runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>")) {
             Ok(_) => Ok((0, false)), // false indicates interpreter was used, vars are updated in-place
             Err(e) => Err(TurbineError::ExecutionError(e)),
         }

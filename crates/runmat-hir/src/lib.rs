@@ -137,114 +137,127 @@ pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
 pub fn infer_function_output_types(prog: &HirProgram) -> std::collections::HashMap<String, Vec<Type>> {
     use std::collections::HashMap;
 
-    fn join_type(a: &Type, b: &Type) -> Type {
-        a.unify(b)
-    }
-
-    fn join_env(a: &std::collections::HashMap<VarId, Type>, b: &std::collections::HashMap<VarId, Type>) -> std::collections::HashMap<VarId, Type> {
-        let mut out = a.clone();
-        for (k, v) in b { out.entry(*k).and_modify(|t| *t = join_type(t, v)).or_insert_with(|| v.clone()); }
-        out
-    }
-
-    #[derive(Clone)]
-    struct Analysis { exits: Vec<std::collections::HashMap<VarId, Type>>, fallthrough: Option<std::collections::HashMap<VarId, Type>> }
-
-    fn analyze_stmts(outputs: &[VarId], stmts: &[HirStmt], mut env: std::collections::HashMap<VarId, Type>) -> Analysis {
-        let mut exits = Vec::new();
-        let mut i = 0usize;
-        while i < stmts.len() {
-            match &stmts[i] {
-                HirStmt::Assign(var, expr, _) => { env.insert(*var, expr.ty.clone()); }
-                HirStmt::MultiAssign(vars, expr, _) => {
-                    for v in vars { if let Some(v) = v { env.insert(*v, expr.ty.clone()); } }
-                }
-                HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
-                HirStmt::Return => { exits.push(env.clone()); return Analysis { exits, fallthrough: None }; }
-                HirStmt::If { cond: _, then_body, elseif_blocks, else_body } => {
-                    let then_a = analyze_stmts(outputs, then_body, env.clone());
-                    let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
-                    let mut all_exits = then_a.exits.clone();
-                    for (c, b) in elseif_blocks { let _ = c; let a = analyze_stmts(outputs, b, env.clone()); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
-                    if let Some(else_b) = else_body { let a = analyze_stmts(outputs, else_b, env.clone()); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
-                    else { out_env = join_env(&out_env, &env); }
-                    env = out_env; exits.extend(all_exits);
-                }
-                HirStmt::While { cond: _, body } => { let a = analyze_stmts(outputs, body, env.clone()); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
-                HirStmt::For { var, expr, body } => { env.insert(*var, expr.ty.clone()); let a = analyze_stmts(outputs, body, env.clone()); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
-                HirStmt::Switch { expr: _, cases, otherwise } => {
-                    let mut out_env: Option<HashMap<VarId, Type>> = None;
-                    for (_v, b) in cases { let a = analyze_stmts(outputs, b, env.clone()); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
-                    if let Some(otherwise) = otherwise { let a = analyze_stmts(outputs, otherwise, env.clone()); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
-                    else { out_env = Some(match out_env { Some(curr) => join_env(&curr, &env), None => env.clone() }); }
-                    if let Some(f) = out_env { env = f; }
-                }
-                HirStmt::TryCatch { try_body, catch_var: _, catch_body } => {
-                    let a_try = analyze_stmts(outputs, try_body, env.clone());
-                    let a_catch = analyze_stmts(outputs, catch_body, env.clone());
-                    let mut out_env = a_try.fallthrough.clone().unwrap_or_else(|| env.clone());
-                    if let Some(f) = a_catch.fallthrough { out_env = join_env(&out_env, &f); }
-                    env = out_env; exits.extend(a_try.exits); exits.extend(a_catch.exits);
-                }
-                HirStmt::Global(_) | HirStmt::Persistent(_) => {}
-                HirStmt::Function { .. } => {}
-                HirStmt::ClassDef { .. } => {}
-                HirStmt::AssignLValue(_, expr, _) => { let _ = &expr.ty; }
-                HirStmt::Import { .. } => {}
-            }
-            i += 1;
-        }
-        Analysis { exits, fallthrough: Some(env) }
-    }
-
-    // Walk functions at top-level and methods in class members
-    let mut out: HashMap<String, Vec<Type>> = HashMap::new();
-    for stmt in &prog.body {
-        match stmt {
-            HirStmt::Function { name, outputs, body, .. } => {
-                let analysis = analyze_stmts(outputs, body, HashMap::new());
-                let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
-                let mut accumulate = |env: &std::collections::HashMap<VarId, Type>| {
-                    for (i, out_id) in outputs.iter().enumerate() {
-                        if let Some(t) = env.get(out_id) { per_output[i] = per_output[i].unify(t); }
-                    }
-                };
-                for e in &analysis.exits { accumulate(e); }
-                if let Some(f) = &analysis.fallthrough { accumulate(f); }
-                out.insert(name.clone(), per_output);
-            }
-            HirStmt::ClassDef { name: _cname, members, .. } => {
-                for m in members {
-                    if let HirClassMember::Methods { body, .. } = m {
-                        for s in body {
-                            if let HirStmt::Function { name, outputs, body, .. } = s {
-                                let analysis = analyze_stmts(outputs, body, HashMap::new());
-                                let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
-                                let mut accumulate = |env: &std::collections::HashMap<VarId, Type>| {
-                                    for (i, out_id) in outputs.iter().enumerate() {
-                                        if let Some(t) = env.get(out_id) { per_output[i] = per_output[i].unify(t); }
-                                    }
+    fn infer_expr_type(expr: &HirExpr, env: &HashMap<VarId, Type>, func_returns: &HashMap<String, Vec<Type>>) -> Type {
+        fn unify_tensor(a: &Type, b: &Type) -> Type {
+            match (a, b) {
+                (Type::Tensor { shape: sa }, Type::Tensor { shape: sb }) => {
+                    match (sa, sb) {
+                        (Some(sa), Some(sb)) => {
+                            let maxr = sa.len().max(sb.len());
+                            let mut out: Vec<Option<usize>> = Vec::with_capacity(maxr);
+                            for i in 0..maxr {
+                                let da = sa.get(i).cloned().unwrap_or(None);
+                                let db = sb.get(i).cloned().unwrap_or(None);
+                                let d = match (da, db) {
+                                    (Some(a), Some(b)) => if a == b { Some(a) } else if a == 1 { Some(b) } else if b == 1 { Some(a) } else { None },
+                                    (Some(a), None) => Some(a),
+                                    (None, Some(b)) => Some(b),
+                                    (None, None) => None,
                                 };
-                                for e in &analysis.exits { accumulate(e); }
-                                if let Some(f) = &analysis.fallthrough { accumulate(f); }
-                                out.insert(name.clone(), per_output);
+                                out.push(d);
                             }
+                            Type::Tensor { shape: Some(out) }
+                        }
+                        _ => Type::tensor(),
+                    }
+                }
+                (Type::Tensor { .. }, _) | (_, Type::Tensor { .. }) => Type::tensor(),
+                _ => Type::tensor(),
+            }
+        }
+        fn index_tensor_shape(base: &Type, idxs: &[HirExpr], env: &HashMap<VarId, Type>, func_returns: &HashMap<String, Vec<Type>>) -> Type {
+            // Compute output tensor shape after indexing; conservative unknowns when necessary
+            let idx_types: Vec<Type> = idxs.iter().map(|e| infer_expr_type(e, env, func_returns)).collect();
+            match base {
+                Type::Tensor { shape: Some(dims) } => {
+                    let rank = dims.len();
+                    let mut out: Vec<Option<usize>> = Vec::new();
+                    for i in 0..rank {
+                        if i < idx_types.len() {
+                            match idx_types[i] {
+                                Type::Int | Type::Num | Type::Bool => { /* drop this dim */ }
+                                _ => { out.push(None); }
+                            }
+                        } else {
+                            out.push(dims[i]);
                         }
                     }
+                    if out.is_empty() { Type::Num } else { Type::Tensor { shape: Some(out) } }
+                }
+                Type::Tensor { shape: None } => {
+                    // If all provided indices are scalar and there would be no remaining dims, return Num, else unknown tensor
+                    let scalar_count = idx_types.iter().filter(|t| matches!(t, Type::Int | Type::Num | Type::Bool)).count();
+                    if scalar_count == idx_types.len() { Type::Num } else { Type::tensor() }
+                }
+                _ => Type::Unknown,
+            }
+        }
+        use HirExprKind as K;
+        match &expr.kind {
+            K::Number(_) => Type::Num,
+            K::String(_) => Type::String,
+            K::Constant(_) => Type::Num,
+            K::Var(id) => env.get(id).cloned().unwrap_or(Type::Unknown),
+            K::Unary(_, e) => infer_expr_type(e, env, func_returns),
+            K::Binary(a, op, b) => {
+                let ta = infer_expr_type(a, env, func_returns);
+                let tb = infer_expr_type(b, env, func_returns);
+                match op {
+                    parser::BinOp::Add | parser::BinOp::Sub | parser::BinOp::Mul | parser::BinOp::Div | parser::BinOp::Pow | parser::BinOp::LeftDiv
+                    | parser::BinOp::ElemMul | parser::BinOp::ElemDiv | parser::BinOp::ElemPow | parser::BinOp::ElemLeftDiv => {
+                        if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) { unify_tensor(&ta, &tb) } else { Type::Num }
+                    }
+                    parser::BinOp::Equal | parser::BinOp::NotEqual | parser::BinOp::Less | parser::BinOp::LessEqual | parser::BinOp::Greater | parser::BinOp::GreaterEqual => Type::Bool,
+                    parser::BinOp::AndAnd | parser::BinOp::OrOr | parser::BinOp::BitAnd | parser::BinOp::BitOr => Type::Bool,
+                    parser::BinOp::Colon => Type::tensor(),
                 }
             }
-            _ => {}
+            K::Tensor(rows) => {
+                let r = rows.len();
+                let c = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+                if r > 0 && rows.iter().all(|row| row.len() == c) { Type::tensor_with_shape(vec![r, c]) } else { Type::tensor() }
+            }
+            K::Cell(rows) => {
+                let mut elem_ty: Option<Type> = None;
+                let mut len: usize = 0;
+                for row in rows {
+                    for e in row {
+                        let t = infer_expr_type(e, env, func_returns);
+                        elem_ty = Some(match elem_ty { Some(curr) => curr.unify(&t), None => t });
+                        len += 1;
+                    }
+                }
+                Type::Cell { element_type: elem_ty.map(Box::new), length: Some(len) }
+            }
+            K::Index(base, idxs) => {
+                let bt = infer_expr_type(base, env, func_returns);
+                index_tensor_shape(&bt, idxs, env, func_returns)
+            }
+            K::IndexCell(base, idxs) => {
+                let bt = infer_expr_type(base, env, func_returns);
+                if let Type::Cell { element_type: Some(t), .. } = bt {
+                    let scalar = idxs.len() == 1 && matches!(infer_expr_type(&idxs[0], env, func_returns), Type::Int | Type::Num | Type::Bool | Type::Tensor{..});
+                    if scalar { *t } else { Type::Unknown }
+                } else { Type::Unknown }
+            }
+            K::Range(_, _, _) => Type::tensor(),
+            K::FuncCall(name, _args) => {
+                if let Some(v) = func_returns.get(name) { v.get(0).cloned().unwrap_or(Type::Unknown) }
+                else {
+                    let builtins = runmat_builtins::builtin_functions();
+                    if let Some(b) = builtins.iter().find(|b| b.name == *name) { b.return_type.clone() } else { Type::Unknown }
+                }
+            }
+            K::MethodCall(_, _, _) => Type::Unknown,
+            K::Member(_, _) => Type::Unknown,
+            K::MemberDynamic(_, _) => Type::Unknown,
+            K::AnonFunc { .. } => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
+            K::FuncHandle(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
+            K::MetaClass(_) => Type::String,
+            K::End => Type::Unknown,
+            K::Colon => Type::tensor(),
         }
     }
-    out
-}
-
-/// Infer variable types inside each function by performing a flow-sensitive analysis and
-/// returning the joined environment (types per VarId) at function exits and fallthrough.
-pub fn infer_function_variable_types(
-    prog: &HirProgram,
-) -> std::collections::HashMap<String, std::collections::HashMap<VarId, Type>> {
-    use std::collections::HashMap;
 
     fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
         let mut out = a.clone();
@@ -255,38 +268,36 @@ pub fn infer_function_variable_types(
     #[derive(Clone)]
     struct Analysis { exits: Vec<HashMap<VarId, Type>>, fallthrough: Option<HashMap<VarId, Type>> }
 
-    fn analyze_stmts(stmts: &[HirStmt], mut env: HashMap<VarId, Type>) -> Analysis {
+    fn analyze_stmts(outputs: &[VarId], stmts: &[HirStmt], mut env: HashMap<VarId, Type>, func_returns: &HashMap<String, Vec<Type>>) -> Analysis {
         let mut exits = Vec::new();
         let mut i = 0usize;
         while i < stmts.len() {
             match &stmts[i] {
-                HirStmt::Assign(var, expr, _) => { env.insert(*var, expr.ty.clone()); }
-                HirStmt::MultiAssign(vars, expr, _) => {
-                    for v in vars { if let Some(v) = v { env.insert(*v, expr.ty.clone()); } }
-                }
+                HirStmt::Assign(var, expr, _) => { let t = infer_expr_type(expr, &env, func_returns); env.insert(*var, t); }
+                HirStmt::MultiAssign(vars, expr, _) => { let t = infer_expr_type(expr, &env, func_returns); for v in vars { if let Some(v) = v { env.insert(*v, t.clone()); } } }
                 HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
                 HirStmt::Return => { exits.push(env.clone()); return Analysis { exits, fallthrough: None }; }
-                HirStmt::If { then_body, elseif_blocks, else_body, .. } => {
-                    let then_a = analyze_stmts(then_body, env.clone());
+                HirStmt::If { cond: _, then_body, elseif_blocks, else_body } => {
+                    let then_a = analyze_stmts(outputs, then_body, env.clone(), func_returns);
                     let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
                     let mut all_exits = then_a.exits.clone();
-                    for (_c, b) in elseif_blocks { let a = analyze_stmts(b, env.clone()); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
-                    if let Some(else_b) = else_body { let a = analyze_stmts(else_b, env.clone()); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    for (_c, b) in elseif_blocks { let a = analyze_stmts(outputs, b, env.clone(), func_returns); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    if let Some(else_b) = else_body { let a = analyze_stmts(outputs, else_b, env.clone(), func_returns); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
                     else { out_env = join_env(&out_env, &env); }
                     env = out_env; exits.extend(all_exits);
                 }
-                HirStmt::While { body, .. } => { let a = analyze_stmts(body, env.clone()); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
-                HirStmt::For { var, expr, body } => { env.insert(*var, expr.ty.clone()); let a = analyze_stmts(body, env.clone()); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
-                HirStmt::Switch { cases, otherwise, .. } => {
+                HirStmt::While { cond: _, body } => { let a = analyze_stmts(outputs, body, env.clone(), func_returns); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
+                HirStmt::For { var, expr, body } => { let t = infer_expr_type(expr, &env, func_returns); env.insert(*var, t); let a = analyze_stmts(outputs, body, env.clone(), func_returns); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
+                HirStmt::Switch { expr: _, cases, otherwise } => {
                     let mut out_env: Option<HashMap<VarId, Type>> = None;
-                    for (_v, b) in cases { let a = analyze_stmts(b, env.clone()); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
-                    if let Some(otherwise) = otherwise { let a = analyze_stmts(otherwise, env.clone()); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
+                    for (_v, b) in cases { let a = analyze_stmts(outputs, b, env.clone(), func_returns); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
+                    if let Some(otherwise) = otherwise { let a = analyze_stmts(outputs, otherwise, env.clone(), func_returns); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
                     else { out_env = Some(match out_env { Some(curr) => join_env(&curr, &env), None => env.clone() }); }
                     if let Some(f) = out_env { env = f; }
                 }
-                HirStmt::TryCatch { try_body, catch_body, .. } => {
-                    let a_try = analyze_stmts(try_body, env.clone());
-                    let a_catch = analyze_stmts(catch_body, env.clone());
+                HirStmt::TryCatch { try_body, catch_var: _, catch_body } => {
+                    let a_try = analyze_stmts(outputs, try_body, env.clone(), func_returns);
+                    let a_catch = analyze_stmts(outputs, catch_body, env.clone(), func_returns);
                     let mut out_env = a_try.fallthrough.clone().unwrap_or_else(|| env.clone());
                     if let Some(f) = a_catch.fallthrough { out_env = join_env(&out_env, &f); }
                     env = out_env; exits.extend(a_try.exits); exits.extend(a_catch.exits);
@@ -294,7 +305,198 @@ pub fn infer_function_variable_types(
                 HirStmt::Global(_) | HirStmt::Persistent(_) => {}
                 HirStmt::Function { .. } => {}
                 HirStmt::ClassDef { .. } => {}
-                HirStmt::AssignLValue(_, expr, _) => { let _ = &expr.ty; }
+                HirStmt::AssignLValue(_, expr, _) => { let _ = infer_expr_type(expr, &env, func_returns); }
+                HirStmt::Import { .. } => {}
+            }
+            i += 1;
+        }
+        Analysis { exits, fallthrough: Some(env) }
+    }
+
+    // Collect function names (top-level and class methods)
+    fn collect_function_names(stmts: &[HirStmt], acc: &mut Vec<String>) {
+        for s in stmts {
+            match s {
+                HirStmt::Function { name, .. } => acc.push(name.clone()),
+                HirStmt::ClassDef { members, .. } => {
+                    for m in members {
+                        if let HirClassMember::Methods { body, .. } = m {
+                            collect_function_names(body, acc);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut function_names: Vec<String> = Vec::new();
+    collect_function_names(&prog.body, &mut function_names);
+    let mut returns: HashMap<String, Vec<Type>> = function_names.iter().map(|n| (n.clone(), Vec::new())).collect();
+
+    let mut changed = true;
+    let mut iter = 0usize;
+    let max_iters = 3usize;
+    while changed && iter < max_iters {
+        changed = false; iter += 1;
+        for stmt in &prog.body {
+            match stmt {
+                HirStmt::Function { name, outputs, body, .. } => {
+                    let analysis = analyze_stmts(outputs, body, HashMap::new(), &returns);
+                    let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
+                    let mut accumulate = |env: &HashMap<VarId, Type>| { for (i, out_id) in outputs.iter().enumerate() { if let Some(t) = env.get(out_id) { per_output[i] = per_output[i].unify(t); } } };
+                    for e in &analysis.exits { accumulate(e); }
+                    if let Some(f) = &analysis.fallthrough { accumulate(f); }
+                    if returns.get(name) != Some(&per_output) { returns.insert(name.clone(), per_output); changed = true; }
+                }
+                HirStmt::ClassDef { members, .. } => {
+                    for m in members {
+                        if let HirClassMember::Methods { body, .. } = m {
+                            for s in body {
+                                if let HirStmt::Function { name, outputs, body, .. } = s {
+                                    let analysis = analyze_stmts(outputs, body, HashMap::new(), &returns);
+                                    let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
+                                    let mut accumulate = |env: &HashMap<VarId, Type>| { for (i, out_id) in outputs.iter().enumerate() { if let Some(t) = env.get(out_id) { per_output[i] = per_output[i].unify(t); } } };
+                                    for e in &analysis.exits { accumulate(e); }
+                                    if let Some(f) = &analysis.fallthrough { accumulate(f); }
+                                    if returns.get(name) != Some(&per_output) { returns.insert(name.clone(), per_output); changed = true; }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    returns
+}
+
+/// Infer variable types inside each function by performing a flow-sensitive analysis and
+/// returning the joined environment (types per VarId) at function exits and fallthrough.
+pub fn infer_function_variable_types(
+    prog: &HirProgram,
+) -> std::collections::HashMap<String, std::collections::HashMap<VarId, Type>> {
+    use std::collections::HashMap;
+
+    // Reuse function return inference to improve call result typing
+    let returns_map = infer_function_output_types(prog);
+
+    fn infer_expr_type(expr: &HirExpr, env: &HashMap<VarId, Type>, returns: &HashMap<String, Vec<Type>>) -> Type {
+        use HirExprKind as K;
+        match &expr.kind {
+            K::Number(_) => Type::Num,
+            K::String(_) => Type::String,
+            K::Constant(_) => Type::Num,
+            K::Var(id) => env.get(id).cloned().unwrap_or(Type::Unknown),
+            K::Unary(_, e) => infer_expr_type(e, env, returns),
+            K::Binary(a, op, b) => {
+                let ta = infer_expr_type(a, env, returns);
+                let tb = infer_expr_type(b, env, returns);
+                match op {
+                    parser::BinOp::Add | parser::BinOp::Sub | parser::BinOp::Mul | parser::BinOp::Div | parser::BinOp::Pow | parser::BinOp::LeftDiv => {
+                        if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) { Type::tensor() } else { Type::Num }
+                    }
+                    parser::BinOp::ElemMul | parser::BinOp::ElemDiv | parser::BinOp::ElemPow | parser::BinOp::ElemLeftDiv => {
+                        if matches!(ta, Type::Tensor { .. }) || matches!(tb, Type::Tensor { .. }) { Type::tensor() } else { Type::Num }
+                    }
+                    parser::BinOp::Equal | parser::BinOp::NotEqual | parser::BinOp::Less | parser::BinOp::LessEqual | parser::BinOp::Greater | parser::BinOp::GreaterEqual => Type::Bool,
+                    parser::BinOp::AndAnd | parser::BinOp::OrOr | parser::BinOp::BitAnd | parser::BinOp::BitOr => Type::Bool,
+                    parser::BinOp::Colon => Type::tensor(),
+                }
+            }
+            K::Tensor(rows) => {
+                let r = rows.len();
+                let c = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+                if r > 0 && rows.iter().all(|row| row.len() == c) { Type::tensor_with_shape(vec![r, c]) } else { Type::tensor() }
+            }
+            K::Cell(rows) => {
+                let mut elem_ty: Option<Type> = None;
+                let mut len: usize = 0;
+                for row in rows {
+                    for e in row {
+                        let t = infer_expr_type(e, env, returns);
+                        elem_ty = Some(match elem_ty { Some(curr) => curr.unify(&t), None => t });
+                        len += 1;
+                    }
+                }
+                Type::Cell { element_type: elem_ty.map(Box::new), length: Some(len) }
+            }
+            K::Index(base, idxs) => {
+                let bt = infer_expr_type(base, env, returns);
+                let scalar_indices = idxs.iter().all(|i| matches!(infer_expr_type(i, env, returns), Type::Int | Type::Num | Type::Bool));
+                if scalar_indices { Type::Num } else { bt }
+            }
+            K::IndexCell(base, idxs) => {
+                let bt = infer_expr_type(base, env, returns);
+                if let Type::Cell { element_type: Some(t), .. } = bt {
+                    let scalar = idxs.len() == 1 && matches!(infer_expr_type(&idxs[0], env, returns), Type::Int | Type::Num | Type::Bool | Type::Tensor{..});
+                    if scalar { *t } else { Type::Unknown }
+                } else { Type::Unknown }
+            }
+            K::Range(_, _, _) => Type::tensor(),
+            K::FuncCall(name, _args) => returns.get(name).and_then(|v| v.get(0)).cloned().unwrap_or_else(|| {
+                if let Some(b) = runmat_builtins::builtin_functions().into_iter().find(|b| b.name == *name) { b.return_type.clone() } else { Type::Unknown }
+            }),
+            K::MethodCall(_, _, _) => Type::Unknown,
+            K::Member(_, _) => Type::Unknown,
+            K::MemberDynamic(_, _) => Type::Unknown,
+            K::AnonFunc { .. } => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
+            K::FuncHandle(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
+            K::MetaClass(_) => Type::String,
+            K::End => Type::Unknown,
+            K::Colon => Type::tensor(),
+        }
+    }
+
+    fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
+        let mut out = a.clone();
+        for (k, v) in b { out.entry(*k).and_modify(|t| *t = t.unify(v)).or_insert_with(|| v.clone()); }
+        out
+    }
+
+    #[derive(Clone)]
+    struct Analysis { exits: Vec<HashMap<VarId, Type>>, fallthrough: Option<HashMap<VarId, Type>> }
+
+    fn analyze_stmts(stmts: &[HirStmt], mut env: HashMap<VarId, Type>, returns: &HashMap<String, Vec<Type>>) -> Analysis {
+        let mut exits = Vec::new();
+        let mut i = 0usize;
+        while i < stmts.len() {
+            match &stmts[i] {
+                HirStmt::Assign(var, expr, _) => { let t = infer_expr_type(expr, &env, returns); env.insert(*var, t); }
+                HirStmt::MultiAssign(vars, expr, _) => { let t = infer_expr_type(expr, &env, returns); for v in vars { if let Some(v) = v { env.insert(*v, t.clone()); } } }
+                HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
+                HirStmt::Return => { exits.push(env.clone()); return Analysis { exits, fallthrough: None }; }
+                HirStmt::If { then_body, elseif_blocks, else_body, .. } => {
+                    let then_a = analyze_stmts(then_body, env.clone(), returns);
+                    let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
+                    let mut all_exits = then_a.exits.clone();
+                    for (_c, b) in elseif_blocks { let a = analyze_stmts(b, env.clone(), returns); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    if let Some(else_body) = else_body { let a = analyze_stmts(else_body, env.clone(), returns); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    else { out_env = join_env(&out_env, &env); }
+                    env = out_env; exits.extend(all_exits);
+                }
+                HirStmt::While { body, .. } => { let a = analyze_stmts(body, env.clone(), returns); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
+                HirStmt::For { var, expr, body } => { let t = infer_expr_type(expr, &env, returns); env.insert(*var, t); let a = analyze_stmts(body, env.clone(), returns); if let Some(f) = a.fallthrough { env = join_env(&env, &f); } exits.extend(a.exits); }
+                HirStmt::Switch { cases, otherwise, .. } => {
+                    let mut out_env: Option<HashMap<VarId, Type>> = None;
+                    for (_v, b) in cases { let a = analyze_stmts(b, env.clone(), returns); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
+                    if let Some(otherwise) = otherwise { let a = analyze_stmts(otherwise, env.clone(), returns); if let Some(f) = a.fallthrough { out_env = Some(match out_env { Some(curr) => join_env(&curr, &f), None => f }); } exits.extend(a.exits); }
+                    else { out_env = Some(match out_env { Some(curr) => join_env(&curr, &env), None => env.clone() }); }
+                    if let Some(f) = out_env { env = f; }
+                }
+                HirStmt::TryCatch { try_body, catch_body, .. } => {
+                    let a_try = analyze_stmts(try_body, env.clone(), returns);
+                    let a_catch = analyze_stmts(catch_body, env.clone(), returns);
+                    let mut out_env = a_try.fallthrough.clone().unwrap_or_else(|| env.clone());
+                    if let Some(f) = a_catch.fallthrough { out_env = join_env(&out_env, &f); }
+                    env = out_env; exits.extend(a_try.exits); exits.extend(a_catch.exits);
+                }
+                HirStmt::Global(_) | HirStmt::Persistent(_) => {}
+                HirStmt::Function { .. } => {}
+                HirStmt::ClassDef { .. } => {}
+                HirStmt::AssignLValue(_, expr, _) => { let _ = infer_expr_type(expr, &env, returns); }
                 HirStmt::Import { .. } => {}
             }
             i += 1;
@@ -306,7 +508,7 @@ pub fn infer_function_variable_types(
     for stmt in &prog.body {
         match stmt {
             HirStmt::Function { name, body, .. } => {
-                let a = analyze_stmts(body, HashMap::new());
+                let a = analyze_stmts(body, HashMap::new(), &returns_map);
                 let mut env = HashMap::new();
                 for e in &a.exits { env = join_env(&env, e); }
                 if let Some(f) = &a.fallthrough { env = join_env(&env, f); }
@@ -317,7 +519,7 @@ pub fn infer_function_variable_types(
                     if let HirClassMember::Methods { body, .. } = m {
                         for s in body {
                             if let HirStmt::Function { name, body, .. } = s {
-                                let a = analyze_stmts(body, HashMap::new());
+                                let a = analyze_stmts(body, HashMap::new(), &returns_map);
                                 let mut env = HashMap::new();
                                 for e in &a.exits { env = join_env(&env, e); }
                                 if let Some(f) = &a.fallthrough { env = join_env(&env, f); }
@@ -1250,20 +1452,20 @@ impl Ctx {
                     | BinOp::Div
                     | BinOp::Pow
                     | BinOp::LeftDiv => {
-                        if matches!(left_ty, Type::Matrix { .. })
-                            || matches!(right_ty, Type::Matrix { .. })
+                        if matches!(left_ty, Type::Tensor { .. })
+                            || matches!(right_ty, Type::Tensor { .. })
                         {
-                            Type::matrix()
+                            Type::tensor()
                         } else {
                             Type::Num
                         }
                     }
                     // Element-wise operations preserve the matrix type if either operand is a matrix
                     BinOp::ElemMul | BinOp::ElemDiv | BinOp::ElemPow | BinOp::ElemLeftDiv => {
-                        if matches!(left_ty, Type::Matrix { .. })
-                            || matches!(right_ty, Type::Matrix { .. })
+                        if matches!(left_ty, Type::Tensor { .. })
+                            || matches!(right_ty, Type::Tensor { .. })
                         {
-                            Type::matrix()
+                            Type::tensor()
                         } else {
                             Type::Num
                         }
@@ -1277,7 +1479,7 @@ impl Ctx {
                     | BinOp::GreaterEqual => Type::Bool,
                     // Logical
                     BinOp::AndAnd | BinOp::OrOr | BinOp::BitAnd | BinOp::BitOr => Type::Bool,
-                    BinOp::Colon => Type::matrix(),
+                    BinOp::Colon => Type::tensor(),
                 };
                 (
                     HirExprKind::Binary(Box::new(left), *op, Box::new(right)),
@@ -1337,7 +1539,7 @@ impl Ctx {
                     }
                     hir_rows.push(hir_row);
                 }
-                (HirExprKind::Tensor(hir_rows), Type::matrix())
+                (HirExprKind::Tensor(hir_rows), Type::tensor())
             }
             Cell(rows) => {
                 let mut hir_rows = Vec::new();
@@ -1375,10 +1577,10 @@ impl Ctx {
                         step_hir.map(Box::new),
                         Box::new(end_hir),
                     ),
-                    Type::matrix(),
+                    Type::tensor(),
                 )
             }
-            Colon => (HirExprKind::Colon, Type::matrix()),
+            Colon => (HirExprKind::Colon, Type::tensor()),
             EndKeyword => (HirExprKind::End, Type::Unknown),
             Member(base, name) => {
                 let b = self.lower_expr(base)?;
@@ -1620,3 +1822,4 @@ impl Ctx {
         per_output
     }
 }
+

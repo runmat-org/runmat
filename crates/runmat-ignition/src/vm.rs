@@ -3,7 +3,17 @@ use crate::gc_roots::InterpretContext;
 use crate::instr::Instr;
 use runmat_builtins::Value;
 use runmat_runtime::call_builtin;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::convert::TryInto;
+
+thread_local! {
+    static GLOBALS: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
+}
+
+thread_local! {
+    static PERSISTENTS: RefCell<HashMap<(String, usize), Value>> = RefCell::new(HashMap::new());
+}
 
 macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
     let b = $stack.pop().ok_or("stack underflow")?; let a = $stack.pop().ok_or("stack underflow")?;
@@ -15,17 +25,32 @@ macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
     }
 }}; }
 
-pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> Result<Vec<Value>, String> {
+pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], current_function_name: Option<&str>) -> Result<Vec<Value>, String> {
     let mut stack: Vec<Value> = Vec::new();
     let mut vars = initial_vars.to_vec();
     if vars.len() < bytecode.var_count { vars.resize(bytecode.var_count, Value::Num(0.0)); }
     let mut pc: usize = 0;
     let mut context = ExecutionContext { call_stack: Vec::new(), locals: Vec::new(), instruction_pointer: 0, functions: bytecode.functions.clone() };
     let _gc_context = InterpretContext::new(&stack, &vars)?;
+    let current_func_name_str: String = current_function_name.map(|s| s.to_string()).unwrap_or_else(|| "<main>".to_string());
     // Stack of (catch_pc, catch_var_global_index)
     let mut try_stack: Vec<(usize, Option<usize>)> = Vec::new();
     // Runtime import registry for this execution
     let mut imports: Vec<(Vec<String>, bool)> = Vec::new();
+    // Helper to resolve unqualified static accesses if Class.* is imported
+    let _resolve_static = |imports: &Vec<(Vec<String>, bool)>, name: &str| -> Option<(String, String)> {
+        // Return (class_name, member) for unqualified 'member' where Class.* imported
+        for (path, wildcard) in imports {
+            if !*wildcard { continue; }
+            if path.len() == 1 {
+                // Class.* style
+                let class_name = path[0].clone();
+                // We cannot know member names here; VM paths for LoadMember/CallMethod will enforce static
+                return Some((class_name, name.to_string()));
+            }
+        }
+        None
+    };
     macro_rules! vm_bail {
         ($err:expr) => {{
             let e: String = $err;
@@ -45,11 +70,22 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
         match bytecode.instructions[pc].clone() {
             Instr::LoadConst(c) => stack.push(Value::Num(c)),
             Instr::LoadString(s) => stack.push(Value::String(s)),
+            Instr::LoadCharRow(s) => {
+                let ca = runmat_builtins::CharArray::new(s.chars().collect(), 1, s.chars().count()).map_err(|e| format!("char row: {e}"))?;
+                stack.push(Value::CharArray(ca));
+            }
             Instr::LoadVar(i) => stack.push(vars[i].clone()),
             Instr::StoreVar(i) => {
                 let val = stack.pop().ok_or("stack underflow")?;
                 if i >= vars.len() { vars.resize(i + 1, Value::Num(0.0)); }
                 vars[i] = val;
+                // If this var is declared global, update the global table entry
+                // We optimistically write-through whenever StoreVar happens and a global exists for this name
+                let key = format!("var_{}", i);
+                GLOBALS.with(|g| {
+                    let mut m = g.borrow_mut();
+                    if m.contains_key(&key) { m.insert(key, vars[i].clone()); }
+                });
             }
             Instr::LoadLocal(offset) => {
                 if let Some(current_frame) = context.call_stack.last() {
@@ -69,11 +105,35 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 } else {
                     if offset >= vars.len() { vars.resize(offset + 1, Value::Num(0.0)); }
                     vars[offset] = val;
+                    // write-through to persistents if this local is a declared persistent for current function
+                    let func_name = context.call_stack.last().map(|f| f.function_name.clone()).unwrap_or_else(|| "<main>".to_string());
+                    let key = (func_name, offset);
+                    PERSISTENTS.with(|p| {
+                        let mut m = p.borrow_mut();
+                        if m.contains_key(&key) { m.insert(key, vars[offset].clone()); }
+                    });
                 }
             }
             Instr::EnterScope(local_count) => { for _ in 0..local_count { context.locals.push(Value::Num(0.0)); } }
             Instr::ExitScope(local_count) => { for _ in 0..local_count { context.locals.pop(); } }
             Instr::RegisterImport { path, wildcard } => { imports.push((path, wildcard)); }
+            Instr::DeclareGlobal(indices) => {
+                // Bind local var slots to global table entries by name (var_N)
+                for i in indices.into_iter() {
+                    let key = format!("var_{}", i);
+                    let val_opt = GLOBALS.with(|g| g.borrow().get(&key).cloned());
+                    if let Some(v) = val_opt { if i >= vars.len() { vars.resize(i + 1, Value::Num(0.0)); } vars[i] = v; }
+                }
+            }
+            Instr::DeclarePersistent(indices) => {
+                // Initialize locals from persistent table if present
+                let func_name = current_func_name_str.clone();
+                for i in indices.into_iter() {
+                    let key = (func_name.clone(), i);
+                    let val_opt = PERSISTENTS.with(|p| p.borrow().get(&key).cloned());
+                    if let Some(v) = val_opt { if i >= vars.len() { vars.resize(i + 1, Value::Num(0.0)); } vars[i] = v; }
+                }
+            }
             Instr::Add => {
                 // If either operand is an object, try operator overloading
                 let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
@@ -208,6 +268,21 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         let out: Vec<f64> = t.data.iter().map(|x| if (s - *x).abs() < 1e-12 { 1.0 } else { 0.0 }).collect();
                         stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, t.shape.clone()).map_err(|e| format!("eq: {e}"))?));
                     }
+                    (Value::StringArray(sa), Value::StringArray(sb)) => {
+                        if sa.shape != sb.shape { return Err("shape mismatch for string array comparison".to_string()); }
+                        let mut out = Vec::with_capacity(sa.data.len());
+                        for i in 0..sa.data.len() { out.push(if sa.data[i] == sb.data[i] { 1.0 } else { 0.0 }); }
+                        stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("eq: {e}"))?));
+                    }
+                    (Value::StringArray(sa), Value::String(s)) => {
+                        let mut out = Vec::with_capacity(sa.data.len()); for i in 0..sa.data.len() { out.push(if sa.data[i] == *s { 1.0 } else { 0.0 }); }
+                        stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("eq: {e}"))?));
+                    }
+                    (Value::String(s), Value::StringArray(sa)) => {
+                        let mut out = Vec::with_capacity(sa.data.len()); for i in 0..sa.data.len() { out.push(if *s == sa.data[i] { 1.0 } else { 0.0 }); }
+                        stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("eq: {e}"))?));
+                    }
+                    (Value::String(a_s), Value::String(b_s)) => { stack.push(Value::Num(if a_s==b_s {1.0}else{0.0})); }
                     _ => { let bb: f64 = (&b).try_into()?; let aa: f64 = (&a).try_into()?; stack.push(Value::Num(if aa==bb {1.0}else{0.0})); }
                 }
             }
@@ -232,6 +307,21 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         let out: Vec<f64> = t.data.iter().map(|x| if (s - *x).abs() >= 1e-12 { 1.0 } else { 0.0 }).collect();
                         stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, t.shape.clone()).map_err(|e| format!("ne: {e}"))?));
                     }
+                    (Value::StringArray(sa), Value::StringArray(sb)) => {
+                        if sa.shape != sb.shape { return Err("shape mismatch for string array comparison".to_string()); }
+                        let mut out = Vec::with_capacity(sa.data.len());
+                        for i in 0..sa.data.len() { out.push(if sa.data[i] != sb.data[i] { 1.0 } else { 0.0 }); }
+                        stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("ne: {e}"))?));
+                    }
+                    (Value::StringArray(sa), Value::String(s)) => {
+                        let mut out = Vec::with_capacity(sa.data.len()); for i in 0..sa.data.len() { out.push(if sa.data[i] != *s { 1.0 } else { 0.0 }); }
+                        stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("ne: {e}"))?));
+                    }
+                    (Value::String(s), Value::StringArray(sa)) => {
+                        let mut out = Vec::with_capacity(sa.data.len()); for i in 0..sa.data.len() { out.push(if *s != sa.data[i] { 1.0 } else { 0.0 }); }
+                        stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("ne: {e}"))?));
+                    }
+                    (Value::String(a_s), Value::String(b_s)) => { stack.push(Value::Num(if a_s!=b_s {1.0}else{0.0})); }
                     _ => { let bb: f64 = (&b).try_into()?; let aa: f64 = (&a).try_into()?; stack.push(Value::Num(if aa!=bb {1.0}else{0.0})); }
                 }
             }
@@ -242,31 +332,41 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 match call_builtin(&name, &args) {
                     Ok(result) => stack.push(result),
                     Err(e) => {
-                        // Try resolving via wildcard imports: import pkg.* -> try pkg.name
-                        let mut resolved = false;
-                        if e.contains("unknown builtin") {
+                        // Specific-import matches: import pkg.foo; name == foo
+                        let mut specific_matches: Vec<String> = Vec::new();
+                        for (path, wildcard) in &imports {
+                            if *wildcard { continue; }
+                            if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
+                                let qual = path.join(".");
+                                if call_builtin(&qual, &args).is_ok() { specific_matches.push(qual); }
+                            }
+                        }
+                        if specific_matches.len() > 1 { vm_bail!(format!("ambiguous builtin '{}' via imports: {}", name, specific_matches.join(", "))); }
+                        if let Some(qual) = specific_matches.get(0) {
+                            match call_builtin(qual, &args) { Ok(v) => { stack.push(v); }, Err(e2) => vm_bail!(e2) }
+                        } else {
+                            // Wildcard-import matches: import pkg.*; try pkg.name
+                            let mut wildcard_matches: Vec<String> = Vec::new();
                             for (path, wildcard) in &imports {
                                 if !*wildcard { continue; }
                                 if path.is_empty() { continue; }
                                 let mut qual = String::new();
                                 for (i, part) in path.iter().enumerate() { if i>0 { qual.push('.'); } qual.push_str(part); }
                                 qual.push('.'); qual.push_str(&name);
-                                if let Ok(v) = call_builtin(&qual, &args) { stack.push(v); resolved = true; break; }
+                                if call_builtin(&qual, &args).is_ok() { wildcard_matches.push(qual); }
                             }
-                        }
-                        if resolved { /* ok */ } else {
-                        if let Some((catch_pc, catch_var)) = try_stack.pop() {
-                            // Set catch var (global) if present
-                            if let Some(var_idx) = catch_var {
-                                if var_idx >= vars.len() { vars.resize(var_idx + 1, Value::Num(0.0)); }
-                                vars[var_idx] = Value::MException(parse_exception(&e));
+                            if wildcard_matches.len() > 1 { vm_bail!(format!("ambiguous builtin '{}' via wildcard imports: {}", name, wildcard_matches.join(", "))); }
+                            if let Some(qual) = wildcard_matches.get(0) {
+                                match call_builtin(qual, &args) { Ok(v) => { stack.push(v); }, Err(e2) => vm_bail!(e2) }
+                            } else {
+                                if let Some((catch_pc, catch_var)) = try_stack.pop() {
+                                    if let Some(var_idx) = catch_var {
+                                        if var_idx >= vars.len() { vars.resize(var_idx + 1, Value::Num(0.0)); }
+                                        vars[var_idx] = Value::MException(parse_exception(&e));
+                                    }
+                                    pc = catch_pc; continue;
+                                } else { return Err(e); }
                             }
-                            pc = catch_pc; // Jump to catch
-                            continue;
-                        } else {
-                                // Fallback: treat as function call to user-defined or error
-                                return Err(e);
-                        }
                         }
                     }
                 }
@@ -401,18 +501,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                             }
                         } else { match (base, indices.len()) {
                             (Value::Cell(ca), 1) => {
-                                if spec.expand_all {
-                                    // Expand all elements of the cell row-major
-                                    let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
-                                    for v in &ca.data { out.push(v.clone()); }
-                                    out
-                                } else {
-                                    match &indices[0] {
+                                match &indices[0] {
                                     Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
                                     Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
                                     Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
                                     _ => return Err("Unsupported cell index type".to_string()),
-                                    }
                                 }
                             }
                             (Value::Cell(ca), 2) => {
@@ -440,30 +533,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 }
                 temp.reverse();
                 args.extend(temp.into_iter());
-                // Special-case cat: support more than two array arguments by iteratively reducing
-                if name == "cat" && args.len() >= 3 {
-                    let dim = args[0].clone();
-                    // Helper to coerce scalars into 1x1 tensors
-                    let coerce_to_tensor = |v: Value| -> Result<Value, String> {
-                        match v {
-                            Value::Tensor(_) => Ok(v),
-                            Value::Num(n) => Ok(Value::Tensor(runmat_builtins::Tensor::new(vec![n], vec![1,1]).map_err(|e| format!("cat coerce: {e}"))?)),
-                            Value::Int(i) => Ok(Value::Tensor(runmat_builtins::Tensor::new(vec![i as f64], vec![1,1]).map_err(|e| format!("cat coerce: {e}"))?)),
-                            other => Ok(other),
-                        }
-                    };
-                    let mut acc = coerce_to_tensor(args[1].clone())?;
-                    for i in 2..args.len() {
-                        let rhs = coerce_to_tensor(args[i].clone())?;
-                        match call_builtin(&name, &[dim.clone(), acc.clone(), rhs]) {
-                            Ok(v) => acc = v,
-                            Err(e) => vm_bail!(e),
-                        }
-                    }
-                    stack.push(acc);
-                } else {
-                    match call_builtin(&name, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
-                }
+                match call_builtin(&name, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
             }
             Instr::CallFunctionExpandMulti(name, specs) => {
                 // Build args via specs, then invoke user function similar to CallFunction
@@ -491,17 +561,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                             }
                         } else { match (base, indices.len()) {
                             (Value::Cell(ca), 1) => {
-                                if spec.expand_all {
-                                    let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
-                                    for v in &ca.data { out.push(v.clone()); }
-                                    out
-                                } else {
-                                    match &indices[0] {
+                                match &indices[0] {
                                     Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
                                     Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
                                     Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
                                     _ => return Err("Unsupported cell index type".to_string()),
-                                    }
                                 }
                             }
                             (Value::Cell(ca), 2) => {
@@ -634,9 +698,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 before.reverse();
                 let expanded = match (base, indices.len()) {
                     (Value::Cell(ca), 1) => {
-                        let i: f64 = (&indices[0]).try_into()?; let idx = i as usize;
-                        if idx == 0 || idx > ca.data.len() { return Err("Cell index out of bounds".to_string()); }
-                        vec![ca.data[idx-1].clone()]
+                        match &indices[0] {
+                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
+                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
+                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
+                            _ => return Err("Unsupported cell index type".to_string()),
+                        }
                     }
                     (Value::Cell(ca), 2) => {
                         let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
@@ -654,33 +721,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                         vec![v]
                     }
-                    _ => return Err("CallFunctionExpandAt requires cell or object cell access".to_string()),
+                    _ => return Err("CallBuiltinExpandAt requires cell or object cell access".to_string()),
                 };
-                let mut arg_values = before; arg_values.extend(expanded.into_iter()); arg_values.extend(after.into_iter());
-                // Lookup user function definition
-                let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(format!("undefined function: {name}")) };
-                let var_map = runmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
-                let local_var_count = var_map.len();
-                let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
-                let func_vars_count = local_var_count.max(func.params.len());
-                let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-                for (i, _param_id) in func.params.iter().enumerate() { if i < arg_values.len() && i < func_vars.len() { func_vars[i] = arg_values[i].clone(); } }
-                // Copy referenced globals into local frame
-                for (original_var_id, local_var_id) in &var_map {
-                    let local_index = local_var_id.0; let global_index = original_var_id.0;
-                    if local_index < func_vars.len() && global_index < vars.len() {
-                        let is_parameter = func.params.iter().any(|param_id| param_id == original_var_id);
-                        if !is_parameter { func_vars[local_index] = vars[global_index].clone(); }
-                    }
-                }
-                let func_program = runmat_hir::HirProgram { body: remapped_body };
-                let func_bytecode = crate::compile_with_functions(&func_program, &bytecode.functions)?;
-                let func_result_vars = match interpret_function(&func_bytecode, func_vars) { Ok(v) => v, Err(e) => vm_bail!(e) };
-                if let Some(output_var_id) = func.outputs.first() {
-                    let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
-                    if local_output_index < func_result_vars.len() { stack.push(func_result_vars[local_output_index].clone()); } else { stack.push(Value::Num(0.0)); }
-                } else { stack.push(Value::Num(0.0)); }
+                let mut args = before; args.extend(expanded.into_iter()); args.extend(after.into_iter());
+                match call_builtin(&name, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
             }
+            
             Instr::CallFunctionMulti(name, arg_count, out_count) => {
                 let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(format!("undefined function: {name}")) };
                 let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); } args.reverse();
@@ -1082,6 +1128,89 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         }
                         }
                     }
+                    Value::StringArray(sa) => {
+                        let rank = sa.shape.len();
+                        #[derive(Clone)] enum Sel { Colon, Scalar(usize), Indices(Vec<usize>) }
+                        let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
+                        let mut num_iter = 0usize;
+                        if dims == 1 {
+                            let total = sa.data.len();
+                            let mut idxs: Vec<usize> = Vec::new();
+                            let is_colon = (colon_mask & 1u32) != 0;
+                            let is_end = (end_mask & 1u32) != 0;
+                            if is_colon { idxs = (1..=total).collect(); }
+                            else if is_end { idxs = vec![total]; }
+                            else if let Some(v) = numeric.get(0) {
+                                match v {
+                                    Value::Num(n) => { let i = *n as isize; if i < 1 { vm_bail!("Index out of bounds".into()); } idxs = vec![i as usize]; }
+                                    Value::Tensor(idx_t) => {
+                                        let len = idx_t.shape.iter().product::<usize>();
+                                        if len == total { for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { idxs.push(i+1); } } }
+                                        else { for &val in &idx_t.data { let i = val as isize; if i < 1 { vm_bail!("Index out of bounds".into()); } idxs.push(i as usize); } }
+                                    }
+                                    _ => vm_bail!("Unsupported index type".into()),
+                                }
+                            } else { vm_bail!("missing numeric index".into()); }
+                            if idxs.iter().any(|&i| i == 0 || i > total) { vm_bail!("Index out of bounds".into()); }
+                            if idxs.len() == 1 {
+                                // MATLAB semantics: string array indexing returns a String (double-quoted)
+                                stack.push(Value::String(sa.data[idxs[0] - 1].clone()));
+                            }
+                            else {
+                                let mut out: Vec<String> = Vec::with_capacity(idxs.len()); for &i in &idxs { out.push(sa.data[i - 1].clone()); }
+                                let out_sa = runmat_builtins::StringArray::new(out, vec![idxs.len(), 1]).map_err(|e| format!("Slice error: {e}"))?;
+                                stack.push(Value::StringArray(out_sa));
+                            }
+                        } else {
+                            for d in 0..dims {
+                                let is_colon = (colon_mask & (1u32 << d)) != 0;
+                                let is_end = (end_mask & (1u32 << d)) != 0;
+                                if is_colon { selectors.push(Sel::Colon); }
+                                else if is_end { let dim_len = *sa.shape.get(d).unwrap_or(&1); selectors.push(Sel::Scalar(dim_len)); }
+                                else {
+                                    let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter += 1;
+                                    match v {
+                                        Value::Num(n) => { let idx = *n as isize; if idx < 1 { return Err("Index out of bounds".to_string()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                        Value::Tensor(idx_t) => {
+                                            let dim_len = *sa.shape.get(d).unwrap_or(&1);
+                                            let len = idx_t.shape.iter().product::<usize>();
+                                            if len == dim_len { let mut indices = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { indices.push(i+1); } } selectors.push(Sel::Indices(indices)); }
+                                            else { let mut indices = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { return Err("Index out of bounds".into()); } indices.push(idx as usize); } selectors.push(Sel::Indices(indices)); }
+                                        }
+                                        _ => return Err("Unsupported index type".into()),
+                                    }
+                                }
+                            }
+                            let mut out_dims: Vec<usize> = Vec::new();
+                            let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+                            for d in 0..dims {
+                                let dim_len = *sa.shape.get(d).unwrap_or(&1);
+                                let idxs = match &selectors[d] { Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(), Sel::Scalar(i)=>vec![*i], Sel::Indices(v)=>v.clone() };
+                                if idxs.iter().any(|&i| i==0 || i>dim_len) { return Err("Index out of bounds".into()); }
+                                if idxs.len()>1 { out_dims.push(idxs.len()); } else { out_dims.push(1); }
+                                per_dim_indices.push(idxs);
+                            }
+                            if dims == 2 {
+                                match (&per_dim_indices[0].as_slice(), &per_dim_indices[1].as_slice()) {
+                                    (i_list, j_list) if i_list.len() > 1 && j_list.len() == 1 => { out_dims = vec![i_list.len(), 1]; }
+                                    (i_list, j_list) if i_list.len() == 1 && j_list.len() > 1 => { out_dims = vec![1, j_list.len()]; }
+                                    _ => {}
+                                }
+                            }
+                            let mut strides: Vec<usize> = vec![0; dims];
+                            let full_shape: Vec<usize> = if rank < dims { let mut s = sa.shape.clone(); s.resize(dims, 1); s } else { sa.shape.clone() };
+                            let mut acc = 1usize; for d in 0..dims { strides[d]=acc; acc*=full_shape[d]; }
+                            let total_out: usize = out_dims.iter().product();
+                            if total_out == 0 { stack.push(Value::StringArray(runmat_builtins::StringArray::new(Vec::new(), out_dims).map_err(|e| format!("Slice error: {e}"))?)); }
+                            else {
+                                fn cartesian<F: FnMut(&[usize])>(lists: &[Vec<usize>], mut f: F) { let dims=lists.len(); let mut idx=vec![0usize; dims]; loop { let current: Vec<usize>=(0..dims).map(|d| lists[d][idx[d]]).collect(); f(&current); let mut d=0usize; while d<dims { idx[d]+=1; if idx[d] < lists[d].len() { break; } idx[d]=0; d+=1; } if d==dims { break; } } }
+                                let mut out_data: Vec<String> = Vec::with_capacity(total_out);
+                                cartesian(&per_dim_indices, |multi| { let mut lin=0usize; for d in 0..dims { let i0=multi[d]-1; lin += i0 * strides[d]; } out_data.push(sa.data[lin].clone()); });
+                                if out_data.len() == 1 { stack.push(Value::String(out_data[0].clone())); }
+                                else { let out_sa = runmat_builtins::StringArray::new(out_data, out_dims).map_err(|e| format!("Slice error: {e}"))?; stack.push(Value::StringArray(out_sa)); }
+                            }
+                        }
+                    }
                     other => {
                         // Support 1-D linear indexing and scalar(1) on non-tensors
                         if dims == 1 {
@@ -1182,6 +1311,62 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         cartesian(&per_dim_indices, |multi| { let mut lin=0usize; for d in 0..dims { let i0=multi[d]-1; lin += i0 * strides[d]; } out_data.push(t.data[lin]); });
                         if out_data.len()==1 { stack.push(Value::Num(out_data[0])); }
                         else { let shape: Vec<usize> = per_dim_indices.iter().map(|v| v.len().max(1)).collect(); let tens = runmat_builtins::Tensor::new(out_data, shape).map_err(|e| format!("Slice error: {e}"))?; stack.push(Value::Tensor(tens)); }
+                    }
+                    Value::StringArray(sa) => {
+                        let rank = sa.shape.len();
+                        #[derive(Clone)] enum Sel { Colon, Scalar(usize), Indices(Vec<usize>), Range{ start: i64, step: i64, end_off: i64 } }
+                        let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
+                        let mut num_iter = 0usize;
+                        let mut rp_iter = 0usize;
+                        for d in 0..dims {
+                            let is_colon = (colon_mask & (1u32 << d)) != 0;
+                            let is_end = (end_mask & (1u32 << d)) != 0;
+                            if is_colon { selectors.push(Sel::Colon); }
+                            else if is_end { selectors.push(Sel::Scalar(*sa.shape.get(d).unwrap_or(&1))); }
+                            else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
+                                let (st, sp) = range_params[rp_iter]; rp_iter += 1;
+                                let off = end_offsets[pos];
+                                selectors.push(Sel::Range { start: st as i64, step: if sp>=0.0 { sp as i64 } else { -(sp.abs() as i64) }, end_off: off });
+                            } else {
+                                let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                match v {
+                                    Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                    Value::Tensor(idx_t) => {
+                                        let dim_len = *sa.shape.get(d).unwrap_or(&1);
+                                        let len = idx_t.shape.iter().product::<usize>();
+                                        if len==dim_len { let mut v = Vec::new(); for (i,&val) in idx_t.data.iter().enumerate(){ if val!=0.0 { v.push(i+1);} } selectors.push(Sel::Indices(v)); }
+                                        else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                    }
+                                    _ => vm_bail!("Unsupported index type".into()),
+                                }
+                            }
+                        }
+                        let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+                        let full_shape: Vec<usize> = if rank < dims { let mut s=sa.shape.clone(); s.resize(dims,1); s } else { sa.shape.clone() };
+                        for d in 0..dims {
+                            let dim_len = full_shape[d] as i64;
+                            let idxs: Vec<usize> = match &selectors[d] {
+                                Sel::Colon => (1..=full_shape[d]).collect(),
+                                Sel::Scalar(i) => vec![*i],
+                                Sel::Indices(v) => v.clone(),
+                                Sel::Range{ start, step, end_off } => {
+                                    let mut v = Vec::new(); let mut cur = *start; let stp = *step; let end_i = dim_len - *end_off; if stp == 0 { vm_bail!("Index step cannot be zero".into()); }
+                                    if stp > 0 { while (cur as i64) <= end_i { if cur<1 || cur>dim_len { break; } v.push(cur as usize); cur += stp; } }
+                                    else { while (cur as i64) >= end_i { if cur<1 || cur>dim_len { break; } v.push(cur as usize); cur += stp; } }
+                                    v
+                                }
+                            };
+                            if idxs.iter().any(|&i| i==0 || i>full_shape[d]) { vm_bail!("Index out of bounds".into()); }
+                            per_dim_indices.push(idxs);
+                        }
+                        let mut strides: Vec<usize> = vec![0; dims]; let mut acc=1usize; for d in 0..dims { strides[d]=acc; acc*=full_shape[d]; }
+                        let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
+                        if total_out == 0 { stack.push(Value::StringArray(runmat_builtins::StringArray::new(Vec::new(), vec![0,0]).map_err(|e| format!("Slice error: {e}"))?)); continue; }
+                        let mut out_data: Vec<String> = Vec::with_capacity(total_out);
+                        fn cartesian<F: FnMut(&[usize])>(lists: &[Vec<usize>], mut f: F) { let dims=lists.len(); let mut idx=vec![0usize; dims]; loop { let current: Vec<usize>=(0..dims).map(|d| lists[d][idx[d]]).collect(); f(&current); let mut d=0usize; while d<dims { idx[d]+=1; if idx[d] < lists[d].len() { break; } idx[d]=0; d+=1; } if d==dims { break; } } }
+                        cartesian(&per_dim_indices, |multi| { let mut lin=0usize; for d in 0..dims { let i0=multi[d]-1; lin += i0 * strides[d]; } out_data.push(sa.data[lin].clone()); });
+                        if out_data.len()==1 { stack.push(Value::String(out_data[0].clone())); }
+                        else { let shape: Vec<usize> = per_dim_indices.iter().map(|v| v.len().max(1)).collect(); let sa_out = runmat_builtins::StringArray::new(out_data, shape).map_err(|e| format!("Slice error: {e}"))?; stack.push(Value::StringArray(sa_out)); }
                     }
                     _ => vm_bail!("IndexRangeEnd only supports tensors currently".to_string()),
                 }
@@ -1291,93 +1476,256 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                     Value::Object(obj) => {
                         let cell = runmat_builtins::CellArray::new(numeric.clone(), 1, numeric.len()).map_err(|e| format!("subsasgn build error: {e}"))?;
                         match runmat_runtime::call_builtin("call_method", &[
-                            Value::Object(obj),
+                            Value::Object(obj.clone()),
                             Value::String("subsasgn".to_string()),
                             Value::String("()".to_string()),
-                            Value::Cell(cell),
-                            rhs,
+                            Value::Cell(cell.clone()),
+                            rhs.clone(),
                         ]) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(_e) => {
+                                // Fallback to direct builtin OverIdx.subsasgn if class method isn't registered
+                                // Determine class name and call fully qualified builtin if present
+                                let qualified = format!("{}.subsasgn", obj.class_name);
+                                match runmat_runtime::call_builtin(&qualified, &[Value::Object(obj), Value::String("()".to_string()), Value::Cell(cell), rhs]) {
+                                    Ok(v2) => stack.push(v2),
+                                    Err(e2) => vm_bail!(e2),
+                                }
+                            },
                         }
                     }
                     Value::Tensor(mut t) => {
-                        let rank = t.shape.len();
-                        #[derive(Clone)] enum Sel { Colon, Scalar(usize), Indices(Vec<usize>) }
-                        let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
-                        let mut num_iter = 0usize;
-                        for d in 0..dims {
-                            let is_colon = (colon_mask & (1u32 << d)) != 0;
-                            let is_end = (end_mask & (1u32 << d)) != 0;
-                            if is_colon { selectors.push(Sel::Colon); }
-                            else if is_end { selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1))); }
+                        // Linear 1-D indexing assignment: A(I) = rhs
+                        if dims == 1 {
+                            let total = t.data.len();
+                            // Build linear index list
+                            let mut lin_indices: Vec<usize> = Vec::new();
+                            let is_colon = (colon_mask & 1u32) != 0;
+                            let is_end = (end_mask & 1u32) != 0;
+                            if is_colon { lin_indices = (1..=total).collect(); }
+                            else if is_end { lin_indices = vec![total]; }
                             else {
-                                let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                let v = numeric.get(0).ok_or("missing numeric index")?;
                                 match v {
-                                    Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                    Value::Num(n) => { let i = *n as isize; if i < 1 || (i as usize) > total { vm_bail!("Index out of bounds".into()); } lin_indices.push(i as usize); }
                                     Value::Tensor(idx_t) => {
-                                        let dim_len = *t.shape.get(d).unwrap_or(&1);
                                         let len = idx_t.shape.iter().product::<usize>();
-                                        if len == dim_len { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val!=0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
-                                        else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                        if len == total {
+                                            for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { lin_indices.push(i+1); } }
+                                        } else {
+                                            for &val in &idx_t.data { let i = val as isize; if i < 1 || (i as usize) > total { vm_bail!("Index out of bounds".into()); } lin_indices.push(i as usize); }
+                                        }
                                     }
                                     _ => vm_bail!("Unsupported index type".into()),
                                 }
                             }
-                        }
-                        // Build per-dim index lists and strides
-                        let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                        let full_shape: Vec<usize> = if rank < dims { let mut s = t.shape.clone(); s.resize(dims, 1); s } else { t.shape.clone() };
-                        for d in 0..dims {
-                            let dim_len = full_shape[d];
-                            let idxs = match &selectors[d] { Sel::Colon => (1..=dim_len).collect(), Sel::Scalar(i) => vec![*i], Sel::Indices(v) => v.clone() };
-                            if idxs.iter().any(|&i| i==0 || i>dim_len) { vm_bail!("Index out of bounds".into()); }
-                            per_dim_indices.push(idxs);
-                        }
-                        // Column-major strides (first dimension fastest)
-                        let mut strides: Vec<usize> = vec![0; dims];
-                        let mut acc = 1usize; for d in 0..dims { strides[d] = acc; acc *= full_shape[d]; }
-                        let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
-                        // Prepare RHS values
-                        enum RhsView { Scalar(f64), Tensor{ data: Vec<f64>, shape: Vec<usize>, strides: Vec<usize> } }
-                        let rhs_view = match rhs {
-                            Value::Num(n) => RhsView::Scalar(n),
-                            Value::Tensor(rt) => {
-                                // Allow exact match or N-D broadcasting where rhs_dim is 1 or equals out_dim
-                                let mut shape = rt.shape.clone();
-                                if shape.len() < dims { shape.resize(dims, 1); }
-                                if shape.len() > dims { if shape.iter().skip(dims).any(|&s| s != 1) { vm_bail!("shape mismatch for slice assign".into()); } shape.truncate(dims); }
-                                let mut ok = true;
-                                for d in 0..dims { let out_len = per_dim_indices[d].len(); let rhs_len = shape[d]; if !(rhs_len == 1 || rhs_len == out_len) { ok = false; break; } }
-                                if !ok { vm_bail!("shape mismatch for slice assign".into()); }
-                                let mut rstrides = vec![0usize; dims];
-                                let mut racc = 1usize; for d in 0..dims { rstrides[d] = racc; racc *= shape[d]; }
-                                RhsView::Tensor{ data: rt.data, shape, strides: rstrides }
+                            // Scatter RHS
+                            match rhs {
+                                Value::Num(v) => { for &li in &lin_indices { t.data[li-1] = v; } }
+                                Value::Tensor(rt) => {
+                                    if rt.data.len() == 1 { let v = rt.data[0]; for &li in &lin_indices { t.data[li-1] = v; } }
+                                    else if rt.data.len() == lin_indices.len() {
+                                        for (k, &li) in lin_indices.iter().enumerate() { t.data[li-1] = rt.data[k]; }
+                                    } else { vm_bail!("shape mismatch for linear slice assign".to_string()); }
+                                }
+                                _ => vm_bail!("rhs must be numeric or tensor".into()),
                             }
-                            _ => vm_bail!("rhs must be numeric or tensor".into()),
-                        };
-                        // Iterate and scatter
-                        let mut _k = 0usize;
-                        let mut idx = vec![0usize; dims];
-                        if total_out == 0 { stack.push(Value::Tensor(t)); continue; }
-                        loop {
-                            let mut lin = 0usize; for d in 0..dims { let i0 = per_dim_indices[d][idx[d]] - 1; lin += i0 * strides[d]; }
-                            match &rhs_view {
-                                RhsView::Scalar(val) => t.data[lin] = *val,
-                                RhsView::Tensor{ data, shape, strides } => {
-                                    let mut rlin = 0usize;
-                                    for d in 0..dims { let rhs_len = shape[d]; let pos = if rhs_len == 1 { 0 } else { idx[d] }; rlin += pos * strides[d]; }
-                                    t.data[lin] = data[rlin];
+                            stack.push(Value::Tensor(t));
+                            
+                        } else {
+                            let rank = t.shape.len();
+                            #[derive(Clone)] enum Sel { Colon, Scalar(usize), Indices(Vec<usize>) }
+                            let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
+                            let mut num_iter = 0usize;
+                            for d in 0..dims {
+                                let is_colon = (colon_mask & (1u32 << d)) != 0;
+                                let is_end = (end_mask & (1u32 << d)) != 0;
+                                if is_colon { selectors.push(Sel::Colon); }
+                                else if is_end { selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1))); }
+                                else {
+                                    let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                    match v {
+                                        Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                        Value::Tensor(idx_t) => {
+                                            let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                            let len = idx_t.shape.iter().product::<usize>();
+                                            if len == dim_len { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val!=0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
+                                            else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                        }
+                                        _ => vm_bail!("Unsupported index type".into()),
+                                    }
                                 }
                             }
-                            _k += 1;
-                            // Increment first dim fastest
-                            let mut d = 0usize; while d < dims { idx[d]+=1; if idx[d] < per_dim_indices[d].len() { break; } idx[d]=0; d+=1; }
-                            if d==dims { break; }
+                            // Build per-dim index lists and strides
+                            let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+                            let full_shape: Vec<usize> = if rank < dims { let mut s = t.shape.clone(); s.resize(dims, 1); s } else { t.shape.clone() };
+                            for d in 0..dims {
+                                let dim_len = full_shape[d];
+                                let idxs = match &selectors[d] { Sel::Colon => (1..=dim_len).collect(), Sel::Scalar(i) => vec![*i], Sel::Indices(v) => v.clone() };
+                                if idxs.iter().any(|&i| i==0 || i>dim_len) { vm_bail!("Index out of bounds".into()); }
+                                per_dim_indices.push(idxs);
+                            }
+                            // Column-major strides (first dimension fastest)
+                            let mut strides: Vec<usize> = vec![0; dims];
+                            let mut acc = 1usize; for d in 0..dims { strides[d] = acc; acc *= full_shape[d]; }
+                            let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
+                            // Prepare RHS values
+                            enum RhsView { Scalar(f64), Tensor{ data: Vec<f64>, shape: Vec<usize>, strides: Vec<usize> } }
+                            let rhs_view = match rhs {
+                                Value::Num(n) => RhsView::Scalar(n),
+                                Value::Tensor(rt) => {
+                                    // Allow exact match or N-D broadcasting where rhs_dim is 1 or equals out_dim
+                                    let mut shape = rt.shape.clone();
+                                    if shape.len() < dims { shape.resize(dims, 1); }
+                                    if shape.len() > dims { if shape.iter().skip(dims).any(|&s| s != 1) { vm_bail!("shape mismatch for slice assign".into()); } shape.truncate(dims); }
+                                    let mut ok = true;
+                                    for d in 0..dims { let out_len = per_dim_indices[d].len(); let rhs_len = shape[d]; if !(rhs_len == 1 || rhs_len == out_len) { ok = false; break; } }
+                                    if !ok { vm_bail!("shape mismatch for slice assign".into()); }
+                                    let mut rstrides = vec![0usize; dims];
+                                    let mut racc = 1usize; for d in 0..dims { rstrides[d] = racc; racc *= shape[d]; }
+                                    RhsView::Tensor{ data: rt.data, shape, strides: rstrides }
+                                }
+                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                            };
+                            // Iterate and scatter
+                            let mut _k = 0usize;
+                            let mut idx = vec![0usize; dims];
+                            if total_out == 0 { stack.push(Value::Tensor(t)); }
+                            else {
+                                loop {
+                                    let mut lin = 0usize; for d in 0..dims { let i0 = per_dim_indices[d][idx[d]] - 1; lin += i0 * strides[d]; }
+                                    match &rhs_view {
+                                        RhsView::Scalar(val) => t.data[lin] = *val,
+                                        RhsView::Tensor{ data, shape, strides } => {
+                                            let mut rlin = 0usize;
+                                            for d in 0..dims { let rhs_len = shape[d]; let pos = if rhs_len == 1 { 0 } else { idx[d] }; rlin += pos * strides[d]; }
+                                            t.data[lin] = data[rlin];
+                                        }
+                                    }
+                                    _k += 1;
+                                    // Increment first dim fastest
+                                    let mut d = 0usize; while d < dims { idx[d]+=1; if idx[d] < per_dim_indices[d].len() { break; } idx[d]=0; d+=1; }
+                                    if d==dims { break; }
+                                }
+                                stack.push(Value::Tensor(t));
+                            }
                         }
-                        stack.push(Value::Tensor(t));
                     }
-                    _ => vm_bail!("Slicing assignment only supported on tensors".into()),
+                    Value::StringArray(mut sa) => {
+                        // Linear 1-D indexing assignment on string arrays
+                        if dims == 1 {
+                            let total = sa.data.len();
+                            let mut lin_indices: Vec<usize> = Vec::new();
+                            let is_colon = (colon_mask & 1u32) != 0;
+                            let is_end = (end_mask & 1u32) != 0;
+                            if is_colon { lin_indices = (1..=total).collect(); }
+                            else if is_end { lin_indices = vec![total]; }
+                            else {
+                                let v = numeric.get(0).ok_or("missing numeric index")?;
+                                match v {
+                                    Value::Num(n) => { let i = *n as isize; if i < 1 || (i as usize) > total { vm_bail!("Index out of bounds".into()); } lin_indices.push(i as usize); }
+                                    Value::Tensor(idx_t) => {
+                                        let len = idx_t.shape.iter().product::<usize>();
+                                        if len == total { for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { lin_indices.push(i+1); } } }
+                                        else { for &val in &idx_t.data { let i = val as isize; if i < 1 || (i as usize) > total { vm_bail!("Index out of bounds".into()); } lin_indices.push(i as usize); } }
+                                    }
+                                    _ => vm_bail!("Unsupported index type".into()),
+                                }
+                            }
+                            // Scatter RHS
+                            match rhs {
+                                Value::String(s) => { for &li in &lin_indices { sa.data[li-1] = s.clone(); } }
+                                Value::StringArray(rsa) => {
+                                    if rsa.data.len() == 1 { let s = rsa.data[0].clone(); for &li in &lin_indices { sa.data[li-1] = s.clone(); } }
+                                    else if rsa.data.len() == lin_indices.len() { for (k, &li) in lin_indices.iter().enumerate() { sa.data[li-1] = rsa.data[k].clone(); } }
+                                    else { vm_bail!("shape mismatch for linear slice assign".to_string()); }
+                                }
+                                Value::Num(n) => { let s = n.to_string(); for &li in &lin_indices { sa.data[li-1] = s.clone(); } }
+                                Value::Int(i) => { let s = i.to_string(); for &li in &lin_indices { sa.data[li-1] = s.clone(); } }
+                                _ => vm_bail!("rhs must be string or string array".into()),
+                            }
+                            stack.push(Value::StringArray(sa));
+                        } else {
+                            let rank = sa.shape.len();
+                            #[derive(Clone)] enum Sel { Colon, Scalar(usize), Indices(Vec<usize>) }
+                            let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
+                            let mut num_iter = 0usize;
+                            for d in 0..dims {
+                                let is_colon = (colon_mask & (1u32 << d)) != 0;
+                                let is_end = (end_mask & (1u32 << d)) != 0;
+                                if is_colon { selectors.push(Sel::Colon); }
+                                else if is_end { selectors.push(Sel::Scalar(*sa.shape.get(d).unwrap_or(&1))); }
+                                else {
+                                    let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                    match v {
+                                        Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                        Value::Tensor(idx_t) => {
+                                            let dim_len = *sa.shape.get(d).unwrap_or(&1);
+                                            let len = idx_t.shape.iter().product::<usize>();
+                                            if len == dim_len { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val!=0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
+                                            else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                        }
+                                        _ => vm_bail!("Unsupported index type".into()),
+                                    }
+                                }
+                            }
+                            // Build per-dim index lists and strides
+                            let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+                            let full_shape: Vec<usize> = if rank < dims { let mut s = sa.shape.clone(); s.resize(dims, 1); s } else { sa.shape.clone() };
+                            for d in 0..dims {
+                                let dim_len = full_shape[d];
+                                let idxs = match &selectors[d] { Sel::Colon => (1..=dim_len).collect(), Sel::Scalar(i) => vec![*i], Sel::Indices(v) => v.clone() };
+                                if idxs.iter().any(|&i| i==0 || i>dim_len) { vm_bail!("Index out of bounds".into()); }
+                                per_dim_indices.push(idxs);
+                            }
+                            // Column-major strides
+                            let mut strides: Vec<usize> = vec![0; dims]; let mut acc = 1usize; for d in 0..dims { strides[d] = acc; acc *= full_shape[d]; }
+                            // Prepare RHS view
+                            enum RhsViewS { Scalar(String), Array{ data: Vec<String>, shape: Vec<usize>, strides: Vec<usize> } }
+                            let rhs_view = match rhs {
+                                Value::String(s) => RhsViewS::Scalar(s),
+                                Value::StringArray(rsa) => {
+                                    let mut shape = rsa.shape.clone(); if shape.len() < dims { shape.resize(dims, 1); }
+                                    if shape.len() > dims { if shape.iter().skip(dims).any(|&s| s != 1) { vm_bail!("shape mismatch for slice assign".into()); } shape.truncate(dims); }
+                                    for d in 0..dims { let out_len = per_dim_indices[d].len(); let rhs_len = shape[d]; if !(rhs_len == 1 || rhs_len == out_len) { vm_bail!("shape mismatch for slice assign".into()); } }
+                                    let mut rstrides = vec![0usize; dims]; let mut racc = 1usize; for d in 0..dims { rstrides[d]=racc; racc*=shape[d]; }
+                                    RhsViewS::Array{ data: rsa.data, shape, strides: rstrides }
+                                }
+                                Value::Num(n) => RhsViewS::Scalar(n.to_string()),
+                                Value::Int(i) => RhsViewS::Scalar(i.to_string()),
+                                Value::Tensor(rt) => {
+                                    // Convert numeric tensor to strings with broadcast
+                                    let mut shape = rt.shape.clone(); if shape.len() < dims { shape.resize(dims, 1); }
+                                    if shape.len() > dims { if shape.iter().skip(dims).any(|&s| s != 1) { vm_bail!("shape mismatch for slice assign".into()); } shape.truncate(dims); }
+                                    for d in 0..dims { let out_len = per_dim_indices[d].len(); let rhs_len = shape[d]; if !(rhs_len == 1 || rhs_len == out_len) { vm_bail!("shape mismatch for slice assign".into()); } }
+                                    let mut rstrides = vec![0usize; dims]; let mut racc=1usize; for d in 0..dims { rstrides[d]=racc; racc*=shape[d]; }
+                                    let data: Vec<String> = rt.data.iter().map(|x| x.to_string()).collect();
+                                    RhsViewS::Array{ data, shape, strides: rstrides }
+                                }
+                                _ => vm_bail!("rhs must be string or string array".into()),
+                            };
+                            // Iterate and scatter
+                            let mut idx = vec![0usize; dims];
+                            if per_dim_indices.iter().any(|v| v.is_empty()) { stack.push(Value::StringArray(sa)); }
+                            else {
+                                loop {
+                                    let mut lin = 0usize; for d in 0..dims { let i0 = per_dim_indices[d][idx[d]] - 1; lin += i0 * strides[d]; }
+                                    match &rhs_view {
+                                        RhsViewS::Scalar(s) => sa.data[lin] = s.clone(),
+                                        RhsViewS::Array{ data, shape, strides } => {
+                                            let mut rlin = 0usize; for d in 0..dims { let rhs_len = shape[d]; let pos = if rhs_len==1 { 0 } else { idx[d] }; rlin += pos * strides[d]; }
+                                            sa.data[lin] = data[rlin].clone();
+                                        }
+                                    }
+                                    // Increment first dim fastest
+                                    let mut d = 0usize; while d < dims { idx[d]+=1; if idx[d] < per_dim_indices[d].len() { break; } idx[d]=0; d+=1; }
+                                    if d==dims { break; }
+                                }
+                                stack.push(Value::StringArray(sa));
+                            }
+                        }
+                    }
+                    _ => vm_bail!("Slicing assignment only supported on tensors or string arrays".into()),
                 }
             }
             Instr::StoreSliceEx(dims, numeric_count, colon_mask, end_mask, end_offsets) => {
@@ -1409,7 +1757,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         stack.push(Value::Tensor(t));
                         for v in adjusted { stack.push(v); }
                         stack.push(rhs);
-                        // Fallthrough emulation: replicate logic of StoreSlice
+                        // Fallthrough emulation: replicate logic of StoreSlice with broadcasting
                         let rhs = stack.pop().ok_or("stack underflow")?;
                         let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
                         for _ in 0..numeric_count { numeric.push(stack.pop().ok_or("stack underflow")?); }
@@ -1420,17 +1768,62 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                                 #[derive(Clone)] enum Sel { Colon, Scalar(usize), Indices(Vec<usize>) }
                                 let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
                                 let mut num_iter = 0usize;
-                                for d in 0..dims { let is_colon=(colon_mask&(1u32<<d))!=0; let is_end=(end_mask&(1u32<<d))!=0; if is_colon { selectors.push(Sel::Colon); } else if is_end { selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1))); } else { let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1; match v { Value::Num(n)=>{ let idx=*n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); } Value::Tensor(idx_t)=>{ let dim_len=*t.shape.get(d).unwrap_or(&1); let len=idx_t.shape.iter().product::<usize>(); if len==dim_len { let mut vi=Vec::new(); for (i,&val) in idx_t.data.iter().enumerate(){ if val!=0.0 { vi.push(i+1);} } selectors.push(Sel::Indices(vi)); } else { let mut vi=Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } vi.push(idx as usize);} selectors.push(Sel::Indices(vi)); } } _=> vm_bail!("Unsupported index type".into()), } } }
-                                // Compute target positions as in StoreSlice and scatter with broadcasting
-                                let rhs_vals: Vec<f64> = match rhs { Value::Num(n) => vec![n], Value::Tensor(rt) => rt.data.clone(), _ => vec![0.0] };
-                                let mut rpos = 0usize;
-                                // Enumerate positions via same gather cartesian
+                                for d in 0..dims {
+                                    let is_colon=(colon_mask&(1u32<<d))!=0; let is_end=(end_mask&(1u32<<d))!=0;
+                                    if is_colon { selectors.push(Sel::Colon); }
+                                    else if is_end { selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1))); }
+                                    else {
+                                        let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                        match v {
+                                            Value::Num(n)=>{ let idx=*n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                            Value::Tensor(idx_t)=>{
+                                                let dim_len=*t.shape.get(d).unwrap_or(&1);
+                                                let len=idx_t.shape.iter().product::<usize>();
+                                                if len==dim_len { let mut vi=Vec::new(); for (i,&val) in idx_t.data.iter().enumerate(){ if val!=0.0 { vi.push(i+1);} } selectors.push(Sel::Indices(vi)); }
+                                                else { let mut vi=Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } vi.push(idx as usize);} selectors.push(Sel::Indices(vi)); }
+                                            }
+                                            _=> vm_bail!("Unsupported index type".into()),
+                                        }
+                                    }
+                                }
+                                // Compute per-dim indices and strides
                                 let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
                                 for d in 0..dims { let dim_len=*t.shape.get(d).unwrap_or(&1); let idxs=match &selectors[d]{ Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(), Sel::Scalar(i)=>vec![*i], Sel::Indices(v)=>v.clone()}; per_dim_indices.push(idxs); }
-                                fn cartesian2<F: FnMut(&[usize])>(lists: &[Vec<usize>], mut f: F) { let dims=lists.len(); let mut idx=vec![0usize; dims]; loop { let current: Vec<usize>=(0..dims).map(|d| lists[d][idx[d]]).collect(); f(&current); let mut d=0usize; while d<dims { idx[d]+=1; if idx[d] < lists[d].len() { break; } idx[d]=0; d+=1; } if d==dims { break; } } }
-                                // Strides
                                 let mut strides: Vec<usize> = vec![0; dims]; let mut acc=1usize; for d in 0..dims { strides[d]=acc; acc *= *t.shape.get(d).unwrap_or(&1); }
-                                cartesian2(&per_dim_indices, |multi| { let mut lin=0usize; for d in 0..dims { let i0=multi[d]-1; lin += i0 * strides[d]; } let v = rhs_vals.get(rpos).cloned().unwrap_or(*rhs_vals.last().unwrap_or(&0.0)); t.data[lin]=v; rpos+=1; });
+                                // Build RHS view with broadcasting like StoreSlice
+                                enum RhsView { Scalar(f64), Tensor{ data: Vec<f64>, shape: Vec<usize>, strides: Vec<usize> } }
+                                let rhs_view = match rhs {
+                                    Value::Num(n) => RhsView::Scalar(n),
+                                    Value::Tensor(rt) => {
+                                        let mut rshape = rt.shape.clone();
+                                        if rshape.len() < dims { rshape.resize(dims, 1); }
+                                        if rshape.len() > dims { if rshape.iter().skip(dims).any(|&s| s != 1) { vm_bail!("shape mismatch for slice assign".into()); } rshape.truncate(dims); }
+                                        for d in 0..dims { let out_len = per_dim_indices[d].len(); let rhs_len = rshape[d]; if !(rhs_len == 1 || rhs_len == out_len) { vm_bail!("shape mismatch for slice assign".into()); } }
+                                        let mut rstrides = vec![0usize; dims]; let mut racc = 1usize; for d in 0..dims { rstrides[d]=racc; racc*=rshape[d]; }
+                                        RhsView::Tensor{ data: rt.data, shape: rshape, strides: rstrides }
+                                    }
+                                    _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                };
+                                // Map absolute indices to selection positions per dimension
+                                use std::collections::HashMap;
+                                let mut pos_maps: Vec<HashMap<usize, usize>> = Vec::with_capacity(dims);
+                                for d in 0..dims { let mut m=HashMap::new(); for (p,&idx) in per_dim_indices[d].iter().enumerate() { m.insert(idx, p); } pos_maps.push(m); }
+                                fn cartesian2<F: FnMut(&[usize])>(lists:&[Vec<usize>], mut f:F){let dims=lists.len(); let mut idx=vec![0usize; dims]; loop { let cur:Vec<usize>=(0..dims).map(|d| lists[d][idx[d]]).collect(); f(&cur); let mut d=0usize; while d<dims { idx[d]+=1; if idx[d] < lists[d].len() { break; } idx[d]=0; d+=1; } if d==dims { break; } } }
+                                cartesian2(&per_dim_indices, |multi| {
+                                    let mut lin=0usize; for d in 0..dims { let i0=multi[d]-1; lin += i0 * strides[d]; }
+                                    match &rhs_view {
+                                        RhsView::Scalar(v) => { t.data[lin] = *v; }
+                                        RhsView::Tensor{ data, shape, strides: rstrides } => {
+                                            let mut rlin = 0usize;
+                                            for d in 0..dims {
+                                                let rhs_len = shape[d];
+                                                let pos_in_dim = if rhs_len == 1 { 0 } else { *pos_maps[d].get(&multi[d]).unwrap_or(&0) };
+                                                rlin += pos_in_dim * rstrides[d];
+                                            }
+                                            t.data[lin] = data[rlin];
+                                        }
+                                    }
+                                });
                                 stack.push(Value::Tensor(t));
                             }
                             other => vm_bail!(format!("StoreSliceEx unsupported base: {other:?}")),
@@ -1805,8 +2198,20 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
                             if p.is_static { vm_bail!(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
                             match p.get_access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", field)), _ => {} }
+                            if p.is_dependent {
+                                // Call get.<field>(obj)
+                                let getter = format!("get.{}", field);
+                                match runmat_runtime::call_builtin(&getter, &[Value::Object(obj.clone())]) {
+                                    Ok(v) => { stack.push(v); continue; }
+                                    Err(_e) => {}
+                                }
+                            }
                         }
                         if let Some(v) = obj.properties.get(&field) { stack.push(v.clone()); }
+                        else if let Some((p2, _)) = runmat_builtins::lookup_property(&obj.class_name, &field) { if p2.is_dependent {
+                            let backing = format!("{}_backing", field);
+                            if let Some(vb) = obj.properties.get(&backing) { stack.push(vb.clone()); continue; }
+                        } }
                         else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) { if cls.methods.contains_key("subsref") {
                             match runmat_runtime::call_builtin("call_method", &[
                                 Value::Object(obj),
@@ -1815,6 +2220,25 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                                 Value::String(field),
                             ]) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
                         } else { vm_bail!(format!("Undefined property '{}' for class {}", field, obj.class_name)); } } else { vm_bail!(format!("Unknown class {}", obj.class_name)); }
+                    }
+                    Value::Struct(st) => {
+                        if let Some(v) = st.fields.get(&field) { stack.push(v.clone()); }
+                        else { vm_bail!(format!("Undefined field '{}'", field)); }
+                    }
+                    Value::Cell(ca) => {
+                        // Extract field from each struct element; build a cell with same shape
+                        let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
+                        for v in &ca.data {
+                            match v {
+                                Value::Struct(st) => {
+                                    if let Some(fv) = st.fields.get(&field) { out.push(fv.clone()); }
+                                    else { out.push(Value::Num(0.0)); }
+                                }
+                                other => { out.push(other.clone()); }
+                            }
+                        }
+                        let new_cell = runmat_builtins::CellArray::new(out, ca.rows, ca.cols).map_err(|e| format!("cell field gather: {e}"))?;
+                        stack.push(Value::Cell(new_cell));
                     }
                     _ => vm_bail!("LoadMember on non-object".into()),
                 }
@@ -1853,6 +2277,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
                             if p.is_static { vm_bail!(format!("Property '{}' is static; use classref('{}').{}", field, obj.class_name, field)); }
                             match p.set_access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", field)), _ => {} }
+                            if p.is_dependent {
+                                // Call set.<field>(obj, rhs)
+                                let setter = format!("set.{}", field);
+                                match runmat_runtime::call_builtin(&setter, &[Value::Object(obj.clone()), rhs.clone()]) {
+                                    Ok(v) => { stack.push(v); continue; }
+                                    Err(_e) => {}
+                                }
+                            }
                             obj.properties.insert(field, rhs); stack.push(Value::Object(obj));
                         } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) { if cls.methods.contains_key("subsasgn") {
                             match runmat_runtime::call_builtin("call_method", &[
@@ -1872,6 +2304,31 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                             stack.push(Value::ClassRef(cls));
                         } else { vm_bail!(format!("Unknown property '{}' on class {}", field, cls)); }
                     }
+                    Value::Struct(mut st) => {
+                        st.fields.insert(field, rhs);
+                        stack.push(Value::Struct(st));
+                    }
+                    Value::Cell(mut ca) => {
+                        // Assign field across each element; support scalar rhs or cell rhs of same shape
+                        let is_cell_rhs = matches!(rhs, Value::Cell(_));
+                        let rhs_cell = if let Value::Cell(rc) = &rhs { Some(rc) } else { None };
+                        if is_cell_rhs {
+                            if let Some(rc) = rhs_cell { if rc.rows != ca.rows || rc.cols != ca.cols { vm_bail!("Field assignment: cell rhs shape mismatch".to_string()); } }
+                        }
+                        for i in 0..ca.data.len() {
+                            let rv = if let Some(rc) = rhs_cell { rc.data[i].clone() } else { rhs.clone() };
+                            match &mut ca.data[i] {
+                                Value::Struct(st) => { st.fields.insert(field.clone(), rv); }
+                                other => {
+                                    // If not struct, convert to struct with this single field
+                                    let mut st = runmat_builtins::StructValue::new();
+                                    st.fields.insert(field.clone(), rv);
+                                    *other = Value::Struct(st);
+                                }
+                            }
+                        }
+                        stack.push(Value::Cell(ca));
+                    }
                     _ => vm_bail!("StoreMember on non-object".into()),
                 }
             }
@@ -1889,6 +2346,21 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         obj.properties.insert(name, rhs); stack.push(Value::Object(obj));
                     }
                     Value::Struct(mut st) => { st.fields.insert(name, rhs); stack.push(Value::Struct(st)); }
+                    Value::Cell(mut ca) => {
+                        let is_cell_rhs = matches!(rhs, Value::Cell(_));
+                        let rhs_cell = if let Value::Cell(rc) = &rhs { Some(rc) } else { None };
+                        if is_cell_rhs {
+                            if let Some(rc) = rhs_cell { if rc.rows != ca.rows || rc.cols != ca.cols { vm_bail!("Field assignment: cell rhs shape mismatch".to_string()); } }
+                        }
+                        for i in 0..ca.data.len() {
+                            let rv = if let Some(rc) = rhs_cell { rc.data[i].clone() } else { rhs.clone() };
+                            match &mut ca.data[i] {
+                                Value::Struct(st) => { st.fields.insert(name.clone(), rv); }
+                                other => { let mut st = runmat_builtins::StructValue::new(); st.fields.insert(name.clone(), rv); *other = Value::Struct(st); }
+                            }
+                        }
+                        stack.push(Value::Cell(ca));
+                    }
                     _ => vm_bail!("StoreMemberDynamic on non-struct/object".into()),
                 }
             }
@@ -1977,7 +2449,8 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                 for (p, is_static, get_access, set_access) in properties {
                     let gacc = if get_access.eq_ignore_ascii_case("private") { runmat_builtins::Access::Private } else { runmat_builtins::Access::Public };
                     let sacc = if set_access.eq_ignore_ascii_case("private") { runmat_builtins::Access::Private } else { runmat_builtins::Access::Public };
-                    prop_map.insert(p.clone(), runmat_builtins::PropertyDef { name: p.clone(), is_static, get_access: gacc, set_access: sacc, default_value: None });
+                    let (is_dep, clean_name) = if let Some(stripped) = p.strip_prefix("@dep:") { (true, stripped.to_string()) } else { (false, p.clone()) };
+                    prop_map.insert(clean_name.clone(), runmat_builtins::PropertyDef { name: clean_name, is_static, is_dependent: is_dep, get_access: gacc, set_access: sacc, default_value: None });
                 }
                 let mut method_map = std::collections::HashMap::new();
                 for (mname, fname, is_static, access) in methods {
@@ -2000,11 +2473,13 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         full_args.extend(args.into_iter());
                         match runmat_runtime::call_builtin(&c.function_name, &full_args) {
                             Ok(v) => stack.push(v),
-                            Err(e) => {
+                            Err(_e) => {
                                 // If not a builtin, try user-defined function
                                 if let Some(func) = context.functions.get(&c.function_name).cloned() {
                                     let argc = full_args.len();
-                                    if argc != func.params.len() { vm_bail!(format!("Function '{}' expects {} arguments, got {} - Not enough input arguments", c.function_name, func.params.len(), argc)); }
+                                    if !func.has_varargin {
+                                        if argc != func.params.len() { vm_bail!(format!("Function '{}' expects {} arguments, got {} - Not enough input arguments", c.function_name, func.params.len(), argc)); }
+                                    } else if argc + 1 < func.params.len() { vm_bail!(format!("Function '{}' expects at least {} arguments, got {}", c.function_name, func.params.len()-1, argc)); }
                                     let var_map = runmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
                                     let local_var_count = var_map.len();
                                     let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
@@ -2028,10 +2503,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                                         let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
                                         if local_output_index < func_result_vars.len() { stack.push(func_result_vars[local_output_index].clone()); } else { stack.push(Value::Num(0.0)); }
                                     } else { stack.push(Value::Num(0.0)); }
-                                } else {
-                                    // Not found -> raise error (will be caught by try/catch if present)
-                                    vm_bail!(e);
-                                }
+                                } else { vm_bail!(format!("unknown builtin `{}'", c.function_name)); }
                             }
                         }
                     }
@@ -2051,7 +2523,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                                         let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
                                         let func_vars_count = local_var_count.max(func.params.len());
                                         let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-                                        if func.has_varargin {
+                                        if func.has_varargout {
                                             let fixed = func.params.len().saturating_sub(1);
                                             for i in 0..fixed { if i < args.len() && i < func_vars.len() { func_vars[i] = args[i].clone(); } }
                                             let mut rest: Vec<Value> = if args.len() > fixed { args[fixed..].to_vec() } else { Vec::new() };
@@ -2101,6 +2573,37 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
                         match runmat_runtime::call_builtin(&name, &args) {
                             Ok(v) => { stack.push(v); }
                             Err(e) => { vm_bail!(e); }
+                        }
+                    }
+                    Value::CharArray(ca) => {
+                        let s: String = ca.data.iter().collect();
+                        if let Some(name) = s.strip_prefix('@') {
+                            match runmat_runtime::call_builtin(name, &args) {
+                                Ok(v) => { stack.push(v); }
+                                Err(_e) => {
+                                    if let Some(func) = context.functions.get(name).cloned() {
+                                        let argc = args.len();
+                                        if !func.has_varargin {
+                                            if argc != func.params.len() { vm_bail!(format!("Function '{}' expects {} arguments, got {} - Not enough input arguments", name, func.params.len(), argc)); }
+                                        } else if argc + 1 < func.params.len() { vm_bail!(format!("Function '{}' expects at least {} arguments, got {}", name, func.params.len()-1, argc)); }
+                                        let var_map = runmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
+                                        let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
+                                        let func_program = runmat_hir::HirProgram { body: remapped_body };
+                                        let func_bytecode = crate::compile_with_functions(&func_program, &context.functions)?;
+                                        for (k, v) in func_bytecode.functions.iter() { context.functions.insert(k.clone(), v.clone()); }
+                                        let mut func_vars = vec![Value::Num(0.0); var_map.len().max(func.params.len())];
+                                        for (i, _param_id) in func.params.iter().enumerate() { if i < args.len() && i < func_vars.len() { func_vars[i] = args[i].clone(); } }
+                                        let func_result_vars = match interpret_function(&func_bytecode, func_vars) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                                        if let Some(output_var_id) = func.outputs.first() {
+                                            let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
+                                            if local_output_index < func_result_vars.len() { stack.push(func_result_vars[local_output_index].clone()); } else { stack.push(Value::Num(0.0)); }
+                                        } else { stack.push(Value::Num(0.0)); }
+                                    } else { vm_bail!(format!("unknown builtin `{}`", name)); }
+                                }
+                            }
+                        } else {
+                            // Treat as plain function name
+                            match runmat_runtime::call_builtin(&s, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
                         }
                     }
                     other => vm_bail!(format!("feval: unsupported function value {other:?}")),
@@ -2269,22 +2772,44 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value]) -> R
 }
 
 fn parse_exception(err: &str) -> runmat_builtins::MException {
-    // Expect "Identifier: message"; if multiple ':', use last as separator
+    // Prefer the last occurrence of ": " to split IDENT: message, preserving nested identifiers
+    if let Some(idx) = err.rfind(": ") {
+        let (id, msg) = err.split_at(idx);
+        let message = msg.trim_start_matches(':').trim().to_string();
+        let ident = if id.trim().is_empty() { "MATLAB:error".to_string() } else { id.trim().to_string() };
+        return runmat_builtins::MException::new(ident, message);
+    }
+    // Fallback: if any ':' present, use the last as separator
     if let Some(idx) = err.rfind(':') {
         let (id, msg) = err.split_at(idx);
         let message = msg.trim_start_matches(':').trim().to_string();
-        runmat_builtins::MException::new(id.trim().to_string(), message)
+        let ident = if id.trim().is_empty() { "MATLAB:error".to_string() } else { id.trim().to_string() };
+        runmat_builtins::MException::new(ident, message)
     } else {
-        runmat_builtins::MException::new("MATLAB:Error".to_string(), err.to_string())
+        runmat_builtins::MException::new("MATLAB:error".to_string(), err.to_string())
     }
 }
 
 /// Interpret bytecode with default variable initialization
 pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-    interpret_with_vars(bytecode, &mut vars)
+    interpret_with_vars(bytecode, &mut vars, Some("<main>"))
 }
 
 pub fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<Value>, String> {
-    interpret_with_vars(bytecode, &mut vars)
+    let result = interpret_with_vars(bytecode, &mut vars, Some("<anonymous>"));
+    // Best-effort: persist any variables that were declared persistent via instructions in this bytecode
+    // We scan instructions for DeclarePersistent and write current values to the persistent table
+    let func_name = "<anonymous>".to_string();
+    for instr in &bytecode.instructions {
+        if let crate::instr::Instr::DeclarePersistent(indices) = instr {
+            for &i in indices {
+                if i < vars.len() {
+                    let key = (func_name.clone(), i);
+                    PERSISTENTS.with(|p| { p.borrow_mut().insert(key, vars[i].clone()); });
+                }
+            }
+        }
+    }
+    result
 }

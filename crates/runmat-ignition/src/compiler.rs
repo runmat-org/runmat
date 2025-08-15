@@ -20,13 +20,15 @@ impl Compiler {
     fn attr_access_from_str(s: &str) -> runmat_builtins::Access {
         match s.to_ascii_lowercase().as_str() { "private" => runmat_builtins::Access::Private, _ => runmat_builtins::Access::Public }
     }
-    fn parse_prop_attrs(attrs: &Vec<runmat_parser::Attr>) -> (bool, String, String) {
+    fn parse_prop_attrs(attrs: &Vec<runmat_parser::Attr>) -> (bool, bool, String, String) {
         // Defaults
         let mut is_static = false;
+        let mut is_dependent = false;
         let mut get_acc = runmat_builtins::Access::Public;
         let mut set_acc = runmat_builtins::Access::Public;
         for a in attrs {
             if a.name.eq_ignore_ascii_case("Static") { is_static = true; }
+            if a.name.eq_ignore_ascii_case("Dependent") { is_dependent = true; }
             if a.name.eq_ignore_ascii_case("Access") {
                 if let Some(v) = &a.value { let acc = Self::attr_access_from_str(v.trim_matches('\'').trim()); get_acc = acc.clone(); set_acc = acc; }
             }
@@ -39,7 +41,7 @@ impl Compiler {
         }
         let gs = match get_acc { runmat_builtins::Access::Private => "private".to_string(), _ => "public".to_string() };
         let ss = match set_acc { runmat_builtins::Access::Private => "private".to_string(), _ => "public".to_string() };
-        (is_static, gs, ss)
+        (is_static, is_dependent, gs, ss)
     }
     fn parse_method_attrs(attrs: &Vec<runmat_parser::Attr>) -> (bool, String) {
         let mut is_static = false;
@@ -217,14 +219,18 @@ impl Compiler {
     pub fn patch(&mut self, idx: usize, instr: Instr) { self.instructions[idx] = instr; }
 
     pub fn compile_program(&mut self, prog: &HirProgram) -> Result<(), String> {
+        // Validate imports early for duplicate/specific-name ambiguities
+        runmat_hir::validate_imports(prog)?;
         // Pre-collect imports (both wildcard and specific) for name resolution
         for stmt in &prog.body {
             if let HirStmt::Import { path, wildcard } = stmt {
                 self.imports.push((path.clone(), *wildcard));
                 self.emit(Instr::RegisterImport { path: path.clone(), wildcard: *wildcard });
             }
+            if let HirStmt::Global(vars) = stmt { let ids: Vec<usize> = vars.iter().map(|v| v.0).collect(); self.emit(Instr::DeclareGlobal(ids)); }
+            if let HirStmt::Persistent(vars) = stmt { let ids: Vec<usize> = vars.iter().map(|v| v.0).collect(); self.emit(Instr::DeclarePersistent(ids)); }
         }
-        for stmt in &prog.body { if !matches!(stmt, HirStmt::Import { .. }) { self.compile_stmt(stmt)?; } }
+        for stmt in &prog.body { if !matches!(stmt, HirStmt::Import { .. } | HirStmt::Global(_) | HirStmt::Persistent(_)) { self.compile_stmt(stmt)?; } }
         Ok(())
     }
 
@@ -430,7 +436,7 @@ impl Compiler {
                             // Compute masks and numeric indices as in IndexSlice
                             let has_colon = indices.iter().any(|e| matches!(e.kind, runmat_hir::HirExprKind::Colon));
                             let has_end = indices.iter().any(|e| matches!(e.kind, runmat_hir::HirExprKind::End));
-                            let has_vector = indices.iter().any(|e| matches!(e.kind, runmat_hir::HirExprKind::Range(_,_,_) | runmat_hir::HirExprKind::Tensor(_)) || matches!(e.ty, runmat_hir::Type::Matrix{..}));
+                            let has_vector = indices.iter().any(|e| matches!(e.kind, HirExprKind::Range(_,_,_) | HirExprKind::Tensor(_)) || matches!(e.ty, runmat_hir::Type::Tensor{..}));
                             if has_colon || has_end || has_vector || indices.len() > 2 {
                                 let mut colon_mask: u32 = 0;
                                 let mut end_mask: u32 = 0;
@@ -538,7 +544,7 @@ impl Compiler {
                             // Decide slice vs numeric
                             let has_colon = indices.iter().any(|e| matches!(e.kind, runmat_hir::HirExprKind::Colon));
                             let has_end = indices.iter().any(|e| matches!(e.kind, runmat_hir::HirExprKind::End));
-                            let has_vector = indices.iter().any(|e| matches!(e.kind, runmat_hir::HirExprKind::Range(_,_,_) | runmat_hir::HirExprKind::Tensor(_)) || matches!(e.ty, runmat_hir::Type::Matrix{..}));
+                            let has_vector = indices.iter().any(|e| matches!(e.kind, HirExprKind::Range(_,_,_) | HirExprKind::Tensor(_)) || matches!(e.ty, runmat_hir::Type::Tensor{..}));
                             if has_colon || has_end || has_vector || indices.len() > 2 {
                                 let mut colon_mask: u32 = 0;
                                 let mut end_mask: u32 = 0;
@@ -625,7 +631,14 @@ impl Compiler {
                     _ => return Err("unsupported lvalue target".into()),
                 }
             }
-            HirStmt::Global(_) | HirStmt::Persistent(_) => {}
+            HirStmt::Global(vars) => {
+                let ids: Vec<usize> = vars.iter().map(|v| v.0).collect();
+                self.emit(Instr::DeclareGlobal(ids));
+            }
+            HirStmt::Persistent(vars) => {
+                let ids: Vec<usize> = vars.iter().map(|v| v.0).collect();
+                self.emit(Instr::DeclarePersistent(ids));
+            }
             HirStmt::Import { path, wildcard } => {
                 self.emit(Instr::RegisterImport { path: path.clone(), wildcard: *wildcard });
             }
@@ -636,8 +649,12 @@ impl Compiler {
                 for m in members {
                     match m {
                         runmat_hir::HirClassMember::Properties { names, attributes } => {
-                            let (is_static, get_access, set_access) = Self::parse_prop_attrs(attributes);
-                            for n in names { props.push((n.clone(), is_static, get_access.clone(), set_access.clone())); }
+                            let (is_static, is_dependent, get_access, set_access) = Self::parse_prop_attrs(attributes);
+                            // Encode dependent flag by prefixing name with "@dep:"; VM will strip and set flag.
+                            for n in names {
+                                let enc = if is_dependent { format!("@dep:{}", n) } else { n.clone() };
+                                props.push((enc, is_static, get_access.clone(), set_access.clone()));
+                            }
                         }
                         runmat_hir::HirClassMember::Methods { body, attributes } => {
                             let (is_static, access) = Self::parse_method_attrs(attributes);
@@ -702,15 +719,46 @@ impl Compiler {
                 self.emit(Instr::LoadConst(val));
             }
             HirExprKind::String(s) => {
-                let clean_string = if s.starts_with('\'') && s.ends_with('\'') { s[1..s.len() - 1].to_string() } else { s.clone() };
-                self.emit(Instr::LoadString(clean_string));
+                if s.starts_with('"') && s.ends_with('"') {
+                    // String scalar
+                    let inner = &s[1..s.len()-1];
+                    let clean = inner.replace("\"\"", "\"");
+                    self.emit(Instr::LoadString(clean));
+                } else if s.starts_with('\'') && s.ends_with('\'') {
+                    // Char vector -> CharArray row
+                    let inner = &s[1..s.len()-1];
+                    let clean = inner.replace("''", "'");
+                    // Encode as CharArray(1, len)
+                    self.emit(Instr::LoadCharRow(clean));
+                } else {
+                    self.emit(Instr::LoadString(s.clone()));
+                }
             }
             HirExprKind::Var(id) => { self.emit(Instr::LoadVar(id.0)); }
+            // Fallback path for unqualified static property via Class.* imports: treat bare identifier as Class.prop
+            // Only when not a known var/const/func; handled earlier in HIR, so we also handle here for robustness via Member lowering
+            // Note: HIR would have errored on undefined variable; we resolve at compile time before that for function calls,
+            // but for expressions like `v = staticValue;` under `import Point.*`, we handle here by probing imports.
             HirExprKind::Constant(name) => {
                 let constants = runmat_builtins::constants();
                 if let Some(constant) = constants.iter().find(|c| c.name == name) {
                     if let runmat_builtins::Value::Num(val) = &constant.value { self.emit(Instr::LoadConst(*val)); } else { return Err(format!("Constant {name} is not a number")); }
-                } else { return Err(format!("Unknown constant: {name}")); }
+                } else {
+                    // Try resolving as unqualified static property via Class.* imports
+                    for (path, wildcard) in &self.imports {
+                        if !*wildcard { continue; }
+                        if path.len() == 1 {
+                            let cls = path[0].clone();
+                            if let Some((p, _owner)) = runmat_builtins::lookup_property(&cls, name) {
+                                if p.is_static {
+                                    self.emit(Instr::LoadStaticProperty(cls, name.clone()));
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+                    return Err(format!("Unknown constant: {name}"));
+                }
             }
             HirExprKind::Unary(op, e) => {
                 self.compile_expr(e)?;
@@ -798,25 +846,16 @@ impl Compiler {
                 if let Some(step) = step { self.compile_expr(step)?; self.compile_expr(end)?; self.emit(Instr::CreateRange(true)); } else { self.compile_expr(end)?; self.emit(Instr::CreateRange(false)); }
             }
             HirExprKind::FuncCall(name, args) => {
-                // Special lowering for getmethod(obj, 'name') into LoadMethod
-                if name == "getmethod" && args.len() == 2 {
+                // Special-case: feval(f, a1, a2, ...) compiles to VM feval to access user functions/closures
+                if name == "feval" {
+                    if args.is_empty() { return Err("feval: missing function argument".into()); }
+                    // Push function value first
                     self.compile_expr(&args[0])?;
-                    if let HirExprKind::String(s) = &args[1].kind {
-                        let method = if s.starts_with('\'') && s.ends_with('\'') { s[1..s.len()-1].to_string() } else { s.clone() };
-                        self.emit(Instr::LoadMethod(method));
-                        return Ok(());
-                    }
-                }
-                // Lower feval(f, args...) specially when name == "feval"
-                if name == "feval" && !args.is_empty() {
-                    // If any arg is a cell-index expansion like varargin{:}, lower to expansion-aware feval
-                    let has_any_expand = args[1..].iter().any(|e| matches!(e.kind, HirExprKind::IndexCell(_, _)));
-                    if has_any_expand {
-                        // Emit f first
-                        self.compile_expr(&args[0])?;
-                        // Then build ArgSpec for remaining args
-                        let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(args.len()-1);
-                        for arg in &args[1..] {
+                    let rest = &args[1..];
+                    let has_expand = rest.iter().any(|a| matches!(a.kind, HirExprKind::IndexCell(_, _)));
+                    if has_expand {
+                        let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(rest.len());
+                        for arg in rest {
                             if let HirExprKind::IndexCell(base, indices) = &arg.kind {
                                 let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon);
                                 if is_expand_all {
@@ -824,7 +863,8 @@ impl Compiler {
                                     self.compile_expr(base)?;
                                 } else {
                                     specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false });
-                                    self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; }
+                                    self.compile_expr(base)?;
+                                    for i in indices { self.compile_expr(i)?; }
                                 }
                             } else {
                                 specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false });
@@ -832,173 +872,96 @@ impl Compiler {
                             }
                         }
                         self.emit(Instr::CallFevalExpandMulti(specs));
-                        return Ok(());
                     } else {
-                        for arg in args { self.compile_expr(arg)?; }
-                        self.emit(Instr::CallFeval(args.len()-1));
-                        return Ok(());
+                        for arg in rest { self.compile_expr(arg)?; }
+                        self.emit(Instr::CallFeval(rest.len()));
                     }
+                    return Ok(());
                 }
-                // Detect all arguments that are cell indexing expressions for expansion
-                let has_any_expand = args.iter().any(|e| matches!(e.kind, HirExprKind::IndexCell(_, _)));
+                let has_any_expand = args.iter().any(|a| matches!(a.kind, HirExprKind::IndexCell(_, _)));
                 if self.functions.contains_key(name) {
-                    // Support function-return comma-list propagation when there are no cell-expansion args.
-                    // We expand inner user-function calls into multiple arguments to match callee arity.
-                    if !has_any_expand {
-                        // Identify inner function-call arguments eligible for expansion
-                        let mut expand_plan: Vec<Option<usize>> = Vec::with_capacity(args.len());
-                        let expected_params = self.functions.get(name).map(|f| f.params.len()).unwrap_or(args.len());
-                        let mut fixed_count = 0usize;
-                        for arg in args {
-                            if let HirExprKind::FuncCall(inner, _) = &arg.kind {
-                                if self.functions.contains_key(inner) {
-                                    expand_plan.push(Some(0)); // placeholder, fill later
-                                } else {
-                                    expand_plan.push(None); fixed_count += 1;
-                                }
-                            } else {
-                                expand_plan.push(None); fixed_count += 1;
-                            }
-                        }
-                        // Decide how many outputs to take from each inner call (left-to-right) to meet arity
-                        let mut needed = expected_params.saturating_sub(fixed_count);
-                        for (i, arg) in args.iter().enumerate() {
-                            if needed == 0 { break; }
-                            if let HirExprKind::FuncCall(inner, _) = &arg.kind {
-                                if let Some(f) = self.functions.get(inner) {
-                                    // If inner has varargout, it can supply arbitrary additional outputs.
-                                    // Otherwise, limit to its declared outputs (at least 1).
-                                    let can_supply_unbounded = f.has_varargout;
-                                    let inner_fixed_max = f.outputs.len().max(1);
-                                    let take = if can_supply_unbounded { needed } else { inner_fixed_max.min(needed) };
-                                    if take > 0 { expand_plan[i] = Some(take); needed -= take; }
-                                }
-                            }
-                        }
-                        // If we satisfied the arity exactly via expansions, emit flattened call
-                        if needed == 0 && expand_plan.iter().any(|o| o.unwrap_or(0) > 1) {
-                            for (i, arg) in args.iter().enumerate() {
-                                if let (HirExprKind::FuncCall(inner, inner_args), Some(take)) = (&arg.kind, expand_plan[i]) {
-                                    // Compile inner args then call multi to push `take` outputs (may exceed declared outputs if varargout)
-                                    for a in inner_args { self.compile_expr(a)?; }
-                                    self.emit(Instr::CallFunctionMulti(inner.clone(), inner_args.len(), take));
-                                } else if let HirExprKind::FuncCall(inner, inner_args) = &arg.kind {
-                                    // Single output case
-                                    for a in inner_args { self.compile_expr(a)?; }
-                                    self.emit(Instr::CallFunction(inner.clone(), inner_args.len()));
-                                } else {
-                                    self.compile_expr(arg)?;
-                                }
-                            }
-                            // Total argc equals expected_params by construction
-                            self.emit(Instr::CallFunction(name.clone(), expected_params));
-                            return Ok(());
-                        }
-                    }
+                    // existing path
                     if has_any_expand {
-                        // Build ArgSpec list and push stack values in proper order
                         let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(args.len());
                         for arg in args {
-                            if let HirExprKind::IndexCell(base, indices) = &arg.kind {
-                                let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon);
-                                if is_expand_all {
-                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true });
-                                    self.compile_expr(base)?;
-                                } else {
-                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false });
-                                    self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; }
-                                }
-                            } else {
-                                specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false });
-                                self.compile_expr(arg)?;
-                            }
-                        }
+                            if let HirExprKind::IndexCell(base, indices) = &arg.kind { let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon); if is_expand_all { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true }); self.compile_expr(base)?; } else { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false }); self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; } } } else { specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false }); self.compile_expr(arg)?; } }
                         self.emit(Instr::CallFunctionExpandMulti(name.clone(), specs));
                     } else {
                         for arg in args { self.compile_expr(arg)?; }
                         self.emit(Instr::CallFunction(name.clone(), args.len()));
                     }
                 } else {
-                    // Attempt compile-time import resolution for builtins
-                    // 1) Specific imports: import pkg.foo => resolve 'foo'
+                    // Existing import-based function/builtin resolution, extended with static method via Class.*
+                    // Attempt compile-time import resolution for builtins and user functions with ambiguity checks
+                    // 1) Specific imports: import pkg.foo => resolve 'foo' (takes precedence)
                     // 2) Wildcard imports: import pkg.* => resolve 'pkg.foo'
                     let mut resolved = name.clone();
+                    let mut resolved_static: Option<(String, String)> = None; // (class, method)
                     if !runmat_builtins::builtin_functions().iter().any(|b| b.name == resolved) {
-                        // First specific imports
+                        // Specific candidates
+                        let mut specific_candidates: Vec<String> = Vec::new();
                         for (path, wildcard) in &self.imports {
                             if *wildcard { continue; }
                             if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
                                 let qual = path.join(".");
-                                if runmat_builtins::builtin_functions().iter().any(|b| b.name == qual) {
-                                    resolved = qual; break;
+                                if runmat_builtins::builtin_functions().iter().any(|b| b.name == qual) || self.functions.contains_key(&qual) {
+                                    specific_candidates.push(qual);
                                 }
                             }
                         }
-                        if resolved == *name {
-                            // Then wildcard imports
+                        if specific_candidates.len() > 1 { return Err(format!("ambiguous unqualified reference '{}' via imports: {}", name, specific_candidates.join(", "))); }
+                        if specific_candidates.len() == 1 { resolved = specific_candidates.remove(0); }
+                        else {
+                            // Wildcard candidates for functions
+                            let mut wildcard_candidates: Vec<String> = Vec::new();
                             for (path, wildcard) in &self.imports {
                                 if !*wildcard { continue; }
                                 if path.is_empty() { continue; }
-                                let mut qual = String::new();
-                                for (i, part) in path.iter().enumerate() { if i>0 { qual.push('.'); } qual.push_str(part); }
-                                qual.push('.'); qual.push_str(name);
-                                if runmat_builtins::builtin_functions().iter().any(|b| b.name == qual) {
-                                    resolved = qual; break;
+                                let mut qual = String::new(); for (i, part) in path.iter().enumerate() { if i>0 { qual.push('.'); } qual.push_str(part); } qual.push('.'); qual.push_str(name);
+                                if runmat_builtins::builtin_functions().iter().any(|b| b.name == qual) || self.functions.contains_key(&qual) {
+                                    wildcard_candidates.push(qual);
+                                }
+                                // Also consider Class.* for static method: single-segment path treated as class name
+                                if path.len() == 1 {
+                                    let cls = path[0].clone();
+                                    // Probe registry for static method existence
+                                    if let Some((m, _owner)) = runmat_builtins::lookup_method(&cls, &name) {
+                                        if m.is_static { resolved_static = Some((cls.clone(), name.clone())); }
+                                    }
                                 }
                             }
+                            if wildcard_candidates.len() > 1 { return Err(format!("ambiguous unqualified reference '{}' via wildcard imports: {}", name, wildcard_candidates.join(", "))); }
+                            if wildcard_candidates.len() == 1 { resolved = wildcard_candidates.remove(0); }
                         }
                     }
-                    // If no cell-expansion args, propagate inner user-function returns into argument list
-                    if !has_any_expand {
-                        let mut total_argc = 0usize;
-                        let mut did_expand_inner = false;
-                        for arg in args {
-                            if let HirExprKind::FuncCall(inner, inner_args) = &arg.kind {
-                                if self.functions.contains_key(inner) {
-                                    for a in inner_args { self.compile_expr(a)?; }
-                                    let outc = self.functions.get(inner).map(|f| {
-                                        if f.has_varargout { // allow unbounded; conservatively request as many as outer builtin can take? we don't know here, so take fixed declared
-                                            f.outputs.len().max(1)
-                                        } else { f.outputs.len().max(1) }
-                                    }).unwrap_or(1);
-                                    self.emit(Instr::CallFunctionMulti(inner.clone(), inner_args.len(), outc));
-                                    total_argc += outc; did_expand_inner = true;
-                                } else {
-                                    // Non-user function call, compile normally
-                                    self.compile_expr(arg)?; total_argc += 1;
-                                }
-                            } else {
-                                self.compile_expr(arg)?; total_argc += 1;
-                            }
-                        }
-                        if did_expand_inner {
-                            self.emit(Instr::CallBuiltin(resolved, total_argc));
+                    // If resolved maps to a user function
+                    if self.functions.contains_key(&resolved) {
+                        if has_any_expand {
+                            let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(args.len());
+                            for arg in args { if let HirExprKind::IndexCell(base, indices) = &arg.kind { let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon); if is_expand_all { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true }); self.compile_expr(base)?; } else { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false }); self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; } } } else { specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false }); self.compile_expr(arg)?; } }
+                            self.emit(Instr::CallFunctionExpandMulti(resolved.clone(), specs));
                             return Ok(());
-                        }
+                        } else { for arg in args { self.compile_expr(arg)?; } self.emit(Instr::CallFunction(resolved.clone(), args.len())); return Ok(()); }
+                    }
+                    // If we matched Class.* static method
+                    if let Some((cls, method)) = resolved_static {
+                        for arg in args { self.compile_expr(arg)?; }
+                        self.emit(Instr::CallStaticMethod(cls, method, args.len()));
+                        return Ok(());
+                    }
+                    // Existing propagation path and builtin call
+                    if !has_any_expand {
+                        let mut total_argc = 0usize; let mut did_expand_inner = false;
+                        for arg in args { if let HirExprKind::FuncCall(inner, inner_args) = &arg.kind { if self.functions.contains_key(inner) { for a in inner_args { self.compile_expr(a)?; } let outc = self.functions.get(inner).map(|f| { if f.has_varargout { f.outputs.len().max(1) } else { f.outputs.len().max(1) } }).unwrap_or(1); self.emit(Instr::CallFunctionMulti(inner.clone(), inner_args.len(), outc)); total_argc += outc; did_expand_inner = true; } else { self.compile_expr(arg)?; total_argc += 1; } } else { self.compile_expr(arg)?; total_argc += 1; } }
+                        if did_expand_inner { self.emit(Instr::CallBuiltin(resolved, total_argc)); return Ok(()); }
                     }
                     if has_any_expand {
                         let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(args.len());
-                        for arg in args {
-                            if let HirExprKind::IndexCell(base, indices) = &arg.kind {
-                                let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon);
-                                if is_expand_all {
-                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true });
-                                    self.compile_expr(base)?;
-                                } else {
-                                    specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false });
-                                    self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; }
-                                }
-                            } else {
-                                specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false });
-                                self.compile_expr(arg)?;
-                            }
-                        }
+                        for arg in args { if let HirExprKind::IndexCell(base, indices) = &arg.kind { let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon); if is_expand_all { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true }); self.compile_expr(base)?; } else { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false }); self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; } } } else { specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false }); self.compile_expr(arg)?; } }
                         self.emit(Instr::CallBuiltinExpandMulti(resolved, specs));
-                    } else {
-                        for arg in args { self.compile_expr(arg)?; }
-                        self.emit(Instr::CallBuiltin(resolved, args.len()));
-                    }
+                    } else { for arg in args { self.compile_expr(arg)?; } self.emit(Instr::CallBuiltin(resolved, args.len())); }
                 }
+                return Ok(())
             }
             HirExprKind::Tensor(matrix_data) | HirExprKind::Cell(matrix_data) => {
                 let rows = matrix_data.len();
@@ -1020,7 +983,8 @@ impl Compiler {
                         }
                     }
                 }
-                let has_non_literals = matrix_data.iter().any(|row| row.iter().any(|expr| {
+                let has_strings = matrix_data.iter().any(|row| row.iter().any(|expr| matches!(expr.kind, HirExprKind::String(_))));
+                let has_non_literals = has_strings || matrix_data.iter().any(|row| row.iter().any(|expr| {
                     !matches!(expr.kind, HirExprKind::Number(_) | HirExprKind::String(_) | HirExprKind::Constant(_))
                 }));
                 if has_non_literals {
@@ -1054,7 +1018,7 @@ impl Compiler {
             HirExprKind::Index(base, indices) => {
                 let has_colon = indices.iter().any(|e| matches!(e.kind, HirExprKind::Colon));
                 let has_end = indices.iter().any(|e| matches!(e.kind, HirExprKind::End));
-                let has_vector = indices.iter().any(|e| matches!(e.kind, HirExprKind::Range(_,_,_) | HirExprKind::Tensor(_)) || matches!(e.ty, runmat_hir::Type::Matrix{..}));
+                let has_vector = indices.iter().any(|e| matches!(e.kind, HirExprKind::Range(_,_,_) | HirExprKind::Tensor(_)) || matches!(e.ty, runmat_hir::Type::Tensor{..}));
                 // General case: any-dimension ranges with end arithmetic (e.g., A(:,2:2:end-1,...))
                 // We lower into IndexRangeEnd: push base, then per-range start[, step] in increasing dimension order,
                 // then any numeric scalar indices (in order). Colon and plain end dims are marked in masks.
@@ -1187,7 +1151,7 @@ impl Compiler {
             }
             // Dynamic member s.(expr)
             HirExprKind::MethodCall(b, m, a) if m == &"()".to_string() && a.len()==1 => {
-                // Note: parser currently doesn’t produce this form; placeholder for dynamic
+                // Note: parser currently doesn't produce this form; placeholder for dynamic
                 self.compile_expr(b)?; self.compile_expr(&a[0])?; self.emit(Instr::LoadMemberDynamic);
             }
             HirExprKind::MethodCall(base, method, args) => {

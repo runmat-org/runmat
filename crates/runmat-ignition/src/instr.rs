@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub enum Instr {
     LoadConst(f64),
     LoadString(String),
+    LoadCharRow(String),
     LoadVar(usize),
     StoreVar(usize),
     Add,
@@ -125,6 +126,9 @@ pub enum Instr {
     StoreLocal(usize), // Store to local variable (relative to current frame)
     // Imports
     RegisterImport { path: Vec<String>, wildcard: bool },
+    // Global and Persistent declarations
+    DeclareGlobal(Vec<usize>),
+    DeclarePersistent(Vec<usize>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

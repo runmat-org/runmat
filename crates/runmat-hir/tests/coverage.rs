@@ -51,7 +51,7 @@ fn matrices_cells_and_indexing() {
     match &prog.body[0] {
         HirStmt::Assign(_, expr, true) => {
             assert!(matches!(expr.kind, HirExprKind::Tensor(_)));
-            assert!(matches!(expr.ty, Type::Matrix{..}));
+            assert!(matches!(expr.ty, Type::Tensor { .. }));
         }
         _ => panic!("expected matrix assignment"),
     }
@@ -89,7 +89,7 @@ fn end_colon_and_range() {
     match &prog.body[2] {
         HirStmt::ExprStmt(expr, true) => {
             assert!(matches!(expr.kind, HirExprKind::Range(_, _, _)));
-            assert!(matches!(expr.ty, Type::Matrix{..}));
+            assert!(matches!(expr.ty, Type::Tensor{..}));
         }
         _ => panic!("expected range"),
     }

@@ -299,8 +299,8 @@ fn infer_complex_type(type_path: &syn::TypePath) -> proc_macro2::TokenStream {
     let path_str = quote! { #type_path }.to_string();
 
     // Handle common patterns
-    if path_str.contains("Matrix") {
-        quote! { runmat_builtins::Type::matrix() }
+    if path_str.contains("Matrix") || path_str.contains("Tensor") {
+        quote! { runmat_builtins::Type::tensor() }
     } else if path_str.contains("Value") {
         quote! { runmat_builtins::Type::Unknown } // Value can be anything
     } else if path_str.starts_with("Result") {

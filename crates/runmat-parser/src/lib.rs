@@ -350,26 +350,12 @@ impl Parser {
                     let expr = self.parse_expr()?;
                     Ok(Stmt::Assign(name, expr, false)) // Will be updated by parse_stmt_with_semicolon
                 } else if self.peek_token() == Some(&Token::Ident)
-                    && !matches!(
+                    && matches!(
                         self.peek_token_at(1),
-                        Some(
-                            Token::Assign
-                                | Token::LParen
-                                | Token::Dot
-                                | Token::LBracket
-                                | Token::LBrace
-                                | Token::Plus
-                                | Token::Minus
-                                | Token::Star
-                                | Token::Transpose
-                        )
-                    )
-                    && !matches!(
-                        self.peek_token_at(1),
-                        Some(Token::AndAnd | Token::OrOr | Token::And | Token::Or)
+                        Some(Token::Ident | Token::Integer | Token::Float | Token::Str)
                     )
                 {
-                    // Command/function duality: name arg1 arg2 ...
+                    // Tightened command-form: only when an identifier is followed by a simple arg token
                     let name = self.next().unwrap().lexeme;
                     let args = self.parse_command_args();
                     Ok(Stmt::ExprStmt(Expr::FuncCall(name, args), false))
@@ -399,6 +385,11 @@ impl Parser {
                     let s = self.next().unwrap().lexeme;
                     args.push(Expr::String(s));
                 }
+                // Stop on tokens that would start normal expression syntax
+                Some(Token::Slash) | Some(Token::Star) | Some(Token::Backslash)
+                | Some(Token::Plus) | Some(Token::Minus) | Some(Token::LParen)
+                | Some(Token::Dot) | Some(Token::LBracket) | Some(Token::LBrace)
+                | Some(Token::Transpose) => break,
                 _ => break,
             }
         }

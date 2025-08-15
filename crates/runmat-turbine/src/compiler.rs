@@ -292,7 +292,7 @@ impl BytecodeCompiler {
                         let const_val = builder.ins().f64const(*val);
                         local_stack.push(const_val);
                     }
-                    Instr::LoadString(_) => {
+                    Instr::LoadString(_) | Instr::LoadCharRow(_) => {
                         // Strings cannot be compiled to JIT - fall back to interpreter
                         return Err(TurbineError::ExecutionError(
                             "String operations not supported in JIT mode".to_string(),
@@ -612,6 +612,8 @@ impl BytecodeCompiler {
                     | Instr::CallFunctionExpandAt(_, _, _, _)
                     | Instr::Swap
                     | Instr::RegisterImport { .. }
+                    | Instr::DeclareGlobal(_)
+                    | Instr::DeclarePersistent(_)
                     | Instr::CallFeval(_)
                     | Instr::CallFevalExpandMulti(_) => {
                         return Err(TurbineError::ExecutionError(

@@ -103,6 +103,21 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                 ))
             }
         }
+        Value::StringArray(sa) => {
+            if indices.is_empty() { return Err("At least one index is required".to_string()); }
+            if indices.len() == 1 {
+                let idx = indices[0] as usize; let total = sa.data.len();
+                if idx < 1 || idx > total { return Err(format!("Index {} out of bounds (1 to {})", idx, total)); }
+                Ok(Value::String(sa.data[idx - 1].clone()))
+            } else if indices.len() == 2 {
+                let row = indices[0] as usize; let col = indices[1] as usize;
+                if row < 1 || row > sa.rows || col < 1 || col > sa.cols { return Err("StringArray subscript out of bounds".to_string()); }
+                let idx = (row - 1) + (col - 1) * sa.rows;
+                Ok(Value::String(sa.data[idx].clone()))
+            } else {
+                Err(format!("StringArray supports 1 or 2 indices, got {}", indices.len()))
+            }
+        }
         Value::Num(_) | Value::Int(_) => {
             if indices.len() == 1 && indices[0] == 1.0 {
                 // Scalar indexing with A(1) returns the scalar itself

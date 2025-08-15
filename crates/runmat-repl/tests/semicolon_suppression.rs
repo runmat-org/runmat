@@ -134,10 +134,10 @@ fn test_type_info_display() {
     assert!(result.value.is_none());
     assert_eq!(result.type_info, Some("1x3 vector".to_string()));
 
-    // Test string assignment with semicolon
+    // Test char array assignment with semicolon
     let result = engine.execute("w = 'hello';").unwrap();
     assert!(result.value.is_none());
-    assert_eq!(result.type_info, Some("string".to_string()));
+    assert_eq!(result.type_info, Some("1x5 char array".to_string()));
 
     // Test that assignments without semicolon still show values, not type info
     let result = engine.execute("a = 100").unwrap();
