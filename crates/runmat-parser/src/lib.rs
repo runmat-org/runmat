@@ -308,6 +308,7 @@ impl Parser {
             Some(Token::Switch) => self.parse_switch().map_err(|e| e.into()),
             Some(Token::Try) => self.parse_try_catch().map_err(|e| e.into()),
             Some(Token::Import) => self.parse_import().map_err(|e| e.into()),
+            Some(Token::ClassDef) => self.parse_classdef().map_err(|e| e.into()),
             Some(Token::Global) => self.parse_global().map_err(|e| e.into()),
             Some(Token::Persistent) => self.parse_persistent().map_err(|e| e.into()),
             Some(Token::Break) => {
@@ -323,7 +324,6 @@ impl Parser {
                 Ok(Stmt::Return)
             }
             Some(Token::Function) => self.parse_function().map_err(|e| e.into()),
-            Some(Token::ClassDef) => self.parse_classdef().map_err(|e| e.into()),
             // Multi-assign like [a,b] = f()
             Some(Token::LBracket) => {
                 let save = self.pos;
@@ -349,23 +349,65 @@ impl Parser {
                     }
                     let expr = self.parse_expr()?;
                     Ok(Stmt::Assign(name, expr, false)) // Will be updated by parse_stmt_with_semicolon
-                } else if self.peek_token() == Some(&Token::Ident)
-                    && matches!(
-                        self.peek_token_at(1),
-                        Some(Token::Ident | Token::Integer | Token::Float | Token::Str)
-                    )
-                {
-                    // Tightened command-form: only when an identifier is followed by a simple arg token
-                    let name = self.next().unwrap().lexeme;
-                    let args = self.parse_command_args();
-                    Ok(Stmt::ExprStmt(Expr::FuncCall(name, args), false))
+                } else if self.peek_token() == Some(&Token::Ident) {
+                    // First, try complex lvalue assignment starting from an identifier: A(1)=x, A{1}=x, s.f=x, s.(n)=x
+                    if let Some(lv) = self.try_parse_lvalue_assign()? { return Ok(lv); }
+                    // Command-form at statement start if it looks like a sequence of simple arguments
+                    // and is not immediately followed by indexing/member syntax.
+                    if self.can_start_command_form() {
+                        let name = self.next().unwrap().lexeme;
+                        let args = self.parse_command_args();
+                        Ok(Stmt::ExprStmt(Expr::FuncCall(name, args), false))
+                } else {
+                        // If we see Ident <space> Ident immediately followed by postfix opener,
+                        // this is an ambiguous adjacency (e.g., "foo b(1)"). Emit a targeted error.
+                        if matches!(self.peek_token_at(1), Some(Token::Ident))
+                            && matches!(
+                                self.peek_token_at(2),
+                                Some(Token::LParen | Token::Dot | Token::LBracket | Token::LBrace | Token::Transpose)
+                            )
+                        {
+                            return Err(self.error(
+                                "ambiguous command-form near identifier; use function syntax foo(b(...)) or quote argument",
+                            ));
+                        }
+                        // Fall back to full expression parse (e.g., foo(1), foo.bar, etc.)
+                    let expr = self.parse_expr()?;
+                        Ok(Stmt::ExprStmt(expr, false))
+                    }
                 } else if let Some(lv) = self.try_parse_lvalue_assign()? {
                     Ok(lv)
                 } else {
                     let expr = self.parse_expr()?;
-                    Ok(Stmt::ExprStmt(expr, false)) // Will be updated by parse_stmt_with_semicolon
+                    // Require statement terminator or EOF after a bare expression at statement level
+                    // Be permissive: allow subsequent tokens; ambiguity has been handled above by
+                    // can_start_command_form()/adjacency guard. Treat this as a normal expression statement.
+                    Ok(Stmt::ExprStmt(expr, false))
                 }
             }
+        }
+    }
+
+    fn can_start_command_form(&self) -> bool {
+        // At entry, peek_token() is Some(Ident) for callee
+        let mut i = 1;
+        // At least one simple arg must follow
+        if !matches!(self.peek_token_at(i), Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)) {
+            return false;
+        }
+        // Consume all contiguous simple args
+        while matches!(self.peek_token_at(i), Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)) {
+            i += 1;
+        }
+        // If the next token begins indexing/member or other expression syntax, do not use command-form
+        match self.peek_token_at(i) {
+            Some(Token::LParen) | Some(Token::Dot) | Some(Token::LBracket) | Some(Token::LBrace) | Some(Token::Transpose) => return false,
+            // If next token is assignment, also not a command-form (would be ambiguous)
+            Some(Token::Assign) => return false,
+            // End of statement is okay for command-form
+            None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline) => return true,
+            // Otherwise conservatively allow
+            _ => return true,
         }
     }
 
@@ -376,6 +418,11 @@ impl Parser {
                 Some(Token::Ident) => {
                     let ident = self.next().unwrap().lexeme;
                     args.push(Expr::Ident(ident));
+                }
+                // In command-form, accept 'end' as a literal identifier token for compatibility
+                Some(Token::End) => {
+                    self.pos += 1;
+                    args.push(Expr::Ident("end".to_string()));
                 }
                 Some(Token::Integer) | Some(Token::Float) => {
                     let num = self.next().unwrap().lexeme;
@@ -612,8 +659,7 @@ impl Parser {
         }
     }
 
-    fn parse_postfix(&mut self) -> Result<Expr, String> {
-        let mut expr = self.parse_primary()?;
+    fn parse_postfix_with_base(&mut self, mut expr: Expr) -> Result<Expr, String> {
         loop {
             if self.consume(&Token::LParen) {
                 let mut args = Vec::new();
@@ -703,6 +749,11 @@ impl Parser {
         Ok(expr)
     }
 
+    fn parse_postfix(&mut self) -> Result<Expr, String> {
+        let expr = self.parse_primary()?;
+        self.parse_postfix_with_base(expr)
+    }
+
     fn expr_suggests_indexing(&self, e: &Expr) -> bool {
         match e {
             Expr::Colon | Expr::EndKeyword | Expr::Range(_, _, _) => true,
@@ -732,9 +783,25 @@ impl Parser {
         } else if self.consume(&Token::Tilde) {
             Ok(Expr::Unary(UnOp::Not, Box::new(self.parse_unary()?)))
         } else if self.consume(&Token::Question) {
-            // Meta-class query: ?Qualified.Name
-            let name = self.parse_qualified_name()?;
-            Ok(Expr::MetaClass(name))
+            // Meta-class query with controlled qualified name consumption to allow postfix chaining
+            // Consume packages (lowercase-leading) and exactly one Class segment (uppercase-leading), then stop.
+            let mut parts: Vec<String> = Vec::new();
+            let first = self.expect_ident()?;
+            let class_consumed = first.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+            parts.push(first);
+            while self.peek_token() == Some(&Token::Dot) && matches!(self.peek_token_at(1), Some(Token::Ident)) {
+                // Lookahead at the next identifier lexeme
+                let next_lex = if let Some(ti) = self.tokens.get(self.pos + 1) { ti.lexeme.clone() } else { String::new() };
+                let is_upper = next_lex.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                if class_consumed { break; }
+                // Consume dot and ident
+                self.pos += 1; // consume '.'
+                let seg = self.expect_ident()?;
+                parts.push(seg);
+                if is_upper { break; }
+            }
+            let base = Expr::MetaClass(parts.join("."));
+            self.parse_postfix_with_base(base)
         } else {
             self.parse_pow()
         }
@@ -748,6 +815,7 @@ impl Parser {
                 Token::True => Ok(Expr::Ident("true".into())),
                 Token::False => Ok(Expr::Ident("false".into())),
                 Token::Ident => Ok(Expr::Ident(info.lexeme)),
+                // Treat 'end' as EndKeyword in expression contexts; in command-form we allow 'end' to be consumed as an identifier via command-args path.
                 Token::End => Ok(Expr::EndKeyword),
                 Token::At => {
                     // Anonymous function or function handle
@@ -793,8 +861,9 @@ impl Parser {
                 }
                 Token::Colon => Ok(Expr::Colon),
                 Token::ClassDef => {
-                    // Allow classdef at statement position only; if encountered in expression, surface a clearer error
-                    Err("unexpected token 'classdef' in expression context".into())
+                    // Rewind one token and defer to statement parser for classdef blocks
+                    self.pos -= 1;
+                    return Err("classdef in expression context".into());
                 }
                 _ => {
                     // Provide detailed error message about what token was unexpected
@@ -839,7 +908,7 @@ impl Parser {
             // Accept either comma-separated or whitespace-separated elements until ';' or ']'
             loop {
                 if self.consume(&Token::Comma) {
-                    row.push(self.parse_expr()?);
+                row.push(self.parse_expr()?);
                     continue;
                 }
                 // If next token ends the row/matrix, stop

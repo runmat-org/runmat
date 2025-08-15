@@ -221,6 +221,8 @@ impl Compiler {
     pub fn compile_program(&mut self, prog: &HirProgram) -> Result<(), String> {
         // Validate imports early for duplicate/specific-name ambiguities
         runmat_hir::validate_imports(prog)?;
+        // Validate class definitions for attribute correctness and name conflicts
+        runmat_hir::validate_classdefs(prog)?;
         // Pre-collect imports (both wildcard and specific) for name resolution
         for stmt in &prog.body {
             if let HirStmt::Import { path, wildcard } = stmt {
@@ -744,20 +746,17 @@ impl Compiler {
                 if let Some(constant) = constants.iter().find(|c| c.name == name) {
                     if let runmat_builtins::Value::Num(val) = &constant.value { self.emit(Instr::LoadConst(*val)); } else { return Err(format!("Constant {name} is not a number")); }
                 } else {
-                    // Try resolving as unqualified static property via Class.* imports
+                    // Try resolving as unqualified static property via Class.* imports (multi-segment)
+                    let mut classes: Vec<String> = Vec::new();
                     for (path, wildcard) in &self.imports {
                         if !*wildcard { continue; }
-                        if path.len() == 1 {
-                            let cls = path[0].clone();
-                            if let Some((p, _owner)) = runmat_builtins::lookup_property(&cls, name) {
-                                if p.is_static {
-                                    self.emit(Instr::LoadStaticProperty(cls, name.clone()));
-                                    return Ok(());
-                                }
-                            }
-                        }
+                        if path.is_empty() { continue; }
+                        let mut cls = String::new(); for (i, part) in path.iter().enumerate() { if i>0 { cls.push('.'); } cls.push_str(part); }
+                        if let Some((p, _owner)) = runmat_builtins::lookup_property(&cls, name) { if p.is_static { classes.push(cls.clone()); } }
                     }
-                    return Err(format!("Unknown constant: {name}"));
+                    if classes.len() > 1 { return Err(format!("ambiguous unqualified static property '{}' via Class.* imports: {}", name, classes.join(", "))); }
+                    if classes.len() == 1 { self.emit(Instr::LoadStaticProperty(classes.remove(0), name.clone())); return Ok(()); }
+                    return Err(format!("Unknown constant or static property: {name}"));
                 }
             }
             HirExprKind::Unary(op, e) => {
@@ -893,10 +892,13 @@ impl Compiler {
                 } else {
                     // Existing import-based function/builtin resolution, extended with static method via Class.*
                     // Attempt compile-time import resolution for builtins and user functions with ambiguity checks
-                    // 1) Specific imports: import pkg.foo => resolve 'foo' (takes precedence)
+                    // Precedence for unqualified resolution:
+                    // locals > user functions in scope > specific imports > wildcard imports > Class.* static methods
+                    // 1) Specific imports: import pkg.foo => resolve 'foo' (takes precedence over wildcard)
                     // 2) Wildcard imports: import pkg.* => resolve 'pkg.foo'
+                    // 3) Class.* static methods: import Class.* (or pkg.Class.*) => resolve static methods if unambiguous
                     let mut resolved = name.clone();
-                    let mut resolved_static: Option<(String, String)> = None; // (class, method)
+                    let mut static_candidates: Vec<(String, String)> = Vec::new();
                     if !runmat_builtins::builtin_functions().iter().any(|b| b.name == resolved) {
                         // Specific candidates
                         let mut specific_candidates: Vec<String> = Vec::new();
@@ -921,20 +923,15 @@ impl Compiler {
                                 if runmat_builtins::builtin_functions().iter().any(|b| b.name == qual) || self.functions.contains_key(&qual) {
                                     wildcard_candidates.push(qual);
                                 }
-                                // Also consider Class.* for static method: single-segment path treated as class name
-                                if path.len() == 1 {
-                                    let cls = path[0].clone();
-                                    // Probe registry for static method existence
-                                    if let Some((m, _owner)) = runmat_builtins::lookup_method(&cls, &name) {
-                                        if m.is_static { resolved_static = Some((cls.clone(), name.clone())); }
-                                    }
-                                }
+                                // Accumulate Class.* static method candidates for any class path
+                                let mut cls = String::new(); for (i, part) in path.iter().enumerate() { if i>0 { cls.push('.'); } cls.push_str(part); }
+                                if let Some((m, _owner)) = runmat_builtins::lookup_method(&cls, &name) { if m.is_static { static_candidates.push((cls.clone(), name.clone())); } }
                             }
                             if wildcard_candidates.len() > 1 { return Err(format!("ambiguous unqualified reference '{}' via wildcard imports: {}", name, wildcard_candidates.join(", "))); }
                             if wildcard_candidates.len() == 1 { resolved = wildcard_candidates.remove(0); }
                         }
                     }
-                    // If resolved maps to a user function
+                    // If resolved maps to a user function, compile it now
                     if self.functions.contains_key(&resolved) {
                         if has_any_expand {
                             let mut specs: Vec<crate::instr::ArgSpec> = Vec::with_capacity(args.len());
@@ -943,11 +940,16 @@ impl Compiler {
                             return Ok(());
                         } else { for arg in args { self.compile_expr(arg)?; } self.emit(Instr::CallFunction(resolved.clone(), args.len())); return Ok(()); }
                     }
-                    // If we matched Class.* static method
-                    if let Some((cls, method)) = resolved_static {
+                    // If still no function, and exactly one static candidate, call it
+                    if !runmat_builtins::builtin_functions().iter().any(|b| b.name == resolved) && static_candidates.len() == 1 {
+                        let (cls, method) = static_candidates.remove(0);
                         for arg in args { self.compile_expr(arg)?; }
                         self.emit(Instr::CallStaticMethod(cls, method, args.len()));
                         return Ok(());
+                    }
+                    // If multiple static candidates and no function resolved, report ambiguity
+                    if !runmat_builtins::builtin_functions().iter().any(|b| b.name == resolved) && static_candidates.len() > 1 {
+                        return Err(format!("ambiguous unqualified static method '{}' via Class.* imports: {}", name, static_candidates.iter().map(|(c,_)| c.clone()).collect::<Vec<_>>().join(", ")));
                     }
                     // Existing propagation path and builtin call
                     if !has_any_expand {
@@ -960,6 +962,7 @@ impl Compiler {
                         for arg in args { if let HirExprKind::IndexCell(base, indices) = &arg.kind { let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon); if is_expand_all { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true }); self.compile_expr(base)?; } else { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false }); self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; } } } else { specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false }); self.compile_expr(arg)?; } }
                         self.emit(Instr::CallBuiltinExpandMulti(resolved, specs));
                     } else { for arg in args { self.compile_expr(arg)?; } self.emit(Instr::CallBuiltin(resolved, args.len())); }
+                    return Ok(())
                 }
                 return Ok(())
             }
@@ -1126,8 +1129,12 @@ impl Compiler {
             HirExprKind::End => { self.emit(Instr::LoadConst(-0.0)); /* placeholder, resolved via end_mask in IndexSlice */ }
             HirExprKind::Member(base, field) => {
                 // If base is a known class ref literal (string via classref builtin), static access
+                // Or if base is MetaClass (string literal), treat as class name for static access
                 // Otherwise, instance member
                 match &base.kind {
+                    HirExprKind::MetaClass(cls_name) => {
+                        self.emit(Instr::LoadStaticProperty(cls_name.clone(), field.clone()));
+                    }
                     HirExprKind::FuncCall(name, args) if name == "classref" && args.len() == 1 => {
                         if let HirExprKind::String(cls) = &args[0].kind {
                             let cls_name = if cls.starts_with('\'') && cls.ends_with('\'') { cls[1..cls.len()-1].to_string() } else { cls.clone() };
@@ -1156,6 +1163,10 @@ impl Compiler {
             }
             HirExprKind::MethodCall(base, method, args) => {
                 match &base.kind {
+                    HirExprKind::MetaClass(cls_name) => {
+                        for arg in args { self.compile_expr(arg)?; }
+                        self.emit(Instr::CallStaticMethod(cls_name.clone(), method.clone(), args.len()));
+                    }
                     HirExprKind::FuncCall(name, bargs) if name == "classref" && bargs.len() == 1 => {
                         if let HirExprKind::String(cls) = &bargs[0].kind {
                             let cls_name = if cls.starts_with('\'') && cls.ends_with('\'') { cls[1..cls.len()-1].to_string() } else { cls.clone() };
@@ -1210,6 +1221,8 @@ impl Compiler {
                 self.emit(Instr::CallBuiltin("make_handle".to_string(), 1));
             }
             HirExprKind::MetaClass(name) => { self.emit(Instr::LoadString(name.clone())); }
+            // Member/Method on metaclass (string on stack) will be handled by runtime as static property/method via classref
+            // We lower MetaClass to a string (class name) and then member/method code paths remain unchanged.
             HirExprKind::IndexCell(base, indices) => {
                 self.compile_expr(base)?;
                 for index in indices { self.compile_expr(index)?; }

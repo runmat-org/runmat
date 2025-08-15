@@ -33,4 +33,14 @@ fn metaclass_with_qualified_name() {
     }
 }
 
+#[test]
+fn imports_then_metaclass_contexts() {
+    let program = parse("import pkg.*; import other.Class; ?pkg.sub.M").unwrap();
+    assert_eq!(program.body.len(), 3);
+    match &program.body[2] {
+        Stmt::ExprStmt(Expr::MetaClass(name), _) => assert_eq!(name, "pkg.sub.M"),
+        _ => panic!("expected metaclass expression after imports"),
+    }
+}
+
 

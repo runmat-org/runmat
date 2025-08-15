@@ -129,6 +129,8 @@ pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
     let hir = HirProgram { body };
     // Apply flow-sensitive inference to populate implicit knowledge for downstream consumers
     let _ = infer_function_output_types(&hir);
+    // Validate class definitions and attributes at lowering time
+    validate_classdefs(&hir)?;
     Ok(hir)
 }
 
@@ -562,6 +564,7 @@ pub fn normalize_imports(prog: &HirProgram) -> Vec<NormalizedImport> {
     let mut out = Vec::new();
     for stmt in &prog.body {
         if let HirStmt::Import { path, wildcard } = stmt {
+            // Support hierarchical aliases, including class paths (e.g., pkg.sub.Class)
             let path_str = path.join(".");
             let last = if *wildcard { None } else { path.last().cloned() };
             out.push(NormalizedImport { path: path_str, wildcard: *wildcard, unqualified: last });
@@ -629,12 +632,18 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                     HirClassMember::Properties { names: props, attributes } => {
                         // Enforce attributes: Access/GetAccess/SetAccess must be public/private; Static+Dependent invalid
                         let mut has_static = false;
+                        let mut has_constant = false;
+                        let mut _has_transient = false;
+                        let mut _has_hidden = false;
                         let mut has_dependent = false;
                         let mut access_default: Option<String> = None;
                         let mut get_access: Option<String> = None;
                         let mut set_access: Option<String> = None;
                         for a in attributes {
                             if a.name.eq_ignore_ascii_case("Static") { has_static = true; continue; }
+                            if a.name.eq_ignore_ascii_case("Constant") { has_constant = true; continue; }
+                            if a.name.eq_ignore_ascii_case("Transient") { _has_transient = true; continue; }
+                            if a.name.eq_ignore_ascii_case("Hidden") { _has_hidden = true; continue; }
                             if a.name.eq_ignore_ascii_case("Dependent") { has_dependent = true; continue; }
                             if a.name.eq_ignore_ascii_case("Access") {
                                 let v = a.value.as_ref().ok_or_else(|| format!("Access requires value in class '{}' properties block", name))?;
@@ -661,6 +670,9 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                         if has_static && has_dependent {
                             return Err(format!("class '{}' properties: attributes 'Static' and 'Dependent' cannot be combined", name));
                         }
+                        if has_constant && has_dependent {
+                            return Err(format!("class '{}' properties: attributes 'Constant' and 'Dependent' cannot be combined", name));
+                        }
                         // If Access provided without Get/Set overrides, it's fine; if overrides provided, also fine.
                         let _ = (access_default, get_access, set_access);
                         // Enforce property attribute semantics minimal subset: ensure no duplicate Static flags in conflict (placeholder)
@@ -675,12 +687,23 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                     }
                     HirClassMember::Methods { body, attributes } => {
                         // Validate method attributes: Access must be public/private if present
+                        let mut _has_static = false;
+                        let mut has_abstract = false;
+                        let mut has_sealed = false;
+                        let mut _has_hidden = false;
                         for a in attributes {
+                            if a.name.eq_ignore_ascii_case("Static") { _has_static = true; continue; }
+                            if a.name.eq_ignore_ascii_case("Abstract") { has_abstract = true; continue; }
+                            if a.name.eq_ignore_ascii_case("Sealed") { has_sealed = true; continue; }
+                            if a.name.eq_ignore_ascii_case("Hidden") { _has_hidden = true; continue; }
                             if a.name.eq_ignore_ascii_case("Access") {
                                 let v = a.value.as_ref().ok_or_else(|| format!("Access requires value in class '{}' methods block", name))?;
                                 let v = norm_attr_value(v);
                                 validate_access_value(&format!("class '{}' methods", name), &v)?;
                             }
+                        }
+                        if has_abstract && has_sealed {
+                            return Err(format!("class '{}' methods: attributes 'Abstract' and 'Sealed' cannot be combined", name));
                         }
                         // Extract method function names at top-level of methods block
                         for s in body {

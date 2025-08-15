@@ -63,8 +63,7 @@ fn classdef_property_attributes_enforced() {
     // Static + Dependent invalid
     let src = "classdef C\n  properties(Static, Dependent)\n    p\n  end\nend";
     let ast = parse(src).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = runmat_hir::validate_classdefs(&hir);
+    let res = lower(&ast);
     assert!(res.is_err());
 }
 
@@ -73,8 +72,7 @@ fn classdef_access_values_validated() {
     // Invalid Access value
     let src = "classdef D\n  properties(Access=protected)\n    p\n  end\n  methods(Access=internal)\n    function y = f(x); y = x; end\n  end\nend";
     let ast = parse(src).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = runmat_hir::validate_classdefs(&hir);
+    let res = lower(&ast);
     assert!(res.is_err());
 }
 

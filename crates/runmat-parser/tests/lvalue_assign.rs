@@ -98,4 +98,10 @@ fn deeply_nested_lvalue_assignment() {
     }
 }
 
+#[test]
+fn multiple_assignment_kinds_sequence() {
+    let program = parse("A=1; A(1)=2; A{1}=3; s.f = 4").unwrap();
+    assert_eq!(program.body.len(), 4);
+}
+
 

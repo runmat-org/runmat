@@ -146,6 +146,212 @@ fn import_static_method_via_specific_class_import() {
 }
 
 #[test]
+fn import_precedence_specific_over_wildcard_and_locals() {
+    // Specific imports should take precedence over wildcard imports; locals should shadow both
+    let program = r#"
+        __register_test_classes();
+        import PkgF.foo;         % specific import of PkgF.foo
+        import PkgG.*;           % wildcard import with also foo
+        a = foo();               % should resolve to PkgF.foo (10)
+        foo = @() 42;            % local function handle shadowing imports
+        b = feval(foo);          % should be 42 (local shadow)
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs()<1e-9)));
+}
+
+#[test]
+fn import_ambiguity_between_specifics_errors() {
+    // Two specific imports of same unqualified function should cause compile-time error
+    let program = r#"
+        import PkgF.foo;
+        import PkgG.foo;
+        y = foo();
+    "#;
+    let ast = runmat_parser::parse(program).unwrap();
+    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    assert!(res.is_err());
+}
+
+#[test]
+fn import_ambiguity_between_wildcards_errors() {
+    // Two wildcard imports that both contain 'foo' should cause an ambiguity error on unqualified call
+    let program = r#"
+        import PkgF.*;
+        import PkgG.*;
+        y = foo();
+    "#;
+    let ast = runmat_parser::parse(program).unwrap();
+    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    assert!(res.is_err());
+}
+
+#[test]
+fn import_specific_conflict_with_user_function_prefers_local() {
+    // A user function in scope should overshadow specific imports
+    let program = r#"
+        import PkgF.foo;   % specific import exists
+        function y = foo()
+            y = 33;
+        end
+        a = foo();         % should call local function => 33
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 33.0).abs()<1e-9)));
+}
+
+#[test]
+fn import_static_property_shadowed_by_local_variable() {
+    // Local variables should shadow static properties brought in via Class.* imports
+    let program = r#"
+        __register_test_classes();
+        import Point.*;
+        staticValue = 7;   % shadows classref('Point').staticValue (42)
+        v = staticValue;
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs()<1e-9)));
+}
+
+#[test]
+fn import_specific_beats_wildcard_for_function_resolution() {
+    // Specific import should win over wildcard providing the same name
+    let program = r#"
+        import PkgF.foo;   % specific import
+        import PkgG.*;     % wildcard that also provides foo
+        y = foo();         % should resolve to PkgF.foo => 10
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
+}
+
+#[test]
+fn import_wildcard_static_method_ambiguity_errors() {
+    // Two Class.* wildcards that both bring in a static method with same unqualified name should be ambiguous
+    // We reuse Point.* for one side; fabricate another class via runtime registration if needed.
+    // Here we simulate ambiguity on function resolution instead, since a second class isn't pre-registered.
+    let program = r#"
+        import PkgF.*;
+        import PkgG.*;
+        z = foo();   % ambiguous via wildcard imports
+    "#;
+    let ast = runmat_parser::parse(program).unwrap();
+    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    assert!(res.is_err());
+}
+
+#[test]
+fn local_function_shadows_class_static_method_under_class_star() {
+    // Define a local function 'origin' that should shadow Point.origin brought via import Point.*
+    let program = r#"
+        __register_test_classes();
+        import Point.*;
+        function y = origin()
+            y = 123;
+        end
+        v = origin();   % should call local (123), not Point.origin
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 123.0).abs()<1e-9)));
+}
+
+#[test]
+fn multi_segment_import_builtin_vs_user_function_specific_prefers_user_function() {
+    // When both a builtin and a user function exist under the same unqualified name via specific import,
+    // ensure the user function in scope takes precedence.
+    let program = r#"
+        import PkgF.foo;   % provides builtin PkgF.foo
+        function y = foo()
+            y = 77;
+        end
+        a = foo();         % should call the user function -> 77
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 77.0).abs()<1e-9)));
+}
+
+#[test]
+fn unqualified_static_property_without_imports_errors() {
+    // Referencing staticValue unqualified without imports should error
+    let program = r#"
+        __register_test_classes();
+        v = staticValue;
+    "#;
+    let ast = runmat_parser::parse(program).unwrap();
+    let res = runmat_hir::lower(&ast).and_then(|hir| runmat_ignition::compile(&hir));
+    assert!(res.is_err());
+}
+
+#[test]
+fn unqualified_static_property_shadowed_by_local_variable() {
+    // Even with import Point.*, a local variable should shadow unqualified static property name
+    let program = r#"
+        __register_test_classes();
+        import Point.*;
+        staticValue = 9;
+        v = staticValue;  % picks local, not class static 42
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs()<1e-9)));
+}
+
+#[test]
+fn import_nested_package_class_static_method_resolution() {
+    // Simulate nested pkg class via import path and ensure resolution prefers functions first, then static method
+    let program = r#"
+        __register_test_classes();
+        import pkg.PointNS.*;   % nested path Simulation (pkg.PointNS has no methods; ensures no accidental resolution)
+        function z = origin()
+            z = 5;
+        end
+        v = origin();          % local function shadows any static method named origin
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs()<1e-9)));
+}
+
+#[test]
+fn class_property_attribute_conflicts_error() {
+    // Properties with Constant and Dependent together should error
+    let program = r#"
+        classdef Bad
+            properties(Constant, Dependent)
+                x
+            end
+        end
+    "#;
+    let ast = runmat_parser::parse(program).unwrap();
+    let res = runmat_hir::lower(&ast);
+    assert!(res.is_err());
+}
+
+#[test]
+fn class_method_attribute_conflicts_error() {
+    // Methods with Abstract and Sealed together should error
+    let program = r#"
+        classdef Bad
+            methods(Abstract, Sealed)
+                function y = f(obj)
+                    y = 1;
+                end
+            end
+        end
+    "#;
+    let ast = runmat_parser::parse(program).unwrap();
+    let res = runmat_hir::lower(&ast);
+    assert!(res.is_err());
+}
+
+#[test]
 #[ignore]
 fn metaclass_context_with_imports() {
     // Ensure ?pkg.Class parses and coexists with imports; no runtime error expected
@@ -153,6 +359,14 @@ fn metaclass_context_with_imports() {
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
+}
+
+#[test]
+fn metaclass_postfix_member_and_method() {
+    let program = "__register_test_classes(); v = ?Point.staticValue; o = ?Point.origin();";
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
 }
 
 #[test]
