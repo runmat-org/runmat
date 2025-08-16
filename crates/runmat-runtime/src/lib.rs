@@ -67,7 +67,7 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             // Otherwise default-construct object
             return new_object_builtin(name.to_string());
         }
-        return Err(format!("unknown builtin `{name}`"));
+        return Err(format!("{}: {}", "MATLAB:UndefinedFunction", format!("Undefined function: {}", name)));
     }
 
     // Try each builtin until one succeeds

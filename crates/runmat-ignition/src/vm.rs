@@ -18,8 +18,13 @@ thread_local! {
     static PERSISTENTS: RefCell<HashMap<(String, usize), Value>> = RefCell::new(HashMap::new());
 }
 
+thread_local! {
+    // (nargin, nargout) for current call
+    static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = RefCell::new(Vec::new());
+}
+
 macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
-    let b = $stack.pop().ok_or("stack underflow")?; let a = $stack.pop().ok_or("stack underflow")?;
+    let b = $stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = $stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
     match (&a, &b) {
         (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String($name.to_string()), b.clone()]; match call_builtin("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
         (_, Value::Object(obj)) => { let rev = match $name { "lt" => "gt", "le" => "ge", "gt" => "lt", "ge" => "le", other => other };
@@ -87,7 +92,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::LoadVar(i) => stack.push(vars[i].clone()),
             Instr::StoreVar(i) => {
-                let val = stack.pop().ok_or("stack underflow")?;
+                let val = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 if i >= vars.len() { vars.resize(i + 1, Value::Num(0.0)); }
                 vars[i] = val;
                 // If this var is declared global, update the global table entry
@@ -108,7 +113,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::StoreLocal(offset) => {
-                let val = stack.pop().ok_or("stack underflow")?;
+                let val = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 if let Some(current_frame) = context.call_stack.last() {
                     let local_index = current_frame.locals_start + offset;
                     while context.locals.len() <= local_index { context.locals.push(Value::Num(0.0)); }
@@ -147,7 +152,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::Add => {
                 // If either operand is an object, try operator overloading
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String("plus".to_string()), b.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { let v = runmat_runtime::elementwise_add(&a, &b)?; stack.push(v) } } }
                     (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), Value::String("plus".to_string()), a.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { let v = runmat_runtime::elementwise_add(&a, &b)?; stack.push(v) } } }
@@ -155,7 +160,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::Sub => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), b.clone()]; match call_builtin("minus", &args) { Ok(v) => stack.push(v), Err(_) => { let v = runmat_runtime::elementwise_sub(&a, &b)?; stack.push(v) } } }
                     (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), a.clone()]; match call_builtin("uminus", &args) { Ok(v) => stack.push(v), Err(_) => { let v = runmat_runtime::elementwise_sub(&a, &b)?; stack.push(v) } } }
@@ -163,7 +168,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::Mul => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
                         let args = vec![Value::Object(obj.clone()), Value::String("mtimes".to_string()), b.clone()];
@@ -177,7 +182,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::Div => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
                         let args = vec![Value::Object(obj.clone()), Value::String("mrdivide".to_string()), b.clone()];
@@ -191,7 +196,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::Pow => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) | (_, Value::Object(obj)) => {
                         let arg_val = if matches!(&a, Value::Object(_)) { b.clone() } else { a.clone() };
@@ -202,7 +207,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::Neg => {
-                let value = stack.pop().ok_or("stack underflow")?;
+                let value = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match &value {
                     Value::Object(obj) => {
                         let args = vec![Value::Object(obj.clone())];
@@ -212,7 +217,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::UPlus => {
-                let value = stack.pop().ok_or("stack underflow")?;
+                let value = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match &value {
                     Value::Object(obj) => {
                         let args = vec![Value::Object(obj.clone())];
@@ -221,9 +226,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     _ => stack.push(value),
                 }
             }
-            Instr::Transpose => { let value = stack.pop().ok_or("stack underflow")?; let result = runmat_runtime::transpose(value)?; stack.push(result); }
+            Instr::Transpose => { let value = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let result = runmat_runtime::transpose(value)?; stack.push(result); }
             Instr::ElemMul => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String("times".to_string()), b.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { stack.push(runmat_runtime::elementwise_mul(&a, &b)?) } } }
                     (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), Value::String("times".to_string()), a.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { stack.push(runmat_runtime::elementwise_mul(&a, &b)?) } } }
@@ -231,7 +236,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::ElemDiv => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String("rdivide".to_string()), b.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { stack.push(runmat_runtime::elementwise_div(&a, &b)?) } } }
                     (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), Value::String("rdivide".to_string()), a.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { stack.push(runmat_runtime::elementwise_div(&a, &b)?) } } }
@@ -239,14 +244,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::ElemPow => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) | (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), if matches!(&a, Value::Object(_)) { b.clone() } else { a.clone() }]; match call_builtin("power", &args) { Ok(v) => stack.push(v), Err(_) => { stack.push(runmat_runtime::elementwise_pow(&a, &b)?) } } }
                     _ => stack.push(runmat_runtime::elementwise_pow(&a, &b)?),
                 }
             }
             Instr::ElemLeftDiv => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String("ldivide".to_string()), b.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { stack.push(runmat_runtime::elementwise_div(&b, &a)?) } } }
                     (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), Value::String("ldivide".to_string()), a.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { stack.push(runmat_runtime::elementwise_div(&b, &a)?) } } }
@@ -254,7 +259,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::LessEqual => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
                         let args = vec![Value::Object(obj.clone()), Value::String("le".to_string()), b.clone()];
@@ -290,7 +295,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::Less => { handle_rel_binary!(<, "lt", stack); }
             Instr::Greater => { handle_rel_binary!(>, "gt", stack); }
             Instr::GreaterEqual => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
                         let args = vec![Value::Object(obj.clone()), Value::String("ge".to_string()), b.clone()];
@@ -324,7 +329,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::Equal => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String("eq".to_string()), b.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa==bb {1.0}else{0.0})) } } }
                     (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), Value::String("eq".to_string()), a.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa==bb {1.0}else{0.0})) } } }
@@ -364,7 +369,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::NotEqual => {
-                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
                         let args = vec![Value::Object(obj.clone()), Value::String("ne".to_string()), b.clone()];
@@ -431,7 +436,19 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::JumpIfFalse(target) => { let cond: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; if cond == 0.0 { pc = target; continue; } }
             Instr::Jump(target) => { pc = target; continue; }
             Instr::CallBuiltin(name, arg_count) => {
-                let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); } args.reverse();
+                if name == "nargin" {
+                    if arg_count != 0 { vm_bail!(mex("MATLAB:TooManyInputs", "nargin takes no arguments")); }
+                    let (nin, _) = CALL_COUNTS.with(|cc| cc.borrow().last().cloned().unwrap_or((0, 0)));
+                    stack.push(Value::Num(nin as f64));
+                    pc += 1; continue;
+                }
+                if name == "nargout" {
+                    if arg_count != 0 { vm_bail!(mex("MATLAB:TooManyInputs", "nargout takes no arguments")); }
+                    let (_, nout) = CALL_COUNTS.with(|cc| cc.borrow().last().cloned().unwrap_or((0, 0)));
+                    stack.push(Value::Num(nout as f64));
+                    pc += 1; continue;
+                }
+                let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); } args.reverse();
                 match call_builtin(&name, &args) {
                     Ok(result) => stack.push(result),
                     Err(e) => {
@@ -485,38 +502,38 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 // Build args vector by first collecting fixed args, then expanding cell indexing into comma-list
                 // Evaluate indices and base
                 let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices { let v = stack.pop().ok_or("stack underflow")?; indices.push(v); }
+                for _ in 0..num_indices { let v = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; indices.push(v); }
                 indices.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 // Collect fixed args
                 let mut fixed = Vec::with_capacity(fixed_argc);
-                for _ in 0..fixed_argc { fixed.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..fixed_argc { fixed.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 fixed.reverse();
                 // Evaluate cell indexing, then flatten cell contents to extend args
                 let expanded = match (base, indices.len()) {
                     (Value::Cell(ca), 1) => {
                         match &indices[0] {
                             Value::Num(n) => {
-                                let i = *n as usize; if i==0 || i>ca.data.len() { return Err("Cell index out of bounds".to_string()); }
+                                let i = *n as usize; if i==0 || i>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); }
                                 vec![ca.data[i-1].clone()]
                             }
                             Value::Int(i) => {
-                                let iu = *i as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); }
+                                let iu = *i as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); }
                                 vec![ca.data[iu-1].clone()]
                             }
                             Value::Tensor(t) => {
                                 // Treat as list of 1-based indices; expand each
                                 let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
-                                for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); }
+                                for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); }
                                 out
                             }
-                            _ => return Err("Unsupported cell index type".to_string()),
+                            _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                         }
                     }
                     (Value::Cell(ca), 2) => {
                         let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                         let (ir, ic) = (r as usize, c as usize);
-                        if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                        if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
                         vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
                     }
                     (other, _) => {
@@ -532,7 +549,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                                 vec![v]
                             }
-                            _ => return Err("CallBuiltinExpandLast requires cell or object cell access".to_string()),
+                            _ => return Err(mex("MATLAB:ExpandError","CallBuiltinExpandLast requires cell or object cell access")),
                         }
                     }
                 };
@@ -554,16 +571,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 let expanded = match (base, indices.len()) {
                     (Value::Cell(ca), 1) => {
                         match &indices[0] {
-                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
-                            _ => return Err("Unsupported cell index type".to_string()),
+                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                            _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                         }
                     }
                     (Value::Cell(ca), 2) => {
                         let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                         let (ir, ic) = (r as usize, c as usize);
-                        if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                        if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
                         vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
                     }
                     (Value::Object(obj), _) => {
@@ -576,7 +593,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                         vec![v]
                     }
-                    _ => return Err("CallBuiltinExpandAt requires cell or object cell access".to_string()),
+                    _ => return Err(mex("MATLAB:ExpandError","CallBuiltinExpandAt requires cell or object cell access")),
                 };
                 let mut args = before; args.extend(expanded.into_iter()); args.extend(after.into_iter());
                 match call_builtin(&name, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
@@ -589,9 +606,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 for spec in specs.iter().rev() {
                     if spec.is_expand {
                         let mut indices = Vec::with_capacity(spec.num_indices);
-                        for _ in 0..spec.num_indices { indices.push(stack.pop().ok_or("stack underflow")?); }
+                        for _ in 0..spec.num_indices { indices.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                         indices.reverse();
-                        let base = stack.pop().ok_or("stack underflow")?;
+                        let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                         let expanded = if spec.expand_all {
                             match base {
                                 Value::Cell(ca) => ca.data.clone(),
@@ -606,21 +623,21 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                                     match v { Value::Cell(ca) => ca.data, other => vec![other] }
                                 }
-                                _ => return Err("CallBuiltinExpandMulti requires cell or object for expand_all".to_string()),
+                                _ => return Err(mex("MATLAB:ExpandError","CallBuiltinExpandMulti requires cell or object for expand_all")),
                             }
                         } else { match (base, indices.len()) {
                             (Value::Cell(ca), 1) => {
                                 match &indices[0] {
-                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
-                                    _ => return Err("Unsupported cell index type".to_string()),
+                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                                    _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                                 }
                             }
                             (Value::Cell(ca), 2) => {
                                 let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                                 let (ir, ic) = (r as usize, c as usize);
-                                if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                                if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
                                 vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
                             }
                             (Value::Object(obj), _) => {
@@ -633,11 +650,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                                 vec![v]
                             }
-                            _ => return Err("CallBuiltinExpandMulti requires cell or object cell access".to_string()),
+                            _ => return Err(mex("MATLAB:ExpandError","CallBuiltinExpandMulti requires cell or object cell access")),
                         }};
                         for v in expanded { temp.push(v); }
                     } else {
-                        temp.push(stack.pop().ok_or("stack underflow")?);
+                        temp.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?);
                     }
                 }
                 temp.reverse();
@@ -648,7 +665,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 // Pop count values and build a 1xN numeric tensor (Num only; others error)
                 let mut vals: Vec<f64> = Vec::with_capacity(count);
                 let mut tmp: Vec<Value> = Vec::with_capacity(count);
-                for _ in 0..count { tmp.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..count { tmp.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 tmp.reverse();
                 for v in tmp {
                     let n: f64 = (&v).try_into()?; vals.push(n);
@@ -659,7 +676,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::PackToCol(count) => {
                 let mut vals: Vec<f64> = Vec::with_capacity(count);
                 let mut tmp: Vec<Value> = Vec::with_capacity(count);
-                for _ in 0..count { tmp.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..count { tmp.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 tmp.reverse();
                 for v in tmp { let n: f64 = (&v).try_into()?; vals.push(n); }
                 let tens = runmat_builtins::Tensor::new(vals, vec![count, 1]).map_err(|e| format!("PackToCol: {e}"))?;
@@ -671,9 +688,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 for spec in specs.iter().rev() {
                     if spec.is_expand {
                         let mut indices = Vec::with_capacity(spec.num_indices);
-                        for _ in 0..spec.num_indices { indices.push(stack.pop().ok_or("stack underflow")?); }
+                        for _ in 0..spec.num_indices { indices.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                         indices.reverse();
-                        let base = stack.pop().ok_or("stack underflow")?;
+                        let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                         let expanded = if spec.expand_all {
                             match base {
                                 Value::Cell(ca) => ca.data.clone(),
@@ -692,16 +709,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         } else { match (base, indices.len()) {
                             (Value::Cell(ca), 1) => {
                                 match &indices[0] {
-                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
-                                    _ => return Err("Unsupported cell index type".to_string()),
+                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                                    _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                                 }
                             }
                             (Value::Cell(ca), 2) => {
                                 let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                                 let (ir, ic) = (r as usize, c as usize);
-                                if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                                if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
                                 vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
                             }
                             (Value::Object(obj), _) => {
@@ -718,12 +735,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         }};
                         for v in expanded { temp.push(v); }
                     } else {
-                        temp.push(stack.pop().ok_or("stack underflow")?);
+                        temp.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?);
                     }
                 }
                 temp.reverse();
                 let args = temp;
-                let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(format!("undefined function: {name}")) };
+                let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(mex("MATLAB:UndefinedFunction", &format!("Undefined function: {}", name))) };
                 let var_map = runmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
                 let local_var_count = var_map.len();
                 let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
@@ -746,12 +763,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 } else { stack.push(Value::Num(0.0)); }
             }
             Instr::CallFunction(name, arg_count) => {
-                let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(format!("undefined function: {name}")) };
-                let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); } args.reverse();
+                let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(mex("MATLAB:UndefinedFunction", &format!("Undefined function: {}", name))) };
+                let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); } args.reverse();
                 if !func.has_varargin {
-                    if arg_count != func.params.len() { vm_bail!(format!("Function '{}' expects {} arguments, got {} - Not enough input arguments", name, func.params.len(), arg_count)); }
+                    if arg_count < func.params.len() { vm_bail!(mex("MATLAB:NotEnoughInputs", &format!("Function '{}' expects {} inputs, got {}", name, func.params.len(), arg_count))); }
+                    if arg_count > func.params.len() { vm_bail!(mex("MATLAB:TooManyInputs", &format!("Function '{}' expects {} inputs, got {}", name, func.params.len(), arg_count))); }
                 } else {
-                    if arg_count + 1 < func.params.len() { vm_bail!(format!("Function '{}' expects at least {} arguments, got {}", name, func.params.len()-1, arg_count)); }
+                    let min_args = func.params.len().saturating_sub(1);
+                    if arg_count < min_args { vm_bail!(mex("MATLAB:NotEnoughInputs", &format!("Function '{}' expects at least {} inputs, got {}", name, min_args, arg_count))); }
                 }
                 let var_map = runmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
                 let local_var_count = var_map.len();
@@ -790,7 +809,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
                 let func_program = runmat_hir::HirProgram { body: remapped_body };
                 let func_bytecode = crate::compile_with_functions(&func_program, &bytecode.functions)?;
-                let func_result_vars = match interpret_function(&func_bytecode, func_vars) {
+                let func_result_vars = match interpret_function_with_counts(&func_bytecode, func_vars, &name, 1, arg_count) {
                     Ok(v) => v,
                     Err(e) => {
                         if let Some((catch_pc, catch_var)) = try_stack.pop() {
@@ -814,7 +833,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 } else if let Some(output_var_id) = func.outputs.first() {
                     let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
                     if local_output_index < func_result_vars.len() { stack.push(func_result_vars[local_output_index].clone()); } else { stack.push(Value::Num(0.0)); }
-                } else { stack.push(Value::Num(0.0)); }
+                } else { vm_bail!(mex("MATLAB:TooManyOutputs", &format!("Function '{}' does not return outputs", name))); }
             }
             Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
                 // Assemble argument list with expansion at position
@@ -831,16 +850,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 let expanded = match (base, indices.len()) {
                     (Value::Cell(ca), 1) => {
                         match &indices[0] {
-                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
-                            _ => return Err("Unsupported cell index type".to_string()),
+                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                            _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                         }
                     }
                     (Value::Cell(ca), 2) => {
                         let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                         let (ir, ic) = (r as usize, c as usize);
-                        if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                        if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
                         vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
                     }
                     (Value::Object(obj), _) => {
@@ -853,7 +872,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                         vec![v]
                     }
-                    _ => return Err("CallBuiltinExpandAt requires cell or object cell access".to_string()),
+                    _ => return Err(mex("MATLAB:ExpandError","CallBuiltinExpandAt requires cell or object cell access")),
                 };
                 let mut args = before; args.extend(expanded.into_iter()); args.extend(after.into_iter());
                 match call_builtin(&name, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
@@ -861,10 +880,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             
             Instr::CallFunctionMulti(name, arg_count, out_count) => {
                 let func: UserFunction = match bytecode.functions.get(&name) { Some(f) => f.clone(), None => vm_bail!(format!("undefined function: {name}")) };
-                let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); } args.reverse();
+                let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); } args.reverse();
                 if !func.has_varargin {
-                    if arg_count != func.params.len() { vm_bail!(format!("Function '{}' expects {} arguments, got {} - Not enough input arguments", name, func.params.len(), arg_count)); }
-                } else if arg_count + 1 < func.params.len() { vm_bail!(format!("Function '{}' expects at least {} arguments, got {}", name, func.params.len()-1, arg_count)); }
+                    if arg_count < func.params.len() { vm_bail!(mex("MATLAB:NotEnoughInputs", &format!("Function '{}' expects {} inputs, got {}", name, func.params.len(), arg_count))); }
+                    if arg_count > func.params.len() { vm_bail!(mex("MATLAB:TooManyInputs", &format!("Function '{}' expects {} inputs, got {}", name, func.params.len(), arg_count))); }
+                } else if arg_count + 1 < func.params.len() { vm_bail!(mex("MATLAB:NotEnoughInputs", &format!("Function '{}' expects at least {} inputs, got {}", name, func.params.len()-1, arg_count))); }
                 let var_map = runmat_hir::remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
                 let local_var_count = var_map.len();
                 let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
@@ -899,7 +919,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
                 let func_program = runmat_hir::HirProgram { body: remapped_body };
                 let func_bytecode = crate::compile_with_functions(&func_program, &bytecode.functions)?;
-                let func_result_vars = match interpret_function(&func_bytecode, func_vars) {
+                let func_result_vars = match interpret_function_with_counts(&func_bytecode, func_vars, &name, out_count, arg_count) {
                     Ok(v) => v,
                     Err(e) => {
                         if let Some((catch_pc, catch_var)) = try_stack.pop() {
@@ -932,18 +952,19 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         if let Some(varargout_oid) = func.outputs.last() {
                             if let Some(local_id) = var_map.get(varargout_oid) {
                                 if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
-                                    let mut vi = 0usize;
-                                    while pushed < out_count {
-                                        let v = ca.data.get(vi).cloned().unwrap_or(Value::Num(0.0));
-                                        stack.push(v); pushed += 1; vi += 1;
-                                    }
+                                    let available = ca.data.len();
+                                    let need = out_count - pushed;
+                                    if need > available { vm_bail!(mex("MATLAB:VarargoutMismatch", &format!("Function '{}' returned {} varargout values, {} requested", name, available, need))); }
+                                    for vi in 0..need { stack.push(ca.data[vi].clone()); pushed += 1; }
                                 }
                             }
                         }
                     }
-                    while pushed < out_count { stack.push(Value::Num(0.0)); pushed += 1; }
+                    // No padding
                 } else {
-                    // Push out_count values, left-to-right; if missing, push 0.0
+                    // Push out_count values; error if requesting more than defined
+                    let defined = func.outputs.len();
+                    if out_count > defined { vm_bail!(mex("MATLAB:TooManyOutputs", &format!("Function '{}' defines {} outputs, {} requested", name, defined, out_count))); }
                     for i in 0..out_count {
                         let v = func.outputs.get(i).and_then(|oid| var_map.get(oid)).map(|lid| lid.0)
                             .and_then(|idx| func_result_vars.get(idx)).cloned().unwrap_or(Value::Num(0.0));
@@ -953,7 +974,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::CallBuiltinMulti(name, arg_count, out_count) => {
                 // Default behavior: try to call builtin; if success, use first output; pad rest with 0.0
-                let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); } args.reverse();
+                let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); } args.reverse();
                 // Special-case for 'find' to support [i,j,v] = find(A)
                 if name == "find" && !args.is_empty() {
                     match &args[0] {
@@ -1047,7 +1068,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::PopTry => { try_stack.pop(); }
             Instr::CreateMatrix(rows, cols) => {
                 let total_elements = rows * cols; let mut row_major = Vec::with_capacity(total_elements);
-                for _ in 0..total_elements { let val: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; row_major.push(val); }
+                for _ in 0..total_elements { let val: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; row_major.push(val); }
                 row_major.reverse();
                 // Reorder to column-major storage: cm[r + c*rows] = rm[r*cols + c]
                 let mut data = vec![0.0; total_elements];
@@ -1057,28 +1078,28 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::CreateMatrixDynamic(num_rows) => {
                 let mut row_lengths = Vec::new();
-                for _ in 0..num_rows { let row_len: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; row_lengths.push(row_len as usize); }
+                for _ in 0..num_rows { let row_len: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; row_lengths.push(row_len as usize); }
                 row_lengths.reverse();
                 let mut rows_data = Vec::new();
-                for &row_len in row_lengths.iter().rev() { let mut row_values = Vec::new(); for _ in 0..row_len { row_values.push(stack.pop().ok_or("stack underflow")?); } row_values.reverse(); rows_data.push(row_values); }
+                for &row_len in row_lengths.iter().rev() { let mut row_values = Vec::new(); for _ in 0..row_len { row_values.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); } row_values.reverse(); rows_data.push(row_values); }
                 rows_data.reverse();
                 let result = runmat_runtime::create_matrix_from_values(&rows_data)?; stack.push(result);
             }
             Instr::CreateRange(has_step) => {
                 if has_step {
-                    let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                    let step: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                    let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    let end: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?;
+                    let step: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?;
+                    let start: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?;
                     let range_result = runmat_runtime::create_range(start, Some(step), end)?; stack.push(range_result);
                 } else {
-                    let end: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                    let start: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                    let end: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?;
+                    let start: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?;
                     let range_result = runmat_runtime::create_range(start, None, end)?; stack.push(range_result);
                 }
             }
             Instr::Index(num_indices) => {
-                let mut indices = Vec::new(); let count = num_indices; for _ in 0..count { let index_val: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; indices.push(index_val); } indices.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let mut indices = Vec::new(); let count = num_indices; for _ in 0..count { let index_val: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; indices.push(index_val); } indices.reverse();
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
                         let cell = runmat_builtins::CellArray::new(indices.iter().map(|n| Value::Num(*n)).collect(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
@@ -1102,9 +1123,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 let __b = bench_start();
                 // Pop numeric indices in reverse order (they were pushed in order), then base
                 let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 numeric.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
                         let cell = runmat_builtins::CellArray::new(numeric.iter().cloned().collect(), 1, numeric.len()).map_err(|e| format!("subsref build error: {e}"))?;
@@ -1134,16 +1155,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             else if is_end { idxs = vec![total]; }
                             else if let Some(v) = numeric.get(0) {
                                 match v {
-                                    Value::Num(n) => { let i = *n as isize; if i < 1 { vm_bail!("Index out of bounds".into()); } idxs = vec![i as usize]; }
+                                    Value::Num(n) => { let i = *n as isize; if i < 1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } idxs = vec![i as usize]; }
                                     Value::Tensor(idx_t) => {
                                         let len = idx_t.shape.iter().product::<usize>();
                                         if len == total { for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { idxs.push(i+1); } } }
-                                        else { for &val in &idx_t.data { let i = val as isize; if i < 1 { vm_bail!("Index out of bounds".into()); } idxs.push(i as usize); } }
+                                        else { for &val in &idx_t.data { let i = val as isize; if i < 1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } idxs.push(i as usize); } }
                                     }
-                                    _ => vm_bail!("Unsupported index type".into()),
+                                    _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                 }
-                            } else { vm_bail!("missing numeric index".into()); }
-                            if idxs.iter().any(|&i| i == 0 || i > total) { vm_bail!("Index out of bounds".into()); }
+                            } else { vm_bail!(mex("MATLAB:MissingNumericIndex","missing numeric index")); }
+                            if idxs.iter().any(|&i| i == 0 || i > total) { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                             if idxs.len() == 1 { stack.push(Value::Num(t.data[idxs[0] - 1])); }
                             else {
                                 let mut out = Vec::with_capacity(idxs.len()); for &i in &idxs { out.push(t.data[i - 1]); }
@@ -1161,12 +1182,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 let dim_len = *t.shape.get(d).unwrap_or(&1);
                                 selectors.push(Sel::Scalar(dim_len));
                             } else {
-                                let v = numeric.get(num_iter).ok_or("missing numeric index")?;
+                                let v = numeric.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?;
                                 num_iter += 1;
                                 match v {
                                     Value::Num(n) => {
                                         let idx = *n as isize;
-                                        if idx < 1 { return Err("Index out of bounds".to_string()); }
+                                        if idx < 1 { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                         selectors.push(Sel::Scalar(idx as usize));
                                     }
                                     Value::Tensor(idx_t) => {
@@ -1180,11 +1201,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                         } else {
                                             // Treat as explicit indices (1-based)
                                             let mut indices = Vec::with_capacity(len);
-                                            for &val in &idx_t.data { let idx = val as isize; if idx<1 { return Err("Index out of bounds".into()); } indices.push(idx as usize); }
+                                            for &val in &idx_t.data { let idx = val as isize; if idx<1 { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } indices.push(idx as usize); }
                                             selectors.push(Sel::Indices(indices));
                                         }
                                     }
-                                    _ => return Err("Unsupported index type".into()),
+                                    _ => return Err(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                 }
                             }
                         }
@@ -1195,7 +1216,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             match (&selectors[0], &selectors[1]) {
                                 // Full column
                                 (Sel::Colon, Sel::Scalar(j)) => {
-                                    let j0 = *j - 1; if j0 >= cols { return Err("Index out of bounds".into()); }
+                                    let j0 = *j - 1; if j0 >= cols { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                     let start = j0 * rows;
                                     let out = t.data[start..start+rows].to_vec();
                                     if out.len() == 1 { stack.push(Value::Num(out[0])); }
@@ -1205,7 +1226,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 }
                                 // Full row
                                 (Sel::Scalar(i), Sel::Colon) => {
-                                    let i0 = *i - 1; if i0 >= rows { return Err("Index out of bounds".into()); }
+                                    let i0 = *i - 1; if i0 >= rows { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                     let mut out: Vec<f64> = Vec::with_capacity(cols);
                                     for c in 0..cols { out.push(t.data[i0 + c*rows]); }
                                     if out.len() == 1 { stack.push(Value::Num(out[0])); }
@@ -1222,7 +1243,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     } else {
                                         let mut out: Vec<f64> = Vec::with_capacity(rows * js.len());
                                         for &j in js {
-                                            let j0 = j - 1; if j0 >= cols { return Err("Index out of bounds".into()); }
+                                            let j0 = j - 1; if j0 >= cols { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                             let start = j0 * rows;
                                             out.extend_from_slice(&t.data[start..start+rows]);
                                         }
@@ -1241,7 +1262,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     } else {
                                         let mut out: Vec<f64> = Vec::with_capacity(is.len() * cols);
                                         for c in 0..cols {
-                                            for &i in is { let i0 = i - 1; if i0 >= rows { return Err("Index out of bounds".into()); } out.push(t.data[i0 + c*rows]); }
+                                            for &i in is { let i0 = i - 1; if i0 >= rows { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } out.push(t.data[i0 + c*rows]); }
                                         }
                                         let tens = runmat_builtins::Tensor::new(out, vec![is.len(), cols]).map_err(|e| format!("Slice error: {e}"))?;
                                         stack.push(Value::Tensor(tens));
@@ -1263,7 +1284,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     Sel::Scalar(i) => vec![*i],
                                     Sel::Indices(v) => v.clone(),
                                 };
-                                if idxs.iter().any(|&i| i == 0 || i > dim_len) { return Err("Index out of bounds".into()); }
+                                if idxs.iter().any(|&i| i == 0 || i > dim_len) { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                 if idxs.len() > 1 { out_dims.push(idxs.len()); } else { out_dims.push(1); }
                                 per_dim_indices.push(idxs);
                             }
@@ -1342,16 +1363,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             else if is_end { idxs = vec![total]; }
                             else if let Some(v) = numeric.get(0) {
                                 match v {
-                                    Value::Num(n) => { let i = *n as isize; if i < 1 { vm_bail!("Index out of bounds".into()); } idxs = vec![i as usize]; }
+                                    Value::Num(n) => { let i = *n as isize; if i < 1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } idxs = vec![i as usize]; }
                                     Value::Tensor(idx_t) => {
                                         let len = idx_t.shape.iter().product::<usize>();
                                         if len == total { for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { idxs.push(i+1); } } }
-                                        else { for &val in &idx_t.data { let i = val as isize; if i < 1 { vm_bail!("Index out of bounds".into()); } idxs.push(i as usize); } }
+                                        else { for &val in &idx_t.data { let i = val as isize; if i < 1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } idxs.push(i as usize); } }
                                     }
-                                    _ => vm_bail!("Unsupported index type".into()),
+                                    _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                 }
-                            } else { vm_bail!("missing numeric index".into()); }
-                            if idxs.iter().any(|&i| i == 0 || i > total) { vm_bail!("Index out of bounds".into()); }
+                            } else { vm_bail!(mex("MATLAB:MissingNumericIndex","missing numeric index")); }
+                            if idxs.iter().any(|&i| i == 0 || i > total) { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                             if idxs.len() == 1 {
                                 // MATLAB semantics: string array indexing returns a String (double-quoted)
                                 stack.push(Value::String(sa.data[idxs[0] - 1].clone()));
@@ -1368,17 +1389,17 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 if is_colon { selectors.push(Sel::Colon); }
                                 else if is_end { let dim_len = *sa.shape.get(d).unwrap_or(&1); selectors.push(Sel::Scalar(dim_len)); }
                                 else {
-                                    let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter += 1;
+                                    let v = numeric.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?; num_iter += 1;
                                     match v {
-                                        Value::Num(n) => { let idx = *n as isize; if idx < 1 { return Err("Index out of bounds".to_string()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                        Value::Num(n) => { let idx = *n as isize; if idx < 1 { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } selectors.push(Sel::Scalar(idx as usize)); }
                                         Value::Tensor(idx_t) => {
                                             let dim_len = *sa.shape.get(d).unwrap_or(&1);
                                             let len = idx_t.shape.iter().product::<usize>();
                                             let is_binary_mask = len == dim_len && idx_t.data.iter().all(|&x| x == 0.0 || x == 1.0);
                                             if is_binary_mask { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val!=0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
-                                            else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                            else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
                                         }
-                                        _ => vm_bail!("Unsupported index type".into()),
+                                        _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                     }
                                 }
                             }
@@ -1387,7 +1408,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             for d in 0..dims {
                                 let dim_len = *sa.shape.get(d).unwrap_or(&1);
                                 let idxs = match &selectors[d] { Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(), Sel::Scalar(i)=>vec![*i], Sel::Indices(v)=>v.clone() };
-                                if idxs.iter().any(|&i| i==0 || i>dim_len) { return Err("Index out of bounds".into()); }
+                                if idxs.iter().any(|&i| i==0 || i>dim_len) { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                 if idxs.len()>1 { out_dims.push(idxs.len()); } else { out_dims.push(1); }
                                 per_dim_indices.push(idxs);
                             }
@@ -1417,7 +1438,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         if dims == 1 {
                             let is_colon = (colon_mask & 1u32) != 0;
                             let is_end = (end_mask & 1u32) != 0;
-                            if is_colon { vm_bail!("Colon selection not supported on non-tensors".into()); }
+                            if is_colon { vm_bail!(mex("MATLAB:SliceNonTensor","Slicing only supported on tensors")); }
                             let idx_val: f64 = if is_end {
                                 1.0
                             } else {
@@ -1427,10 +1448,10 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     _ => 1.0,
                                 }
                             };
-                            let v = match runmat_runtime::perform_indexing(&other, &[idx_val]) { Ok(v) => v, Err(e) => vm_bail!(e) };
+                            let v = match runmat_runtime::perform_indexing(&other, &[idx_val]) { Ok(v) => v, Err(_e) => vm_bail!(mex("MATLAB:SliceNonTensor","Slicing only supported on tensors")) };
                             stack.push(v);
                         }
-                        vm_bail!("Slicing only supported on tensors".to_string());
+                        vm_bail!(mex("MATLAB:SliceNonTensor","Slicing only supported on tensors"));
                     }
                 }
                 bench_end("IndexSlice", __b);
@@ -1438,22 +1459,22 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::IndexRangeEnd { dims, numeric_count, colon_mask, end_mask, range_dims, range_has_step, end_offsets } => {
                 // Pop any numeric scalar indices (reverse), then for each range in reverse push step (if has), start; then base
                 let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 numeric.reverse();
                 // Gather per-range params in reverse order of pushes
                 let mut range_params: Vec<(f64, f64)> = Vec::with_capacity(range_dims.len());
                 for i in (0..range_dims.len()).rev() {
                     let has_step = range_has_step[i];
                     let step = if has_step { 
-                        let v = stack.pop().ok_or("stack underflow")?; 
+                        let v = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; 
                         match v { Value::Num(n)=>n, Value::Int(i)=>i as f64, Value::Tensor(t) if !t.data.is_empty()=>t.data[0], _=>1.0 }
                     } else { 1.0 };
-                    let v = stack.pop().ok_or("stack underflow")?; 
+                    let v = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; 
                     let start: f64 = match v { Value::Num(n)=>n, Value::Int(i)=>i as f64, Value::Tensor(t) if !t.data.is_empty()=>t.data[0], _=>1.0 };
                     range_params.push((start, step));
                 }
                 range_params.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Tensor(t) => {
                         let rank = t.shape.len();
@@ -1471,16 +1492,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 let off = end_offsets[pos];
                                 selectors.push(Sel::Range { start: st as i64, step: if sp>=0.0 { sp as i64 } else { -(sp.abs() as i64) }, end_off: off });
                             } else {
-                                let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                let v = numeric.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?; num_iter+=1;
                                 match v {
-                                    Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                    Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } selectors.push(Sel::Scalar(idx as usize)); }
                                     Value::Tensor(idx_t) => {
                                         let dim_len = *t.shape.get(d).unwrap_or(&1);
                                         let len = idx_t.shape.iter().product::<usize>();
                                         if len == dim_len { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val!=0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
-                                        else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                        else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
                                     }
-                                    _ => vm_bail!("Unsupported index type".into()),
+                                    _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                 }
                             }
                         }
@@ -1495,13 +1516,13 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 Sel::Indices(v) => v.clone(),
                                 Sel::Range{ start, step, end_off } => {
                                     let mut v = Vec::new();
-                                    let mut cur = *start; let stp = *step; let end_i = dim_len - *end_off; if stp == 0 { vm_bail!("Index step cannot be zero".into()); }
+                                    let mut cur = *start; let stp = *step; let end_i = dim_len - *end_off; if stp == 0 { vm_bail!(mex("MATLAB:IndexStepZero","Index step cannot be zero")); }
                                     if stp > 0 { while (cur as i64) <= end_i { if cur<1 || cur>dim_len { break; } v.push(cur as usize); cur += stp; } }
                                     else { while (cur as i64) >= end_i { if cur<1 || cur>dim_len { break; } v.push(cur as usize); cur += stp; } }
                                     v
                                 }
                             };
-                            if idxs.iter().any(|&i| i==0 || i>full_shape[d]) { vm_bail!("Index out of bounds".into()); }
+                            if idxs.iter().any(|&i| i==0 || i>full_shape[d]) { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                             per_dim_indices.push(idxs);
                         }
                         // Strides and gather
@@ -1530,16 +1551,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 let off = end_offsets[pos];
                                 selectors.push(Sel::Range { start: st as i64, step: if sp>=0.0 { sp as i64 } else { -(sp.abs() as i64) }, end_off: off });
                             } else {
-                                let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                let v = numeric.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?; num_iter+=1;
                                 match v {
-                                    Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                    Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } selectors.push(Sel::Scalar(idx as usize)); }
                                     Value::Tensor(idx_t) => {
                                         let dim_len = *sa.shape.get(d).unwrap_or(&1);
                                         let len = idx_t.shape.iter().product::<usize>();
                                         if len == dim_len { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
-                                        else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                        else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
                                     }
-                                    _ => vm_bail!("Unsupported index type".into()),
+                                    _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                 }
                             }
                         }
@@ -1552,13 +1573,13 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 Sel::Scalar(i) => vec![*i],
                                 Sel::Indices(v) => v.clone(),
                                 Sel::Range{ start, step, end_off } => {
-                                    let mut v = Vec::new(); let mut cur = *start; let stp = *step; let end_i = dim_len - *end_off; if stp == 0 { vm_bail!("Index step cannot be zero".into()); }
+                                    let mut v = Vec::new(); let mut cur = *start; let stp = *step; let end_i = dim_len - *end_off; if stp == 0 { vm_bail!(mex("MATLAB:IndexStepZero","Index step cannot be zero")); }
                                     if stp > 0 { while (cur as i64) <= end_i { if cur<1 || cur>dim_len { break; } v.push(cur as usize); cur += stp; } }
                                     else { while (cur as i64) >= end_i { if cur<1 || cur>dim_len { break; } v.push(cur as usize); cur += stp; } }
                                     v
                                 }
                             };
-                            if idxs.iter().any(|&i| i==0 || i>full_shape[d]) { vm_bail!("Index out of bounds".into()); }
+                            if idxs.iter().any(|&i| i==0 || i>full_shape[d]) { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                             per_dim_indices.push(idxs);
                         }
                         let mut strides: Vec<usize> = vec![0; dims]; let mut acc=1usize; for d in 0..dims { strides[d]=acc; acc*=full_shape[d]; }
@@ -1570,16 +1591,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         if out_data.len()==1 { stack.push(Value::String(out_data[0].clone())); }
                         else { let shape: Vec<usize> = per_dim_indices.iter().map(|v| v.len().max(1)).collect(); let sa_out = runmat_builtins::StringArray::new(out_data, shape).map_err(|e| format!("Slice error: {e}"))?; stack.push(Value::StringArray(sa_out)); }
                     }
-                    _ => vm_bail!("IndexRangeEnd only supports tensors currently".to_string()),
+                    _ => vm_bail!(mex("MATLAB:SliceNonTensor","Slicing only supported on tensors")),
                 }
             }
             
             Instr::IndexSliceEx(dims, numeric_count, colon_mask, end_mask, end_offsets) => {
                 // Like IndexSlice, but apply end arithmetic to specified numeric indices
                 let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 numeric.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Tensor(t) => {
                         // Adjust numeric indices where specified: end - k
@@ -1608,8 +1629,8 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         // Swap stacks for reuse: assign and then fallthrough to IndexSlice body via small duplication
                         let mut numeric_vals: Vec<Value> = Vec::new();
                         let count = numeric_count; let mut idx_iter = tmp_stack.into_iter();
-                        let base = match idx_iter.next().ok_or("stack underflow")? { Value::Tensor(t) => Value::Tensor(t), other => other };
-                        for _ in 0..count { match idx_iter.next() { Some(v) => numeric_vals.push(v), None => return Err("stack underflow".to_string()) } }
+                        let base = match idx_iter.next().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))? { Value::Tensor(t) => Value::Tensor(t), other => other };
+                        for _ in 0..count { match idx_iter.next() { Some(v) => numeric_vals.push(v), None => return Err(mex("MATLAB:StackUnderflow","stack underflow")) } }
                         match base {
                             Value::Tensor(t2) => {
                                 // Inline small subset of IndexSlice gather for t2
@@ -1624,16 +1645,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     if is_colon { idxs = (1..=total).collect(); }
                                     else if is_end { idxs = vec![total]; }
                                     else if let Some(v) = numeric_vals.get(0) {
-                                        match v { Value::Num(n) => { let i = *n as isize; if i < 1 { vm_bail!("Index out of bounds".into()); } idxs = vec![i as usize]; }
-                                                Value::Tensor(idx_t) => { let len = idx_t.shape.iter().product::<usize>(); if len == total { for (i,&val) in idx_t.data.iter().enumerate() { if val!=0.0 { idxs.push(i+1); } } } else { for &val in &idx_t.data { let i = val as isize; if i<1 { vm_bail!("Index out of bounds".into()); } idxs.push(i as usize); } } }
-                                                _ => vm_bail!("Unsupported index type".into()), }
-                                    } else { vm_bail!("missing numeric index".into()); }
-                                    if idxs.iter().any(|&i| i==0 || i>total) { vm_bail!("Index out of bounds".into()); }
+                                        match v { Value::Num(n) => { let i = *n as isize; if i < 1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } idxs = vec![i as usize]; }
+                                                Value::Tensor(idx_t) => { let len = idx_t.shape.iter().product::<usize>(); if len == total { for (i,&val) in idx_t.data.iter().enumerate() { if val!=0.0 { idxs.push(i+1); } } } else { for &val in &idx_t.data { let i = val as isize; if i<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } idxs.push(i as usize); } } }
+                                                _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")), }
+                                    } else { vm_bail!(mex("MATLAB:MissingNumericIndex","missing numeric index")); }
+                                    if idxs.iter().any(|&i| i==0 || i>total) { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                     if idxs.len()==1 { stack.push(Value::Num(t2.data[idxs[0]-1])); } else { let mut out = Vec::with_capacity(idxs.len()); for &i in &idxs { out.push(t2.data[i-1]); } let tens = runmat_builtins::Tensor::new(out, vec![idxs.len(),1]).map_err(|e| format!("Slice error: {e}"))?; stack.push(Value::Tensor(tens)); }
                                 } else {
-                                    for d in 0..dims { let is_colon=(colon_mask&(1u32<<d))!=0; let is_end=(end_mask&(1u32<<d))!=0; if is_colon { selectors.push(Sel::Colon); } else if is_end { let dim_len=*t2.shape.get(d).unwrap_or(&1); selectors.push(Sel::Scalar(dim_len)); } else { let v = numeric_vals.get(num_iter).ok_or("missing numeric index")?; num_iter+=1; match v { Value::Num(n)=>{ let idx=*n as isize; if idx<1 { return Err("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); } Value::Tensor(idx_t)=>{ let dim_len=*t2.shape.get(d).unwrap_or(&1); let len=idx_t.shape.iter().product::<usize>(); if len==dim_len { let mut indices=Vec::new(); for (i,&val) in idx_t.data.iter().enumerate(){ if val!=0.0 { indices.push(i+1);} } selectors.push(Sel::Indices(indices)); } else { let mut indices=Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { return Err("Index out of bounds".into()); } indices.push(idx as usize);} selectors.push(Sel::Indices(indices)); } } _=> return Err("Unsupported index type".into()), } } }
+                                    for d in 0..dims { let is_colon=(colon_mask&(1u32<<d))!=0; let is_end=(end_mask&(1u32<<d))!=0; if is_colon { selectors.push(Sel::Colon); } else if is_end { let dim_len=*t2.shape.get(d).unwrap_or(&1); selectors.push(Sel::Scalar(dim_len)); } else { let v = numeric_vals.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?; num_iter+=1; match v { Value::Num(n)=>{ let idx=*n as isize; if idx<1 { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } selectors.push(Sel::Scalar(idx as usize)); } Value::Tensor(idx_t)=>{ let dim_len=*t2.shape.get(d).unwrap_or(&1); let len=idx_t.shape.iter().product::<usize>(); if len==dim_len { let mut indices=Vec::new(); for (i,&val) in idx_t.data.iter().enumerate(){ if val!=0.0 { indices.push(i+1);} } selectors.push(Sel::Indices(indices)); } else { let mut indices=Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } indices.push(idx as usize);} selectors.push(Sel::Indices(indices)); } } _=> return Err(mex("MATLAB:UnsupportedIndexType","Unsupported index type")), } } }
                                     let mut out_dims: Vec<usize> = Vec::new(); let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                                    for d in 0..dims { let dim_len=*t2.shape.get(d).unwrap_or(&1); let idxs=match &selectors[d]{ Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(), Sel::Scalar(i)=>vec![*i], Sel::Indices(v)=>v.clone()}; if idxs.iter().any(|&i| i==0 || i>dim_len) { return Err("Index out of bounds".into()); } if idxs.len()>1 { out_dims.push(idxs.len()); } else { out_dims.push(1);} per_dim_indices.push(idxs);} if dims==2 { match (&per_dim_indices[0].as_slice(), &per_dim_indices[1].as_slice()) { (i_list, j_list) if i_list.len()>1 && j_list.len()==1 => { out_dims=vec![i_list.len(),1]; } (i_list, j_list) if i_list.len()==1 && j_list.len()>1 => { out_dims=vec![1,j_list.len()]; } _=>{} } }
+                                    for d in 0..dims { let dim_len=*t2.shape.get(d).unwrap_or(&1); let idxs=match &selectors[d]{ Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(), Sel::Scalar(i)=>vec![*i], Sel::Indices(v)=>v.clone()}; if idxs.iter().any(|&i| i==0 || i>dim_len) { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } if idxs.len()>1 { out_dims.push(idxs.len()); } else { out_dims.push(1);} per_dim_indices.push(idxs);} if dims==2 { match (&per_dim_indices[0].as_slice(), &per_dim_indices[1].as_slice()) { (i_list, j_list) if i_list.len()>1 && j_list.len()==1 => { out_dims=vec![i_list.len(),1]; } (i_list, j_list) if i_list.len()==1 && j_list.len()>1 => { out_dims=vec![1,j_list.len()]; } _=>{} } }
                                     let mut strides: Vec<usize> = vec![0; dims]; let full_shape: Vec<usize> = if rank < dims { let mut s=t2.shape.clone(); s.resize(dims,1); s } else { t2.shape.clone() }; let mut acc=1usize; for d in 0..dims { strides[d]=acc; acc*=full_shape[d]; }
                                     let total_out: usize = out_dims.iter().product(); let mut out_data: Vec<f64> = Vec::with_capacity(total_out);
                                     if out_dims.iter().any(|&d| d==0) { let out_tensor=runmat_builtins::Tensor::new(out_data, out_dims).map_err(|e| format!("Slice error: {e}"))?; stack.push(Value::Tensor(out_tensor)); }
@@ -1644,14 +1665,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             other => { stack.push(other); }
                         }
                     }
-                    other => { vm_bail!(format!("Slicing only supported on tensors: got {other:?}")); }
+                    other => { vm_bail!(mex("MATLAB:SliceNonTensor", &format!("Slicing only supported on tensors: got {other:?}"))); }
                 }
             }
             Instr::Index1DRangeEnd { has_step, offset } => {
                 // Legacy 1-D path for end arithmetic
-                let step_val: f64 = if has_step { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; v } else { 1.0 };
-                let start_val: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                let base = stack.pop().ok_or("stack underflow")?;
+                let step_val: f64 = if has_step { let v: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; v } else { 1.0 };
+                let start_val: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Tensor(t) => {
                         let total = t.data.len();
@@ -1659,22 +1680,22 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         let mut out: Vec<f64> = Vec::new();
                         let mut cur = start_val as i64;
                         let step_i = if step_val >= 0.0 { step_val as i64 } else { -(step_val.abs() as i64) };
-                        if step_i == 0 { return Err("Index step cannot be zero".to_string()); }
+                        if step_i == 0 { return Err(mex("MATLAB:IndexStepZero","Index step cannot be zero")); }
                         if step_i > 0 { while cur as i64 <= end_idx { let idx0 = cur as usize; if idx0==0 || idx0>total { break; } out.push(t.data[idx0-1]); cur += step_i; } }
                         else { while (cur as i64) >= end_idx { let idx0 = cur as usize; if idx0==0 || idx0>total { break; } out.push(t.data[idx0-1]); cur += step_i; } }
                         if out.len() == 1 { stack.push(Value::Num(out[0])); } else { let tens = runmat_builtins::Tensor::new(out.clone(), vec![out.len(), 1]).map_err(|e| format!("Range slice error: {e}"))?; stack.push(Value::Tensor(tens)); }
                     }
-                    _ => vm_bail!("Indexing range with end only supported on tensors".to_string()),
+                    _ => vm_bail!(mex("MATLAB:SliceNonTensor","Slicing only supported on tensors")),
                 }
             }
             Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask) => {
                 let __b = bench_start();
                 // RHS value to scatter, then numeric indices, then base
-                let rhs = stack.pop().ok_or("stack underflow")?;
+                let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 numeric.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
                         let cell = runmat_builtins::CellArray::new(numeric.clone(), 1, numeric.len()).map_err(|e| format!("subsasgn build error: {e}"))?;
@@ -1708,18 +1729,18 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             if is_colon { lin_indices = (1..=total).collect(); }
                             else if is_end { lin_indices = vec![total]; }
                             else {
-                                let v = numeric.get(0).ok_or("missing numeric index")?;
+                                let v = numeric.get(0).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?;
                                 match v {
-                                    Value::Num(n) => { let i = *n as isize; if i < 1 || (i as usize) > total { vm_bail!("Index out of bounds".into()); } lin_indices.push(i as usize); }
+                                    Value::Num(n) => { let i = *n as isize; if i < 1 || (i as usize) > total { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } lin_indices.push(i as usize); }
                                     Value::Tensor(idx_t) => {
                                         let len = idx_t.shape.iter().product::<usize>();
                                         if len == total {
                                             for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { lin_indices.push(i+1); } }
                                         } else {
-                                            for &val in &idx_t.data { let i = val as isize; if i < 1 || (i as usize) > total { vm_bail!("Index out of bounds".into()); } lin_indices.push(i as usize); }
+                                            for &val in &idx_t.data { let i = val as isize; if i < 1 || (i as usize) > total { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } lin_indices.push(i as usize); }
                                         }
                                     }
-                                    _ => vm_bail!("Unsupported index type".into()),
+                                    _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                 }
                             }
                             // Scatter RHS
@@ -1746,16 +1767,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 if is_colon { selectors.push(Sel::Colon); }
                                 else if is_end { selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1))); }
                                 else {
-                                    let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                    let v = numeric.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?; num_iter+=1;
                                     match v {
-                                        Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                        Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } selectors.push(Sel::Scalar(idx as usize)); }
                                         Value::Tensor(idx_t) => {
                                             let dim_len = *t.shape.get(d).unwrap_or(&1);
                                             let len = idx_t.shape.iter().product::<usize>();
                                             if len == dim_len { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val!=0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
-                                            else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                            else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
                                         }
-                                        _ => vm_bail!("Unsupported index type".into()),
+                                        _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                     }
                                 }
                             }
@@ -1766,7 +1787,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 match (&selectors[0], &selectors[1]) {
                                     // A(:, j) = rhs
                                     (Sel::Colon, Sel::Scalar(j)) => {
-                                        let j0 = *j - 1; if j0 >= cols { vm_bail!("Index out of bounds".into()); }
+                                        let j0 = *j - 1; if j0 >= cols { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                         let start = j0 * rows;
                                         match rhs {
                                             Value::Num(v) => { for r in 0..rows { t.data[start + r] = v; } }
@@ -1782,7 +1803,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     }
                                     // A(i, :) = rhs
                                     (Sel::Scalar(i), Sel::Colon) => {
-                                        let i0 = *i - 1; if i0 >= rows { vm_bail!("Index out of bounds".into()); }
+                                        let i0 = *i - 1; if i0 >= rows { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                         match rhs {
                                             Value::Num(v) => { for c in 0..cols { t.data[i0 + c*rows] = v; } }
                                             Value::Tensor(rt) => {
@@ -1805,7 +1826,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             for d in 0..dims {
                                 let dim_len = full_shape[d];
                                 let idxs = match &selectors[d] { Sel::Colon => (1..=dim_len).collect(), Sel::Scalar(i) => vec![*i], Sel::Indices(v) => v.clone() };
-                                if idxs.iter().any(|&i| i==0 || i>dim_len) { vm_bail!("Index out of bounds".into()); }
+                                if idxs.iter().any(|&i| i==0 || i>dim_len) { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                 per_dim_indices.push(idxs);
                             }
                             // Column-major strides (first dimension fastest)
@@ -1864,15 +1885,15 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             if is_colon { lin_indices = (1..=total).collect(); }
                             else if is_end { lin_indices = vec![total]; }
                             else {
-                                let v = numeric.get(0).ok_or("missing numeric index")?;
+                                let v = numeric.get(0).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?;
                                 match v {
-                                    Value::Num(n) => { let i = *n as isize; if i < 1 || (i as usize) > total { vm_bail!("Index out of bounds".into()); } lin_indices.push(i as usize); }
+                                    Value::Num(n) => { let i = *n as isize; if i < 1 || (i as usize) > total { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } lin_indices.push(i as usize); }
                                     Value::Tensor(idx_t) => {
                                         let len = idx_t.shape.iter().product::<usize>();
                                         if len == total { for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { lin_indices.push(i+1); } } }
-                                        else { for &val in &idx_t.data { let i = val as isize; if i < 1 || (i as usize) > total { vm_bail!("Index out of bounds".into()); } lin_indices.push(i as usize); } }
+                                        else { for &val in &idx_t.data { let i = val as isize; if i < 1 || (i as usize) > total { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } lin_indices.push(i as usize); } }
                                     }
-                                    _ => vm_bail!("Unsupported index type".into()),
+                                    _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                 }
                             }
                             // Scatter RHS
@@ -1899,16 +1920,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 if is_colon { selectors.push(Sel::Colon); }
                                 else if is_end { selectors.push(Sel::Scalar(*sa.shape.get(d).unwrap_or(&1))); }
                                 else {
-                                    let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                    let v = numeric.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?; num_iter+=1;
                                     match v {
-                                        Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                        Value::Num(n) => { let idx = *n as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } selectors.push(Sel::Scalar(idx as usize)); }
                                         Value::Tensor(idx_t) => {
                                             let dim_len = *sa.shape.get(d).unwrap_or(&1);
                                             let len = idx_t.shape.iter().product::<usize>();
                                             if len == dim_len { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val!=0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
-                                            else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                            else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
                                         }
-                                        _ => vm_bail!("Unsupported index type".into()),
+                                        _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                     }
                                 }
                             }
@@ -1918,7 +1939,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             for d in 0..dims {
                                 let dim_len = full_shape[d];
                                 let idxs = match &selectors[d] { Sel::Colon => (1..=dim_len).collect(), Sel::Scalar(i) => vec![*i], Sel::Indices(v) => v.clone() };
-                                if idxs.iter().any(|&i| i==0 || i>dim_len) { vm_bail!("Index out of bounds".into()); }
+                                if idxs.iter().any(|&i| i==0 || i>dim_len) { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                                 per_dim_indices.push(idxs);
                             }
                             // Column-major strides
@@ -1973,11 +1994,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 bench_end("StoreSlice", __b);
             }
             Instr::StoreSliceEx(dims, numeric_count, colon_mask, end_mask, end_offsets) => {
-                let rhs = stack.pop().ok_or("stack underflow")?;
+                let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 numeric.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Tensor(t) => {
                         // Adjust numeric indices for end offsets, mapping numeric position to actual dimension
@@ -2002,11 +2023,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         for v in adjusted { stack.push(v); }
                         stack.push(rhs);
                         // Fallthrough emulation: replicate logic of StoreSlice with broadcasting
-                        let rhs = stack.pop().ok_or("stack underflow")?;
+                        let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                         let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                        for _ in 0..numeric_count { numeric.push(stack.pop().ok_or("stack underflow")?); }
+                        for _ in 0..numeric_count { numeric.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                         numeric.reverse();
-                        let base = stack.pop().ok_or("stack underflow")?;
+                        let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                         match base {
                             Value::Tensor(mut t) => {
                                 #[derive(Clone)] enum Sel { Colon, Scalar(usize), Indices(Vec<usize>) }
@@ -2017,16 +2038,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     if is_colon { selectors.push(Sel::Colon); }
                                     else if is_end { selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1))); }
                                     else {
-                                        let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter+=1;
+                                        let v = numeric.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?; num_iter+=1;
                                         match v {
-                                            Value::Num(n)=>{ let idx=*n as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                            Value::Num(n)=>{ let idx=*n as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } selectors.push(Sel::Scalar(idx as usize)); }
                                             Value::Tensor(idx_t)=>{
                                                 let dim_len=*t.shape.get(d).unwrap_or(&1);
                                                 let len=idx_t.shape.iter().product::<usize>();
                                                 if len==dim_len { let mut vi=Vec::new(); for (i,&val) in idx_t.data.iter().enumerate(){ if val!=0.0 { vi.push(i+1);} } selectors.push(Sel::Indices(vi)); }
-                                                else { let mut vi=Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } vi.push(idx as usize);} selectors.push(Sel::Indices(vi)); }
+                                                else { let mut vi=Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } vi.push(idx as usize);} selectors.push(Sel::Indices(vi)); }
                                             }
-                                            _=> vm_bail!("Unsupported index type".into()),
+                                            _=> vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                                         }
                                     }
                                 }
@@ -2078,15 +2099,15 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::StoreRangeEnd { dims, numeric_count, colon_mask, end_mask, range_dims, range_has_step, end_offsets } => {
                 // RHS, range params (per range dim), then base with numeric scalar indices interleaved
-                let rhs = stack.pop().ok_or("stack underflow")?;
+                let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 // Pop per-range params in reverse order
                 let mut range_params: Vec<(f64,f64)> = Vec::with_capacity(range_dims.len());
-                for i in (0..range_dims.len()).rev() { let has = range_has_step[i]; let step = if has { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; v } else { 1.0 }; let st: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; range_params.push((st, step)); }
+                for i in (0..range_dims.len()).rev() { let has = range_has_step[i]; let step = if has { let v: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; v } else { 1.0 }; let st: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; range_params.push((st, step)); }
                 range_params.reverse();
                 let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..numeric_count { numeric.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 numeric.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Tensor(mut t) => {
                         #[derive(Clone)] enum Sel { Colon, Scalar(usize), Indices(Vec<usize>), Range{ start: i64, step: i64, end_off: i64 } }
@@ -2103,9 +2124,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             let is_end = (end_mask & (1u32 << d)) != 0;
                             if is_colon { selectors.push(Sel::Colon); continue; }
                             if is_end { selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1))); continue; }
-                            let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter += 1;
+                            let v = numeric.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?; num_iter += 1;
                             match v {
-                                Value::Num(n) => { let idx = *n as isize; if idx < 1 { vm_bail!("Index out of bounds".into()); } selectors.push(Sel::Scalar(idx as usize)); }
+                                Value::Num(n) => { let idx = *n as isize; if idx < 1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } selectors.push(Sel::Scalar(idx as usize)); }
                                 Value::Tensor(idx_t) => {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
                                     let len = idx_t.shape.iter().product::<usize>();
@@ -2113,11 +2134,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                         let mut vi = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { vi.push(i + 1); } }
                                         selectors.push(Sel::Indices(vi));
                                     } else {
-                                        let mut vi = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx < 1 { vm_bail!("Index out of bounds".into()); } vi.push(idx as usize); }
+                                        let mut vi = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx < 1 { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); } vi.push(idx as usize); }
                                         selectors.push(Sel::Indices(vi));
                                     }
                                 }
-                                _ => vm_bail!("Unsupported index type".into()),
+                                _ => vm_bail!(mex("MATLAB:UnsupportedIndexType","Unsupported index type")),
                             }
                         }
                         // Build index lists and scatter rhs with broadcasting
@@ -2130,13 +2151,13 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 Sel::Scalar(i)=>vec![*i],
                                 Sel::Indices(v)=>v.clone(),
                                 Sel::Range{ start, step, end_off } => {
-                                    let mut v=Vec::new(); let mut cur=*start; let end_i=(dim_len as i64)-*end_off; let stp=*step; if stp==0 { vm_bail!("Index step cannot be zero".into()); }
+                                    let mut v=Vec::new(); let mut cur=*start; let end_i=(dim_len as i64)-*end_off; let stp=*step; if stp==0 { vm_bail!(mex("MATLAB:IndexStepZero","Index step cannot be zero")); }
                                     if stp>0 { while cur<=end_i { if cur<1 || cur>dim_len as i64 { break; } v.push(cur as usize); cur+=stp; } }
                                     else { while cur>=end_i { if cur<1 || cur>dim_len as i64 { break; } v.push(cur as usize); cur+=stp; } }
                                     v
                                 }
                             };
-                            if idxs.iter().any(|&i| i==0 || i>dim_len) { vm_bail!("Index out of bounds".into()); }
+                            if idxs.iter().any(|&i| i==0 || i>dim_len) { vm_bail!(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                             per_dim_indices.push(idxs);
                         }
                         let mut strides: Vec<usize> = vec![0; dims]; let mut acc=1usize; for d in 0..dims { strides[d]=acc; acc *= *t.shape.get(d).unwrap_or(&1); }
@@ -2215,7 +2236,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 ).map_err(|e| format!("obj range: {e}"))?;
                                 idx_values.push(Value::Cell(cell));
                             } else {
-                                let v = numeric.get(num_iter).ok_or("missing numeric index")?; num_iter += 1;
+                                let v = numeric.get(num_iter).ok_or(mex("MATLAB:MissingNumericIndex","missing numeric index"))?; num_iter += 1;
                                 match v {
                                     Value::Num(n) => idx_values.push(Value::Num(*n)),
                                     Value::Int(i) => idx_values.push(Value::Num(*i as f64)),
@@ -2238,15 +2259,15 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::StoreSlice1DRangeEnd { has_step, offset } => {
                 // RHS, then start[, step], then base
-                let rhs = stack.pop().ok_or("stack underflow")?;
-                let step_val: f64 = if has_step { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; v } else { 1.0 };
-                let start_val: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
-                let base = stack.pop().ok_or("stack underflow")?;
+                let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
+                let step_val: f64 = if has_step { let v: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; v } else { 1.0 };
+                let start_val: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Tensor(mut t) => {
                         let total = t.data.len(); let end_idx = (total as i64) - offset; let mut cur = start_val as i64;
                         let step_i = if step_val >= 0.0 { step_val as i64 } else { -(step_val.abs() as i64) };
-                        if step_i == 0 { return Err("Index step cannot be zero".to_string()); }
+                        if step_i == 0 { return Err(mex("MATLAB:IndexStepZero","Index step cannot be zero")); }
                         // Broadcast rhs if scalar
                         let rhs_vals: Vec<f64> = match rhs { Value::Num(n) => vec![n], Value::Tensor(rt) => rt.data.clone(), _ => vec![0.0] };
                         let mut rpos = 0usize;
@@ -2259,7 +2280,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::CreateCell2D(rows, cols) => {
                 let mut elems = Vec::with_capacity(rows*cols);
-                for _ in 0..rows*cols { elems.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..rows*cols { elems.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 elems.reverse();
                 let ca = runmat_builtins::CellArray::new(elems, rows, cols).map_err(|e| format!("Cell creation error: {e}"))?;
                 stack.push(Value::Cell(ca));
@@ -2267,9 +2288,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::IndexCell(num_indices) => {
                 // Pop indices first (in reverse), then base
                 let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; indices.push(v as usize); }
+                for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; indices.push(v as usize); }
                 indices.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
                         // Route to subsref(obj, '{}', {indices})
@@ -2289,12 +2310,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         match indices.len() {
                             1 => {
                                 let i = indices[0];
-                                if i == 0 || i > ca.data.len() { return Err("Cell index out of bounds".to_string()); }
+                                if i == 0 || i > ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); }
                                 stack.push(ca.data[i-1].clone());
                             }
                             2 => {
                                 let r = indices[0]; let c = indices[1];
-                                if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                                if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
                                 stack.push(ca.data[(r-1)*ca.cols + (c-1)].clone());
                             }
                             _ => return Err("Unsupported number of cell indices".to_string()),
@@ -2307,10 +2328,10 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 // Same as IndexCell but flatten cell contents into multiple outputs
                 let mut indices = Vec::with_capacity(num_indices);
                 if num_indices > 0 {
-                    for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; indices.push(v as usize); }
+                    for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; indices.push(v as usize); }
                     indices.reverse();
                 }
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Cell(ca) => {
                         // Expand in column-major order up to out_count elements
@@ -2320,8 +2341,8 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             values.extend(ca.data.iter().cloned());
                         } else {
                             match indices.len() {
-                                1 => { let i = indices[0]; if i == 0 || i > ca.data.len() { return Err("Cell index out of bounds".to_string()); } values.push(ca.data[i-1].clone()); }
-                                2 => { let r = indices[0]; let c = indices[1]; if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err("Cell subscript out of bounds".to_string()); } values.push(ca.data[(r-1)*ca.cols + (c-1)].clone()); }
+                                1 => { let i = indices[0]; if i == 0 || i > ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } values.push(ca.data[i-1].clone()); }
+                                2 => { let r = indices[0]; let c = indices[1]; if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); } values.push(ca.data[(r-1)*ca.cols + (c-1)].clone()); }
                                 _ => return Err("Unsupported number of cell indices".to_string()),
                             }
                         }
@@ -2348,14 +2369,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::Pop => { stack.pop(); }
             Instr::Return => { break; }
-            Instr::ReturnValue => { let return_value = stack.pop().ok_or("stack underflow")?; stack.push(return_value); break; }
+            Instr::ReturnValue => { let return_value = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?; stack.push(return_value); break; }
             Instr::StoreIndex(num_indices) => {
                 // RHS to assign, then indices, then base
-                let rhs = stack.pop().ok_or("stack underflow")?;
+                let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let mut indices = Vec::new();
-                for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; indices.push(v as usize); }
+                for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; indices.push(v as usize); }
                 indices.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
                         // subsasgn(obj, '()', {indices...}, rhs)
@@ -2374,14 +2395,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         if indices.len() == 1 {
                             let total = t.rows() * t.cols();
                             let idx = indices[0];
-                            if idx == 0 || idx > total { return Err("Index out of bounds".to_string()); }
+                            if idx == 0 || idx > total { return Err(mex("MATLAB:IndexOutOfBounds","Index out of bounds")); }
                             let val: f64 = (&rhs).try_into()?;
                             t.data[idx - 1] = val;
                             stack.push(Value::Tensor(t));
                         } else if indices.len() == 2 {
                             let i = indices[0]; let j = indices[1];
                             let rows = t.rows(); let cols = t.cols();
-                            if i == 0 || i > rows || j == 0 || j > cols { return Err("Subscript out of bounds".to_string()); }
+                            if i == 0 || i > rows || j == 0 || j > cols { return Err(mex("MATLAB:SubscriptOutOfBounds","Subscript out of bounds")); }
                             let val: f64 = (&rhs).try_into()?;
                             let idx = (i - 1) + (j - 1) * rows;
                             t.data[idx] = val;
@@ -2395,11 +2416,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::StoreIndexCell(num_indices) => {
                 // RHS, then indices, then base cell
-                let rhs = stack.pop().ok_or("stack underflow")?;
+                let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let mut indices = Vec::new();
-                for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; indices.push(v as usize); }
+                for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; indices.push(v as usize); }
                 indices.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
                         // subsasgn(obj, '{}', {indices}, rhs)
@@ -2420,13 +2441,13 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         match indices.len() {
                             1 => {
                                 let i = indices[0];
-                                if i == 0 || i > ca.data.len() { return Err("Cell index out of bounds".to_string()); }
+                                if i == 0 || i > ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); }
                                 ca.data[i - 1] = rhs;
                                 stack.push(Value::Cell(ca));
                             }
                             2 => {
                                 let i = indices[0]; let j = indices[1];
-                                if i == 0 || i > ca.rows || j == 0 || j > ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                                if i == 0 || i > ca.rows || j == 0 || j > ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
                                 ca.data[(i - 1) * ca.cols + (j - 1)] = rhs;
                                 stack.push(Value::Cell(ca));
                             }
@@ -2437,7 +2458,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::LoadMember(field) => {
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
                         if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
@@ -2489,8 +2510,8 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::LoadMemberDynamic => {
-                let name_val = stack.pop().ok_or("stack underflow")?;
-                let base = stack.pop().ok_or("stack underflow")?;
+                let name_val = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let name: String = (&name_val).try_into()?;
                 match base {
                     Value::Object(obj) => {
@@ -2515,8 +2536,8 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::StoreMember(field) => {
-                let rhs = stack.pop().ok_or("stack underflow")?;
-                let base = stack.pop().ok_or("stack underflow")?;
+                let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(mut obj) => {
                         if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
@@ -2578,9 +2599,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::StoreMemberDynamic => {
-                let rhs = stack.pop().ok_or("stack underflow")?;
-                let name_val = stack.pop().ok_or("stack underflow")?;
-                let base = stack.pop().ok_or("stack underflow")?;
+                let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
+                let name_val = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let name: String = (&name_val).try_into()?;
                 match base {
                     Value::Object(mut obj) => {
@@ -2612,9 +2633,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::CallMethod(name, arg_count) => {
                 // base, then args are on stack in order: [..., base, a1, a2, ...]
                 let mut args = Vec::with_capacity(arg_count);
-                for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..arg_count { args.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 args.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
                         // Compose qualified and try runtime builtin dispatch, passing receiver first
@@ -2643,7 +2664,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::LoadMethod(name) => {
                 // Base object on stack; return a closure that calls the method with receiver as first captured arg
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
                         let func_qual = format!("{}.{}", obj.class_name, name);
@@ -2663,7 +2684,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::CreateClosure(func_name, capture_count) => {
                 let mut captures = Vec::with_capacity(capture_count);
-                for _ in 0..capture_count { captures.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..capture_count { captures.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 captures.reverse();
                 stack.push(Value::Closure(runmat_builtins::Closure { function_name: func_name, captures }));
             }
@@ -2679,7 +2700,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::CallStaticMethod(class_name, method, arg_count) => {
                 let mut args = Vec::with_capacity(arg_count);
-                for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..arg_count { args.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 args.reverse();
                 if let Some((m, _owner)) = runmat_builtins::lookup_method(&class_name, &method) {
                     if !m.is_static { vm_bail!(format!("Method '{}' is not static", method)); }
@@ -2708,9 +2729,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::CallFeval(arg_count) => {
                 // Stack layout: [..., f, a1, a2, ...]
                 let mut args = Vec::with_capacity(arg_count);
-                for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..arg_count { args.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 args.reverse();
-                let func_val = stack.pop().ok_or("stack underflow")?;
+                let func_val = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match func_val {
                     Value::Closure(c) => {
                         // First try runtime builtin dispatch with captures prepended
@@ -2862,9 +2883,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     if spec.is_expand {
                         // Pop indices if any, then base
                         let mut indices: Vec<Value> = Vec::with_capacity(spec.num_indices);
-                        for _ in 0..spec.num_indices { indices.push(stack.pop().ok_or("stack underflow")?); }
+                        for _ in 0..spec.num_indices { indices.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                         indices.reverse();
-                        let base = stack.pop().ok_or("stack underflow")?;
+                        let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                         let expanded: Vec<Value> = if spec.expand_all {
                             match base {
                                 Value::Cell(ca) => ca.data.clone(),
@@ -2884,16 +2905,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             match (base, indices.len()) {
                                 (Value::Cell(ca), 1) => {
                                     match &indices[0] {
-                                        Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                                        Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err("Cell index out of bounds".to_string()); } vec![ca.data[idx-1].clone()] }
-                                        Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err("Cell index out of bounds".to_string()); } out.push(ca.data[iu-1].clone()); } out }
-                                        _ => return Err("Unsupported cell index type".to_string()),
+                                        Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                                        Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
+                                        Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                                        _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                                     }
                                 }
                                 (Value::Cell(ca), 2) => {
                                     let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                                     let (ir, ic) = (r as usize, c as usize);
-                                    if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
+                                    if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
                                     vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
                                 }
                                 (Value::Object(obj), _) => {
@@ -2911,12 +2932,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         };
                         for v in expanded { temp.push(v); }
                     } else {
-                        temp.push(stack.pop().ok_or("stack underflow")?);
+                        temp.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?);
                     }
                 }
                 temp.reverse();
                 // Now pop function value and call feval runtime with assembled args
-                let func_val = stack.pop().ok_or("stack underflow")?;
+                let func_val = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 match func_val {
                     Value::Closure(c) => {
                         let mut full_args = c.captures.clone();
@@ -2995,17 +3016,17 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             }
             Instr::AndAnd(target) => {
                 // Stack top holds lhs != 0 result (1 or 0). If false (0), jump to target and push 0
-                let cond: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                let cond: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?;
                 if cond == 0.0 { pc = target; continue; } else { /* leave evaluation of rhs result already pushed by compiler path */ }
             }
             Instr::OrOr(target) => {
                 // Stack top holds lhs != 0 result (1 or 0). If true (non-zero), jump to target and push 1
-                let cond: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?;
+                let cond: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?;
                 if cond != 0.0 { pc = target; continue; } else { /* evaluate rhs result path */ }
             }
             Instr::Swap => {
-                let a = stack.pop().ok_or("stack underflow")?;
-                let b = stack.pop().ok_or("stack underflow")?;
+                let a = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
+                let b = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 stack.push(a);
                 stack.push(b);
             }
@@ -3057,4 +3078,27 @@ pub fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<V
         }
     }
     result
+}
+
+fn interpret_function_with_counts(bytecode: &Bytecode, mut vars: Vec<Value>, _name: &str, out_count: usize, in_count: usize) -> Result<Vec<Value>, String> {
+    // Push (nargin, nargout), run, then pop
+    let res = CALL_COUNTS.with(|cc| {
+        cc.borrow_mut().push((in_count, out_count));
+        let r = interpret_with_vars(bytecode, &mut vars, Some("<anonymous>"));
+        cc.borrow_mut().pop();
+        r
+    });
+    // Persistents handling mirrors interpret_function
+    let func_name = "<anonymous>".to_string();
+    for instr in &bytecode.instructions {
+        if let crate::instr::Instr::DeclarePersistent(indices) = instr {
+            for &i in indices {
+                if i < vars.len() {
+                    let key = (func_name.clone(), i);
+                    PERSISTENTS.with(|p| { p.borrow_mut().insert(key, vars[i].clone()); });
+                }
+            }
+        }
+    }
+    res
 }

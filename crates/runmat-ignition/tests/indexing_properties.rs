@@ -346,3 +346,67 @@ fn cell_expansion_into_row_col_linear_slices() {
 	assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
 		if t.shape==vec![3,3] && t.data[0]==70.0 && t.data[8]==80.0)));
 }
+
+#[test]
+fn function_return_expansion_into_slice_with_empty() {
+    let program = r#"
+        function varargout = g(k)
+            if k==0
+                varargout = {};
+            else
+                varargout = {1,2,3};
+            end
+        end
+        A = zeros(2,3);
+        % Empty expansion: ensure we don't crash; assign nothing
+        x = g(0);
+    "#;
+    let hir = runmat_hir::lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let _ = runmat_ignition::execute(&hir);
+}
+
+#[test]
+fn cell_expansion_into_slice_with_degenerate_dims() {
+    let program = r#"
+        C = {10,20,30};
+        A = zeros(1,3);
+        % Expand by explicit indexing
+        A(1,1) = C{1}; A(1,2) = C{2}; A(1,3) = C{3};
+        s = sum(A(:));
+    "#;
+    let hir = runmat_hir::lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = runmat_ignition::execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-60.0).abs()<1e-9)));
+}
+
+#[test]
+fn oop_negative_missing_subsref_mex() {
+    let program = r#"
+        __register_test_classes();
+        o = new_object('NoIdx'); % class without subsref
+        try
+            x = o(1);
+        catch e
+            err = e;
+        end
+    "#;
+    let hir = runmat_hir::lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let out = runmat_ignition::execute(&hir);
+    if let Err(err) = out { assert!(err.contains("MATLAB:MissingSubsref") || err.contains("subsref")); }
+}
+
+#[test]
+fn oop_negative_missing_subsasgn_mex() {
+    let program = r#"
+        __register_test_classes();
+        o = new_object('NoIdx'); % class without subsasgn
+        try
+            o(1) = 5;
+        catch e
+            err = e;
+        end
+    "#;
+    let hir = runmat_hir::lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let out = runmat_ignition::execute(&hir);
+    if let Err(err) = out { assert!(err.contains("MATLAB:MissingSubsasgn") || err.contains("subsasgn")); }
+}

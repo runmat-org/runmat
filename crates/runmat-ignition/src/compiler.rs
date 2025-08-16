@@ -990,7 +990,27 @@ impl Compiler {
                             for arg in args { if let HirExprKind::IndexCell(base, indices) = &arg.kind { let is_expand_all = indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon); if is_expand_all { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: 0, expand_all: true }); self.compile_expr(base)?; } else { specs.push(crate::instr::ArgSpec { is_expand: true, num_indices: indices.len(), expand_all: false }); self.compile_expr(base)?; for i in indices { self.compile_expr(i)?; } } } else { specs.push(crate::instr::ArgSpec { is_expand: false, num_indices: 0, expand_all: false }); self.compile_expr(arg)?; } }
                             self.emit(Instr::CallFunctionExpandMulti(resolved.clone(), specs));
                             return Ok(());
-                        } else { for arg in args { self.compile_expr(arg)?; } self.emit(Instr::CallFunction(resolved.clone(), args.len())); return Ok(()); }
+                        } else {
+                            // Flatten inner user-function returns into argument list for the call
+                            let mut total_argc: usize = 0;
+                            for arg in args {
+                                if let HirExprKind::FuncCall(inner, inner_args) = &arg.kind {
+                                    if self.functions.contains_key(inner) {
+                                        for a in inner_args { self.compile_expr(a)?; }
+                                        let outc = self.functions.get(inner)
+                                            .map(|f| { if f.has_varargout { f.outputs.len().max(1) } else { f.outputs.len().max(1) } })
+                                            .unwrap_or(1);
+                                        self.emit(Instr::CallFunctionMulti(inner.clone(), inner_args.len(), outc));
+                                        total_argc += outc;
+                                        continue;
+                                    }
+                                }
+                                self.compile_expr(arg)?;
+                                total_argc += 1;
+                            }
+                            self.emit(Instr::CallFunction(resolved.clone(), total_argc));
+                            return Ok(());
+                        }
                     }
                     // If still no function, and exactly one static candidate, call it
                     if !runmat_builtins::builtin_functions().iter().any(|b| b.name == resolved) && static_candidates.len() == 1 {

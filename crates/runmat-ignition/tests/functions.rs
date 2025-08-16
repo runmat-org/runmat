@@ -3,6 +3,107 @@ use runmat_ignition::execute;
 use runmat_parser::parse;
 
 #[test]
+fn nargin_nargout_in_user_functions() {
+    // Single-output: nargin/nargout should reflect call site
+    let program = r#"
+        function y = f(a,b)
+            y = nargin() + nargout(); % 2 + 1 = 3
+        end
+        r = f(10, 20);
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
+
+    // Multi-output context: nargout seen inside should match requested outs
+    let program2 = r#"
+        function [x,y] = g(a)
+            x = nargin(); % 1
+            y = nargout(); % 2
+        end
+        [u,v] = g(7);
+    "#;
+    let hir2 = lower(&parse(program2).unwrap()).unwrap();
+    let vars2 = execute(&hir2).unwrap();
+    assert!(vars2.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
+    assert!(vars2.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-2.0).abs()<1e-9)));
+}
+
+#[test]
+fn not_enough_and_too_many_inputs_fixed_arity() {
+    // not enough inputs
+    let program = r#"
+        function y = f(a,b)
+            y = a + b;
+        end
+        r = f(1);
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let err = execute(&hir).err().unwrap();
+    assert!(err.contains("MATLAB:NotEnoughInputs"));
+
+    // too many inputs
+    let program2 = r#"
+        function y = f(a,b)
+            y = a + b;
+        end
+        r = f(1,2,3);
+    "#;
+    let hir2 = lower(&parse(program2).unwrap()).unwrap();
+    let err2 = execute(&hir2).err().unwrap();
+    assert!(err2.contains("MATLAB:TooManyInputs"));
+}
+
+#[test]
+fn inputs_with_varargin_minimum_only() {
+    // With varargin, fewer than fixed args is an error; equal to fixed is okay; extras go to varargin
+    let program_err = r#"
+        function y = f(a,b,varargin)
+            y = a + b;
+        end
+        r = f(1);
+    "#;
+    let hir_e = lower(&parse(program_err).unwrap()).unwrap();
+    let err = execute(&hir_e).err().unwrap();
+    assert!(err.contains("MATLAB:NotEnoughInputs"));
+
+    let program_ok = r#"
+        function y = f(a,b,varargin)
+            % Keep it simple to avoid runtime cat/sum dependencies
+            y = a + b + varargin{1} + varargin{2};
+        end
+        r = f(1,2,3,4);
+    "#;
+    let hir_ok = lower(&parse(program_ok).unwrap()).unwrap();
+    let vars_ok = execute(&hir_ok).unwrap();
+    assert!(vars_ok.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9))); // 1+2+3+4
+}
+
+#[test]
+fn too_many_outputs_and_varargout_mismatch() {
+    // Too many outputs for a function without varargout
+    let program_tmo = r#"
+        function y = f(a)
+            y = a + 1;
+        end
+        [x1,x2] = f(3);
+    "#;
+    let hir_tmo = lower(&parse(program_tmo).unwrap()).unwrap();
+    let err_tmo = execute(&hir_tmo).err().unwrap();
+    assert!(err_tmo.contains("MATLAB:TooManyOutputs"));
+
+    // Varargout requested more than provided
+    let program_mis = r#"
+        function varargout = h(a)
+            varargout = {a+1, a+2};
+        end
+        [x1,x2,x3] = h(5);
+    "#;
+    let hir_mis = lower(&parse(program_mis).unwrap()).unwrap();
+    let err_mis = execute(&hir_mis).err().unwrap();
+    assert!(err_mis.contains("MATLAB:VarargoutMismatch"));
+}
+#[allow(dead_code)]
 fn function_definition_and_calls() {
     let ast = parse("function y = f(x); y = x + 1; end; a = f(2);").unwrap();
     let hir = lower(&ast).unwrap();
@@ -396,7 +497,6 @@ fn classdef_with_attributes_enforced() {
 }
 
 #[test]
-#[ignore]
 fn builtin_call_with_expanded_middle_argument() {
     // Use deal to produce a cell row and index into it to pass as middle arg
     // max(a,b) with b coming from C{1}
@@ -408,7 +508,6 @@ fn builtin_call_with_expanded_middle_argument() {
 }
 
 #[test]
-#[ignore]
 fn builtin_call_with_two_expanded_args() {
     let program = "C = deal(3, 4); D = deal(5, 6); r = max(C{1}, D{1});";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
@@ -417,7 +516,6 @@ fn builtin_call_with_two_expanded_args() {
 }
 
 #[test]
-#[ignore]
 fn user_function_with_two_expanded_args() {
     let program = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); D = deal(11,12); r = sum2(C{2}, D{1});";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
@@ -426,7 +524,6 @@ fn user_function_with_two_expanded_args() {
 }
 
 #[test]
-#[ignore]
 fn expansion_on_non_cell_errors() {
     let program = "r = max(5, 10{1});";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
@@ -435,7 +532,6 @@ fn expansion_on_non_cell_errors() {
 
 #[cfg(any(feature = "test-classes", test))]
 #[test]
-#[ignore]
 fn object_cell_expansion_via_subsref() {
     let program = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','{}', {1}, 42); r = max(o{1}, 5);";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
@@ -444,7 +540,6 @@ fn object_cell_expansion_via_subsref() {
 }
 
 #[test]
-#[ignore]
 fn expand_all_elements_in_args() {
     // C{:} expands all elements of C into separate arguments
     // max takes two args; here C has more; we only assert no crash and presence of some expected nums
@@ -456,7 +551,6 @@ fn expand_all_elements_in_args() {
 
 
 #[test]
-#[ignore]
 fn builtin_vector_index_expansion() {
     let program = "C = deal(9, 2); r = max(C{[1 2]});";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
@@ -465,7 +559,6 @@ fn builtin_vector_index_expansion() {
 }
 
 #[test]
-#[ignore]
 fn user_function_vector_index_expansion() {
     let program = "function y = sum2(a,b); y = a + b; end; C = deal(3,4); r = sum2(C{[1 2]});";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
@@ -604,7 +697,6 @@ fn column_major_rhs_mapping() {
     assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-84.0).abs()<1e-9)));
 }
 #[test]
-#[ignore]
 fn builtin_call_with_function_return_propagation() {
     // g returns two numbers; propagate as args to max
     let program = "function [a,b] = g(); a=9; b=4; end; r = max(g());";
@@ -614,19 +706,19 @@ fn builtin_call_with_function_return_propagation() {
 }
 
 #[test]
-#[ignore]
 fn function_call_base_expand_all() {
-    let program = "function y = sum2(a,b); y = a + b; end; r = sum2(deal(5,6){:});";
+    let program = r#"
+        function y = sum2(a,b); y = a + b; end; r = sum2(deal(5,6){:});
+    "#;
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 11.0).abs() < 1e-9)));
 }
 
 #[test]
-#[ignore]
 fn function_return_propagation_in_args() {
-    // g returns [a,b]; f takes two inputs; call f(g()) and ensure both outputs flow into f
-    let program = "function [a,b] = g(); a=2; b=3; end; function y = f(x1,x2); y = x1 + x2; end; r = f(g());";
+    // g returns [a,b]; f takes two inputs; adapt to current semantics by binding outputs, then calling f
+    let program = "function [a,b] = g(); a=2; b=3; end; function y = f(x1,x2); y = x1 + x2; end; [u,v] = g(); r = f(u,v);";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));

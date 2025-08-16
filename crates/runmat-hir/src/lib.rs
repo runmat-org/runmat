@@ -279,11 +279,26 @@ pub fn infer_function_output_types(prog: &HirProgram) -> std::collections::HashM
         let mut i = 0usize;
         while i < stmts.len() {
             match &stmts[i] {
-                HirStmt::Assign(var, expr, _) => {
-                    let t = infer_expr_type(expr, &env, func_returns);
-                    env.insert(*var, t);
+                HirStmt::Assign(var, expr, _) => { let t = infer_expr_type(expr, &env, func_returns); env.insert(*var, t); }
+                HirStmt::MultiAssign(vars, expr, _) => {
+                    // If RHS is a direct FuncCall and we know its outputs, map element-wise; otherwise unify to single type
+                    if let HirExprKind::FuncCall(ref name, ref _args) = expr.kind {
+                        if let Some(summary) = func_returns.get(name) {
+                            for (i, v) in vars.iter().enumerate() {
+                                if let Some(id) = v {
+                                    let ty = summary.get(i).cloned().unwrap_or(Type::Unknown);
+                                    env.insert(*id, ty);
+                                }
+                            }
+                        } else {
+                            let t = infer_expr_type(expr, &env, func_returns);
+                            for v in vars { if let Some(id) = v { env.insert(*id, t.clone()); } }
+                        }
+                    } else {
+                        let t = infer_expr_type(expr, &env, func_returns);
+                        for v in vars { if let Some(id) = v { env.insert(*id, t.clone()); } }
+                    }
                 }
-                HirStmt::MultiAssign(vars, expr, _) => { let t = infer_expr_type(expr, &env, func_returns); for v in vars { if let Some(v) = v { env.insert(*v, t.clone()); } } }
                 HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
                 HirStmt::Return => { exits.push(env.clone()); return Analysis { exits, fallthrough: None }; }
                 HirStmt::If { cond, then_body, elseif_blocks, else_body } => {
@@ -473,6 +488,18 @@ pub fn infer_function_output_types(prog: &HirProgram) -> std::collections::HashM
     collect_function_names(&prog.body, &mut function_names);
     let mut returns: HashMap<String, Vec<Type>> = function_names.iter().map(|n| (n.clone(), Vec::new())).collect();
 
+    // Seed returns: per function, default outputs Unknown; if a function contains obvious numeric assignments to outputs, capture them on the first pass
+    for stmt in &prog.body {
+        if let HirStmt::Function { name, outputs, body, .. } = stmt {
+            let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
+            let analysis = analyze_stmts(outputs, body, HashMap::new(), &returns);
+            let mut accumulate = |env: &HashMap<VarId, Type>| { for (i, out_id) in outputs.iter().enumerate() { if let Some(t) = env.get(out_id) { per_output[i] = per_output[i].unify(t); } } };
+            if let Some(f) = &analysis.fallthrough { accumulate(f); }
+            for e in &analysis.exits { accumulate(e); }
+            returns.insert(name.clone(), per_output);
+        }
+    }
+
     let mut changed = true;
     let mut iter = 0usize;
     let max_iters = 3usize;
@@ -604,7 +631,19 @@ pub fn infer_function_variable_types(
         while i < stmts.len() {
             match &stmts[i] {
                 HirStmt::Assign(var, expr, _) => { let t = infer_expr_type(expr, &env, returns); env.insert(*var, t); }
-                HirStmt::MultiAssign(vars, expr, _) => { let t = infer_expr_type(expr, &env, returns); for v in vars { if let Some(v) = v { env.insert(*v, t.clone()); } } }
+                HirStmt::MultiAssign(vars, expr, _) => {
+                    if let HirExprKind::FuncCall(ref name, _) = expr.kind {
+                        if let Some(summary) = returns.get(name) {
+                            for (i, v) in vars.iter().enumerate() { if let Some(id) = v { env.insert(*id, summary.get(i).cloned().unwrap_or(Type::Unknown)); } }
+                        } else {
+                            let t = infer_expr_type(expr, &env, returns);
+                            for v in vars { if let Some(v) = v { env.insert(*v, t.clone()); } }
+                        }
+                    } else {
+                        let t = infer_expr_type(expr, &env, returns);
+                        for v in vars { if let Some(v) = v { env.insert(*v, t.clone()); } }
+                    }
+                }
                 HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
                 HirStmt::Return => { exits.push(env.clone()); return Analysis { exits, fallthrough: None }; }
                 HirStmt::If { cond, then_body, elseif_blocks, else_body } => {
@@ -1688,7 +1727,7 @@ impl Ctx {
                     let return_type = self.infer_function_return_type(name, &[]);
                     (HirExprKind::FuncCall(name.clone(), vec![]), return_type)
                 } else {
-                    return Err(format!("undefined variable `{name}`"));
+                    return Err(format!("{}: {}", "MATLAB:UndefinedVariable", format!("Undefined variable: {}", name)));
                 }
             }
             Unary(op, e) => {

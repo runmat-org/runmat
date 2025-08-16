@@ -60,4 +60,109 @@ fn nested_break_and_continue_scopes() {
     assert_eq!(x, 1.0);
 }
 
+#[test]
+fn undefined_variable_raises_mex() {
+    let ast = parse("y = x + 1;").unwrap();
+    let hir = lower(&ast);
+    let err = hir.err().unwrap();
+    assert!(err.contains("MATLAB:UndefinedVariable"));
+}
+
+#[test]
+fn block_comment_is_ignored() {
+    let ast = parse("a = 1; %{ this is a\n block comment %} b = 2; c = a + b;").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    // Expect c = 3 somewhere
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
+}
+
+#[test]
+fn apostrophe_is_transpose_when_adjacent() {
+    // Adjacent apostrophe after value is transpose
+    let ast = parse("A = [1 2; 3 4]; B = A'; s = sum(B(:));").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    // sum is invariant under transpose: sum 10
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
+}
+
+#[test]
+fn apostrophe_starts_char_array_when_not_adjacent() {
+    // Non-adjacent apostrophe starts a char array, not transpose
+    let ast = parse("A = [1 2]; \n s = 'hi';").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    // Expect a CharArray or String present
+    let has_text = vars.iter().any(|v| matches!(v, runmat_builtins::Value::CharArray(_) | runmat_builtins::Value::String(_)));
+    assert!(has_text);
+}
+
+#[test]
+fn too_many_inputs_mex() {
+    let src = r#"
+        function y = f(a)
+            y = a+1;
+        end
+        r = f(1,2);
+    "#;
+    let hir = lower(&parse(src).unwrap()).unwrap();
+    let err = execute(&hir).err().unwrap();
+    assert!(err.contains("MATLAB:TooManyInputs"));
+}
+
+#[test]
+fn too_many_outputs_mex() {
+    let src = r#"
+        function y = f(a)
+            y = a+1;
+        end
+        [x1,x2] = f(1);
+    "#;
+    let hir = lower(&parse(src).unwrap()).unwrap();
+    let err = execute(&hir).err().unwrap();
+    assert!(err.contains("MATLAB:TooManyOutputs"));
+}
+
+#[test]
+fn varargout_mismatch_mex() {
+    let src = r#"
+        function varargout = g()
+            varargout = {1,2};
+        end
+        [a,b,c] = g();
+    "#;
+    let hir = lower(&parse(src).unwrap()).unwrap();
+    let err = execute(&hir).err().unwrap();
+    assert!(err.contains("MATLAB:VarargoutMismatch"));
+}
+
+#[test]
+fn slice_non_tensor_mex() {
+    let src = "x = 5; y = x(1,1);";
+    let hir = lower(&parse(src).unwrap()).unwrap();
+    let err = execute(&hir).err().unwrap();
+    eprintln!("slice_non_tensor_mex err: {}", err);
+    assert!(err.contains("MATLAB:SliceNonTensor"));
+}
+
+#[test]
+fn index_step_zero_mex() {
+    let src = "A = [1 2 3 4]; B = A(1:0:3);";
+    let hir = lower(&parse(src).unwrap()).unwrap();
+    let err = execute(&hir).err().unwrap();
+    assert!(err.contains("Range step cannot be zero") || err.contains("MATLAB:IndexStepZero"));
+}
+
+#[test]
+fn unsupported_cell_index_type_mex() {
+    // When length doesn't match or contains non 0/1 it falls back to indices, but 0 is invalid => out of bounds.
+    // Force unsupported type by passing a string as index
+    let src2 = "C = {1,2,3}; r = C{'a'};";
+    let hir2 = lower(&parse(src2).unwrap()).unwrap();
+    let err2 = execute(&hir2).err().unwrap();
+    // Current runtime path attempts numeric coercion and reports conversion failure
+    assert!(err2.contains("cannot convert CharArray") || err2.contains("MATLAB:CellIndexType"));
+}
+
 

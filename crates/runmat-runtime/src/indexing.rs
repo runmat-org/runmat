@@ -123,7 +123,7 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                 // Scalar indexing with A(1) returns the scalar itself
                 Ok(base.clone())
             } else {
-                Err("Cannot index scalar values".to_string())
+                Err("MATLAB:SliceNonTensor: Slicing only supported on tensors".to_string())
             }
         }
         Value::Cell(ca) => {

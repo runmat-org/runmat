@@ -134,4 +134,34 @@ end
     assert!(err.contains("expected 'end'"));
 }
 
+#[test]
+fn classdef_enumeration_and_arguments_blocks_parse() {
+    let src = r#"
+        classdef MyEnum
+            enumeration
+                Red, Green, Blue
+            end
+        end
+
+        classdef C
+            properties
+                x
+            end
+            methods
+                function obj = C()
+                    obj.x = 1;
+                end
+            end
+            arguments(Input)
+                a
+                b
+            end
+        end
+    "#;
+    let ast = runmat_parser::parse(src).unwrap();
+    // Ensure both classes are present
+    assert!(matches!(ast.body[0], runmat_parser::Stmt::ClassDef{..}));
+    assert!(matches!(ast.body[1], runmat_parser::Stmt::ClassDef{..}));
+}
+
 
