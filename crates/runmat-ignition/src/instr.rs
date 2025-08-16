@@ -119,6 +119,10 @@ pub enum Instr {
     // - if is_expand: pop indices (num_indices), then base; expand to value(s)
     // - else: pop one fixed argument value
     CallBuiltinExpandMulti(String, Vec<ArgSpec>),
+    // Pack N top-of-stack values into a 1xN row tensor (left-to-right)
+    PackToRow(usize),
+    // Pack N top-of-stack values into an Nx1 column tensor (top is last)
+    PackToCol(usize),
     // Scoping and call stack instructions
     EnterScope(usize), // Number of local variables to allocate
     ExitScope(usize),  // Number of local variables to deallocate

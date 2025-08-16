@@ -288,6 +288,9 @@ impl BytecodeCompiler {
                 let instr = &instructions[pc];
 
                 match instr {
+                    &Instr::PackToRow(_) | &Instr::PackToCol(_) => {
+                        return Err(TurbineError::ExecutionError("PackToRow/PackToCol not supported in JIT; use interpreter".to_string()));
+                    }
                     Instr::LoadConst(val) => {
                         let const_val = builder.ins().f64const(*val);
                         local_stack.push(const_val);

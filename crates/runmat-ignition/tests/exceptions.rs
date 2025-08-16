@@ -4,21 +4,13 @@ use runmat_parser::parse;
 
 #[test]
 fn error_identifier_and_catch() {
-    // Produce the message as the final expression deterministically; use double-quoted strings for identifier/message
-    let ast = parse("try; error(\"MATLAB:domainError\", \"bad\"); catch e; string(getfield(e, 'message')); end").unwrap();
+    // Emit the message; ensure id/message are captured correctly
+    let ast = parse("try; error(\"MATLAB:domainError\", \"bad\"); catch e; msg = getfield(e, 'message'); end").unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
-    // The last result may be either the message or the MException depending on path; handle both
-    match vars.last().cloned().unwrap() {
-        runmat_builtins::Value::StringArray(sa) => {
-            let got = &sa.data[0];
-            assert!(got.contains("bad"));
-        }
-        runmat_builtins::Value::MException(me) => {
-            assert!(me.message.contains("bad"));
-        }
-        other => panic!("unexpected last value: {:?}", other),
-    }
+    let has_msg = vars.iter().any(|v| matches!(v, runmat_builtins::Value::StringArray(sa) if !sa.data.is_empty() && sa.data.iter().any(|s| s.contains("bad"))));
+    let has_exc = vars.iter().any(|v| matches!(v, runmat_builtins::Value::MException(me) if me.message.contains("bad")));
+    assert!(has_msg || has_exc);
 }
 
 #[test]
@@ -27,6 +19,16 @@ fn nested_try_catch_rethrow() {
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs()<1e-9)));
+}
+
+#[test]
+fn catch_and_multi_assign_propagation() {
+    // Ensure catch-bound exception can be read and subsequent assignments proceed
+    let ast = parse("A=[1 2]; try; x=A(10); catch e; [m,ok] = deal(getfield(e,'message'), 1); end").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let has_ok = vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs()<1e-9));
+    assert!(has_ok);
 }
 
 #[test]

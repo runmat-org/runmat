@@ -7,6 +7,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
+#[inline]
+fn mex(id: &str, msg: &str) -> String { format!("{}: {}", id, msg) }
+
 thread_local! {
     static GLOBALS: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
 }
@@ -35,6 +38,8 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
     let current_func_name_str: String = current_function_name.map(|s| s.to_string()).unwrap_or_else(|| "<main>".to_string());
     // Stack of (catch_pc, catch_var_global_index)
     let mut try_stack: Vec<(usize, Option<usize>)> = Vec::new();
+    // Track last caught exception for possible rethrow handling
+    let mut last_exception: Option<runmat_builtins::MException> = None;
     // Runtime import registry for this execution
     let mut imports: Vec<(Vec<String>, bool)> = Vec::new();
     // Helper to resolve unqualified static accesses if Class.* is imported
@@ -51,13 +56,19 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
         }
         None
     };
+    #[inline]
+    fn bench_start() -> Option<std::time::Instant> { None }
+    #[inline]
+    fn bench_end(_label: &str, _start: Option<std::time::Instant>) { }
     macro_rules! vm_bail {
         ($err:expr) => {{
             let e: String = $err;
             if let Some((catch_pc, catch_var)) = try_stack.pop() {
                 if let Some(var_idx) = catch_var {
                     if var_idx >= vars.len() { vars.resize(var_idx + 1, Value::Num(0.0)); }
-                    vars[var_idx] = Value::MException(parse_exception(&e));
+                    let mex = parse_exception(&e);
+                    last_exception = Some(mex.clone());
+                    vars[var_idx] = Value::MException(mex);
                 }
                 pc = catch_pc;
                 continue;
@@ -71,7 +82,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::LoadConst(c) => stack.push(Value::Num(c)),
             Instr::LoadString(s) => stack.push(Value::String(s)),
             Instr::LoadCharRow(s) => {
-                let ca = runmat_builtins::CharArray::new(s.chars().collect(), 1, s.chars().count()).map_err(|e| format!("char row: {e}"))?;
+                let ca = runmat_builtins::CharArray::new(s.chars().collect(), 1, s.chars().count()).map_err(|e| mex("MATLAB:CharError", &e))?;
                 stack.push(Value::CharArray(ca));
             }
             Instr::LoadVar(i) => stack.push(vars[i].clone()),
@@ -242,10 +253,76 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     _ => stack.push(runmat_runtime::elementwise_div(&b, &a)?),
                 }
             }
-            Instr::LessEqual => { handle_rel_binary!(<=, "le", stack); }
+            Instr::LessEqual => {
+                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                match (&a, &b) {
+                    (Value::Object(obj), _) => {
+                        let args = vec![Value::Object(obj.clone()), Value::String("le".to_string()), b.clone()];
+                        match call_builtin("call_method", &args) {
+                            Ok(v) => stack.push(v),
+                            Err(_) => {
+                                // Fallback: le(a,b) = ~gt(a,b)
+                                let args2 = vec![Value::Object(obj.clone()), Value::String("gt".to_string()), b.clone()];
+                                match call_builtin("call_method", &args2) {
+                                    Ok(v) => { let truth: f64 = (&v).try_into()?; stack.push(Value::Num(if truth == 0.0 { 1.0 } else { 0.0 })); },
+                                    Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa <= bb {1.0}else{0.0})); }
+                                }
+                            }
+                        }
+                    }
+                    (_, Value::Object(obj)) => {
+                        let args = vec![Value::Object(obj.clone()), Value::String("ge".to_string()), a.clone()];
+                        match call_builtin("call_method", &args) {
+                            Ok(v) => stack.push(v),
+                            Err(_) => {
+                                // Fallback: ge(b,a) = ~lt(b,a) hence le(a,b) = ge(b,a)
+                                let args2 = vec![Value::Object(obj.clone()), Value::String("lt".to_string()), a.clone()];
+                                match call_builtin("call_method", &args2) {
+                                    Ok(v) => { let truth: f64 = (&v).try_into()?; stack.push(Value::Num(if truth == 0.0 { 1.0 } else { 0.0 })); },
+                                    Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa <= bb {1.0}else{0.0})); }
+                                }
+                            }
+                        }
+                    }
+                    _ => { let bb: f64 = (&b).try_into()?; let aa: f64 = (&a).try_into()?; stack.push(Value::Num(if aa <= bb {1.0}else{0.0})); }
+                }
+            }
             Instr::Less => { handle_rel_binary!(<, "lt", stack); }
             Instr::Greater => { handle_rel_binary!(>, "gt", stack); }
-            Instr::GreaterEqual => { handle_rel_binary!(>=, "ge", stack); }
+            Instr::GreaterEqual => {
+                let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
+                match (&a, &b) {
+                    (Value::Object(obj), _) => {
+                        let args = vec![Value::Object(obj.clone()), Value::String("ge".to_string()), b.clone()];
+                        match call_builtin("call_method", &args) {
+                            Ok(v) => stack.push(v),
+                            Err(_) => {
+                                // Fallback: ge(a,b) = ~lt(a,b)
+                                let args2 = vec![Value::Object(obj.clone()), Value::String("lt".to_string()), b.clone()];
+                                match call_builtin("call_method", &args2) {
+                                    Ok(v) => { let truth: f64 = (&v).try_into()?; stack.push(Value::Num(if truth == 0.0 { 1.0 } else { 0.0 })); },
+                                    Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa >= bb {1.0}else{0.0})); }
+                                }
+                            }
+                        }
+                    }
+                    (_, Value::Object(obj)) => {
+                        let args = vec![Value::Object(obj.clone()), Value::String("le".to_string()), a.clone()];
+                        match call_builtin("call_method", &args) {
+                            Ok(v) => stack.push(v),
+                            Err(_) => {
+                                // Fallback: le(b,a) = ~gt(b,a); hence ge(a,b) = le(b,a)
+                                let args2 = vec![Value::Object(obj.clone()), Value::String("gt".to_string()), a.clone()];
+                                match call_builtin("call_method", &args2) {
+                                    Ok(v) => { let truth: f64 = (&v).try_into()?; stack.push(Value::Num(if truth == 0.0 { 1.0 } else { 0.0 })); },
+                                    Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa >= bb {1.0}else{0.0})); }
+                                }
+                            }
+                        }
+                    }
+                    _ => { let bb: f64 = (&b).try_into()?; let aa: f64 = (&a).try_into()?; stack.push(Value::Num(if aa >= bb {1.0}else{0.0})); }
+                }
+            }
             Instr::Equal => {
                 let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
                 match (&a, &b) {
@@ -253,7 +330,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), Value::String("eq".to_string()), a.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa==bb {1.0}else{0.0})) } } }
                     (Value::Tensor(ta), Value::Tensor(tb)) => {
                         // Element-wise eq; shapes must match
-                        if ta.shape != tb.shape { return Err("shape mismatch for element-wise comparison".to_string()); }
+                        if ta.shape != tb.shape { return Err(mex("MATLAB:ShapeMismatch", "shape mismatch for element-wise comparison")); }
                         let mut out = Vec::with_capacity(ta.data.len());
                         for i in 0..ta.data.len() { out.push(if (ta.data[i] - tb.data[i]).abs() < 1e-12 { 1.0 } else { 0.0 }); }
                         stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, ta.shape.clone()).map_err(|e| format!("eq: {e}"))?));
@@ -269,7 +346,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, t.shape.clone()).map_err(|e| format!("eq: {e}"))?));
                     }
                     (Value::StringArray(sa), Value::StringArray(sb)) => {
-                        if sa.shape != sb.shape { return Err("shape mismatch for string array comparison".to_string()); }
+                        if sa.shape != sb.shape { return Err(mex("MATLAB:ShapeMismatch", "shape mismatch for string array comparison")); }
                         let mut out = Vec::with_capacity(sa.data.len());
                         for i in 0..sa.data.len() { out.push(if sa.data[i] == sb.data[i] { 1.0 } else { 0.0 }); }
                         stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("eq: {e}"))?));
@@ -289,10 +366,36 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::NotEqual => {
                 let b = stack.pop().ok_or("stack underflow")?; let a = stack.pop().ok_or("stack underflow")?;
                 match (&a, &b) {
-                    (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String("ne".to_string()), b.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa!=bb {1.0}else{0.0})) } } }
-                    (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), Value::String("ne".to_string()), a.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa!=bb {1.0}else{0.0})) } } }
+                    (Value::Object(obj), _) => {
+                        let args = vec![Value::Object(obj.clone()), Value::String("ne".to_string()), b.clone()];
+                        match call_builtin("call_method", &args) {
+                            Ok(v) => stack.push(v),
+                            Err(_) => {
+                                // Fallback: ne(a,b) = ~eq(a,b)
+                                let args2 = vec![Value::Object(obj.clone()), Value::String("eq".to_string()), b.clone()];
+                                match call_builtin("call_method", &args2) {
+                                    Ok(v) => { let truth: f64 = (&v).try_into()?; stack.push(Value::Num(if truth == 0.0 { 1.0 } else { 0.0 })); },
+                                    Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa!=bb {1.0}else{0.0})); }
+                                }
+                            }
+                        }
+                    }
+                    (_, Value::Object(obj)) => {
+                        let args = vec![Value::Object(obj.clone()), Value::String("ne".to_string()), a.clone()];
+                        match call_builtin("call_method", &args) {
+                            Ok(v) => stack.push(v),
+                            Err(_) => {
+                                // Fallback: ne(b,a) = ~eq(b,a)
+                                let args2 = vec![Value::Object(obj.clone()), Value::String("eq".to_string()), a.clone()];
+                                match call_builtin("call_method", &args2) {
+                                    Ok(v) => { let truth: f64 = (&v).try_into()?; stack.push(Value::Num(if truth == 0.0 { 1.0 } else { 0.0 })); },
+                                    Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa!=bb {1.0}else{0.0})); }
+                                }
+                            }
+                        }
+                    }
                     (Value::Tensor(ta), Value::Tensor(tb)) => {
-                        if ta.shape != tb.shape { return Err("shape mismatch for element-wise comparison".to_string()); }
+                        if ta.shape != tb.shape { return Err(mex("MATLAB:ShapeMismatch", "shape mismatch for element-wise comparison")); }
                         let mut out = Vec::with_capacity(ta.data.len());
                         for i in 0..ta.data.len() { out.push(if (ta.data[i] - tb.data[i]).abs() >= 1e-12 { 1.0 } else { 0.0 }); }
                         stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, ta.shape.clone()).map_err(|e| format!("ne: {e}"))?));
@@ -308,7 +411,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, t.shape.clone()).map_err(|e| format!("ne: {e}"))?));
                     }
                     (Value::StringArray(sa), Value::StringArray(sb)) => {
-                        if sa.shape != sb.shape { return Err("shape mismatch for string array comparison".to_string()); }
+                        if sa.shape != sb.shape { return Err(mex("MATLAB:ShapeMismatch", "shape mismatch for string array comparison")); }
                         let mut out = Vec::with_capacity(sa.data.len());
                         for i in 0..sa.data.len() { out.push(if sa.data[i] != sb.data[i] { 1.0 } else { 0.0 }); }
                         stack.push(Value::Tensor(runmat_builtins::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("ne: {e}"))?));
@@ -325,7 +428,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     _ => { let bb: f64 = (&b).try_into()?; let aa: f64 = (&a).try_into()?; stack.push(Value::Num(if aa!=bb {1.0}else{0.0})); }
                 }
             }
-            Instr::JumpIfFalse(target) => { let cond: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; if cond == 0.0 { pc = target; continue; } }
+            Instr::JumpIfFalse(target) => { let cond: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; if cond == 0.0 { pc = target; continue; } }
             Instr::Jump(target) => { pc = target; continue; }
             Instr::CallBuiltin(name, arg_count) => {
                 let mut args = Vec::new(); for _ in 0..arg_count { args.push(stack.pop().ok_or("stack underflow")?); } args.reverse();
@@ -359,10 +462,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             if let Some(qual) = wildcard_matches.get(0) {
                                 match call_builtin(qual, &args) { Ok(v) => { stack.push(v); }, Err(e2) => vm_bail!(e2) }
                             } else {
+                                // Special-case: rethrow() without explicit e uses last caught
+                                if name == "rethrow" && args.is_empty() {
+                                    if let Some(le) = &last_exception { vm_bail!(format!("{}: {}", le.identifier, le.message)); }
+                                }
                                 if let Some((catch_pc, catch_var)) = try_stack.pop() {
                                     if let Some(var_idx) = catch_var {
                                         if var_idx >= vars.len() { vars.resize(var_idx + 1, Value::Num(0.0)); }
-                                        vars[var_idx] = Value::MException(parse_exception(&e));
+                                        let mex = parse_exception(&e);
+                                        last_exception = Some(mex.clone());
+                                        vars[var_idx] = Value::MException(mex);
                                     }
                                     pc = catch_pc; continue;
                                 } else { return Err(e); }
@@ -433,14 +542,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::CallBuiltinExpandAt(name, before_count, num_indices, after_count) => {
                 // Stack layout: [..., a1..abefore, base, idx..., a_after...]
                 let mut after: Vec<Value> = Vec::with_capacity(after_count);
-                for _ in 0..after_count { after.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..after_count { after.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 after.reverse();
                 let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices { indices.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..num_indices { indices.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 indices.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let mut before: Vec<Value> = Vec::with_capacity(before_count);
-                for _ in 0..before_count { before.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..before_count { before.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 before.reverse();
                 let expanded = match (base, indices.len()) {
                     (Value::Cell(ca), 1) => {
@@ -534,6 +643,27 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 temp.reverse();
                 args.extend(temp.into_iter());
                 match call_builtin(&name, &args) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
+            }
+            Instr::PackToRow(count) => {
+                // Pop count values and build a 1xN numeric tensor (Num only; others error)
+                let mut vals: Vec<f64> = Vec::with_capacity(count);
+                let mut tmp: Vec<Value> = Vec::with_capacity(count);
+                for _ in 0..count { tmp.push(stack.pop().ok_or("stack underflow")?); }
+                tmp.reverse();
+                for v in tmp {
+                    let n: f64 = (&v).try_into()?; vals.push(n);
+                }
+                let tens = runmat_builtins::Tensor::new(vals, vec![1, count]).map_err(|e| format!("PackToRow: {e}"))?;
+                stack.push(Value::Tensor(tens));
+            }
+            Instr::PackToCol(count) => {
+                let mut vals: Vec<f64> = Vec::with_capacity(count);
+                let mut tmp: Vec<Value> = Vec::with_capacity(count);
+                for _ in 0..count { tmp.push(stack.pop().ok_or("stack underflow")?); }
+                tmp.reverse();
+                for v in tmp { let n: f64 = (&v).try_into()?; vals.push(n); }
+                let tens = runmat_builtins::Tensor::new(vals, vec![count, 1]).map_err(|e| format!("PackToCol: {e}"))?;
+                stack.push(Value::Tensor(tens));
             }
             Instr::CallFunctionExpandMulti(name, specs) => {
                 // Build args via specs, then invoke user function similar to CallFunction
@@ -666,7 +796,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         if let Some((catch_pc, catch_var)) = try_stack.pop() {
                             if let Some(var_idx) = catch_var {
                                 if var_idx >= vars.len() { vars.resize(var_idx + 1, Value::Num(0.0)); }
-                                vars[var_idx] = Value::MException(parse_exception(&e));
+                                let mex = parse_exception(&e);
+                                last_exception = Some(mex.clone());
+                                vars[var_idx] = Value::MException(mex);
                             }
                             pc = catch_pc; continue;
                         } else { vm_bail!(e); }
@@ -687,14 +819,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
                 // Assemble argument list with expansion at position
                 let mut after: Vec<Value> = Vec::with_capacity(after_count);
-                for _ in 0..after_count { after.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..after_count { after.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 after.reverse();
                 let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices { indices.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..num_indices { indices.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 indices.reverse();
-                let base = stack.pop().ok_or("stack underflow")?;
+                let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let mut before: Vec<Value> = Vec::with_capacity(before_count);
-                for _ in 0..before_count { before.push(stack.pop().ok_or("stack underflow")?); }
+                for _ in 0..before_count { before.push(stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?); }
                 before.reverse();
                 let expanded = match (base, indices.len()) {
                     (Value::Cell(ca), 1) => {
@@ -773,7 +905,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         if let Some((catch_pc, catch_var)) = try_stack.pop() {
                             if let Some(var_idx) = catch_var {
                                 if var_idx >= vars.len() { vars.resize(var_idx + 1, Value::Num(0.0)); }
-                                vars[var_idx] = Value::MException(parse_exception(&e));
+                                let mex = parse_exception(&e);
+                                last_exception = Some(mex.clone());
+                                vars[var_idx] = Value::MException(mex);
                             }
                             pc = catch_pc; continue;
                         } else { vm_bail!(e); }
@@ -965,6 +1099,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::IndexSlice(dims, numeric_count, colon_mask, end_mask) => {
+                let __b = bench_start();
                 // Pop numeric indices in reverse order (they were pushed in order), then base
                 let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
                 for _ in 0..numeric_count { numeric.push(stack.pop().ok_or("stack underflow")?); }
@@ -1053,6 +1188,70 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 }
                             }
                         }
+                        // 2-D fast paths
+                        if dims == 2 {
+                            let rows = if rank >= 1 { t.shape[0] } else { 1 };
+                            let cols = if rank >= 2 { t.shape[1] } else { 1 };
+                            match (&selectors[0], &selectors[1]) {
+                                // Full column
+                                (Sel::Colon, Sel::Scalar(j)) => {
+                                    let j0 = *j - 1; if j0 >= cols { return Err("Index out of bounds".into()); }
+                                    let start = j0 * rows;
+                                    let out = t.data[start..start+rows].to_vec();
+                                    if out.len() == 1 { stack.push(Value::Num(out[0])); }
+                                    else { let tens = runmat_builtins::Tensor::new(out, vec![rows, 1]).map_err(|e| format!("Slice error: {e}"))?; stack.push(Value::Tensor(tens)); }
+                                    bench_end("IndexSlice2D.fast_col", __b);
+                                    pc += 1; continue;
+                                }
+                                // Full row
+                                (Sel::Scalar(i), Sel::Colon) => {
+                                    let i0 = *i - 1; if i0 >= rows { return Err("Index out of bounds".into()); }
+                                    let mut out: Vec<f64> = Vec::with_capacity(cols);
+                                    for c in 0..cols { out.push(t.data[i0 + c*rows]); }
+                                    if out.len() == 1 { stack.push(Value::Num(out[0])); }
+                                    else { let tens = runmat_builtins::Tensor::new(out, vec![1, cols]).map_err(|e| format!("Slice error: {e}"))?; stack.push(Value::Tensor(tens)); }
+                                    bench_end("IndexSlice2D.fast_row", __b);
+                                    pc += 1; continue;
+                                }
+                                // Full columns subset: A(:, J)
+                                (Sel::Colon, Sel::Indices(js)) => {
+                                    // Gather selected full columns into a [rows, |J|] tensor
+                                    if js.is_empty() {
+                                        let tens = runmat_builtins::Tensor::new(Vec::new(), vec![rows, 0]).map_err(|e| format!("Slice error: {e}"))?;
+                                        stack.push(Value::Tensor(tens));
+                                    } else {
+                                        let mut out: Vec<f64> = Vec::with_capacity(rows * js.len());
+                                        for &j in js {
+                                            let j0 = j - 1; if j0 >= cols { return Err("Index out of bounds".into()); }
+                                            let start = j0 * rows;
+                                            out.extend_from_slice(&t.data[start..start+rows]);
+                                        }
+                                        let tens = runmat_builtins::Tensor::new(out, vec![rows, js.len()]).map_err(|e| format!("Slice error: {e}"))?;
+                                        stack.push(Value::Tensor(tens));
+                                    }
+                                    bench_end("IndexSlice2D.fast_cols", __b);
+                                    pc += 1; continue;
+                                }
+                                // Selected rows full: A(I, :)
+                                (Sel::Indices(is), Sel::Colon) => {
+                                    // Gather selected rows across all columns into [|I|, cols]
+                                    if is.is_empty() {
+                                        let tens = runmat_builtins::Tensor::new(Vec::new(), vec![0, cols]).map_err(|e| format!("Slice error: {e}"))?;
+                                        stack.push(Value::Tensor(tens));
+                                    } else {
+                                        let mut out: Vec<f64> = Vec::with_capacity(is.len() * cols);
+                                        for c in 0..cols {
+                                            for &i in is { let i0 = i - 1; if i0 >= rows { return Err("Index out of bounds".into()); } out.push(t.data[i0 + c*rows]); }
+                                        }
+                                        let tens = runmat_builtins::Tensor::new(out, vec![is.len(), cols]).map_err(|e| format!("Slice error: {e}"))?;
+                                        stack.push(Value::Tensor(tens));
+                                    }
+                                    bench_end("IndexSlice2D.fast_rows_multi", __b);
+                                    pc += 1; continue;
+                                }
+                                _ => {}
+                            }
+                        }
                         {
                             // Compute output shape and gather
                             let mut out_dims: Vec<usize> = Vec::new();
@@ -1068,6 +1267,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 if idxs.len() > 1 { out_dims.push(idxs.len()); } else { out_dims.push(1); }
                                 per_dim_indices.push(idxs);
                             }
+                            let mut out_dims: Vec<usize> = per_dim_indices.iter().map(|v| v.len()).collect();
                             // 2D mixed selectors shape correction to match MATLAB:
                             // (I, scalar) => column vector [len(I), 1]; (scalar, J) => row vector [1, len(J)]
                             if dims == 2 {
@@ -1091,7 +1291,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             // Cartesian product gather
                             let total_out: usize = out_dims.iter().product();
                             let mut out_data: Vec<f64> = Vec::with_capacity(total_out);
-                            if out_dims.iter().any(|&d| d == 0) {
+                            if out_dims.iter().any(|&d| d == 0) || per_dim_indices.iter().any(|v| v.is_empty()) {
                                 // Empty selection on some dimension -> empty tensor
                                 let out_tensor = runmat_builtins::Tensor::new(out_data, out_dims)
                                     .map_err(|e| format!("Slice error: {e}"))?;
@@ -1174,10 +1374,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                         Value::Tensor(idx_t) => {
                                             let dim_len = *sa.shape.get(d).unwrap_or(&1);
                                             let len = idx_t.shape.iter().product::<usize>();
-                                            if len == dim_len { let mut indices = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { indices.push(i+1); } } selectors.push(Sel::Indices(indices)); }
-                                            else { let mut indices = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { return Err("Index out of bounds".into()); } indices.push(idx as usize); } selectors.push(Sel::Indices(indices)); }
+                                            let is_binary_mask = len == dim_len && idx_t.data.iter().all(|&x| x == 0.0 || x == 1.0);
+                                            if is_binary_mask { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val!=0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
+                                            else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
                                         }
-                                        _ => return Err("Unsupported index type".into()),
+                                        _ => vm_bail!("Unsupported index type".into()),
                                     }
                                 }
                             }
@@ -1232,6 +1433,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         vm_bail!("Slicing only supported on tensors".to_string());
                     }
                 }
+                bench_end("IndexSlice", __b);
             }
             Instr::IndexRangeEnd { dims, numeric_count, colon_mask, end_mask, range_dims, range_has_step, end_offsets } => {
                 // Pop any numeric scalar indices (reverse), then for each range in reverse push step (if has), start; then base
@@ -1334,8 +1536,8 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     Value::Tensor(idx_t) => {
                                         let dim_len = *sa.shape.get(d).unwrap_or(&1);
                                         let len = idx_t.shape.iter().product::<usize>();
-                                        if len==dim_len { let mut v = Vec::new(); for (i,&val) in idx_t.data.iter().enumerate(){ if val!=0.0 { v.push(i+1);} } selectors.push(Sel::Indices(v)); }
-                                        else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx=val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
+                                        if len == dim_len { let mut v = Vec::new(); for (i, &val) in idx_t.data.iter().enumerate() { if val != 0.0 { v.push(i+1); } } selectors.push(Sel::Indices(v)); }
+                                        else { let mut v = Vec::with_capacity(len); for &val in &idx_t.data { let idx = val as isize; if idx<1 { vm_bail!("Index out of bounds".into()); } v.push(idx as usize); } selectors.push(Sel::Indices(v)); }
                                     }
                                     _ => vm_bail!("Unsupported index type".into()),
                                 }
@@ -1466,6 +1668,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 }
             }
             Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask) => {
+                let __b = bench_start();
                 // RHS value to scatter, then numeric indices, then base
                 let rhs = stack.pop().ok_or("stack underflow")?;
                 let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
@@ -1556,6 +1759,46 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     }
                                 }
                             }
+                            // 2-D write fast paths (full column/row) with strict broadcast checks
+                            if dims == 2 {
+                                let rows = if rank >= 1 { t.shape[0] } else { 1 };
+                                let cols = if rank >= 2 { t.shape[1] } else { 1 };
+                                match (&selectors[0], &selectors[1]) {
+                                    // A(:, j) = rhs
+                                    (Sel::Colon, Sel::Scalar(j)) => {
+                                        let j0 = *j - 1; if j0 >= cols { vm_bail!("Index out of bounds".into()); }
+                                        let start = j0 * rows;
+                                        match rhs {
+                                            Value::Num(v) => { for r in 0..rows { t.data[start + r] = v; } }
+                                            Value::Tensor(rt) => {
+                                                let len = rt.data.len();
+                                                if len == rows { for r in 0..rows { t.data[start + r] = rt.data[r]; } }
+                                                else if len == 1 { for r in 0..rows { t.data[start + r] = rt.data[0]; } }
+                                                else { vm_bail!("shape mismatch for slice assign".into()); }
+                                            }
+                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                        }
+                                        stack.push(Value::Tensor(t)); bench_end("StoreSlice2D.fast_col", __b); pc += 1; continue;
+                                    }
+                                    // A(i, :) = rhs
+                                    (Sel::Scalar(i), Sel::Colon) => {
+                                        let i0 = *i - 1; if i0 >= rows { vm_bail!("Index out of bounds".into()); }
+                                        match rhs {
+                                            Value::Num(v) => { for c in 0..cols { t.data[i0 + c*rows] = v; } }
+                                            Value::Tensor(rt) => {
+                                                let len = rt.data.len();
+                                                if len == cols { for c in 0..cols { t.data[i0 + c*rows] = rt.data[c]; } }
+                                                else if len == 1 { for c in 0..cols { t.data[i0 + c*rows] = rt.data[0]; } }
+                                                else { vm_bail!("shape mismatch for slice assign".into()); }
+                                            }
+                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                        }
+                                        stack.push(Value::Tensor(t)); bench_end("StoreSlice2D.fast_row", __b); pc += 1; continue;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            // Generic N-D writer path
                             // Build per-dim index lists and strides
                             let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
                             let full_shape: Vec<usize> = if rank < dims { let mut s = t.shape.clone(); s.resize(dims, 1); s } else { t.shape.clone() };
@@ -1727,6 +1970,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     }
                     _ => vm_bail!("Slicing assignment only supported on tensors or string arrays".into()),
                 }
+                bench_end("StoreSlice", __b);
             }
             Instr::StoreSliceEx(dims, numeric_count, colon_mask, end_mask, end_offsets) => {
                 let rhs = stack.pop().ok_or("stack underflow")?;
@@ -2062,23 +2306,24 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::IndexCellExpand(num_indices, out_count) => {
                 // Same as IndexCell but flatten cell contents into multiple outputs
                 let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; indices.push(v as usize); }
-                indices.reverse();
+                if num_indices > 0 {
+                    for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or("stack underflow")?).try_into()?; indices.push(v as usize); }
+                    indices.reverse();
+                }
                 let base = stack.pop().ok_or("stack underflow")?;
                 match base {
                     Value::Cell(ca) => {
                         // Expand in column-major order up to out_count elements
                         let mut values: Vec<Value> = Vec::new();
-                        match indices.len() {
-                            1 => {
-                                let i = indices[0]; if i == 0 || i > ca.data.len() { return Err("Cell index out of bounds".to_string()); }
-                                values.push(ca.data[i-1].clone());
+                        if indices.is_empty() {
+                            // Expand all elements in column-major order
+                            values.extend(ca.data.iter().cloned());
+                        } else {
+                            match indices.len() {
+                                1 => { let i = indices[0]; if i == 0 || i > ca.data.len() { return Err("Cell index out of bounds".to_string()); } values.push(ca.data[i-1].clone()); }
+                                2 => { let r = indices[0]; let c = indices[1]; if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err("Cell subscript out of bounds".to_string()); } values.push(ca.data[(r-1)*ca.cols + (c-1)].clone()); }
+                                _ => return Err("Unsupported number of cell indices".to_string()),
                             }
-                            2 => {
-                                let r = indices[0]; let c = indices[1]; if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err("Cell subscript out of bounds".to_string()); }
-                                values.push(ca.data[(r-1)*ca.cols + (c-1)].clone());
-                            }
-                            _ => return Err("Unsupported number of cell indices".to_string()),
                         }
                         // Pad or truncate to out_count
                         if values.len() >= out_count { for i in 0..out_count { stack.push(values[i].clone()); } }

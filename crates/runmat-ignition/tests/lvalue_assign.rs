@@ -31,12 +31,16 @@ fn brace_get_and_set_on_object() {
 
 #[test]
 fn colon_slice_and_broadcast_assign() {
-	// Test colon slice on tensor (positive case) to keep suite meaningful
-	let src = "A=[1,2;3,4]; y = A(:,2);";
+	// Test colon slice read and full-column/row writes
+	let src = "A=[1,2;3,4]; y = A(:,2); A(:,2)=[9;8]; C=A; A(1,:)=[7,6]; D=A;";
 	let hir = lower(&parse(src).unwrap()).unwrap();
 	let vars = execute(&hir).unwrap();
 	// y should be column vector [2;4] -> data [2,4]
 	assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.data == vec![2.0,4.0])));
+	// C should be [1 9; 3 8] -> [1,3,9,8]
+	assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.data == vec![1.0,3.0,9.0,8.0])));
+	// D should be [7 6; 3 8] -> [7,3,6,8]
+	assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.data == vec![7.0,3.0,6.0,8.0])));
 }
 
 #[test]
