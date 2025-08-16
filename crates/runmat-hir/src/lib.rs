@@ -251,7 +251,11 @@ pub fn infer_function_output_types(prog: &HirProgram) -> std::collections::HashM
                 }
             }
             K::MethodCall(_, _, _) => Type::Unknown,
-            K::Member(_, _) => Type::Unknown,
+            K::Member(base, _) => {
+                // If base appears to be a struct, member read remains Unknown but confirms struct-like usage
+                let _bt = infer_expr_type(base, env, func_returns);
+                Type::Unknown
+            }
             K::MemberDynamic(_, _) => Type::Unknown,
             K::AnonFunc { .. } => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
             K::FuncHandle(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
@@ -275,15 +279,132 @@ pub fn infer_function_output_types(prog: &HirProgram) -> std::collections::HashM
         let mut i = 0usize;
         while i < stmts.len() {
             match &stmts[i] {
-                HirStmt::Assign(var, expr, _) => { let t = infer_expr_type(expr, &env, func_returns); env.insert(*var, t); }
+                HirStmt::Assign(var, expr, _) => {
+                    let t = infer_expr_type(expr, &env, func_returns);
+                    env.insert(*var, t);
+                }
                 HirStmt::MultiAssign(vars, expr, _) => { let t = infer_expr_type(expr, &env, func_returns); for v in vars { if let Some(v) = v { env.insert(*v, t.clone()); } } }
                 HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
                 HirStmt::Return => { exits.push(env.clone()); return Analysis { exits, fallthrough: None }; }
-                HirStmt::If { cond: _, then_body, elseif_blocks, else_body } => {
-                    let then_a = analyze_stmts(outputs, then_body, env.clone(), func_returns);
+                HirStmt::If { cond, then_body, elseif_blocks, else_body } => {
+                    // Try to refine struct field knowledge from the condition for the then-branch
+                    fn trim_quotes(s: &str) -> String { let t = s.trim(); t.trim_matches('\'').to_string() }
+                    fn extract_field_literal(e: &HirExpr) -> Option<String> {
+                        match &e.kind {
+                            HirExprKind::String(s) => Some(trim_quotes(s)),
+                            _ => None,
+                        }
+                    }
+                    fn extract_field_list(e: &HirExpr) -> Vec<String> {
+                        match &e.kind {
+                            HirExprKind::String(s) => vec![trim_quotes(s)],
+                            HirExprKind::Cell(rows) => {
+                                let mut out = Vec::new();
+                                for row in rows { for it in row { if let Some(v) = extract_field_literal(it) { out.push(v); } } }
+                                out
+                            }
+                            _ => Vec::new(),
+                        }
+                    }
+                    fn collect_assertions(e: &HirExpr, out: &mut Vec<(VarId, String)>) {
+                        use HirExprKind as K;
+                        match &e.kind {
+                            K::Unary(parser::UnOp::Not, _inner) => {
+                                // Negative condition - do not refine
+                            }
+                            K::Binary(left, op, right) => {
+                                match op {
+                                    parser::BinOp::AndAnd | parser::BinOp::BitAnd => {
+                                        collect_assertions(left, out);
+                                        collect_assertions(right, out);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            K::FuncCall(name, args) => {
+                                let lname = name.as_str();
+                                if lname.eq_ignore_ascii_case("isfield") && args.len() >= 2 {
+                                    if let HirExprKind::Var(vid) = args[0].kind { if let Some(f) = extract_field_literal(&args[1]) { out.push((vid, f)); } }
+                                }
+                                // ismember('f', fieldnames(s)) or ismember(fieldnames(s),'f')
+                                if lname.eq_ignore_ascii_case("ismember") && args.len() >= 2 {
+                                    let mut fields: Vec<String> = Vec::new();
+                                    let mut target: Option<VarId> = None;
+                                    // Extract fields from either arg
+                                    if !fields.is_empty() {}
+                                    if let HirExprKind::FuncCall(ref n0, ref a0) = args[0].kind {
+                                        if n0.eq_ignore_ascii_case("fieldnames") && a0.len() == 1 {
+                                            if let HirExprKind::Var(vid) = a0[0].kind { target = Some(vid); }
+                                        }
+                                    }
+                                    if let HirExprKind::FuncCall(ref n1, ref a1) = args[1].kind {
+                                        if n1.eq_ignore_ascii_case("fieldnames") && a1.len() == 1 {
+                                            if let HirExprKind::Var(vid) = a1[0].kind { target = Some(vid); }
+                                        }
+                                    }
+                                    if fields.is_empty() { fields.extend(extract_field_list(&args[0])); }
+                                    if fields.is_empty() { fields.extend(extract_field_list(&args[1])); }
+                                    if let Some(vid) = target { for f in fields { out.push((vid, f)); } }
+                                }
+                                // any(strcmp(fieldnames(s), 'f')) and variants; also strcmpi
+                                if (lname.eq_ignore_ascii_case("any") || lname.eq_ignore_ascii_case("all")) && args.len() >= 1 {
+                                    collect_assertions(&args[0], out);
+                                }
+                                if (lname.eq_ignore_ascii_case("strcmp") || lname.eq_ignore_ascii_case("strcmpi")) && args.len() >= 2 {
+                                    let mut target: Option<VarId> = None;
+                                    if let HirExprKind::FuncCall(ref n0, ref a0) = args[0].kind {
+                                        if n0.eq_ignore_ascii_case("fieldnames") && a0.len() == 1 { if let HirExprKind::Var(vid) = a0[0].kind { target = Some(vid); } }
+                                    }
+                                    if let HirExprKind::FuncCall(ref n1, ref a1) = args[1].kind {
+                                        if n1.eq_ignore_ascii_case("fieldnames") && a1.len() == 1 { if let HirExprKind::Var(vid) = a1[0].kind { target = Some(vid); } }
+                                    }
+                                    let mut fields = Vec::new();
+                                    fields.extend(extract_field_list(&args[0]));
+                                    fields.extend(extract_field_list(&args[1]));
+                                    if let Some(vid) = target { for f in fields { out.push((vid, f)); } }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    let mut assertions: Vec<(VarId, String)> = Vec::new();
+                    collect_assertions(cond, &mut assertions);
+                    let mut then_env = env.clone();
+                    if !assertions.is_empty() {
+                        for (vid, field) in assertions {
+                            let mut known = match then_env.get(&vid) {
+                                Some(Type::Struct { known_fields }) => known_fields.clone(),
+                                _ => Some(Vec::new()),
+                            };
+                            if let Some(list) = &mut known {
+                                if !list.iter().any(|f| f == &field) { list.push(field); list.sort(); list.dedup(); }
+                            }
+                            then_env.insert(vid, Type::Struct { known_fields: known });
+                        }
+                    }
+                    let then_a = analyze_stmts(outputs, then_body, then_env, func_returns);
                     let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
                     let mut all_exits = then_a.exits.clone();
-                    for (_c, b) in elseif_blocks { let a = analyze_stmts(outputs, b, env.clone(), func_returns); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    for (c, b) in elseif_blocks {
+                        let mut elseif_env = env.clone();
+                        let mut els_assertions: Vec<(VarId, String)> = Vec::new();
+                        collect_assertions(c, &mut els_assertions);
+                        if !els_assertions.is_empty() {
+                            for (vid, field) in els_assertions {
+                                let mut known = match elseif_env.get(&vid) {
+                                    Some(Type::Struct { known_fields }) => known_fields.clone(),
+                                    _ => Some(Vec::new()),
+                                };
+                                if let Some(list) = &mut known {
+                                    if !list.iter().any(|f| f == &field) { list.push(field); list.sort(); list.dedup(); }
+                                }
+                                elseif_env.insert(vid, Type::Struct { known_fields: known });
+                            }
+                        }
+                        let a = analyze_stmts(outputs, b, elseif_env, func_returns);
+                        if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); }
+                        all_exits.extend(a.exits);
+                    }
                     if let Some(else_b) = else_body { let a = analyze_stmts(outputs, else_b, env.clone(), func_returns); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
                     else { out_env = join_env(&out_env, &env); }
                     env = out_env; exits.extend(all_exits);
@@ -307,7 +428,23 @@ pub fn infer_function_output_types(prog: &HirProgram) -> std::collections::HashM
                 HirStmt::Global(_) | HirStmt::Persistent(_) => {}
                 HirStmt::Function { .. } => {}
                 HirStmt::ClassDef { .. } => {}
-                HirStmt::AssignLValue(_, expr, _) => { let _ = infer_expr_type(expr, &env, func_returns); }
+                HirStmt::AssignLValue(lv, expr, _) => {
+                    // Update struct field knowledge if we see s.field = expr
+                    if let HirLValue::Member(base, field) = lv {
+                        // If base is a variable, mark it as Struct with this field
+                        if let HirExprKind::Var(vid) = base.kind {
+                            let mut known = match env.get(&vid) {
+                                Some(Type::Struct { known_fields }) => known_fields.clone(),
+                                _ => Some(Vec::new()),
+                            };
+                            if let Some(list) = &mut known {
+                                if !list.iter().any(|f| f == field) { list.push(field.clone()); list.sort(); list.dedup(); }
+                            }
+                            env.insert(vid, Type::Struct { known_fields: known });
+                        }
+                    }
+                    let _ = infer_expr_type(expr, &env, func_returns);
+                }
                 HirStmt::Import { .. } => {}
             }
             i += 1;
@@ -470,11 +607,79 @@ pub fn infer_function_variable_types(
                 HirStmt::MultiAssign(vars, expr, _) => { let t = infer_expr_type(expr, &env, returns); for v in vars { if let Some(v) = v { env.insert(*v, t.clone()); } } }
                 HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}
                 HirStmt::Return => { exits.push(env.clone()); return Analysis { exits, fallthrough: None }; }
-                HirStmt::If { then_body, elseif_blocks, else_body, .. } => {
-                    let then_a = analyze_stmts(then_body, env.clone(), returns);
+                HirStmt::If { cond, then_body, elseif_blocks, else_body } => {
+                    // Apply the same struct field refinement in the variable-type analysis
+                    fn trim_quotes(s: &str) -> String { let t = s.trim(); t.trim_matches('\'').to_string() }
+                    fn extract_field_literal(e: &HirExpr) -> Option<String> {
+                        match &e.kind { HirExprKind::String(s) => Some(trim_quotes(s)), _ => None }
+                    }
+                    fn extract_field_list(e: &HirExpr) -> Vec<String> {
+                        match &e.kind {
+                            HirExprKind::String(s) => vec![trim_quotes(s)],
+                            HirExprKind::Cell(rows) => { let mut out=Vec::new(); for row in rows { for it in row { if let Some(v)=extract_field_literal(it){ out.push(v);} } } out },
+                            _ => Vec::new(),
+                        }
+                    }
+                    fn collect_assertions(e: &HirExpr, out: &mut Vec<(VarId, String)>) {
+                        use HirExprKind as K;
+                        match &e.kind {
+                            K::Unary(parser::UnOp::Not, _inner) => {}
+                            K::Binary(left, op, right) => {
+                                match op { parser::BinOp::AndAnd | parser::BinOp::BitAnd => { collect_assertions(left, out); collect_assertions(right, out); } _ => {} }
+                            }
+                            K::FuncCall(name, args) => {
+                                let lname = name.as_str();
+                                if lname.eq_ignore_ascii_case("isfield") && args.len() >= 2 {
+                                    if let HirExprKind::Var(vid) = args[0].kind { if let Some(f)=extract_field_literal(&args[1]) { out.push((vid, f)); } }
+                                }
+                                if lname.eq_ignore_ascii_case("ismember") && args.len() >= 2 {
+                                    let mut fields: Vec<String> = Vec::new();
+                                    let mut target: Option<VarId> = None;
+                                    if let HirExprKind::FuncCall(ref n0, ref a0) = args[0].kind { if n0.eq_ignore_ascii_case("fieldnames") && a0.len()==1 { if let HirExprKind::Var(vid)=a0[0].kind { target=Some(vid); } } }
+                                    if let HirExprKind::FuncCall(ref n1, ref a1) = args[1].kind { if n1.eq_ignore_ascii_case("fieldnames") && a1.len()==1 { if let HirExprKind::Var(vid)=a1[0].kind { target=Some(vid); } } }
+                                    if fields.is_empty() { fields.extend(extract_field_list(&args[0])); }
+                                    if fields.is_empty() { fields.extend(extract_field_list(&args[1])); }
+                                    if let Some(vid)=target { for f in fields { out.push((vid, f)); } }
+                                }
+                                if (lname.eq_ignore_ascii_case("strcmp") || lname.eq_ignore_ascii_case("strcmpi")) && args.len() >= 2 {
+                                    let mut target: Option<VarId> = None;
+                                    if let HirExprKind::FuncCall(ref n0, ref a0) = args[0].kind { if n0.eq_ignore_ascii_case("fieldnames") && a0.len()==1 { if let HirExprKind::Var(vid)=a0[0].kind { target=Some(vid); } } }
+                                    if let HirExprKind::FuncCall(ref n1, ref a1) = args[1].kind { if n1.eq_ignore_ascii_case("fieldnames") && a1.len()==1 { if let HirExprKind::Var(vid)=a1[0].kind { target=Some(vid); } } }
+                                    let mut fields=Vec::new(); fields.extend(extract_field_list(&args[0])); fields.extend(extract_field_list(&args[1]));
+                                    if let Some(vid)=target { for f in fields { out.push((vid, f)); } }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    let mut assertions: Vec<(VarId, String)> = Vec::new();
+                    collect_assertions(cond, &mut assertions);
+                    let mut then_env = env.clone();
+                    if !assertions.is_empty() {
+                        for (vid, field) in assertions {
+                            let mut known = match then_env.get(&vid) { Some(Type::Struct { known_fields }) => known_fields.clone(), _ => Some(Vec::new()) };
+                            if let Some(list) = &mut known { if !list.iter().any(|f| f == &field) { list.push(field); list.sort(); list.dedup(); } }
+                            then_env.insert(vid, Type::Struct { known_fields: known });
+                        }
+                    }
+                    let then_a = analyze_stmts(then_body, then_env, returns);
                     let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
                     let mut all_exits = then_a.exits.clone();
-                    for (_c, b) in elseif_blocks { let a = analyze_stmts(b, env.clone(), returns); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
+                    for (c, b) in elseif_blocks {
+                        let mut elseif_env = env.clone();
+                        let mut els_assertions: Vec<(VarId, String)> = Vec::new();
+                        collect_assertions(c, &mut els_assertions);
+                        if !els_assertions.is_empty() {
+                            for (vid, field) in els_assertions {
+                                let mut known = match elseif_env.get(&vid) { Some(Type::Struct { known_fields }) => known_fields.clone(), _ => Some(Vec::new()) };
+                                if let Some(list) = &mut known { if !list.iter().any(|f| f == &field) { list.push(field); list.sort(); list.dedup(); } }
+                                elseif_env.insert(vid, Type::Struct { known_fields: known });
+                            }
+                        }
+                        let a = analyze_stmts(b, elseif_env, returns);
+                        if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); }
+                        all_exits.extend(a.exits);
+                    }
                     if let Some(else_body) = else_body { let a = analyze_stmts(else_body, env.clone(), returns); if let Some(f) = a.fallthrough { out_env = join_env(&out_env, &f); } all_exits.extend(a.exits); }
                     else { out_env = join_env(&out_env, &env); }
                     env = out_env; exits.extend(all_exits);
@@ -717,8 +922,36 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                             }
                         }
                     }
-                    HirClassMember::Events { .. } | HirClassMember::Enumeration { .. } | HirClassMember::Arguments { .. } => {
-                        // Accepted but not deeply validated yet
+                    HirClassMember::Events { attributes, names } => {
+                        // Events: currently no attributes enforced; names must be unique within class
+                        for ev in names {
+                            if method_names.contains(ev) || prop_names.contains(ev) {
+                                return Err(format!("Name '{}' used for event conflicts with existing member in class {}", ev, name));
+                            }
+                        }
+                        let mut seen = std::collections::HashSet::new();
+                        for ev in names { if !seen.insert(ev) { return Err(format!("Duplicate event '{}' in class {}", ev, name)); } }
+                        let _ = attributes; // placeholder for future attribute validation
+                    }
+                    HirClassMember::Enumeration { attributes, names } => {
+                        // Enumeration: unique names; no conflicts with props/methods
+                        for en in names {
+                            if method_names.contains(en) || prop_names.contains(en) {
+                                return Err(format!("Name '{}' used for enumeration conflicts with existing member in class {}", en, name));
+                            }
+                        }
+                        let mut seen = std::collections::HashSet::new();
+                        for en in names { if !seen.insert(en) { return Err(format!("Duplicate enumeration '{}' in class {}", en, name)); } }
+                        let _ = attributes;
+                    }
+                    HirClassMember::Arguments { attributes, names } => {
+                        // Arguments: ensure no conflicts with props/methods
+                        for ar in names {
+                            if method_names.contains(ar) || prop_names.contains(ar) {
+                                return Err(format!("Name '{}' used for arguments conflicts with existing member in class {}", ar, name));
+                            }
+                        }
+                        let _ = attributes;
                     }
                 }
             }

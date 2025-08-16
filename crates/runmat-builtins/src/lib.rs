@@ -383,6 +383,11 @@ pub enum Type {
     Unknown,
     /// Union type (multiple possible types)
     Union(Vec<Type>),
+    /// Struct-like type with optional known field set (purely for inference)
+    Struct {
+        /// Optional set of known field names observed via control-flow (None = unknown fields)
+        known_fields: Option<Vec<String>>, // kept sorted unique for deterministic Eq
+    },
 }
 
 impl Type {
@@ -426,6 +431,17 @@ impl Type {
             (Type::Unknown, t) | (t, Type::Unknown) => t.clone(),
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => Type::Num,
             (Type::Tensor { .. }, Type::Tensor { .. }) => Type::tensor(), // Lose shape info for now
+            (Type::Struct { known_fields: a }, Type::Struct { known_fields: b }) => {
+                match (a, b) {
+                    (None, None) => Type::Struct { known_fields: None },
+                    (Some(ka), None) | (None, Some(ka)) => Type::Struct { known_fields: Some(ka.clone()) },
+                    (Some(ka), Some(kb)) => {
+                        let mut set: std::collections::BTreeSet<String> = ka.iter().cloned().collect();
+                        set.extend(kb.iter().cloned());
+                        Type::Struct { known_fields: Some(set.into_iter().collect()) }
+                    }
+                }
+            }
             (a, b) if a == b => a.clone(),
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
@@ -459,7 +475,7 @@ impl Type {
             }
             Value::GpuTensor(h) => { Type::Tensor { shape: Some(h.shape.iter().map(|&d| Some(d)).collect()) } }
             Value::Object(_) => Type::Unknown,
-            Value::Struct(_) => Type::Unknown,
+            Value::Struct(_) => Type::Struct { known_fields: None },
             Value::FunctionHandle(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
             Value::Closure(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
             Value::ClassRef(_) => Type::Unknown,

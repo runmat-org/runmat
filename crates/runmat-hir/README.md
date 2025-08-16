@@ -2,84 +2,169 @@
 
 High-level Intermediate Representation for MATLAB code. HIR is the semantic hub
 between parsing and execution (interpreter/JIT). It resolves identifiers to
-`VarId`s, annotates types, and normalizes constructs for efficient downstream
-execution.
+`VarId`s, attaches static types, normalizes constructs, and runs early
+semantic validations so downstream components can be simpler and faster.
 
 ## Goals
 
 - Provide a typed, SSA-friendly structure for the engine
-- Preserve MATLAB semantics (indexing, cells, methods, class members)
-- Enable type inference and optimizations (constant folding, dispatch)
+- Preserve MATLAB semantics (indexing, cells, classes, methods, metaclass)
+- Enable flow-sensitive inference and optimizations (constant folding, dispatch)
+- Catch structural and attribute errors early (classdef attributes, imports)
 
-## Core types
+## Core data structures
 
 - `VarId(usize)`: stable variable identifiers after name binding
-- `Type`: imported from `runmat-builtins` (Num, Bool, String, Matrix, Unknown, Void, etc.)
-- `HirExpr { kind, ty }` with variants:
-  - Numbers, strings, variables, constants
-  - Unary and binary ops (incl. element-wise, logical, transpose)
-  - Matrix and cell literals; indexing `Index`, `IndexCell`
-  - Ranges (`start[:step]:end`), colon (`:`) and `End` sentinel
-  - Member/method access; function calls; anonymous functions; function handles
-- `HirStmt` with variants:
-  - Expression statements (with suppression flag)
-  - Assignment and multi-assignment
-  - (Lowered placeholder) Complex lvalue assignments (member/paren/brace) are currently represented as effectful `ExprStmt` for side effects; interpreter implements write semantics
-  - Control flow: if/elseif/else, while, for, switch/otherwise, try/catch
-  - Declarations: function, global, persistent
-  - Break/continue/return
-  - Class definitions: name, optional superclass, members
-- `HirClassMember`: properties, methods (lowered body), events, enumeration, arguments
+- `Type` (from `runmat-builtins`):
+  - `Int`, `Num`, `Bool`, `String`
+  - `Tensor { shape: Option<Vec<Option<usize>>> }` (column-major semantics)
+  - `Cell { element_type: Option<Box<Type>>, length: Option<usize> }`
+  - `Function { params: Vec<Type>, returns: Box<Type> }`
+  - `Struct { known_fields: Option<Vec<String>> }` (inference-only)
+  - `Void`, `Unknown`, `Union(Vec<Type>)`
+- `HirExpr { kind, ty }` (selected variants):
+  - Literals and names: `Number`, `String`, `Var(VarId)`, `Constant`
+  - Ops: `Unary`, `Binary`
+  - Aggregates: `Tensor`, `Cell`, `Range`, `Colon`, `End`
+  - Indexing: `Index`, `IndexCell`
+  - Calls and members: `FuncCall`, `FuncHandle`, `AnonFunc`, `Member`, `MemberDynamic`, `MethodCall`
+  - Metaclass: `MetaClass("pkg.Class")`
+- `HirStmt` (selected variants):
+  - `ExprStmt(expr, suppressed)` (semicolon suppression)
+  - `Assign(VarId, expr, suppressed)`
+  - `MultiAssign(Vec<Option<VarId>>, expr, suppressed)` with `~` as `None`
+  - `AssignLValue(HirLValue, expr, suppressed)` where `HirLValue` ∈ { `Var`, `Member`, `MemberDynamic`, `Index`, `IndexCell` }
+  - Control flow: `If`, `While`, `For`, `Switch`, `TryCatch`
+  - Declarations: `Function { name, params, outputs, body, has_varargin, has_varargout }`, `Global`, `Persistent`
+  - Flow control: `Break`, `Continue`, `Return`
+  - Class: `ClassDef { name, super_class, members }`
+  - Imports: `Import { path: Vec<String>, wildcard: bool }`
+- `HirClassMember`: `Properties`, `Methods`, `Events`, `Enumeration`, `Arguments` (carry `parser::Attr` attributes)
 - `HirProgram { body }`
 
 ## Lowering (AST → HIR)
 
-- Name resolution: `Ctx` maintains nested scopes and maps identifiers to `VarId`
-- Type tracking: `var_types[VarId]` updated on assignments; expressions carry `ty`
-- Indexing vs calls: parser disambiguates; HIR keeps both forms (`Index`, `FuncCall`)
-- Cells, methods, members lowered to dedicated variants
-- Globals/persistents mapped to VarIds for consistent runtime handling
-- Import statements are lowered as no-ops (carried as `ExprStmt` placeholder) since they affect name resolution rather than runtime
-- Metaclass `?Qualified.Name` lowers to a string literal for now (future: dedicated HIR node if needed)
+- `Ctx` manages scopes, binds names to `VarId`, and maintains `var_types` for flow typing.
+- Variables shadow constants; bare identifiers that are known functions lower to `FuncCall(name, [])`.
+- Indexing vs calls is already disambiguated by the parser; HIR keeps `Index`/`IndexCell` and `FuncCall` distinct.
+- L-values lower to `HirLValue` for dot/paren/brace writes. Plain `A(…) = v` is `AssignLValue`.
+- `Function` statements record `has_varargin`/`has_varargout` flags.
+- `ClassDef` lowers structurally into `HirClassMember` blocks with attributes preserved.
+- `Import` lowers to a dedicated `HirStmt::Import` (no runtime effect; used by name resolution/validation).
+- Metaclass `?Qualified.Name` lowers to `HirExprKind::MetaClass("Qualified.Name")`; postfix is handled in the compiler.
 
-## Type inference
+## Early validations and helpers
 
-- Expressions infer types via operator rules and builtin signatures
-- Function return types:
-  - Builtins: taken from registry signature
-  - User-defined: flow-sensitive dataflow across a CFG-like analysis
-    - Track VarId → Type through statements
-    - At control-flow joins (if/switch/loops), join types (Unknown ⊔ T = T; T ⊔ U ≠ T = Unknown)
-    - Collect environments at return sites and fallthrough; compute per-output types
-    - Unassigned outputs remain Unknown (or Empty if modeled)
+- `validate_classdefs(&HirProgram)` runs during `lower()`:
+  - Detects duplicate properties/methods and name conflicts between them
+  - Enforces attribute constraints (e.g., Methods: `Abstract` ∧ `Sealed` invalid; Properties: `Static` ∧ `Dependent` invalid; `Access`/`GetAccess`/`SetAccess` values limited to `public|private`)
+  - Performs basic sanity checks for `Events`, `Enumeration`, and `Arguments` (unique names; no conflicts with props/methods)
+- Imports:
+  - `collect_imports(&HirProgram)`
+  - `normalize_imports(&HirProgram) -> Vec<NormalizedImport { path, wildcard, unqualified }>`
+  - `validate_imports(&HirProgram)` checks duplicates and ambiguity among specifics with the same unqualified name
+
+## Type inference (expressions)
+
+- Numbers/strings/booleans map to `Num`/`String`/`Bool`.
+- Arithmetic/elementwise ops: if any operand is `Tensor`, result is `Tensor` (shape may unify when known).
+- Range/colon produce `Tensor`.
+- Indexing computes output type conservatively. For tensors with known rank, scalar indices drop dimensions.
+- Cells compute a unified element type across literals when possible.
+- Member/Method calls are `Unknown` by default (value-dependent at runtime).
+- Metaclass expression has `String` type.
+
+## Flow-sensitive inference
+
+Two complementary passes exist:
+
+1) Inter‑procedural return summaries
+
+- `infer_function_output_types(&HirProgram) -> HashMap<String, Vec<Type>>`
+  - Gathers all function names (top-level and class methods)
+  - Iteratively analyzes bodies with a dataflow pass until a small fixed point (cap at 3 iters)
+  - Merges types at joins; Unknown ⊔ T = T; otherwise unify
+  - Uses an internal `analyze_stmts(outputs, …, func_returns)` whose env joins propagate return types
+
+2) Per‑function variable environments
+
+- `infer_function_variable_types(&HirProgram) -> HashMap<String, HashMap<VarId, Type>>`
+  - Similar dataflow pass that produces a final environment for each function
+  - Uses return summaries from (1) to type `FuncCall`
+  - Incorporates struct‑field flow inference (see below)
+
+### Struct‑field flow inference
+
+- HIR uses `Type::Struct { known_fields: Option<Vec<String>> }` to conservatively track observed fields on variables.
+- The analysis refines struct knowledge in two ways:
+  - Writes: `s.field = expr` marks `s` as Struct and adds `"field"` to `known_fields`.
+  - Conditions (then‑branch refinement): detect any of the following and add asserted fields:
+    - `isfield(s, 'x')`
+    - `ismember('x', fieldnames(s))` or `ismember(fieldnames(s), 'x')`
+    - `strcmp(fieldnames(s), 'x')` / `strcmpi(…)`, including `any(strcmp(…))` or `all(strcmp(…))`
+    - Conjunctions using `&&` or `&` are traversed; negations are ignored (no refinement)
+- Refinements are applied to the then‑branch env only and merged back at joins using `Type::unify` for Structs.
+
+## Function call typing
+
+- Builtins: signatures come from the registry (`runmat-builtins`).
+- User functions: `Ctx` holds parsed functions; `infer_user_function_return_type` performs a flow analysis over outputs and returns the first output type for simple `FuncCall` contexts.
 
 ## Remapping utilities
 
-- `remapping::create_function_var_map` and `create_complete_function_var_map`
-- `remap_function_body`, `remap_stmt`, `remap_expr`: rewrite VarIds for function-local contexts
-- Variable collectors for building complete maps and analyses
+- `remapping::create_function_var_map`, `create_complete_function_var_map`
+- `remapping::remap_function_body` / `remap_stmt` / `remap_expr` to rewrite `VarId`s for local execution frames
+- `remapping::collect_function_variables` scans bodies to compute complete maps
+
+## Public entry points
+
+- `lower(&AstProgram) -> Result<HirProgram, String>`: lowers AST, runs return‑summary inference (for seeding), then validates classes
+- `lower_with_context` / `lower_with_full_context`: lowering for REPL with preexisting variables/functions
+- Validation helpers: `validate_classdefs`, `collect_imports`, `normalize_imports`, `validate_imports`
+- Inference helpers: `infer_function_output_types`, `infer_function_variable_types`
 
 ## Testing
 
-- Ensure parity with parser tests for constructs
-- Add tests to validate inference joins across if/else, switch, loops, early returns, and multi-assign
-- Validate cell/indexing/method lowering and class member lowering
+- Mirrors parser coverage for syntax constructs; adds HIR‑specific tests:
+  - L‑value lowering (member/paren/brace), multi‑assign and `~` placeholder
+  - Control‑flow joins across if/elseif/else, switch/otherwise, while/for loops, try/catch
+  - Class attribute validation (invalid combos, duplicates, conflicts)
+  - Import normalization/ambiguity checks
+  - Fuzz seeds for lowering edge cases
 
-## Notes
+## Notes and differences from MATLAB
 
-- HIR remains conservative where semantics depend on runtime values; Unknown types are permitted and handled by the runtime
-- Class members are lowered structurally; semantic checks (access, attributes) are future work
+- MATLAB is dynamically typed; HIR attaches conservative static types for optimization only. Programs acceptable to MATLAB remain acceptable; Unknown is used when insufficient info.
+- Column‑major Tensor semantics are preserved throughout indexing/slicing/shape operations.
+- Class blocks are carried structurally; access/attribute validations run during lowering; advanced OOP attributes may have future passes.
+- Metaclass expressions are represented explicitly; postfix static member/method usage is compiled appropriately downstream.
 
-## How HIR differs from MATLAB (and why)
+## Roadmap / future enhancements
 
-- MATLAB is dynamically typed; HIR attaches static types to expressions and variables to enable optimization. This is an internal representation only:
-  - Type inference is conservative and never rejects programs that MATLAB would accept. Unknown is used when information is insufficient.
-  - No user‑visible “compile‑time” type errors are introduced by HIR; runtime semantics remain MATLAB‑compatible.
-- Control‑flow–sensitive return‑type inference for user functions (CFG‑like join of types at merges) goes beyond MATLAB’s dynamic behavior and exists to guide optimizations and codegen.
-- Normalization choices:
-  - `end` index sentinel is a first‑class `Expr` in HIR.
-  - Member/method access, cells, and function handles/anonymous functions are represented explicitly to simplify codegen.
-  - Class blocks are carried structurally in HIR; access control/attributes are deferred to later phases.
-  - Command syntax is normalized at the parser layer into `FuncCall`; HIR treats both uniformly.
-- Disambiguations (e.g., call vs indexing, `.'` vs member access) are made explicitly in HIR to avoid ambiguity in later stages, but semantics are preserved.
+- Inter‑procedural propagation of struct field knowledge across calls
+- Deeper OOP attribute validations (Hidden/Constant/Transient interplay; static/instance access rules)
+- Richer import resolution summaries for static method/property lookup in the HIR stage
+- Shape reasoning improvements for Tensor broadcasting and indexing
 
+## Minimal example
+
+MATLAB:
+
+```
+function y = f(s)
+  if isfield(s, 'x') && any(strcmp(fieldnames(s), 'y'))
+    s.y = 1;
+  end
+  y = g(s.x);
+end
+```
+
+HIR sketch:
+
+```
+Function { name: "f", params: [s], outputs: [y], ... }
+  If { cond: FuncCall("isfield", [Var(s), String('x')]) && any(strcmp(fieldnames(s),'y')), then: [ AssignLValue(Member(Var(s),'y'), Number(1)) ] }
+  Assign(Var(y), FuncCall("g", [Member(Var(s), "x")]))
+```
+
+Return summaries infer type of `g`’s first output if available; variable analysis refines `s` as a Struct with fields `{x,y}` along the then‑branch.
