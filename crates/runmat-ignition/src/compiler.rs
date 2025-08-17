@@ -193,7 +193,7 @@ impl Compiler {
                         visit_stmts(catch_body, max);
                     }
                     HirStmt::Global(vars) | HirStmt::Persistent(vars) => {
-                        for v in vars { if v.0 + 1 > *max { *max = v.0 + 1; } }
+                        for (v, _name) in vars { if v.0 + 1 > *max { *max = v.0 + 1; } }
                     }
                     HirStmt::AssignLValue(_, expr, _) => visit_expr(expr, max),
                     HirStmt::MultiAssign(vars, expr, _) => {
@@ -229,8 +229,16 @@ impl Compiler {
                 self.imports.push((path.clone(), *wildcard));
                 self.emit(Instr::RegisterImport { path: path.clone(), wildcard: *wildcard });
             }
-            if let HirStmt::Global(vars) = stmt { let ids: Vec<usize> = vars.iter().map(|v| v.0).collect(); self.emit(Instr::DeclareGlobal(ids)); }
-            if let HirStmt::Persistent(vars) = stmt { let ids: Vec<usize> = vars.iter().map(|v| v.0).collect(); self.emit(Instr::DeclarePersistent(ids)); }
+            if let HirStmt::Global(vars) = stmt {
+                let ids: Vec<usize> = vars.iter().map(|(v, _n)| v.0).collect();
+                let names: Vec<String> = vars.iter().map(|(_v, n)| n.clone()).collect();
+                self.emit(Instr::DeclareGlobalNamed(ids, names));
+            }
+            if let HirStmt::Persistent(vars) = stmt {
+                let ids: Vec<usize> = vars.iter().map(|(v, _n)| v.0).collect();
+                let names: Vec<String> = vars.iter().map(|(_v, n)| n.clone()).collect();
+                self.emit(Instr::DeclarePersistentNamed(ids, names));
+            }
         }
         for stmt in &prog.body { if !matches!(stmt, HirStmt::Import { .. } | HirStmt::Global(_) | HirStmt::Persistent(_)) { self.compile_stmt(stmt)?; } }
         Ok(())
@@ -382,7 +390,7 @@ impl Compiler {
                         HirStmt::Break | HirStmt::Continue | HirStmt::Return => {}
                         HirStmt::Switch { expr, cases, otherwise } => { visit_expr_for_vars(expr, max); for (c, b) in cases { visit_expr_for_vars(c, max); for s in b { visit_stmt_for_vars(s, max); } } if let Some(b) = otherwise { for s in b { visit_stmt_for_vars(s, max); } } }
                         HirStmt::TryCatch { try_body, catch_var, catch_body } => { if let Some(v) = catch_var { if v.0 + 1 > *max { *max = v.0 + 1; } } for s in try_body { visit_stmt_for_vars(s, max); } for s in catch_body { visit_stmt_for_vars(s, max); } }
-                        HirStmt::Global(vars) | HirStmt::Persistent(vars) => { for v in vars { if v.0 + 1 > *max { *max = v.0 + 1; } } }
+                        HirStmt::Global(vars) | HirStmt::Persistent(vars) => { for (v, _name) in vars { if v.0 + 1 > *max { *max = v.0 + 1; } } }
                         HirStmt::AssignLValue(_, expr, _) => visit_expr_for_vars(expr, max),
                         HirStmt::MultiAssign(vars, expr, _) => { for v in vars { if let Some(v) = v { if v.0 + 1 > *max { *max = v.0 + 1; } } } visit_expr_for_vars(expr, max); }
                         HirStmt::Function { .. } | HirStmt::ClassDef { .. } | HirStmt::Import { .. } => {}
@@ -686,12 +694,14 @@ impl Compiler {
                 }
             }
             HirStmt::Global(vars) => {
-                let ids: Vec<usize> = vars.iter().map(|v| v.0).collect();
-                self.emit(Instr::DeclareGlobal(ids));
+                let ids: Vec<usize> = vars.iter().map(|(v, _n)| v.0).collect();
+                let names: Vec<String> = vars.iter().map(|(_v, n)| n.clone()).collect();
+                self.emit(Instr::DeclareGlobalNamed(ids, names));
             }
             HirStmt::Persistent(vars) => {
-                let ids: Vec<usize> = vars.iter().map(|v| v.0).collect();
-                self.emit(Instr::DeclarePersistent(ids));
+                let ids: Vec<usize> = vars.iter().map(|(v, _n)| v.0).collect();
+                let names: Vec<String> = vars.iter().map(|(_v, n)| n.clone()).collect();
+                self.emit(Instr::DeclarePersistentNamed(ids, names));
             }
             HirStmt::Import { path, wildcard } => {
                 self.emit(Instr::RegisterImport { path: path.clone(), wildcard: *wildcard });

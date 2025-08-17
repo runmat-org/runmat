@@ -112,6 +112,8 @@ MATLAB allows “command‑form” calls at statement start (`name arg1 arg2`). 
 - Extend fuzz coverage for rare command‑form adjacencies (deeply nested quotes, mixes with `end` and punctuation).
 - Optional: support indexing postfix after metaclass if MATLAB semantics require it (e.g., class arrays of metaobjects) — currently unsupported by design.
 - Keep import/namespace ambiguity matrices growing (user/builtin/Class.* statics) to prevent regressions.
+- Function‑level `arguments ... end`: names are accepted today; adding type/default/range validation hooks is planned in HIR/runtime.
+- Classdef `enumeration`: explicit value forms are parsed structurally; richer validations (conflicts/range) can be added.
 
 ## Where semantics are enforced (beyond parsing)
 

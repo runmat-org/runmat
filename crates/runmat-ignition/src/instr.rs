@@ -133,6 +133,9 @@ pub enum Instr {
     // Global and Persistent declarations
     DeclareGlobal(Vec<usize>),
     DeclarePersistent(Vec<usize>),
+    // New named variants to bind by source names across units
+    DeclareGlobalNamed(Vec<usize>, Vec<String>),
+    DeclarePersistentNamed(Vec<usize>, Vec<String>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

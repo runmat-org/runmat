@@ -19,6 +19,10 @@ thread_local! {
 }
 
 thread_local! {
+    static PERSISTENTS_BY_NAME: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
+}
+
+thread_local! {
     // (nargin, nargout) for current call
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = RefCell::new(Vec::new());
 }
@@ -41,6 +45,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
     let mut context = ExecutionContext { call_stack: Vec::new(), locals: Vec::new(), instruction_pointer: 0, functions: bytecode.functions.clone() };
     let _gc_context = InterpretContext::new(&stack, &vars)?;
     let current_func_name_str: String = current_function_name.map(|s| s.to_string()).unwrap_or_else(|| "<main>".to_string());
+    // Track per-execution alias maps for globals/persistents
+    let mut global_aliases: HashMap<usize, String> = HashMap::new();
+    let mut persistent_aliases: HashMap<usize, String> = HashMap::new();
     // Stack of (catch_pc, catch_var_global_index)
     let mut try_stack: Vec<(usize, Option<usize>)> = Vec::new();
     // Track last caught exception for possible rethrow handling
@@ -102,6 +109,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     let mut m = g.borrow_mut();
                     if m.contains_key(&key) { m.insert(key, vars[i].clone()); }
                 });
+                if let Some(name) = global_aliases.get(&i) {
+                    GLOBALS.with(|g| { g.borrow_mut().insert(name.clone(), vars[i].clone()); });
+                }
             }
             Instr::LoadLocal(offset) => {
                 if let Some(current_frame) = context.call_stack.last() {
@@ -141,6 +151,15 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     if let Some(v) = val_opt { if i >= vars.len() { vars.resize(i + 1, Value::Num(0.0)); } vars[i] = v; }
                 }
             }
+            Instr::DeclareGlobalNamed(indices, names) => {
+                for (pos, i) in indices.into_iter().enumerate() {
+                    let name = names.get(pos).cloned().unwrap_or_else(|| format!("var_{}", i));
+                    let val_opt = GLOBALS.with(|g| g.borrow().get(&name).cloned());
+                    if let Some(v) = val_opt { if i >= vars.len() { vars.resize(i + 1, Value::Num(0.0)); } vars[i] = v; }
+                    GLOBALS.with(|g| { let mut m = g.borrow_mut(); if let Some(v) = m.get(&name).cloned() { m.insert(format!("var_{}", i), v); } });
+                    global_aliases.insert(i, name);
+                }
+            }
             Instr::DeclarePersistent(indices) => {
                 // Initialize locals from persistent table if present
                 let func_name = current_func_name_str.clone();
@@ -148,6 +167,17 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     let key = (func_name.clone(), i);
                     let val_opt = PERSISTENTS.with(|p| p.borrow().get(&key).cloned());
                     if let Some(v) = val_opt { if i >= vars.len() { vars.resize(i + 1, Value::Num(0.0)); } vars[i] = v; }
+                }
+            }
+            Instr::DeclarePersistentNamed(indices, names) => {
+                let func_name = current_func_name_str.clone();
+                for (pos, i) in indices.into_iter().enumerate() {
+                    let name = names.get(pos).cloned().unwrap_or_else(|| format!("var_{}", i));
+                    let key = (func_name.clone(), i);
+                    let val_opt = PERSISTENTS_BY_NAME.with(|p| p.borrow().get(&(func_name.clone(), name.clone())).cloned())
+                        .or_else(|| PERSISTENTS.with(|p| p.borrow().get(&key).cloned()));
+                    if let Some(v) = val_opt { if i >= vars.len() { vars.resize(i + 1, Value::Num(0.0)); } vars[i] = v; }
+                    persistent_aliases.insert(i, name);
                 }
             }
             Instr::Add => {
@@ -3062,42 +3092,43 @@ pub fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, String> {
     interpret_with_vars(bytecode, &mut vars, Some("<main>"))
 }
 
-pub fn interpret_function(bytecode: &Bytecode, mut vars: Vec<Value>) -> Result<Vec<Value>, String> {
-    let result = interpret_with_vars(bytecode, &mut vars, Some("<anonymous>"));
-    // Best-effort: persist any variables that were declared persistent via instructions in this bytecode
-    // We scan instructions for DeclarePersistent and write current values to the persistent table
-    let func_name = "<anonymous>".to_string();
-    for instr in &bytecode.instructions {
-        if let crate::instr::Instr::DeclarePersistent(indices) = instr {
-            for &i in indices {
-                if i < vars.len() {
-                    let key = (func_name.clone(), i);
-                    PERSISTENTS.with(|p| { p.borrow_mut().insert(key, vars[i].clone()); });
-                }
-            }
-        }
-    }
-    result
+pub fn interpret_function(bytecode: &Bytecode, vars: Vec<Value>) -> Result<Vec<Value>, String> {
+    // Delegate to the counted variant with anonymous name and zero counts
+    interpret_function_with_counts(bytecode, vars, "<anonymous>", 0, 0)
 }
 
-fn interpret_function_with_counts(bytecode: &Bytecode, mut vars: Vec<Value>, _name: &str, out_count: usize, in_count: usize) -> Result<Vec<Value>, String> {
+fn interpret_function_with_counts(bytecode: &Bytecode, mut vars: Vec<Value>, name: &str, out_count: usize, in_count: usize) -> Result<Vec<Value>, String> {
     // Push (nargin, nargout), run, then pop
     let res = CALL_COUNTS.with(|cc| {
         cc.borrow_mut().push((in_count, out_count));
-        let r = interpret_with_vars(bytecode, &mut vars, Some("<anonymous>"));
+        let r = interpret_with_vars(bytecode, &mut vars, Some(name));
         cc.borrow_mut().pop();
         r
     });
-    // Persistents handling mirrors interpret_function
-    let func_name = "<anonymous>".to_string();
+    // Persist any variables declared persistent in this bytecode under the given function name
+    let func_name = name.to_string();
     for instr in &bytecode.instructions {
-        if let crate::instr::Instr::DeclarePersistent(indices) = instr {
-            for &i in indices {
-                if i < vars.len() {
-                    let key = (func_name.clone(), i);
-                    PERSISTENTS.with(|p| { p.borrow_mut().insert(key, vars[i].clone()); });
+        match instr {
+            crate::instr::Instr::DeclarePersistent(indices) => {
+                for &i in indices {
+                    if i < vars.len() {
+                        let key = (func_name.clone(), i);
+                        PERSISTENTS.with(|p| { p.borrow_mut().insert(key, vars[i].clone()); });
+                    }
                 }
             }
+            crate::instr::Instr::DeclarePersistentNamed(indices, names) => {
+                for (pos, &i) in indices.iter().enumerate() {
+                    if i < vars.len() {
+                        let key = (func_name.clone(), i);
+                        let name_key = (func_name.clone(), names.get(pos).cloned().unwrap_or_else(|| format!("var_{}", i)));
+                        let val = vars[i].clone();
+                        PERSISTENTS.with(|p| { p.borrow_mut().insert(key, val.clone()); });
+                        PERSISTENTS_BY_NAME.with(|p| { p.borrow_mut().insert(name_key, val); });
+                    }
+                }
+            }
+            _ => {}
         }
     }
     res

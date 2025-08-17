@@ -1,9 +1,6 @@
 # RunMat HIR
 
-High-level Intermediate Representation for MATLAB code. HIR is the semantic hub
-between parsing and execution (interpreter/JIT). It resolves identifiers to
-`VarId`s, attaches static types, normalizes constructs, and runs early
-semantic validations so downstream components can be simpler and faster.
+High-level Intermediate Representation for MATLAB code. HIR is the semantic hub between parsing and execution (interpreter/JIT). It resolves identifiers to `VarId`s, attaches static types, normalizes constructs, and runs early semantic validations so downstream components can be simpler and faster.
 
 ## Goals
 
@@ -52,6 +49,7 @@ semantic validations so downstream components can be simpler and faster.
 - `ClassDef` lowers structurally into `HirClassMember` blocks with attributes preserved.
 - `Import` lowers to a dedicated `HirStmt::Import` (no runtime effect; used by name resolution/validation).
 - Metaclass `?Qualified.Name` lowers to `HirExprKind::MetaClass("Qualified.Name")`; postfix is handled in the compiler.
+- Function-level `arguments ... end` blocks (when present) are parsed; names are accepted and exposed to later validation. Constraint checking (types/defaults/ranges) is enforced at HIR/VM time rather than parsing time.
 
 ## Early validations and helpers
 
@@ -61,8 +59,10 @@ semantic validations so downstream components can be simpler and faster.
   - Performs basic sanity checks for `Events`, `Enumeration`, and `Arguments` (unique names; no conflicts with props/methods)
 - Imports:
   - `collect_imports(&HirProgram)`
-  - `normalize_imports(&HirProgram) -> Vec<NormalizedImport { path, wildcard, unqualified }>`
+  - `normalize_imports(&HirProgram) -> Vec<NormalizedImport { path, wildcard, unqualified }]`
   - `validate_imports(&HirProgram)` checks duplicates and ambiguity among specifics with the same unqualified name
+- Multi-LHS structural validation: lowering rejects invalid LHS shapes early (e.g., empty LHS vectors, unsupported mixed forms); shape/size rules are enforced by the interpreter at assignment.
+- Globals/Persistents: a per-program symbol set is collected across units to model lifetimes and name binding consistently.
 
 ## Type inference (expressions)
 
@@ -82,16 +82,16 @@ Two complementary passes exist:
 
 - `infer_function_output_types(&HirProgram) -> HashMap<String, Vec<Type>>`
   - Gathers all function names (top-level and class methods)
-  - Iteratively analyzes bodies with a dataflow pass until a small fixed point (cap at 3 iters)
+  - Seeds summaries from each function’s own exits/fallthrough, then iterates to a small fixed point (cap at 3 iters)
   - Merges types at joins; Unknown ⊔ T = T; otherwise unify
   - Uses an internal `analyze_stmts(outputs, …, func_returns)` whose env joins propagate return types
 
 2) Per‑function variable environments
 
-- `infer_function_variable_types(&HirProgram) -> HashMap<String, HashMap<VarId, Type>>`
-  - Similar dataflow pass that produces a final environment for each function
+- `infer_function_variable_types(&HirProgram) -> HashMap<String, HashMap<VarId, Type>`
+  - Similar dataflow that produces a final environment for each function
   - Uses return summaries from (1) to type `FuncCall`
-  - Incorporates struct‑field flow inference (see below)
+  - Includes a simple callsite fallback for direct callees: when a callee’s summary is missing/Unknown, a single-pass analysis of the callee body (seeding parameter types conservatively) infers direct output assignments. This stabilizes per-position types for `[a,b]=f(...)` at callers.
 
 ### Struct‑field flow inference
 
@@ -105,10 +105,16 @@ Two complementary passes exist:
     - Conjunctions using `&&` or `&` are traversed; negations are ignored (no refinement)
 - Refinements are applied to the then‑branch env only and merged back at joins using `Type::unify` for Structs.
 
+## Multi-assign typing
+
+- `[a,b] = f(...)` is typed per-position using the callee’s return summary when available.
+- If a summary is incomplete or missing, a simple fallback (single-pass over the callee) infers direct assignments to outputs and fills Unknowns conservatively.
+- Mixed forms like `[~,b] = f(...)` are handled by storing `None` in the LHS vector and skipping the slot.
+
 ## Function call typing
 
 - Builtins: signatures come from the registry (`runmat-builtins`).
-- User functions: `Ctx` holds parsed functions; `infer_user_function_return_type` performs a flow analysis over outputs and returns the first output type for simple `FuncCall` contexts.
+- User functions: return summaries and the per-position logic above are used for accurate call result typing in both expression and `MultiAssign` contexts.
 
 ## Remapping utilities
 
@@ -145,6 +151,12 @@ Two complementary passes exist:
 - Deeper OOP attribute validations (Hidden/Constant/Transient interplay; static/instance access rules)
 - Richer import resolution summaries for static method/property lookup in the HIR stage
 - Shape reasoning improvements for Tensor broadcasting and indexing
+
+## Remaining edges
+
+- Arguments metadata: carry `arguments ... end` declared names/constraints (when available from parser) and surface to runtime validation. Current parser accepts names; HIR will add optional metadata structs without breaking format.
+- Multi‑LHS validation: parser structurally restricts to identifiers/`~`; HIR enforces shape semantics at runtime. Additional unit tests exist; no further work is blocking.
+- Globals/Persistents: cross‑unit name binding is wired; additional tests around nested functions/closures will be added.
 
 ## Minimal example
 

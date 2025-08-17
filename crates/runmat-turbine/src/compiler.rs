@@ -75,6 +75,9 @@ impl ControlFlowGraph {
                 Instr::LoadString(_) => {
                     // String instructions don't affect control flow
                 }
+                Instr::DeclareGlobalNamed(_, _) | Instr::DeclarePersistentNamed(_, _) => {
+                    // No control flow impact
+                }
                 Instr::Jump(target) => {
                     block_starts.insert(*target);
                     // Instruction after jump starts new block (if reachable)
@@ -290,6 +293,9 @@ impl BytecodeCompiler {
                 match instr {
                     &Instr::PackToRow(_) | &Instr::PackToCol(_) => {
                         return Err(TurbineError::ExecutionError("PackToRow/PackToCol not supported in JIT; use interpreter".to_string()));
+                    }
+                    Instr::DeclareGlobalNamed(_, _) | Instr::DeclarePersistentNamed(_, _) => {
+                        // Ignore; VM manages globals/persistents
                     }
                     Instr::LoadConst(val) => {
                         let const_val = builder.ins().f64const(*val);

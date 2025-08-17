@@ -1054,6 +1054,21 @@ impl Parser {
             }
         }
 
+        // Optional function-level arguments block
+        // arguments ... end  (we accept a sequence of identifiers, validation semantics handled in HIR/runtime)
+        if self.peek_token() == Some(&Token::Arguments) {
+            self.pos += 1; // consume 'arguments'
+            // Accept a flat list of identifiers optionally separated by commas/semicolons
+            loop {
+                if self.consume(&Token::End) { break; }
+                if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) { continue; }
+                if matches!(self.peek_token(), Some(Token::Ident)) { let _ = self.expect_ident()?; continue; }
+                // Tolerate newlines/whitespace-only between entries
+                if self.peek_token().is_none() { break; }
+                break;
+            }
+        }
+
         let body = self.parse_block(|t| matches!(t, Token::End))?;
         if !self.consume(&Token::End) {
             return Err("expected 'end'".into());

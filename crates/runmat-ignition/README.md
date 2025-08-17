@@ -73,6 +73,12 @@ Sibling docs for deep dives:
 - Correctness‑first generic paths, plus 2‑D fast paths for `A(:, j)` and `A(i, :)` with strict shape checks and column‑major writes.
 - Unhandled opcodes in JIT (Turbine) explicitly fall back to the interpreter.
 
+## Remaining edges
+
+- Error model sweep: confirm all remaining failure paths surface normalized mex identifiers (indexing, arity, OOP dispatch). Most paths covered; add a couple more targeted tests.
+- OOP negative strictness: once the runtime registry guarantees absence of subsref/subsasgn, tighten tests to expect `MATLAB:MissingSubsref`/`MATLAB:MissingSubsasgn` only.
+- Expansion into slice targets: core implemented; add a few degenerate/empty seeds when encountered.
+
 ## Contributing
 - Add builtins in `runmat-runtime`; wire special handling in the VM only if semantics require.
 - Prefer centralizing MATLAB rules in `IndexSlice`/`StoreSlice` rather than scattering logic.
