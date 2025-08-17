@@ -9,6 +9,7 @@ license-file = "../LICENSE.md"
 inventory = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+runmat-gc-api = { path = "../runmat-gc-api" }
 
 [dev-dependencies]
 trybuild = "1"

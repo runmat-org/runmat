@@ -13,6 +13,8 @@ runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
 runmat-plot = { workspace = true }
 runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+runmat-gc = { path = "../runmat-gc" }
+runmat-gc-api = { path = "../runmat-gc-api" }
 glam = "0.24"
 tokio = { workspace = true }
 

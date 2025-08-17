@@ -135,14 +135,14 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                 if idx < 1 || idx > ca.data.len() {
                     return Err(format!("Cell index {} out of bounds (1 to {})", idx, ca.data.len()));
                 }
-                Ok(ca.data[idx - 1].clone())
+                Ok((*ca.data[idx - 1]).clone())
             } else if indices.len() == 2 {
                 let row = indices[0] as usize;
                 let col = indices[1] as usize;
                 if row < 1 || row > ca.rows || col < 1 || col > ca.cols {
                     return Err("Cell subscript out of bounds".to_string());
                 }
-                Ok(ca.data[(row - 1) * ca.cols + (col - 1)].clone())
+                Ok((*ca.data[(row - 1) * ca.cols + (col - 1)]).clone())
             } else {
                 Err(format!("Cell arrays support 1 or 2 indices, got {}", indices.len()))
             }

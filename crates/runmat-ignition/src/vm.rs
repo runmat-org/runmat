@@ -43,7 +43,14 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
     if vars.len() < bytecode.var_count { vars.resize(bytecode.var_count, Value::Num(0.0)); }
     let mut pc: usize = 0;
     let mut context = ExecutionContext { call_stack: Vec::new(), locals: Vec::new(), instruction_pointer: 0, functions: bytecode.functions.clone() };
-    let _gc_context = InterpretContext::new(&stack, &vars)?;
+    let mut _gc_context = InterpretContext::new(&stack, &vars)?;
+    // Register thread-local globals/persistents as GC roots for the duration of this execution
+    let mut thread_roots: Vec<Value> = Vec::new();
+    GLOBALS.with(|g| { for v in g.borrow().values() { thread_roots.push(v.clone()); } });
+    PERSISTENTS.with(|p| { for v in p.borrow().values() { thread_roots.push(v.clone()); } });
+    // Name-based table may duplicate persistents; harmless if included
+    PERSISTENTS_BY_NAME.with(|p| { for v in p.borrow().values() { thread_roots.push(v.clone()); } });
+    let _ = _gc_context.register_global_values(thread_roots, "thread_globals_persistents");
     let current_func_name_str: String = current_function_name.map(|s| s.to_string()).unwrap_or_else(|| "<main>".to_string());
     // Track per-execution alias maps for globals/persistents
     let mut global_aliases: HashMap<usize, String> = HashMap::new();
@@ -545,16 +552,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         match &indices[0] {
                             Value::Num(n) => {
                                 let i = *n as usize; if i==0 || i>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); }
-                                vec![ca.data[i-1].clone()]
+                                vec![(*ca.data[i-1]).clone()]
                             }
                             Value::Int(i) => {
                                 let iu = *i as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); }
-                                vec![ca.data[iu-1].clone()]
+                                vec![(*ca.data[iu-1]).clone()]
                             }
                             Value::Tensor(t) => {
                                 // Treat as list of 1-based indices; expand each
                                 let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
-                                for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); }
+                                for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push((*ca.data[iu-1]).clone()); }
                                 out
                             }
                             _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
@@ -564,7 +571,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                         let (ir, ic) = (r as usize, c as usize);
                         if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
-                        vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                        vec![(*ca.data[(ir-1)*ca.cols + (ic-1)]).clone()]
                     }
                     (other, _) => {
                         // Route to subsref(obj,'{}',{indices...}) if object
@@ -601,9 +608,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 let expanded = match (base, indices.len()) {
                     (Value::Cell(ca), 1) => {
                         match &indices[0] {
-                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push((*ca.data[iu-1]).clone()); } out }
                             _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                         }
                     }
@@ -611,15 +618,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                         let (ir, ic) = (r as usize, c as usize);
                         if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
-                        vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                        vec![(*ca.data[(ir-1)*ca.cols + (ic-1)]).clone()]
                     }
                     (Value::Object(obj), _) => {
-                        let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
+                        let idx_vals: Vec<Value> = indices.iter().map(|v| Value::Num((v).try_into().unwrap_or(0.0))).collect();
+                        let cell = runmat_runtime::call_builtin("__make_cell", &idx_vals)?;
                         let v = match runmat_runtime::call_builtin("call_method", &[
                             Value::Object(obj),
                             Value::String("subsref".to_string()),
                             Value::String("{}".to_string()),
-                            Value::Cell(cell),
+                            cell,
                         ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                         vec![v]
                     }
@@ -641,7 +649,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                         let expanded = if spec.expand_all {
                             match base {
-                                Value::Cell(ca) => ca.data.clone(),
+                                Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect(),
                                 Value::Object(obj) => {
                                     // subsref(obj,'{}', {}) with empty indices; expect a cell or value
                                     let empty = runmat_builtins::CellArray::new(vec![], 1, 0).map_err(|e| format!("subsref build error: {e}"))?;
@@ -651,16 +659,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                         Value::String("{}".to_string()),
                                         Value::Cell(empty),
                                     ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
-                                    match v { Value::Cell(ca) => ca.data, other => vec![other] }
+                                    match v { Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect(), other => vec![other] }
                                 }
                                 _ => return Err(mex("MATLAB:ExpandError","CallBuiltinExpandMulti requires cell or object for expand_all")),
                             }
                         } else { match (base, indices.len()) {
                             (Value::Cell(ca), 1) => {
                                 match &indices[0] {
-                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push((*ca.data[iu-1]).clone()); } out }
                                     _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                                 }
                             }
@@ -668,15 +676,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                                 let (ir, ic) = (r as usize, c as usize);
                                 if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
-                                vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                                vec![(*ca.data[(ir-1)*ca.cols + (ic-1)]).clone()]
                             }
                             (Value::Object(obj), _) => {
-                                let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
+                                let idx_vals: Vec<Value> = indices.iter().map(|v| Value::Num((v).try_into().unwrap_or(0.0))).collect();
+                                let cell = runmat_runtime::call_builtin("__make_cell", &idx_vals)?;
                                 let v = match runmat_runtime::call_builtin("call_method", &[
                                     Value::Object(obj),
                                     Value::String("subsref".to_string()),
                                     Value::String("{}".to_string()),
-                                    Value::Cell(cell),
+                                    cell,
                                 ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                                 vec![v]
                             }
@@ -723,7 +732,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                         let expanded = if spec.expand_all {
                             match base {
-                                Value::Cell(ca) => ca.data.clone(),
+                                Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect::<Vec<Value>>(),
                                 Value::Object(obj) => {
                                     let empty = runmat_builtins::CellArray::new(vec![], 1, 0).map_err(|e| format!("subsref build error: {e}"))?;
                                     let v = match runmat_runtime::call_builtin("call_method", &[
@@ -732,16 +741,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                         Value::String("{}".to_string()),
                                         Value::Cell(empty),
                                     ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
-                                    match v { Value::Cell(ca) => ca.data, other => vec![other] }
+                                    match v { Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect::<Vec<Value>>(), other => vec![other] }
                                 }
                                 _ => return Err("CallFunctionExpandMulti requires cell or object for expand_all".to_string()),
                             }
                         } else { match (base, indices.len()) {
                             (Value::Cell(ca), 1) => {
                                 match &indices[0] {
-                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                                    Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                                    Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                                    Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push((*ca.data[iu-1]).clone()); } out }
                                     _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                                 }
                             }
@@ -749,7 +758,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                                 let (ir, ic) = (r as usize, c as usize);
                                 if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
-                                vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                                vec![(*ca.data[(ir-1)*ca.cols + (ic-1)]).clone()]
                             }
                             (Value::Object(obj), _) => {
                                 let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
@@ -858,7 +867,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     // For true multi-assign we already have CallFunctionMulti path
                     let first = func.outputs.first().and_then(|oid| var_map.get(oid)).map(|lid| lid.0).unwrap_or(0);
                     if let Some(Value::Cell(ca)) = func_result_vars.get(first) {
-                        if !ca.data.is_empty() { stack.push(ca.data[0].clone()); } else { stack.push(Value::Num(0.0)); }
+                        if !ca.data.is_empty() { stack.push((*ca.data[0]).clone()); } else { stack.push(Value::Num(0.0)); }
                     } else if let Some(v) = func_result_vars.get(first) { stack.push(v.clone()); } else { stack.push(Value::Num(0.0)); }
                 } else if let Some(output_var_id) = func.outputs.first() {
                     let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
@@ -880,9 +889,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 let expanded = match (base, indices.len()) {
                     (Value::Cell(ca), 1) => {
                         match &indices[0] {
-                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                            Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                            Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                            Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push((*ca.data[iu-1]).clone()); } out }
                             _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                         }
                     }
@@ -890,15 +899,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                         let (ir, ic) = (r as usize, c as usize);
                         if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
-                        vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                        vec![(*ca.data[(ir-1)*ca.cols + (ic-1)]).clone()]
                     }
                     (Value::Object(obj), _) => {
-                        let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
+                        let idx_vals: Vec<Value> = indices.iter().map(|v| Value::Num((v).try_into().unwrap_or(0.0))).collect();
+                        let cell = runmat_runtime::call_builtin("__make_cell", &idx_vals)?;
                         let v = match runmat_runtime::call_builtin("call_method", &[
                             Value::Object(obj),
                             Value::String("subsref".to_string()),
                             Value::String("{}".to_string()),
-                            Value::Cell(cell),
+                            cell,
                         ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                         vec![v]
                     }
@@ -985,7 +995,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     let available = ca.data.len();
                                     let need = out_count - pushed;
                                     if need > available { vm_bail!(mex("MATLAB:VarargoutMismatch", &format!("Function '{}' returned {} varargout values, {} requested", name, available, need))); }
-                                    for vi in 0..need { stack.push(ca.data[vi].clone()); pushed += 1; }
+                                    for vi in 0..need { stack.push((*ca.data[vi]).clone()); pushed += 1; }
                                 }
                             }
                         }
@@ -1056,7 +1066,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 let mut pushed = 0usize;
                                 for v in &ca.data {
                                     if pushed >= out_count { break; }
-                                    stack.push(v.clone());
+                                    stack.push((**v).clone());
                                     pushed += 1;
                                 }
                                 for _ in pushed..out_count { stack.push(Value::Num(0.0)); }
@@ -1080,7 +1090,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 }
                                 Value::Cell(ca) => {
                                     let mut pushed = 0usize;
-                                    for v in &ca.data { if pushed >= out_count { break; } stack.push(v.clone()); pushed += 1; }
+                                    for v in &ca.data { if pushed >= out_count { break; } stack.push((**v).clone()); pushed += 1; }
                                     for _ in pushed..out_count { stack.push(Value::Num(0.0)); }
                                 }
                                 other => {
@@ -2324,13 +2334,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 match base {
                     Value::Object(obj) => {
                         // Route to subsref(obj, '{}', {indices})
-                        let cell = runmat_builtins::CellArray::new(indices.iter().map(|n| Value::Num(*n as f64)).collect(), 1, indices.len())
-                            .map_err(|e| format!("subsref build error: {e}"))?;
+                        let cell = runmat_runtime::call_builtin("__make_cell", &indices.iter().map(|n| Value::Num(*n as f64)).collect::<Vec<_>>())?;
                         match runmat_runtime::call_builtin("call_method", &[
                             Value::Object(obj),
                             Value::String("subsref".to_string()),
                             Value::String("{}".to_string()),
-                            Value::Cell(cell),
+                            cell,
                         ]) {
                             Ok(v) => stack.push(v),
                             Err(e) => vm_bail!(e),
@@ -2341,12 +2350,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             1 => {
                                 let i = indices[0];
                                 if i == 0 || i > ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); }
-                                stack.push(ca.data[i-1].clone());
+                                stack.push((*ca.data[i-1]).clone());
                             }
                             2 => {
                                 let r = indices[0]; let c = indices[1];
                                 if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
-                                stack.push(ca.data[(r-1)*ca.cols + (c-1)].clone());
+                                stack.push((*ca.data[(r-1)*ca.cols + (c-1)]).clone());
                             }
                             _ => return Err("Unsupported number of cell indices".to_string()),
                         }
@@ -2368,11 +2377,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         let mut values: Vec<Value> = Vec::new();
                         if indices.is_empty() {
                             // Expand all elements in column-major order
-                            values.extend(ca.data.iter().cloned());
+                            values.extend(ca.data.iter().map(|p| (*(*p)).clone()));
                         } else {
                             match indices.len() {
-                                1 => { let i = indices[0]; if i == 0 || i > ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } values.push(ca.data[i-1].clone()); }
-                                2 => { let r = indices[0]; let c = indices[1]; if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); } values.push(ca.data[(r-1)*ca.cols + (c-1)].clone()); }
+                                1 => { let i = indices[0]; if i == 0 || i > ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } values.push((*ca.data[i-1]).clone()); }
+                                2 => { let r = indices[0]; let c = indices[1]; if r==0 || r>ca.rows || c==0 || c>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); } values.push((*ca.data[(r-1)*ca.cols + (c-1)]).clone()); }
                                 _ => return Err("Unsupported number of cell indices".to_string()),
                             }
                         }
@@ -2382,13 +2391,12 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                     }
                     Value::Object(obj) => {
                         // Defer to subsref; expect a cell back; then expand one element
-                        let cell = runmat_builtins::CellArray::new(indices.iter().map(|n| Value::Num(*n as f64)).collect(), 1, indices.len())
-                            .map_err(|e| format!("subsref build error: {e}"))?;
+                        let cell = runmat_runtime::call_builtin("__make_cell", &indices.iter().map(|n| Value::Num(*n as f64)).collect::<Vec<_>>())?;
                         let v = match runmat_runtime::call_builtin("call_method", &[
                             Value::Object(obj),
                             Value::String("subsref".to_string()),
                             Value::String("{}".to_string()),
-                            Value::Cell(cell),
+                            cell,
                         ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                         // Push returned value and pad to out_count
                         stack.push(v);
@@ -2407,16 +2415,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; indices.push(v as usize); }
                 indices.reverse();
                 let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
+                // TODO(GC): write barrier hook if base is in older generation and rhs/indices reference younger objects
                 match base {
                     Value::Object(obj) => {
                         // subsasgn(obj, '()', {indices...}, rhs)
-                        let cell = runmat_builtins::CellArray::new(indices.iter().map(|n| Value::Num(*n as f64)).collect(), 1, indices.len())
-                            .map_err(|e| format!("subsasgn build error: {e}"))?;
+                        let cell = runmat_runtime::call_builtin("__make_cell", &indices.iter().map(|n| Value::Num(*n as f64)).collect::<Vec<_>>())?;
                         match runmat_runtime::call_builtin("call_method", &[
                             Value::Object(obj),
                             Value::String("subsasgn".to_string()),
                             Value::String("()".to_string()),
-                            Value::Cell(cell),
+                            cell,
                             rhs,
                         ]) { Ok(v) => stack.push(v), Err(e) => vm_bail!(e) }
                     }
@@ -2451,6 +2459,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 for _ in 0..num_indices { let v: f64 = (&stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?).try_into()?; indices.push(v as usize); }
                 indices.reverse();
                 let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
+                // TODO(GC): write barrier hook for cell element updates
                 match base {
                     Value::Object(obj) => {
                         // subsasgn(obj, '{}', {indices}, rhs)
@@ -2472,13 +2481,16 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             1 => {
                                 let i = indices[0];
                                 if i == 0 || i > ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); }
-                                ca.data[i - 1] = rhs;
+                                if let Some(oldv) = ca.data.get(i-1) { runmat_gc::gc_record_write(oldv, &rhs); }
+                                *ca.data[i - 1] = rhs;
                                 stack.push(Value::Cell(ca));
                             }
                             2 => {
                                 let i = indices[0]; let j = indices[1];
                                 if i == 0 || i > ca.rows || j == 0 || j > ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
-                                ca.data[(i - 1) * ca.cols + (j - 1)] = rhs;
+                                let lin = (i - 1) * ca.cols + (j - 1);
+                                if let Some(oldv) = ca.data.get(lin) { runmat_gc::gc_record_write(oldv, &rhs); }
+                                *ca.data[lin] = rhs;
                                 stack.push(Value::Cell(ca));
                             }
                             _ => return Err("Unsupported number of cell indices".to_string()),
@@ -2525,7 +2537,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         // Extract field from each struct element; build a cell with same shape
                         let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
                         for v in &ca.data {
-                            match v {
+                            match &**v {
                                 Value::Struct(st) => {
                                     if let Some(fv) = st.fields.get(&field) { out.push(fv.clone()); }
                                     else { out.push(Value::Num(0.0)); }
@@ -2568,6 +2580,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
             Instr::StoreMember(field) => {
                 let rhs = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
+                // TODO(GC): write barrier hook for object/struct field write
                 match base {
                     Value::Object(mut obj) => {
                         if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
@@ -2581,6 +2594,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     Err(_e) => {}
                                 }
                             }
+                            if let Some(oldv) = obj.properties.get(&field) { runmat_gc::gc_record_write(oldv, &rhs); }
                             obj.properties.insert(field, rhs); stack.push(Value::Object(obj));
                         } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) { if cls.methods.contains_key("subsasgn") {
                             match runmat_runtime::call_builtin("call_method", &[
@@ -2601,6 +2615,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         } else { vm_bail!(format!("Unknown property '{}' on class {}", field, cls)); }
                     }
                     Value::Struct(mut st) => {
+                        if let Some(oldv) = st.fields.get(&field) { runmat_gc::gc_record_write(oldv, &rhs); }
                         st.fields.insert(field, rhs);
                         stack.push(Value::Struct(st));
                     }
@@ -2612,9 +2627,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             if let Some(rc) = rhs_cell { if rc.rows != ca.rows || rc.cols != ca.cols { vm_bail!("Field assignment: cell rhs shape mismatch".to_string()); } }
                         }
                         for i in 0..ca.data.len() {
-                            let rv = if let Some(rc) = rhs_cell { rc.data[i].clone() } else { rhs.clone() };
-                            match &mut ca.data[i] {
-                                Value::Struct(st) => { st.fields.insert(field.clone(), rv); }
+                            let rv = if let Some(rc) = rhs_cell { (*rc.data[i]).clone() } else { rhs.clone() };
+                            match &mut *ca.data[i] {
+                                Value::Struct(st) => { if let Some(oldv) = st.fields.get(&field) { runmat_gc::gc_record_write(oldv, &rv); } st.fields.insert(field.clone(), rv); }
                                 other => {
                                     // If not struct, convert to struct with this single field
                                     let mut st = runmat_builtins::StructValue::new();
@@ -2633,15 +2648,17 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 let name_val = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                 let name: String = (&name_val).try_into()?;
+                // TODO(GC): write barrier hook for dynamic field write
                 match base {
                     Value::Object(mut obj) => {
                         if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &name) {
                             if p.is_static { vm_bail!(format!("Property '{}' is static; use classref('{}').{}", name, obj.class_name, name)); }
                             match p.set_access { runmat_builtins::Access::Private => vm_bail!(format!("Property '{}' is private", name)), _ => {} }
                         }
+                        if let Some(oldv) = obj.properties.get(&name) { runmat_gc::gc_record_write(oldv, &rhs); }
                         obj.properties.insert(name, rhs); stack.push(Value::Object(obj));
                     }
-                    Value::Struct(mut st) => { st.fields.insert(name, rhs); stack.push(Value::Struct(st)); }
+                    Value::Struct(mut st) => { if let Some(oldv) = st.fields.get(&name) { runmat_gc::gc_record_write(oldv, &rhs); } st.fields.insert(name, rhs); stack.push(Value::Struct(st)); }
                     Value::Cell(mut ca) => {
                         let is_cell_rhs = matches!(rhs, Value::Cell(_));
                         let rhs_cell = if let Value::Cell(rc) = &rhs { Some(rc) } else { None };
@@ -2649,9 +2666,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             if let Some(rc) = rhs_cell { if rc.rows != ca.rows || rc.cols != ca.cols { vm_bail!("Field assignment: cell rhs shape mismatch".to_string()); } }
                         }
                         for i in 0..ca.data.len() {
-                            let rv = if let Some(rc) = rhs_cell { rc.data[i].clone() } else { rhs.clone() };
-                            match &mut ca.data[i] {
-                                Value::Struct(st) => { st.fields.insert(name.clone(), rv); }
+                            let rv = if let Some(rc) = rhs_cell { (*rc.data[i]).clone() } else { rhs.clone() };
+                            match &mut *ca.data[i] {
+                                Value::Struct(st) => { if let Some(oldv) = st.fields.get(&name) { runmat_gc::gc_record_write(oldv, &rv); } st.fields.insert(name.clone(), rv); }
                                 other => { let mut st = runmat_builtins::StructValue::new(); st.fields.insert(name.clone(), rv); *other = Value::Struct(st); }
                             }
                         }
@@ -2854,7 +2871,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                             // Return first varargout element if present
                                             let first = func.outputs.first().and_then(|oid| var_map.get(oid)).map(|lid| lid.0).unwrap_or(0);
                                             if let Some(Value::Cell(ca)) = func_result_vars.get(first) {
-                                                if !ca.data.is_empty() { stack.push(ca.data[0].clone()); } else { stack.push(Value::Num(0.0)); }
+                                                if !ca.data.is_empty() { stack.push((*ca.data[0]).clone()); } else { stack.push(Value::Num(0.0)); }
                                             } else if let Some(v) = func_result_vars.get(first) { stack.push(v.clone()); } else { stack.push(Value::Num(0.0)); }
                                         } else if let Some(output_var_id) = func.outputs.first() {
                                             let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
@@ -2918,7 +2935,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                         let base = stack.pop().ok_or(mex("MATLAB:StackUnderflow","stack underflow"))?;
                         let expanded: Vec<Value> = if spec.expand_all {
                             match base {
-                                Value::Cell(ca) => ca.data.clone(),
+                                Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect::<Vec<Value>>(),
                                 Value::Object(obj) => {
                                     let empty = runmat_builtins::CellArray::new(vec![], 1, 0).map_err(|e| format!("subsref build error: {e}"))?;
                                     let v = match runmat_runtime::call_builtin("call_method", &[
@@ -2927,7 +2944,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                         Value::String("{}".to_string()),
                                         Value::Cell(empty),
                                     ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
-                                    match v { Value::Cell(ca) => ca.data, other => vec![other] }
+                                    match v { Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect::<Vec<Value>>(), other => vec![other] }
                                 }
                                 _ => return Err("CallFevalExpandMulti requires cell or object for expand_all".to_string()),
                             }
@@ -2935,9 +2952,9 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                             match (base, indices.len()) {
                                 (Value::Cell(ca), 1) => {
                                     match &indices[0] {
-                                        Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                                        Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![ca.data[idx-1].clone()] }
-                                        Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push(ca.data[iu-1].clone()); } out }
+                                        Value::Num(n) => { let idx = *n as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                                        Value::Int(i) => { let idx = *i as usize; if idx==0 || idx>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } vec![(*ca.data[idx-1]).clone()] }
+                                        Value::Tensor(t) => { let mut out: Vec<Value> = Vec::with_capacity(t.data.len()); for &val in &t.data { let iu = val as usize; if iu==0 || iu>ca.data.len() { return Err(mex("MATLAB:CellIndexOutOfBounds","Cell index out of bounds")); } out.push((*ca.data[iu-1]).clone()); } out }
                                         _ => return Err(mex("MATLAB:CellIndexType","Unsupported cell index type")),
                                     }
                                 }
@@ -2945,7 +2962,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                     let r: f64 = (&indices[0]).try_into()?; let c: f64 = (&indices[1]).try_into()?;
                                     let (ir, ic) = (r as usize, c as usize);
                                     if ir==0 || ir>ca.rows || ic==0 || ic>ca.cols { return Err(mex("MATLAB:CellSubscriptOutOfBounds","Cell subscript out of bounds")); }
-                                    vec![ca.data[(ir-1)*ca.cols + (ic-1)].clone()]
+                                    vec![(*ca.data[(ir-1)*ca.cols + (ic-1)]).clone()]
                                 }
                                 (Value::Object(obj), _) => {
                                     let cell = runmat_builtins::CellArray::new(indices.clone(), 1, indices.len()).map_err(|e| format!("subsref build error: {e}"))?;
@@ -3027,7 +3044,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                         if func.has_varargout {
                                             let first = func.outputs.first().and_then(|oid| var_map.get(oid)).map(|lid| lid.0).unwrap_or(0);
                                             if let Some(Value::Cell(ca)) = func_result_vars.get(first) {
-                                                if !ca.data.is_empty() { stack.push(ca.data[0].clone()); } else { stack.push(Value::Num(0.0)); }
+                                                if !ca.data.is_empty() { stack.push((*ca.data[0]).clone()); } else { stack.push(Value::Num(0.0)); }
                                             } else if let Some(v) = func_result_vars.get(first) { stack.push(v.clone()); } else { stack.push(Value::Num(0.0)); }
                                         } else if let Some(output_var_id) = func.outputs.first() {
                                             let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);

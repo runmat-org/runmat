@@ -53,7 +53,7 @@ impl JitMemoryManager {
         // Store in pool for reuse
         {
             let mut pool = self.string_pool.write().unwrap();
-            pool.insert(s.to_string(), gc_ptr);
+            pool.insert(s.to_string(), gc_ptr.clone());
         }
 
         // Return pointer and length

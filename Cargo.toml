@@ -13,6 +13,7 @@ members = [
     "crates/runmat-runtime",
     "crates/runmat-kernel",
     "crates/runmat-turbine",
+    "crates/runmat-gc-api",
     "crates/runmat-gc",
     "crates/runmat-snapshot",
     "runmat",
@@ -59,3 +60,6 @@ runmat-turbine = { path = "crates/runmat-turbine" }
 runmat-gc = { path = "crates/runmat-gc" }
 runmat-snapshot = { path = "crates/runmat-snapshot" }
 runmat-accelerate = { path = "crates/runmat-accelerate" }
+
+[patch.crates-io]
+# Ensure no accidental cycle via crates.io variants

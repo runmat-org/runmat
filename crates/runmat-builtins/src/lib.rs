@@ -2,6 +2,7 @@ pub use inventory;
 use std::convert::TryFrom;
 use std::fmt;
 use std::collections::HashMap;
+use runmat_gc_api::GcPtr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -322,7 +323,7 @@ impl TryFrom<&Value> for Tensor {
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
             Value::Tensor(m) => Ok(m.clone()),
-            _ => Err(format!("cannot convert {v:?} to Matrix")),
+            _ => Err(format!("cannot convert {v:?} to Tensor")),
         }
     }
 }
@@ -338,7 +339,7 @@ impl TryFrom<&Value> for Vec<Value> {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Cell(c) => Ok(c.data.clone()),
+            Value::Cell(c) => Ok(c.data.iter().map(|p| (**p).clone()).collect()),
             _ => Err(format!("cannot convert {v:?} to Vec<Value>")),
         }
     }
@@ -667,24 +668,32 @@ impl fmt::Display for Value {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellArray {
-    pub data: Vec<Value>,
+    pub data: Vec<GcPtr<Value>>,
     pub rows: usize,
     pub cols: usize,
 }
 
 impl CellArray {
+    pub fn new_handles(handles: Vec<GcPtr<Value>>, rows: usize, cols: usize) -> Result<Self, String> {
+        if rows * cols != handles.len() {
+            return Err(format!("Cell data length {} doesn't match dimensions {}x{}", handles.len(), rows, cols));
+        }
+        Ok(CellArray { data: handles, rows, cols })
+    }
     pub fn new(data: Vec<Value>, rows: usize, cols: usize) -> Result<Self, String> {
         if rows * cols != data.len() {
             return Err(format!("Cell data length {} doesn't match dimensions {}x{}", data.len(), rows, cols));
         }
-        Ok(CellArray { data, rows, cols })
+        // Note: data will be allocated into GC handles by callers (runtime/ignition) to avoid builtins↔gc cycles
+        let handles: Vec<GcPtr<Value>> = data.into_iter().map(|v| unsafe { GcPtr::from_raw(Box::into_raw(Box::new(v))) }).collect();
+        Ok(CellArray { data: handles, rows, cols })
     }
 
-    pub fn get(&self, row: usize, col: usize) -> Result<&Value, String> {
+    pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {
         if row >= self.rows || col >= self.cols {
             return Err(format!("Cell index ({}, {}) out of bounds for {}x{} cell array", row, col, self.rows, self.cols));
         }
-        Ok(&self.data[row * self.cols + col])
+        Ok((*self.data[row * self.cols + col]).clone())
     }
 }
 
@@ -695,7 +704,7 @@ impl fmt::Display for CellArray {
             for c in 0..self.cols {
                 if c > 0 { write!(f, ", ")?; }
                 let v = &self.data[r * self.cols + c];
-                write!(f, "{v}")?;
+                write!(f, "{}", **v)?;
             }
             if r + 1 < self.rows { write!(f, "; ")?; }
         }

@@ -51,7 +51,7 @@ fn test_collection_with_live_objects() {
         let mut live_objects = Vec::new();
         for i in 0..10 {
             let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-            gc_add_root(ptr).expect("root registration should succeed"); // Explicitly protect from collection
+            gc_add_root(ptr.clone()).expect("root registration should succeed"); // Explicitly protect from collection
             live_objects.push(ptr);
         }
 
@@ -83,9 +83,7 @@ fn test_collection_with_live_objects() {
         assert_eq!(before_allocations, after_allocations);
 
         // Clean up roots
-        for ptr in &live_objects {
-            gc_remove_root(*ptr).expect("root removal should succeed");
-        }
+        for ptr in &live_objects { gc_remove_root(ptr.clone()).expect("root removal should succeed"); }
     });
 }
 

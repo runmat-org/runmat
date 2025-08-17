@@ -1,4 +1,5 @@
 use runmat_builtins::{builtin_functions, Value};
+use runmat_gc_api::GcPtr;
 use regex::Regex;
 use runmat_macros::runtime_builtin;
 
@@ -42,6 +43,24 @@ pub use matrix::*;
 pub use blas::*;
 #[cfg(feature = "blas-lapack")]
 pub use lapack::*;
+
+fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, String> {
+    let handles: Vec<GcPtr<Value>> = values
+        .into_iter()
+        .map(|v| runmat_gc::gc_allocate(v).expect("gc alloc"))
+        .collect();
+    let ca = runmat_builtins::CellArray::new_handles(handles, rows, cols)
+        .map_err(|e| format!("Cell creation error: {e}"))?;
+    Ok(Value::Cell(ca))
+}
+
+// Internal builtin to construct a cell from a vector of values (used by ignition)
+#[runmat_macros::runtime_builtin(name = "__make_cell")]
+fn make_cell_builtin(rest: Vec<Value>) -> Result<Value, String> {
+    let rows = 1usize;
+    let cols = rest.len();
+    make_cell(rest, rows, cols)
+}
 
 /// Call a registered MATLAB builtin by name.
 /// Supports function overloading by trying different argument patterns.
@@ -92,12 +111,12 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
 #[runmat_macros::runtime_builtin(name = "cellstr")]
 fn cellstr_builtin(a: Value) -> Result<Value, String> {
     match a {
-        Value::String(s) => Ok(Value::Cell(runmat_builtins::CellArray::new(vec![Value::String(s)], 1, 1).map_err(|e| format!("cellstr: {e}"))?)),
+        Value::String(s) => make_cell(vec![Value::String(s)], 1, 1),
         Value::StringArray(sa) => {
             let rows = sa.rows(); let cols = sa.cols();
             let mut cells: Vec<Value> = Vec::with_capacity(sa.data.len());
             for r in 0..rows { for c in 0..cols { let idx = r + c*rows; cells.push(Value::String(sa.data[idx].clone())); } }
-            Ok(Value::Cell(runmat_builtins::CellArray::new(cells, rows, cols).map_err(|e| format!("cellstr: {e}"))?))
+            make_cell(cells, rows, cols)
         }
         other => Err(format!("cellstr: expected string or string array, got {other:?}")),
     }
@@ -166,7 +185,7 @@ fn ind2sub_builtin(dims_val: Value, idx_val: f64) -> Result<Value, String> {
             } else { return Err("ind2sub: dims must be a vector".to_string()); }
         }
         Value::Cell(ca) => {
-            if ca.data.is_empty() { vec![] } else { ca.data.iter().map(|v| match v { Value::Num(n) => *n as usize, Value::Int(i) => *i as usize, _ => 1usize }).collect() }
+            if ca.data.is_empty() { vec![] } else { ca.data.iter().map(|v| match &**v { Value::Num(n) => *n as usize, Value::Int(i) => *i as usize, _ => 1usize }).collect() }
         }
         _ => return Err("ind2sub: dims must be a vector".to_string()),
     };
@@ -194,7 +213,7 @@ fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> Result<Value, String> {
             } else { return Err("sub2ind: dims must be a vector".to_string()); }
         }
         Value::Cell(ca) => {
-            if ca.data.is_empty() { vec![] } else { ca.data.iter().map(|v| match v { Value::Num(n) => *n as usize, Value::Int(i) => *i as usize, _ => 1usize }).collect() }
+            if ca.data.is_empty() { vec![] } else { ca.data.iter().map(|v| match &**v { Value::Num(n) => *n as usize, Value::Int(i) => *i as usize, _ => 1usize }).collect() }
         }
         _ => return Err("sub2ind: dims must be a vector".to_string()),
     };
@@ -255,7 +274,7 @@ fn string_conv(a: Value) -> Result<Value, String> {
         }
         Value::Cell(ca) => {
             let mut out: Vec<String> = Vec::with_capacity(ca.rows*ca.cols);
-            for r in 0..ca.rows { for c in 0..ca.cols { let v = &ca.data[r*ca.cols + c]; let s: String = match v { Value::String(s)=>s.clone(), Value::Num(n)=>n.to_string(), Value::Int(i)=>i.to_string(), Value::CharArray(ch)=> ch.data.iter().collect(), other=> format!("{other:?}") }; out.push(s); } }
+            for r in 0..ca.rows { for c in 0..ca.cols { let v = &ca.data[r*ca.cols + c]; let s: String = match &**v { Value::String(s)=>s.clone(), Value::Num(n)=>n.to_string(), Value::Int(i)=>i.to_string(), Value::CharArray(ch)=> ch.data.iter().collect(), other=> format!("{other:?}") }; out.push(s); } }
             Ok(Value::StringArray(runmat_builtins::StringArray::new(out, vec![ca.rows, ca.cols]).map_err(|e| format!("string: {e}"))?))
         }
         Value::Num(n) => Ok(Value::StringArray(runmat_builtins::StringArray::new(vec![n.to_string()], vec![1,1]).unwrap())),
@@ -529,10 +548,10 @@ fn regexp_builtin(a: Value, pat: Value) -> Result<Value, String> {
         let full = cap.get(0).map(|m| m.as_str().to_string()).unwrap_or_default();
         let mut row: Vec<Value> = vec![Value::String(full)];
         for i in 1..cap.len() { row.push(Value::String(cap.get(i).map(|m| m.as_str().to_string()).unwrap_or_default())); }
-        matches.push(Value::Cell(runmat_builtins::CellArray::new(row, 1, cap.len()).map_err(|e| format!("regexp: {e}"))?));
+        matches.push(make_cell(row, 1, cap.len())?);
     }
     let len = matches.len();
-    Ok(Value::Cell(runmat_builtins::CellArray::new(matches, 1, len).map_err(|e| format!("regexp: {e}"))?))
+    make_cell(matches, 1, len)
 }
 
 #[runmat_macros::runtime_builtin(name = "regexpi")]
@@ -544,10 +563,10 @@ fn regexpi_builtin(a: Value, pat: Value) -> Result<Value, String> {
         let full = cap.get(0).map(|m| m.as_str().to_string()).unwrap_or_default();
         let mut row: Vec<Value> = vec![Value::String(full)];
         for i in 1..cap.len() { row.push(Value::String(cap.get(i).map(|m| m.as_str().to_string()).unwrap_or_default())); }
-        matches.push(Value::Cell(runmat_builtins::CellArray::new(row, 1, cap.len()).map_err(|e| format!("regexpi: {e}"))?));
+        matches.push(make_cell(row, 1, cap.len())?);
     }
     let len = matches.len();
-    Ok(Value::Cell(runmat_builtins::CellArray::new(matches, 1, len).map_err(|e| format!("regexpi: {e}"))?))
+    make_cell(matches, 1, len)
 }
 
 // Adjust strjoin semantics: join rows (row-wise)
@@ -615,8 +634,7 @@ fn ndims_builtin(a: Value) -> Result<Value, String> {
 fn deal_builtin(rest: Vec<Value>) -> Result<Value, String> {
     // Return cell row vector of inputs for expansion
     let cols = rest.len();
-    let ca = runmat_builtins::CellArray::new(rest, 1, cols).map_err(|e| format!("deal: {e}"))?;
-    Ok(Value::Cell(ca))
+    make_cell(rest, 1, cols)
 }
 
 #[runmat_macros::runtime_builtin(name = "find")]
@@ -730,8 +748,7 @@ fn fieldnames_builtin(s: Value) -> Result<Value, String> {
             names.sort();
             let len = names.len();
             let vals: Vec<Value> = names.into_iter().map(Value::String).collect();
-            let cell = runmat_builtins::CellArray::new(vals, len, 1).map_err(|e| format!("fieldnames: {e}"))?;
-            Ok(Value::Cell(cell))
+            make_cell(vals, len, 1)
         }
         other => Err(format!("fieldnames: expected struct, got {other:?}")),
     }
@@ -751,7 +768,13 @@ fn isfield_builtin(s: Value, name: Value) -> Result<Value, String> {
                 }
                 Value::Cell(ca) => {
                     let rows = ca.rows; let cols = ca.cols; let mut out: Vec<f64> = Vec::with_capacity(rows*cols);
-                    for c in 0..cols { for r in 0..rows { let idx = r*cols + c; let n: String = (&ca.data[idx]).try_into()?; out.push(if st.fields.contains_key(&n) { 1.0 } else { 0.0 }); } }
+                    for c in 0..cols {
+                        for r in 0..rows {
+                            let idx = r*cols + c;
+                            let n: String = (&*ca.data[idx]).try_into()?;
+                            out.push(if st.fields.contains_key(&n) { 1.0 } else { 0.0 });
+                        }
+                    }
                     Ok(Value::Tensor(runmat_builtins::Tensor::new(out, vec![rows, cols]).map_err(|e| format!("isfield: {e}"))?))
                 }
                 other => {
@@ -773,7 +796,13 @@ fn isfield_builtin(s: Value, name: Value) -> Result<Value, String> {
                     }
                     Value::Cell(ca) => {
                         let rows = ca.rows; let cols = ca.cols; let mut out: Vec<f64> = Vec::with_capacity(rows*cols);
-                        for c in 0..cols { for r in 0..rows { let idx = r*cols + c; let n: String = (&ca.data[idx]).try_into()?; out.push(if st.fields.contains_key(&n) { 1.0 } else { 0.0 }); } }
+                        for c in 0..cols {
+                            for r in 0..rows {
+                                let idx = r*cols + c;
+                                let n: String = (&*ca.data[idx]).try_into()?;
+                                out.push(if st.fields.contains_key(&n) { 1.0 } else { 0.0 });
+                            }
+                        }
                         Ok(Value::Tensor(runmat_builtins::Tensor::new(out, vec![rows, cols]).map_err(|e| format!("isfield: {e}"))?))
                     }
                     other => { let n: String = (&other).try_into()?; Ok(Value::Num(if st.fields.contains_key(&n) { 1.0 } else { 0.0 })) }
@@ -803,7 +832,7 @@ fn isfield_multi_builtin(s: Value, names: Value) -> Result<Value, String> {
                 for r in 0..rows {
                     let idx = r * cols + c; // cell stored row-major
                     let v = &ca.data[idx];
-                    let n: String = v.try_into()?;
+                    let n: String = (&**v).try_into()?;
                     out.push(if st.fields.contains_key(&n) { 1.0 } else { 0.0 });
                 }
             }
@@ -829,7 +858,7 @@ fn rmfield_builtin(s: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() == 1 {
         match &rest[0] {
             Value::Cell(ca) => {
-                for v in &ca.data { names.push(String::try_from(v).map_err(|e| format!("rmfield: {e}"))?); }
+                for v in &ca.data { names.push(String::try_from(&**v).map_err(|e| format!("rmfield: {e}"))?); }
             }
             other => { names.push(String::try_from(other).map_err(|e| format!("rmfield: {e}"))?); }
         }
@@ -1400,8 +1429,7 @@ fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
         for c in 0..cols { for r in 0..rows { let v = t.data[r + c*rows]; if v > m[c] { m[c] = v; idx[c] = (r+1) as f64; } } }
         let m_t = runmat_builtins::Tensor::new(m, vec![1, cols]).map_err(|e| format!("max: {e}"))?;
         let i_t = runmat_builtins::Tensor::new(idx, vec![1, cols]).map_err(|e| format!("max: {e}"))?;
-        let cell = runmat_builtins::CellArray::new(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2).map_err(|e| format!("max: {e}"))?;
-        Ok(Value::Cell(cell))
+        make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
     } else if dim == 2 {
         // row-wise maxima: return {M_col, I_col}
         let mut m: Vec<f64> = vec![std::f64::NEG_INFINITY; rows];
@@ -1409,8 +1437,7 @@ fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
         for r in 0..rows { for c in 0..cols { let v = t.data[r + c*rows]; if v > m[r] { m[r] = v; idx[r] = (c+1) as f64; } } }
         let m_t = runmat_builtins::Tensor::new(m, vec![rows, 1]).map_err(|e| format!("max: {e}"))?;
         let i_t = runmat_builtins::Tensor::new(idx, vec![rows, 1]).map_err(|e| format!("max: {e}"))?;
-        let cell = runmat_builtins::CellArray::new(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2).map_err(|e| format!("max: {e}"))?;
-        Ok(Value::Cell(cell))
+        make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
     } else { Err("max: dim out of range".to_string()) }
 }
 
@@ -1426,16 +1453,14 @@ fn min_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
         for c in 0..cols { for r in 0..rows { let v = t.data[r + c*rows]; if v < m[c] { m[c] = v; idx[c] = (r+1) as f64; } } }
         let m_t = runmat_builtins::Tensor::new(m, vec![1, cols]).map_err(|e| format!("min: {e}"))?;
         let i_t = runmat_builtins::Tensor::new(idx, vec![1, cols]).map_err(|e| format!("min: {e}"))?;
-        let cell = runmat_builtins::CellArray::new(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2).map_err(|e| format!("min: {e}"))?;
-        Ok(Value::Cell(cell))
+        make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
     } else if dim == 2 {
         let mut m: Vec<f64> = vec![std::f64::INFINITY; rows];
         let mut idx: Vec<f64> = vec![1.0; rows];
         for r in 0..rows { for c in 0..cols { let v = t.data[r + c*rows]; if v < m[r] { m[r] = v; idx[r] = (c+1) as f64; } } }
         let m_t = runmat_builtins::Tensor::new(m, vec![rows, 1]).map_err(|e| format!("min: {e}"))?;
         let i_t = runmat_builtins::Tensor::new(idx, vec![rows, 1]).map_err(|e| format!("min: {e}"))?;
-        let cell = runmat_builtins::CellArray::new(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2).map_err(|e| format!("min: {e}"))?;
-        Ok(Value::Cell(cell))
+        make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
     } else { Err("min: dim out of range".to_string()) }
 }
 
@@ -1674,7 +1699,7 @@ fn permute_builtin(a: Value, order: Value) -> Result<Value, String> {
     let t = match a { Value::Tensor(t) => t, Value::StringArray(_)=> return Err("permute: not supported for string arrays".to_string()), Value::CharArray(_)=> return Err("permute: not supported for char arrays".to_string()), _ => return Err("permute: expected tensor".to_string()) };
     let ord = match order {
         Value::Tensor(idx) => idx.data.iter().map(|&v| v as usize).collect::<Vec<usize>>() ,
-        Value::Cell(c) => c.data.iter().map(|v| match v { Value::Num(n) => *n as usize, Value::Int(i) => *i as usize, _ => 0 }).collect(),
+        Value::Cell(c) => c.data.iter().map(|v| match &**v { Value::Num(n) => *n as usize, Value::Int(i) => *i as usize, _ => 0 }).collect(),
         Value::Num(n) => vec![n as usize],
         _ => return Err("permute: expected index vector".to_string()),
     };

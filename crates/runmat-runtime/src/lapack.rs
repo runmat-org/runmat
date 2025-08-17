@@ -359,7 +359,7 @@ fn value_vector_to_f64(values: &[Value]) -> Result<Vec<f64>, String> {
             Value::Int(i) => out.push(*i as f64),
             Value::Cell(c) => {
                 for elem in &c.data {
-                    match elem {
+                    match &**elem {
                         Value::Num(n) => out.push(*n),
                         Value::Int(i) => out.push(*i as f64),
                         _ => return Err(format!("Cannot convert {elem:?} to f64")),
@@ -386,8 +386,7 @@ fn solve_builtin(a: Matrix, b: Vec<Value>) -> Result<Value, String> {
     // Return as a cell column vector to match test expectations
     let n = solution.len();
     let data: Vec<Value> = solution.into_iter().map(Value::Num).collect();
-    let cell = runmat_builtins::CellArray::new(data, n, 1).map_err(|e| format!("solve: {e}"))?;
-    Ok(Value::Cell(cell))
+    super::make_cell(data, n, 1)
 }
 
 #[runtime_builtin(name = "det")]

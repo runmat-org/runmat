@@ -4,7 +4,7 @@
 //! with optimizations for RunMat's value types and usage patterns.
 
 use crate::{GcConfig, GcPtr, GcStats, GenerationalAllocator, Result};
-use runmat_builtins::Value;
+use crate::Value;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -39,24 +39,48 @@ impl MarkSweepCollector {
         roots: &[GcPtr<Value>],
         stats: &GcStats,
     ) -> Result<usize> {
+        let _ = stats; // currently unused in this path
         log::debug!("Starting young generation collection");
         let start_time = Instant::now();
 
         // Phase 1: Mark reachable objects
         self.mark_phase(roots, 0)?; // Only mark in generation 0
 
-        // Phase 2: Sweep unmarked objects in young generation
-        let collected = self.sweep_young_generation(allocator, stats)?;
+        // Phase 2: Sweep unmarked objects in young generation (in-place sweep)
+        let mut collected = 0usize;
+        let mut any_survivor = false;
+        // Walk allocations recorded by the young generation and free the unmarked ones
+        let allocated_ptrs = allocator.young_take_allocations();
+        let mut promoted_this_cycle = 0usize;
+        for &ptr in &allocated_ptrs {
+            let addr = ptr as usize;
+            if !self.marked_objects.lock().contains(&addr) {
+                collected += 1;
+                // Drop the value in place to run destructors if any
+                unsafe { std::ptr::drop_in_place(ptr as *mut Value); }
+                // Space remains reserved; a free-list compactor can reclaim later
+            } else {
+                // Survivor: keep; optional policy to mark for promotion
+                allocator.young_mark_survivor(ptr);
+                if allocator.note_survivor_and_maybe_promote(ptr) { promoted_this_cycle += 1; }
+                any_survivor = true;
+            }
+        }
+        // If there are no survivors, we can safely reset the young generation to reclaim space
+        // If no explicit survivors, double-check allocator survivor tracking
+        if !any_survivor && !allocator.young_has_survivors() {
+            allocator.young_reset();
+        }
 
-        // Phase 3: Promote survivors if they've survived enough collections
-        let promoted = self.promote_survivors(allocator, stats)?;
+        // Phase 3: Promotions are handled inline during survivor scan above
 
         self.marked_objects.lock().clear();
         self.collections_performed += 1;
         self.total_objects_collected += collected;
 
         let duration = start_time.elapsed();
-        log::debug!("Young generation collection completed: {collected} collected, {promoted} promoted in {duration:?}");
+        if promoted_this_cycle > 0 { stats.record_promotion(promoted_this_cycle); }
+        log::debug!("Young generation collection completed: {collected} collected, {promoted_this_cycle} promoted in {duration:?}");
 
         Ok(collected)
     }
@@ -74,10 +98,17 @@ impl MarkSweepCollector {
         // Phase 1: Mark reachable objects in all generations
         self.mark_phase(roots, usize::MAX)?;
 
-        // Phase 2: Sweep unmarked objects in all generations
-        let collected = self.sweep_all_generations(allocator, stats)?;
+        // Phase 2: Sweep unmarked objects (reuse young sweep and then clear marks)
+        // Do not call collect_young_generation to avoid double incrementing stats/marks; inline minimal work
+        let collected = {
+            // Reuse the young sweep logic without updating collection counters here
+            let mut temp_collector = MarkSweepCollector::new(&self.config);
+            temp_collector.marked_objects = std::mem::take(&mut self.marked_objects);
+            let c = temp_collector.collect_young_generation(allocator, roots, stats)?;
+            self.marked_objects = temp_collector.marked_objects; // bring back mark set (already cleared inside)
+            c
+        };
 
-        self.marked_objects.lock().clear();
         self.collections_performed += 1;
         self.total_objects_collected += collected;
 
@@ -94,8 +125,8 @@ impl MarkSweepCollector {
         self.marked_objects.lock().clear();
 
         // Mark all objects reachable from roots
-        for root in roots {
-            let root_ptr: GcPtr<Value> = *root;
+        for root in roots.iter().cloned() {
+            let root_ptr: GcPtr<Value> = root;
             if !root_ptr.is_null() {
                 self.mark_object(root_ptr, max_generation)?;
             }
@@ -201,10 +232,11 @@ impl MarkSweepCollector {
     }
 
     /// Sweep phase: collect unmarked objects in young generation
+    #[allow(dead_code)]
     fn sweep_young_generation(
         &mut self,
         _allocator: &mut GenerationalAllocator,
-        stats: &GcStats,
+        _stats: &GcStats,
     ) -> Result<usize> {
         log::trace!("Starting sweep of young generation");
 
@@ -221,17 +253,18 @@ impl MarkSweepCollector {
         // 3. If not marked, add to free list and increment collected
         // 4. Reset the generation's allocation state
 
-        collected += self.simulate_sweep(stats, "young generation");
+        collected += self.simulate_sweep(_stats, "young generation");
 
         log::trace!("Young generation sweep completed: {collected} objects collected");
         Ok(collected)
     }
 
     /// Sweep phase: collect unmarked objects in all generations
+    #[allow(dead_code)]
     fn sweep_all_generations(
         &mut self,
         _allocator: &mut GenerationalAllocator,
-        stats: &GcStats,
+        _stats: &GcStats,
     ) -> Result<usize> {
         log::trace!("Starting sweep of all generations");
 
@@ -239,7 +272,7 @@ impl MarkSweepCollector {
 
         // Sweep each generation
         for generation in 0..self.config.num_generations {
-            collected += self.simulate_sweep(stats, &format!("generation {generation}"));
+            collected += self.simulate_sweep(_stats, &format!("generation {generation}"));
         }
 
         log::trace!("Full heap sweep completed: {collected} objects collected");
@@ -247,6 +280,7 @@ impl MarkSweepCollector {
     }
 
     /// Simulate sweeping for placeholder implementation
+    #[allow(dead_code)]
     fn simulate_sweep(&self, _stats: &GcStats, description: &str) -> usize {
         // In a real implementation, this would actually free memory
         // For now, just simulate collecting some objects
@@ -264,10 +298,11 @@ impl MarkSweepCollector {
     }
 
     /// Promote objects from young generation to next generation
+    #[allow(dead_code)]
     fn promote_survivors(
         &mut self,
         _allocator: &mut GenerationalAllocator,
-        stats: &GcStats,
+        _stats: &GcStats,
     ) -> Result<usize> {
         log::trace!("Starting survivor promotion");
 
@@ -282,7 +317,7 @@ impl MarkSweepCollector {
         let promoted = if marked_len > 10 {
             // Simulate promoting some survivors
             let promotion_count = marked_len / 4;
-            stats.record_promotion(promotion_count);
+            _stats.record_promotion(promotion_count);
             promotion_count
         } else {
             0

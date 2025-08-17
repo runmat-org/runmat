@@ -4,7 +4,7 @@
 //! objects in older generations that reference younger objects are
 //! included in minor collection roots.
 
-use runmat_builtins::Value;
+use crate::Value;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -329,6 +329,10 @@ impl WriteBarrierManager {
         }
     }
 }
+
+// Ensure thread-safety for global usage; internal synchronization guards shared state
+unsafe impl Send for WriteBarrierManager {}
+unsafe impl Sync for WriteBarrierManager {}
 
 /// Combined statistics for write barrier manager
 #[derive(Debug, Clone)]

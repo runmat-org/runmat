@@ -5,7 +5,7 @@
 //! execution context (stacks, global variables, etc.).
 
 use crate::{GcError, GcPtr, Result};
-use runmat_builtins::Value;
+use crate::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
