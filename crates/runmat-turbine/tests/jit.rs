@@ -1040,6 +1040,8 @@ fn test_jit_user_function_fallback() {
                 false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1128,6 +1130,8 @@ fn test_jit_function_variable_preservation() {
                 false, // Assignment suppression flag for test
             )],
             local_var_count: 3,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1197,6 +1201,8 @@ fn test_jit_mixed_execution_patterns() {
                 false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1309,6 +1315,8 @@ fn test_jit_engine_statistics_with_functions() {
             outputs: vec![],
             body: vec![],
             local_var_count: 0,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1366,6 +1374,8 @@ fn test_jit_simple_function_compilation() {
                 false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1446,6 +1456,8 @@ fn test_jit_nested_function_calls_compilation() {
                 false, // Assignment suppression flag for test
             )],
             local_var_count: 3,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1496,6 +1508,8 @@ fn test_jit_nested_function_calls_compilation() {
                 false, // Assignment suppression flag for test
             )],
             local_var_count: 5,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1570,6 +1584,8 @@ fn test_jit_function_parameter_validation() {
                 false, // Assignment suppression flag for test
             )],
             local_var_count: 3,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1656,6 +1672,8 @@ fn test_jit_function_variable_isolation() {
                 false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1752,6 +1770,8 @@ fn test_jit_function_compilation_performance() {
                 ),
             ],
             local_var_count: 3,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 
@@ -1836,6 +1856,8 @@ fn test_jit_function_error_handling() {
                 false, // Assignment suppression flag for test
             )],
             local_var_count: 2,
+            has_varargin: false,
+            has_varargout: false,
         },
     );
 

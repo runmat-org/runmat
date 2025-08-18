@@ -99,6 +99,7 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
     while pc < bytecode.instructions.len() {
         match bytecode.instructions[pc].clone() {
             Instr::LoadConst(c) => stack.push(Value::Num(c)),
+            Instr::LoadBool(b) => stack.push(Value::Bool(b)),
             Instr::LoadString(s) => stack.push(Value::String(s)),
             Instr::LoadCharRow(s) => {
                 let ca = runmat_builtins::CharArray::new(s.chars().collect(), 1, s.chars().count()).map_err(|e| mex("MATLAB:CharError", &e))?;

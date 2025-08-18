@@ -301,10 +301,10 @@ impl BytecodeCompiler {
                         let const_val = builder.ins().f64const(*val);
                         local_stack.push(const_val);
                     }
-                    Instr::LoadString(_) | Instr::LoadCharRow(_) => {
+                    Instr::LoadString(_) | Instr::LoadCharRow(_) | Instr::LoadBool(_) => {
                         // Strings cannot be compiled to JIT - fall back to interpreter
                         return Err(TurbineError::ExecutionError(
-                            "String operations not supported in JIT mode".to_string(),
+                            "Non-numeric literal not supported in JIT mode".to_string(),
                         ));
                     }
                     Instr::LoadVar(idx) => {

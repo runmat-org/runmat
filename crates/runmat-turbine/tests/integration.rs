@@ -235,8 +235,8 @@ fn test_memory_safety_with_gc() {
         if let Ok(mut engine) = TurbineEngine::new() {
             // Test that JIT compilation works with GC allocations
             let matrix_data = vec![1.0, 2.0, 3.0, 4.0];
-            let matrix = runmat_builtins::Matrix::new(matrix_data, 2, 2).unwrap();
-            let matrix_value = Value::Matrix(matrix);
+            let tensor = runmat_builtins::Tensor::new_2d(matrix_data, 2, 2).unwrap();
+            let matrix_value = Value::Tensor(tensor);
             let _gc_ptr = gc_allocate(matrix_value).unwrap();
 
             // Now test JIT compilation

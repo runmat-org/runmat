@@ -806,7 +806,11 @@ impl Compiler {
             HirExprKind::Constant(name) => {
                 let constants = runmat_builtins::constants();
                 if let Some(constant) = constants.iter().find(|c| c.name == name) {
-                    if let runmat_builtins::Value::Num(val) = &constant.value { self.emit(Instr::LoadConst(*val)); } else { return Err(format!("Constant {name} is not a number")); }
+                    match &constant.value {
+                        runmat_builtins::Value::Num(val) => { self.emit(Instr::LoadConst(*val)); }
+                        runmat_builtins::Value::Bool(b) => { self.emit(Instr::LoadBool(*b)); }
+                        _ => { return Err(format!("Constant {name} is not a number or boolean")); }
+                    }
                 } else {
                     // Try resolving as unqualified static property via Class.* imports (multi-segment)
                     let mut classes: Vec<String> = Vec::new();

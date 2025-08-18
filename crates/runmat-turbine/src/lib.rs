@@ -1083,6 +1083,10 @@ impl TurbineEngine {
                     "LoadString".hash(&mut hasher);
                     s.hash(&mut hasher);
                 }
+                Instr::LoadBool(b) => {
+                    "LoadBool".hash(&mut hasher);
+                    b.hash(&mut hasher);
+                }
                 Instr::LoadVar(idx) => {
                     "LoadVar".hash(&mut hasher);
                     idx.hash(&mut hasher);

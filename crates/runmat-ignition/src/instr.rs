@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instr {
     LoadConst(f64),
+    LoadBool(bool),
     LoadString(String),
     LoadCharRow(String),
     LoadVar(usize),

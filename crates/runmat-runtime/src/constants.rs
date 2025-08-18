@@ -6,6 +6,18 @@
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
+/// Logical scalar true (MATLAB-compatible)
+#[runtime_builtin(name = "true")]
+fn true_builtin() -> Result<bool, String> {
+    Ok(true)
+}
+
+/// Logical scalar false (MATLAB-compatible)
+#[runtime_builtin(name = "false")]
+fn false_builtin() -> Result<bool, String> {
+    Ok(false)
+}
+
 /// Mathematical constant π (pi)
 #[runtime_builtin(name = "pi")]
 fn pi_builtin() -> Result<f64, String> {
@@ -101,6 +113,12 @@ mod tests {
     }
 
     #[test]
+    fn test_true_false_builtins() {
+        assert_eq!(true_builtin().unwrap(), true);
+        assert_eq!(false_builtin().unwrap(), false);
+    }
+
+    #[test]
     fn test_matlab_compatibility() {
         // Test MATLAB-style names
         assert_eq!(inf_matlab_builtin().unwrap(), inf_builtin().unwrap());
@@ -162,5 +180,20 @@ runmat_builtins::inventory::submit! {
     runmat_builtins::Constant {
         name: "sqrt2",
         value: Value::Num(std::f64::consts::SQRT_2),
+    }
+}
+
+// Register logical constants so bare identifiers resolve without requiring a call
+runmat_builtins::inventory::submit! {
+    runmat_builtins::Constant {
+        name: "true",
+        value: Value::Bool(true),
+    }
+}
+
+runmat_builtins::inventory::submit! {
+    runmat_builtins::Constant {
+        name: "false",
+        value: Value::Bool(false),
     }
 }
