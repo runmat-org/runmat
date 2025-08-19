@@ -1693,7 +1693,7 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                                     )
                                 })?;
                                 let v = norm_attr_value(v);
-                                validate_access_value(&format!("class '{}' methods"), &v)?;
+                                validate_access_value(&format!("class '{name}' methods"), &v)?;
                             }
                         }
                         if has_abstract && has_sealed {

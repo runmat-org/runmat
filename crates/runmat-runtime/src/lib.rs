@@ -355,8 +355,7 @@ fn string_conv(a: Value) -> Result<Value, String> {
                 out.push(s);
             }
             Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(out, vec![ca.rows, 1])
-                    .map_err(|e| format!("string: {e}"))?,
+                runmat_builtins::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| e.to_string())?,
             ))
         }
         Value::Tensor(t) => {
@@ -413,8 +412,7 @@ fn string_conv(a: Value) -> Result<Value, String> {
                 }
             }
             Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(out, vec![ca.rows, ca.cols])
-                    .map_err(|e| format!("string: {e}"))?,
+                runmat_builtins::StringArray::new(out, vec![ca.rows, ca.cols]).map_err(|e| e.to_string())?,
             ))
         }
         Value::Num(n) => Ok(Value::StringArray(
@@ -691,12 +689,12 @@ fn strcat_builtin(rest: Vec<Value>) -> Result<Value, String> {
     for a in &arrays {
         if a.shape == vec![1, 1] {
             let s = &a.data[0];
-            for i in 0..total {
-                out[i].push_str(s);
+            for item in out.iter_mut().take(total) {
+                item.push_str(s);
             }
         } else {
-            for i in 0..total {
-                out[i].push_str(&a.data[i]);
+            for (i, item) in out.iter_mut().enumerate().take(total) {
+                item.push_str(&a.data[i]);
             }
         }
     }
@@ -877,13 +875,12 @@ fn pad_builtin(a: Value, total_len: f64, rest: Vec<Value>) -> Result<Value, Stri
         return Ok(Value::String(s));
     }
     let pad_count = n - s.chars().count();
-    let pad_str: String = std::iter::repeat(ch).take(pad_count).collect();
-    let out = if direction == "left" {
-        format!("{}{}", pad_str, s)
+    let pad_str: String = std::iter::repeat_n(ch, pad_count).collect();
+    if direction == "left" {
+        format!("{pad_str}{s}")
     } else {
-        format!("{}{}", s, pad_str)
-    };
-    Ok(Value::String(out))
+        format!("{s}{pad_str}")
+    }
 }
 
 #[runmat_macros::runtime_builtin(name = "strtrim")]
@@ -1052,11 +1049,8 @@ fn getfield_builtin(base: Value, field: String) -> Result<Value, String> {
                         field, obj.class_name, field
                     ));
                 }
-                match p.get_access {
-                    runmat_builtins::Access::Private => {
-                        return Err(format!("Property '{field}' is private"))
-                    }
-                    _ => {}
+                if p.get_access == runmat_builtins::Access::Private {
+                    return Err(format!("Property '{field}' is private"));
                 }
                 if p.is_dependent {
                     // Try dynamic getter first

@@ -101,7 +101,7 @@ fn ndims_builtin(a: Value) -> Result<f64, String> {
 fn isempty_builtin(a: Value) -> Result<bool, String> {
     Ok(match a {
         Value::Tensor(t) => t.data.is_empty() || t.rows == 0 || t.cols == 0,
-        Value::LogicalArray(la) => la.data.is_empty() || la.shape.iter().any(|&d| d == 0),
+        Value::LogicalArray(la) => la.data.is_empty() || la.shape.contains(&0),
         Value::StringArray(sa) => sa.data.is_empty() || sa.rows == 0 || sa.cols == 0,
         Value::CharArray(ca) => ca.rows == 0 || ca.cols == 0,
         Value::Cell(ca) => ca.data.is_empty() || ca.rows == 0 || ca.cols == 0,

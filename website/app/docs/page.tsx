@@ -177,7 +177,7 @@ export default function DocsPage() {
                   <CardTitle>Roadmap</CardTitle>
               </div>
               <CardDescription>
-                  Track RunMat's development roadmap and progress
+                  Track RunMat&apos;s development roadmap and progress
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -197,7 +197,7 @@ export default function DocsPage() {
                   <CardTitle>License</CardTitle>
                 </div>
                 <CardDescription>
-                  View RunMat's license and terms of use (MIT+)
+                  View RunMat&apos;s license and terms of use (MIT+)
                 </CardDescription>
               </CardHeader>
               <CardContent>

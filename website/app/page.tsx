@@ -118,8 +118,8 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Parser + core semantics for arrays and indexing (<code>end</code>, colon, masks), multiple returns,
-                  cells/structs, <code>classdef</code> OOP, and more. See the <Link className="underline" href="/docs/language-coverage">language coverage</Link> with Octave comparison.
+                  Run the whole language, not a subset: proper indexing (<code>end</code>/colon/masks), multiple returns,
+                  classdef OOP, events/handles. What you already write just works. See <Link className="underline" href="/docs/language-coverage">coverage</Link>.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -130,8 +130,8 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Benchmarks on Apple M2 Max show triple‑digit speedups vs GNU Octave across startup, matrix ops,
-                  math functions, and control flow. Read the <Link className="underline" href="/blog/introducing-runmat">results</Link>.
+                  Spend time computing, not waiting: instant startup and triple‑digit speedups vs Octave across startup,
+                  matrix ops, math, and control flow. Read the <Link className="underline" href="/blog/introducing-runmat">results</Link>.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -142,8 +142,8 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  A minimal, blazing‑fast core with canonical builtins. Breadth comes from packages (native Rust or
-                  source MATLAB). See the <Link className="underline" href="/docs/package-manager">package manager (draft)</Link>.
+                  Keep the core predictable; add only what you need. Install native Rust or source MATLAB packages and
+                  get docs generated automatically. See the <Link className="underline" href="/docs/package-manager">package manager</Link>.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -154,8 +154,8 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Typed HIR lowers to Cranelift IR for small static binaries and predictable performance across
-                  Linux/macOS/Windows. Great for laptops, clusters, and CI.
+                  Same code, everywhere: small static binaries with consistent performance on Linux/macOS/Windows.
+                  Great for laptops, clusters, and CI.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -325,13 +325,13 @@ export default function HomePage() {
               </thead>
               <tbody>
                 <tr className="border-b border-border/60"><td className="py-3 px-4">Grammar & parser (full surface)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center">✅</td></tr>
-                <tr className="border-b border-border/60"><td className="py-3 px-4">Arrays & indexing (end, colon, masks, N‑D)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center">✅</td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Arrays & indexing (end, colon, masks, N-D)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center">✅</td></tr>
                 <tr className="border-b border-border/60"><td className="py-3 px-4">Multiple returns, varargin/varargout, nargin/nargout</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center">✅</td></tr>
                 <tr className="border-b border-border/60"><td className="py-3 px-4">classdef OOP + operator overloading</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
                 <tr className="border-b border-border/60"><td className="py-3 px-4">Events/handles (addlistener/notify/isvalid/delete)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
                 <tr className="border-b border-border/60"><td className="py-3 px-4">Imports precedence & static access (Class.*)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
                 <tr className="border-b border-border/60"><td className="py-3 px-4">Metaclass operator ?Class</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
-                <tr className="border-b border-border/60"><td className="py-3 px-4">String arrays (double‑quoted)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">String arrays (double-quoted)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
                 <tr><td className="py-3 px-4">Standardized MException identifiers</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
               </tbody>
             </table>
@@ -380,8 +380,8 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-sm">
-                  The runtime ships a minimal, blazing‑fast core with canonical builtins (e.g., sin/cos/sum; printf‑style
-                  formatting). Broader or domain‑specific behavior lives in packages: native (Rust) for speed, or source (MATLAB)
+                  The runtime ships a minimal, blazing-fast core with canonical builtins (e.g., sin/cos/sum; printf-style
+                  formatting). Broader or domain-specific behavior lives in packages: native (Rust) for speed, or source (MATLAB)
                   for portability. Docs are generated from runtime metadata.
                 </CardDescription>
                 <div className="mt-4 text-sm"><Link className="underline" href="/docs/package-manager">Read the Package Manager design draft →</Link></div>
