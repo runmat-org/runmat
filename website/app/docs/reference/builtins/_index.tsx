@@ -1,5 +1,6 @@
 import { Metadata } from 'next';
 import BuiltinsExplorer from '@/components/BuiltinsExplorer';
+import { Suspense } from 'react';
 import { loadBuiltins } from '@/lib/builtins';
 
 export const dynamic = 'force-static';
@@ -23,7 +24,9 @@ export default function BuiltinsIndexPage() {
         <div className="text-sm text-muted-foreground mt-1">{all.filter(b => !b.internal).length} built-in functions</div>
       </div>
 
-      <BuiltinsExplorer builtins={all} />
+      <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
+        <BuiltinsExplorer builtins={all} />
+      </Suspense>
     </div>
   );
 }

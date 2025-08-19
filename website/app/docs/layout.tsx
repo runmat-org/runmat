@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { docsTree, DocsNode, flatten } from "@/content/docs";
-import { Menu, Github, Twitter } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Menu } from "lucide-react";
+import { Suspense, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
@@ -10,7 +10,9 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 md:px-6 py-8">
         <div className="grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)] gap-6">
-          <Sidebar />
+          <Suspense fallback={<div className="hidden md:block" />}> 
+            <Sidebar />
+          </Suspense>
           <main className="min-w-0 md:pl-6 md:border-l md:border-border/60">{children}</main>
         </div>
       </div>
