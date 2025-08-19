@@ -380,9 +380,7 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-sm">
-                  The runtime ships a minimal, blazing-fast core with canonical builtins (e.g., sin/cos/sum; printf-style
-                  formatting). Broader or domain-specific behavior lives in packages: native (Rust) for speed, or source (MATLAB)
-                  for portability. Docs are generated from runtime metadata.
+                  Minimal core with canonical builtins; everything else is a package. Install only what you need; docs are generated automatically.
                 </CardDescription>
                 <div className="mt-4 text-sm"><Link className="underline" href="/docs/package-manager">Read the Package Manager design draft →</Link></div>
                 <div className="mt-1 text-sm"><Link className="underline" href="/docs/design-philosophy">Read the Design Philosophy →</Link></div>
@@ -394,8 +392,7 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-sm">
-                  Typed HIR lowers to Cranelift IR, yielding small static binaries and predictable performance across
-                  Linux/macOS/Windows. Great for laptops, clusters, CI — and for accelerators/LSPs that plug in cleanly.
+                  Small static binaries with consistent performance on Linux/macOS/Windows. Great for laptops, clusters, CI — and for accelerators/LSPs that plug in cleanly.
                 </CardDescription>
               </CardContent>
             </Card>
