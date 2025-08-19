@@ -10,9 +10,9 @@
 
 use runmat_builtins::{Tensor, Value};
 
+pub mod simple_provider;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_backend;
-pub mod simple_provider;
 use serde::{Deserialize, Serialize};
 
 /// High-level device kind. Concrete selection is provided by backend.
@@ -58,14 +58,38 @@ pub trait AccelerateBackend: Send + Sync {
     fn download_matrix(&self, dev: &dyn DeviceMatrix) -> anyhow::Result<Tensor>;
 
     // Elementwise
-    fn elem_add(&self, a: &dyn DeviceMatrix, b: &dyn DeviceMatrix) -> anyhow::Result<Box<dyn DeviceMatrix>>;
-    fn elem_sub(&self, a: &dyn DeviceMatrix, b: &dyn DeviceMatrix) -> anyhow::Result<Box<dyn DeviceMatrix>>;
-    fn elem_mul(&self, a: &dyn DeviceMatrix, b: &dyn DeviceMatrix) -> anyhow::Result<Box<dyn DeviceMatrix>>;
-    fn elem_div(&self, a: &dyn DeviceMatrix, b: &dyn DeviceMatrix) -> anyhow::Result<Box<dyn DeviceMatrix>>;
-    fn elem_pow(&self, a: &dyn DeviceMatrix, b: &dyn DeviceMatrix) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_add(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_sub(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_mul(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_div(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_pow(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
 
     // Linear algebra (future): matmul, transpose, BLAS/LAPACK analogs
-    fn matmul(&self, a: &dyn DeviceMatrix, b: &dyn DeviceMatrix) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn matmul(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
     fn transpose(&self, a: &dyn DeviceMatrix) -> anyhow::Result<Box<dyn DeviceMatrix>>;
 }
 
@@ -89,7 +113,7 @@ impl Planner {
     pub fn choose_elem_add(&self, a: &Tensor, b: &Tensor) -> ExecutionTarget {
         if let Some(bk) = &self.backend {
             if a.data.len() >= 1 << 16 && a.rows() == b.rows() && a.cols() == b.cols() {
-                return ExecutionTarget::Gpu(bk.device_info())
+                return ExecutionTarget::Gpu(bk.device_info());
             }
         }
         ExecutionTarget::Cpu
@@ -108,23 +132,28 @@ pub struct Accelerator {
 }
 
 impl Accelerator {
-    pub fn new(planner: Planner) -> Self { Self { planner } }
+    pub fn new(planner: Planner) -> Self {
+        Self { planner }
+    }
 
     pub fn elementwise_add(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
         match (a, b) {
-            (Value::Tensor(ma), Value::Tensor(mb)) => {
-                match self.planner.choose_elem_add(ma, mb) {
-                    ExecutionTarget::Cpu => runmat_runtime::elementwise_add(a, b).map_err(|e| anyhow::anyhow!(e)),
-                    ExecutionTarget::Gpu(_) => {
-                        let bk = self.planner.device().ok_or_else(|| anyhow::anyhow!("no backend"))?;
-                        let da = bk.upload_matrix(ma)?;
-                        let db = bk.upload_matrix(mb)?;
-                        let dc = bk.elem_add(da.as_ref(), db.as_ref())?;
-                        let out = bk.download_matrix(dc.as_ref())?;
-                        Ok(Value::Tensor(out))
-                    }
+            (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
+                ExecutionTarget::Cpu => {
+                    runmat_runtime::elementwise_add(a, b).map_err(|e| anyhow::anyhow!(e))
                 }
-            }
+                ExecutionTarget::Gpu(_) => {
+                    let bk = self
+                        .planner
+                        .device()
+                        .ok_or_else(|| anyhow::anyhow!("no backend"))?;
+                    let da = bk.upload_matrix(ma)?;
+                    let db = bk.upload_matrix(mb)?;
+                    let dc = bk.elem_add(da.as_ref(), db.as_ref())?;
+                    let out = bk.download_matrix(dc.as_ref())?;
+                    Ok(Value::Tensor(out))
+                }
+            },
             (Value::GpuTensor(ga), Value::GpuTensor(gb)) => {
                 // Placeholder: assume same device; in practice look up buffers by id
                 // Fallback to CPU until device registry is implemented
@@ -161,5 +190,3 @@ impl Accelerator {
 
 // NOTE: No concrete backend is provided in this crate yet. Future crates (or modules enabled via
 // features) will implement `AccelerateBackend` for CUDA/ROCm/Metal/Vulkan/OpenCL/etc.
-
-

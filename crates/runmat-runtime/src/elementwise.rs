@@ -1,6 +1,6 @@
 //! Element-wise operations for matrices and scalars
 //!
-//! This module implements MATLAB-compatible element-wise operations (.*,  ./,  .^)
+//! This module implements language-compatible element-wise operations (.*,  ./,  .^)
 //! These operations work element-by-element on matrices and support scalar broadcasting.
 
 use crate::matrix::matrix_power;
@@ -30,11 +30,15 @@ fn to_host_value(v: &Value) -> Result<Value, String> {
         Value::GpuTensor(h) => {
             if let Some(p) = runmat_accelerate_api::provider() {
                 let ht = p.download(h).map_err(|e| e.to_string())?;
-                Ok(Value::Tensor(Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?))
+                Ok(Value::Tensor(
+                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
+                ))
             } else {
                 // Fallback: zeros tensor with same shape
                 let total: usize = h.shape.iter().product();
-                Ok(Value::Tensor(Tensor::new(vec![0.0; total], h.shape.clone()).map_err(|e| e.to_string())?))
+                Ok(Value::Tensor(
+                    Tensor::new(vec![0.0; total], h.shape.clone()).map_err(|e| e.to_string())?,
+                ))
             }
         }
         other => Ok(other.clone()),
@@ -54,7 +58,7 @@ pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
             } else {
                 Ok(Value::Int(runmat_builtins::IntValue::I64(-v)))
             }
-        },
+        }
         Value::Bool(b) => Ok(Value::Bool(!b)), // Boolean negation
         Value::Tensor(m) => {
             let data: Vec<f64> = m.data.iter().map(|x| -x).collect();
@@ -69,25 +73,27 @@ pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
 pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
     // If exactly one is GPU, gather to host and recurse
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
-        let ah = to_host_value(a)?; let bh = to_host_value(b)?; return elementwise_mul(&ah, &bh);
+        let ah = to_host_value(a)?;
+        let bh = to_host_value(b)?;
+        return elementwise_mul(&ah, &bh);
     }
     if let Some(p) = runmat_accelerate_api::provider() {
-        match (a, b) {
-            (Value::GpuTensor(ha), Value::GpuTensor(hb)) => {
-                // Try provider path
-                if let Ok(hc) = p.elem_mul(ha, hb) {
-                    let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                    return Ok(Value::Tensor(Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?));
-                }
+        if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
+            if let Ok(hc) = p.elem_mul(ha, hb) {
+                let ht = p.download(&hc).map_err(|e| e.to_string())?;
+                return Ok(Value::Tensor(
+                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
+                ));
             }
-            _ => {}
         }
     }
     match (a, b) {
         // Complex scalars
-        (Value::Complex(ar, ai), Value::Complex(br, bi)) => Ok(Value::Complex(ar*br - ai*bi, ar*bi + ai*br)),
-        (Value::Complex(ar, ai), Value::Num(s)) => Ok(Value::Complex(ar*s, ai*s)),
-        (Value::Num(s), Value::Complex(br, bi)) => Ok(Value::Complex(s*br, s*bi)),
+        (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
+            Ok(Value::Complex(ar * br - ai * bi, ar * bi + ai * br))
+        }
+        (Value::Complex(ar, ai), Value::Num(s)) => Ok(Value::Complex(ar * s, ai * s)),
+        (Value::Num(s), Value::Complex(br, bi)) => Ok(Value::Complex(s * br, s * bi)),
         // Scalar-scalar case
         (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x * y)),
         (Value::Int(x), Value::Num(y)) => Ok(Value::Num(x.to_f64() * y)),
@@ -119,7 +125,10 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
             if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for element-wise multiplication: {}x{} .* {}x{}",
-                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
+                    m1.rows(),
+                    m1.cols(),
+                    m2.rows(),
+                    m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -133,18 +142,34 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
 
         // Complex tensors
         (Value::ComplexTensor(m1), Value::ComplexTensor(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols { return Err(format!("Matrix dimensions must agree for element-wise multiplication: {}x{} .* {}x{}", m1.rows, m1.cols, m2.rows, m2.cols)); }
-            let mut out: Vec<(f64,f64)> = Vec::with_capacity(m1.data.len());
-            for i in 0..m1.data.len() { let (ar,ai)=m1.data[i]; let (br,bi)=m2.data[i]; out.push((ar*br - ai*bi, ar*bi + ai*br)); }
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(out, m1.shape.clone()).map_err(|e| format!(".*: {e}"))?))
+            if m1.rows != m2.rows || m1.cols != m2.cols {
+                return Err(format!(
+                    "Matrix dimensions must agree for element-wise multiplication: {}x{} .* {}x{}",
+                    m1.rows, m1.cols, m2.rows, m2.cols
+                ));
+            }
+            let mut out: Vec<(f64, f64)> = Vec::with_capacity(m1.data.len());
+            for i in 0..m1.data.len() {
+                let (ar, ai) = m1.data[i];
+                let (br, bi) = m2.data[i];
+                out.push((ar * br - ai * bi, ar * bi + ai * br));
+            }
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new(out, m1.shape.clone())
+                    .map_err(|e| format!(".*: {e}"))?,
+            ))
         }
         (Value::ComplexTensor(m), Value::Num(s)) => {
-            let data: Vec<(f64,f64)> = m.data.iter().map(|(re,im)| (re*s, im*s)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?))
+            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (re * s, im * s)).collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
+            ))
         }
         (Value::Num(s), Value::ComplexTensor(m)) => {
-            let data: Vec<(f64,f64)> = m.data.iter().map(|(re,im)| (s*re, s*im)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?))
+            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (s * re, s * im)).collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
+            ))
         }
 
         _ => Err(format!(
@@ -157,13 +182,17 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
-        let ah = to_host_value(a)?; let bh = to_host_value(b)?; return elementwise_add(&ah, &bh);
+        let ah = to_host_value(a)?;
+        let bh = to_host_value(b)?;
+        return elementwise_add(&ah, &bh);
     }
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
             if let Ok(hc) = p.elem_add(ha, hb) {
                 let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?));
+                return Ok(Value::Tensor(
+                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
+                ));
             }
         }
     }
@@ -203,7 +232,10 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
             if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for addition: {}x{} + {}x{}",
-                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
+                    m1.rows(),
+                    m1.cols(),
+                    m2.rows(),
+                    m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -217,17 +249,33 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
 
         // Complex tensors
         (Value::ComplexTensor(m1), Value::ComplexTensor(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols { return Err(format!("Matrix dimensions must agree for addition: {}x{} + {}x{}", m1.rows, m1.cols, m2.rows, m2.cols)); }
-            let data: Vec<(f64,f64)> = m1.data.iter().zip(m2.data.iter()).map(|((ar,ai),(br,bi))| (ar+br, ai+bi)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m1.rows, m1.cols)?))
+            if m1.rows != m2.rows || m1.cols != m2.cols {
+                return Err(format!(
+                    "Matrix dimensions must agree for addition: {}x{} + {}x{}",
+                    m1.rows, m1.cols, m2.rows, m2.cols
+                ));
+            }
+            let data: Vec<(f64, f64)> = m1
+                .data
+                .iter()
+                .zip(m2.data.iter())
+                .map(|((ar, ai), (br, bi))| (ar + br, ai + bi))
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m1.rows, m1.cols)?,
+            ))
         }
         (Value::ComplexTensor(m), Value::Num(s)) => {
-            let data: Vec<(f64,f64)> = m.data.iter().map(|(re,im)| (re+s, *im)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?))
+            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (re + s, *im)).collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
+            ))
         }
         (Value::Num(s), Value::ComplexTensor(m)) => {
-            let data: Vec<(f64,f64)> = m.data.iter().map(|(re,im)| (s+re, *im)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?))
+            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (s + re, *im)).collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
+            ))
         }
 
         _ => Err(format!("Addition not supported for types: {a:?} + {b:?}")),
@@ -238,13 +286,17 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
-        let ah = to_host_value(a)?; let bh = to_host_value(b)?; return elementwise_sub(&ah, &bh);
+        let ah = to_host_value(a)?;
+        let bh = to_host_value(b)?;
+        return elementwise_sub(&ah, &bh);
     }
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
             if let Ok(hc) = p.elem_sub(ha, hb) {
                 let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?));
+                return Ok(Value::Tensor(
+                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
+                ));
             }
         }
     }
@@ -284,7 +336,10 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
             if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for subtraction: {}x{} - {}x{}",
-                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
+                    m1.rows(),
+                    m1.cols(),
+                    m2.rows(),
+                    m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -298,17 +353,33 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
 
         // Complex tensors
         (Value::ComplexTensor(m1), Value::ComplexTensor(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols { return Err(format!("Matrix dimensions must agree for element-wise multiplication: {}x{} .* {}x{}", m1.rows, m1.cols, m2.rows, m2.cols)); }
-            let data: Vec<(f64,f64)> = m1.data.iter().zip(m2.data.iter()).map(|((ar,ai),(br,bi))| (ar*br - ai*bi, ar*bi + ai*br)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m1.rows, m1.cols)?))
+            if m1.rows != m2.rows || m1.cols != m2.cols {
+                return Err(format!(
+                    "Matrix dimensions must agree for element-wise multiplication: {}x{} .* {}x{}",
+                    m1.rows, m1.cols, m2.rows, m2.cols
+                ));
+            }
+            let data: Vec<(f64, f64)> = m1
+                .data
+                .iter()
+                .zip(m2.data.iter())
+                .map(|((ar, ai), (br, bi))| (ar * br - ai * bi, ar * bi + ai * br))
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m1.rows, m1.cols)?,
+            ))
         }
         (Value::ComplexTensor(m), Value::Num(s)) => {
-            let data: Vec<(f64,f64)> = m.data.iter().map(|(re,im)| (re*s, im*s)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?))
+            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (re * s, im * s)).collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
+            ))
         }
         (Value::Num(s), Value::ComplexTensor(m)) => {
-            let data: Vec<(f64,f64)> = m.data.iter().map(|(re,im)| (s*re, s*im)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?))
+            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (s * re, s * im)).collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
+            ))
         }
 
         _ => Err(format!(
@@ -321,26 +392,39 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
-        let ah = to_host_value(a)?; let bh = to_host_value(b)?; return elementwise_div(&ah, &bh);
+        let ah = to_host_value(a)?;
+        let bh = to_host_value(b)?;
+        return elementwise_div(&ah, &bh);
     }
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
             if let Ok(hc) = p.elem_div(ha, hb) {
                 let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?));
+                return Ok(Value::Tensor(
+                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
+                ));
             }
         }
     }
     match (a, b) {
         // Complex scalars
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
-            let denom = br*br + bi*bi; if denom == 0.0 { return Ok(Value::Num(f64::NAN)); }
-            Ok(Value::Complex((ar*br + ai*bi)/denom, (ai*br - ar*bi)/denom))
+            let denom = br * br + bi * bi;
+            if denom == 0.0 {
+                return Ok(Value::Num(f64::NAN));
+            }
+            Ok(Value::Complex(
+                (ar * br + ai * bi) / denom,
+                (ai * br - ar * bi) / denom,
+            ))
         }
         (Value::Complex(ar, ai), Value::Num(s)) => Ok(Value::Complex(ar / s, ai / s)),
         (Value::Num(s), Value::Complex(br, bi)) => {
-            let denom = br*br + bi*bi; if denom == 0.0 { return Ok(Value::Num(f64::NAN)); }
-            Ok(Value::Complex((s*br)/denom, (-s*bi)/denom))
+            let denom = br * br + bi * bi;
+            if denom == 0.0 {
+                return Ok(Value::Num(f64::NAN));
+            }
+            Ok(Value::Complex((s * br) / denom, (-s * bi) / denom))
         }
         // Scalar-scalar case
         (Value::Num(x), Value::Num(y)) => {
@@ -351,13 +435,25 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
             }
         }
         (Value::Int(x), Value::Num(y)) => {
-            if *y == 0.0 { Ok(Value::Num(f64::INFINITY * x.to_f64().signum())) } else { Ok(Value::Num(x.to_f64() / y)) }
+            if *y == 0.0 {
+                Ok(Value::Num(f64::INFINITY * x.to_f64().signum()))
+            } else {
+                Ok(Value::Num(x.to_f64() / y))
+            }
         }
         (Value::Num(x), Value::Int(y)) => {
-            if y.is_zero() { Ok(Value::Num(f64::INFINITY * x.signum())) } else { Ok(Value::Num(x / y.to_f64())) }
+            if y.is_zero() {
+                Ok(Value::Num(f64::INFINITY * x.signum()))
+            } else {
+                Ok(Value::Num(x / y.to_f64()))
+            }
         }
         (Value::Int(x), Value::Int(y)) => {
-            if y.is_zero() { Ok(Value::Num(f64::INFINITY * x.to_f64().signum())) } else { Ok(Value::Num(x.to_f64() / y.to_f64())) }
+            if y.is_zero() {
+                Ok(Value::Num(f64::INFINITY * x.to_f64().signum()))
+            } else {
+                Ok(Value::Num(x.to_f64() / y.to_f64()))
+            }
         }
 
         // Matrix-scalar cases (broadcasting)
@@ -415,7 +511,10 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
             if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for element-wise division: {}x{} ./ {}x{}",
-                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
+                    m1.rows(),
+                    m1.cols(),
+                    m2.rows(),
+                    m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -435,17 +534,51 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
 
         // Complex tensors
         (Value::ComplexTensor(m1), Value::ComplexTensor(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols { return Err(format!("Matrix dimensions must agree for element-wise division: {}x{} ./ {}x{}", m1.rows, m1.cols, m2.rows, m2.cols)); }
-            let data: Vec<(f64,f64)> = m1.data.iter().zip(m2.data.iter()).map(|((ar,ai),(br,bi))| { let denom = br*br + bi*bi; if denom==0.0 { (f64::NAN,f64::NAN) } else { ((ar*br + ai*bi)/denom, (ai*br - ar*bi)/denom) } }).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m1.rows, m1.cols)?))
+            if m1.rows != m2.rows || m1.cols != m2.cols {
+                return Err(format!(
+                    "Matrix dimensions must agree for element-wise division: {}x{} ./ {}x{}",
+                    m1.rows, m1.cols, m2.rows, m2.cols
+                ));
+            }
+            let data: Vec<(f64, f64)> = m1
+                .data
+                .iter()
+                .zip(m2.data.iter())
+                .map(|((ar, ai), (br, bi))| {
+                    let denom = br * br + bi * bi;
+                    if denom == 0.0 {
+                        (f64::NAN, f64::NAN)
+                    } else {
+                        ((ar * br + ai * bi) / denom, (ai * br - ar * bi) / denom)
+                    }
+                })
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m1.rows, m1.cols)?,
+            ))
         }
         (Value::ComplexTensor(m), Value::Num(s)) => {
-            let data: Vec<(f64,f64)> = m.data.iter().map(|(re,im)| (re/s, im/s)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?))
+            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (re / s, im / s)).collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
+            ))
         }
         (Value::Num(s), Value::ComplexTensor(m)) => {
-            let data: Vec<(f64,f64)> = m.data.iter().map(|(br,bi)| { let denom = br*br + bi*bi; if denom==0.0 { (f64::NAN,f64::NAN) } else { ((s*br)/denom, (-s*bi)/denom) } }).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?))
+            let data: Vec<(f64, f64)> = m
+                .data
+                .iter()
+                .map(|(br, bi)| {
+                    let denom = br * br + bi * bi;
+                    if denom == 0.0 {
+                        (f64::NAN, f64::NAN)
+                    } else {
+                        ((s * br) / denom, (-s * bi) / denom)
+                    }
+                })
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
+            ))
         }
 
         _ => Err(format!(
@@ -461,26 +594,26 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
     match (a, b) {
         // Scalar cases - include complex
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
-            let (r,i) = complex_pow_scalar(*ar, *ai, *br, *bi);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(*ar, *ai, *br, *bi);
+            Ok(Value::Complex(r, i))
         }
         (Value::Complex(ar, ai), Value::Num(y)) => {
-            let (r,i) = complex_pow_scalar(*ar, *ai, *y, 0.0);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(*ar, *ai, *y, 0.0);
+            Ok(Value::Complex(r, i))
         }
         (Value::Num(x), Value::Complex(br, bi)) => {
-            let (r,i) = complex_pow_scalar(*x, 0.0, *br, *bi);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(*x, 0.0, *br, *bi);
+            Ok(Value::Complex(r, i))
         }
         (Value::Complex(ar, ai), Value::Int(y)) => {
             let yv = y.to_f64();
-            let (r,i) = complex_pow_scalar(*ar, *ai, yv, 0.0);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(*ar, *ai, yv, 0.0);
+            Ok(Value::Complex(r, i))
         }
         (Value::Int(x), Value::Complex(br, bi)) => {
             let xv = x.to_f64();
-            let (r,i) = complex_pow_scalar(xv, 0.0, *br, *bi);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(xv, 0.0, *br, *bi);
+            Ok(Value::Complex(r, i))
         }
 
         // Scalar cases - real only
@@ -533,26 +666,26 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
     match (a, b) {
         // Complex scalar cases
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
-            let (r,i) = complex_pow_scalar(*ar, *ai, *br, *bi);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(*ar, *ai, *br, *bi);
+            Ok(Value::Complex(r, i))
         }
         (Value::Complex(ar, ai), Value::Num(y)) => {
-            let (r,i) = complex_pow_scalar(*ar, *ai, *y, 0.0);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(*ar, *ai, *y, 0.0);
+            Ok(Value::Complex(r, i))
         }
         (Value::Num(x), Value::Complex(br, bi)) => {
-            let (r,i) = complex_pow_scalar(*x, 0.0, *br, *bi);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(*x, 0.0, *br, *bi);
+            Ok(Value::Complex(r, i))
         }
         (Value::Complex(ar, ai), Value::Int(y)) => {
             let yv = y.to_f64();
-            let (r,i) = complex_pow_scalar(*ar, *ai, yv, 0.0);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(*ar, *ai, yv, 0.0);
+            Ok(Value::Complex(r, i))
         }
         (Value::Int(x), Value::Complex(br, bi)) => {
             let xv = x.to_f64();
-            let (r,i) = complex_pow_scalar(xv, 0.0, *br, *bi);
-            Ok(Value::Complex(r,i))
+            let (r, i) = complex_pow_scalar(xv, 0.0, *br, *bi);
+            Ok(Value::Complex(r, i))
         }
         // Scalar-scalar case
         (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x.powf(*y))),
@@ -585,7 +718,10 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
             if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
                 return Err(format!(
                     "Matrix dimensions must agree for element-wise power: {}x{} .^ {}x{}",
-                    m1.rows(), m1.cols(), m2.rows(), m2.cols()
+                    m1.rows(),
+                    m1.cols(),
+                    m2.rows(),
+                    m2.cols()
                 ));
             }
             let data: Vec<f64> = m1
@@ -605,39 +741,77 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.rows, m1.cols, m2.rows, m2.cols
                 ));
             }
-            let mut out: Vec<(f64,f64)> = Vec::with_capacity(m1.data.len());
+            let mut out: Vec<(f64, f64)> = Vec::with_capacity(m1.data.len());
             for i in 0..m1.data.len() {
-                let (ar,ai) = m1.data[i];
-                let (br,bi) = m2.data[i];
+                let (ar, ai) = m1.data[i];
+                let (br, bi) = m2.data[i];
                 out.push(complex_pow_scalar(ar, ai, br, bi));
             }
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(out, m1.rows, m1.cols)?))
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(out, m1.rows, m1.cols)?,
+            ))
         }
         (Value::ComplexTensor(m), Value::Num(s)) => {
-            let out: Vec<(f64,f64)> = m.data.iter().map(|(ar,ai)| complex_pow_scalar(*ar, *ai, *s, 0.0)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?))
+            let out: Vec<(f64, f64)> = m
+                .data
+                .iter()
+                .map(|(ar, ai)| complex_pow_scalar(*ar, *ai, *s, 0.0))
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
+            ))
         }
         (Value::ComplexTensor(m), Value::Int(s)) => {
             let sv = s.to_f64();
-            let out: Vec<(f64,f64)> = m.data.iter().map(|(ar,ai)| complex_pow_scalar(*ar, *ai, sv, 0.0)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?))
+            let out: Vec<(f64, f64)> = m
+                .data
+                .iter()
+                .map(|(ar, ai)| complex_pow_scalar(*ar, *ai, sv, 0.0))
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
+            ))
         }
         (Value::ComplexTensor(m), Value::Complex(br, bi)) => {
-            let out: Vec<(f64,f64)> = m.data.iter().map(|(ar,ai)| complex_pow_scalar(*ar, *ai, *br, *bi)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?))
+            let out: Vec<(f64, f64)> = m
+                .data
+                .iter()
+                .map(|(ar, ai)| complex_pow_scalar(*ar, *ai, *br, *bi))
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
+            ))
         }
         (Value::Num(s), Value::ComplexTensor(m)) => {
-            let out: Vec<(f64,f64)> = m.data.iter().map(|(br,bi)| complex_pow_scalar(*s, 0.0, *br, *bi)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?))
+            let out: Vec<(f64, f64)> = m
+                .data
+                .iter()
+                .map(|(br, bi)| complex_pow_scalar(*s, 0.0, *br, *bi))
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
+            ))
         }
         (Value::Int(s), Value::ComplexTensor(m)) => {
             let sv = s.to_f64();
-            let out: Vec<(f64,f64)> = m.data.iter().map(|(br,bi)| complex_pow_scalar(sv, 0.0, *br, *bi)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?))
+            let out: Vec<(f64, f64)> = m
+                .data
+                .iter()
+                .map(|(br, bi)| complex_pow_scalar(sv, 0.0, *br, *bi))
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
+            ))
         }
         (Value::Complex(br, bi), Value::ComplexTensor(m)) => {
-            let out: Vec<(f64,f64)> = m.data.iter().map(|(er,ei)| complex_pow_scalar(*br, *bi, *er, *ei)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?))
+            let out: Vec<(f64, f64)> = m
+                .data
+                .iter()
+                .map(|(er, ei)| complex_pow_scalar(*br, *bi, *er, *ei))
+                .collect();
+            Ok(Value::ComplexTensor(
+                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
+            ))
         }
 
         _ => Err(format!(
@@ -661,7 +835,11 @@ mod tests {
             Value::Num(12.0)
         );
         assert_eq!(
-            elementwise_mul(&Value::Int(runmat_builtins::IntValue::I32(3)), &Value::Num(4.5)).unwrap(),
+            elementwise_mul(
+                &Value::Int(runmat_builtins::IntValue::I32(3)),
+                &Value::Num(4.5)
+            )
+            .unwrap(),
             Value::Num(13.5)
         );
     }

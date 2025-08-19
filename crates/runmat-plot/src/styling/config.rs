@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub enum ThemeVariant {
     /// Modern dark theme with green accents (default)
     ModernDark,
-    /// Classic light theme (MATLAB-style)
+    /// Light theme
     ClassicLight,
     /// High contrast theme for accessibility
     HighContrast,

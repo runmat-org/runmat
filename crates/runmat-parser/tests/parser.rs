@@ -278,38 +278,44 @@ fn nested_matrix_literal() {
     );
 }
 
-    #[test]
-    fn whitespace_separated_matrix_allowed() {
-        // MATLAB allows space-separated elements
-        assert!(parse("[1 2]").is_ok());
-    }
+#[test]
+fn whitespace_separated_matrix_allowed() {
+    // Space-separated elements are allowed
+    assert!(parse("[1 2]").is_ok());
+}
 
-    #[test]
-    fn nested_tensor_literals_and_rows() {
-        let ast = parse("A=[1 2 3; 4 5 6]; B=[7 8; 9 10];").unwrap();
-        if let Stmt::Assign(_, Expr::Tensor(rows), _) = &ast.body[0] {
-            assert_eq!(rows.len(), 2);
-            assert_eq!(rows[0].len(), 3);
-            assert_eq!(rows[1].len(), 3);
-        } else { panic!("expected tensor literal on assignment to A"); }
-        if let Stmt::Assign(_, Expr::Tensor(rows2), _) = &ast.body[1] {
-            assert_eq!(rows2.len(), 2);
-            assert_eq!(rows2[0].len(), 2);
-        } else { panic!("expected tensor literal on assignment to B"); }
+#[test]
+fn nested_tensor_literals_and_rows() {
+    let ast = parse("A=[1 2 3; 4 5 6]; B=[7 8; 9 10];").unwrap();
+    if let Stmt::Assign(_, Expr::Tensor(rows), _) = &ast.body[0] {
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].len(), 3);
+        assert_eq!(rows[1].len(), 3);
+    } else {
+        panic!("expected tensor literal on assignment to A");
     }
+    if let Stmt::Assign(_, Expr::Tensor(rows2), _) = &ast.body[1] {
+        assert_eq!(rows2.len(), 2);
+        assert_eq!(rows2[0].len(), 2);
+    } else {
+        panic!("expected tensor literal on assignment to B");
+    }
+}
 
-    #[test]
-    fn whitespace_and_comma_mixed_elements() {
-        assert!(parse("[1, 2 3,4]").is_ok());
-    }
+#[test]
+fn whitespace_and_comma_mixed_elements() {
+    assert!(parse("[1, 2 3,4]").is_ok());
+}
 
-    #[test]
-    fn tensor_in_index_and_end_arithmetic() {
-        let ast = parse("A=[1 2 3; 4 5 6; 7 8 9]; B=A(1:end-1, [1 3]);").unwrap();
-        if let Stmt::Assign(_, Expr::Index(_, idxs), _) = &ast.body[1] {
-            assert_eq!(idxs.len(), 2);
-        } else { panic!("expected index expression"); }
+#[test]
+fn tensor_in_index_and_end_arithmetic() {
+    let ast = parse("A=[1 2 3; 4 5 6; 7 8 9]; B=A(1:end-1, [1 3]);").unwrap();
+    if let Stmt::Assign(_, Expr::Index(_, idxs), _) = &ast.body[1] {
+        assert_eq!(idxs.len(), 2);
+    } else {
+        panic!("expected index expression");
     }
+}
 
 #[test]
 fn missing_closing_bracket_is_error() {

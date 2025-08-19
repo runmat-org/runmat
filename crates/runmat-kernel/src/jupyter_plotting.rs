@@ -265,7 +265,7 @@ impl JupyterPlottingManager {
         }
     }
 
-    /// Handle plot function calls from MATLAB code
+    /// Handle plot function calls from code
     pub fn handle_plot_function(
         &mut self,
         function_name: &str,

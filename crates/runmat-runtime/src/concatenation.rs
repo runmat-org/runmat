@@ -1,12 +1,12 @@
 //! Matrix and array concatenation operations
 //!
-//! This module provides MATLAB-compatible matrix concatenation operations.
+//! This module provides language-compatible matrix concatenation operations.
 //! Supports both horizontal concatenation [A, B] and vertical concatenation [A; B].
 
 use runmat_builtins::{Tensor, Value};
 
 /// Horizontally concatenate two matrices [A, B]
-/// In MATLAB: C = [A, B] creates a matrix with A and B side by side
+/// In language: C = [A, B] creates a matrix with A and B side by side
 pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
     if a.rows() != b.rows() {
         return Err(format!(
@@ -22,10 +22,14 @@ pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
     // Column-major layout: build column-by-column
     for col in 0..new_cols {
         if col < a.cols() {
-            for row in 0..a.rows() { new_data.push(a.data[row + col * a.rows()]); }
+            for row in 0..a.rows() {
+                new_data.push(a.data[row + col * a.rows()]);
+            }
         } else {
             let bcol = col - a.cols();
-            for row in 0..b.rows() { new_data.push(b.data[row + bcol * b.rows()]); }
+            for row in 0..b.rows() {
+                new_data.push(b.data[row + bcol * b.rows()]);
+            }
         }
     }
 
@@ -33,7 +37,7 @@ pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 }
 
 /// Vertically concatenate two matrices [A; B]
-/// In MATLAB: C = [A; B] creates a matrix with A on top and B below
+/// In language: C = [A; B] creates a matrix with A on top and B below
 pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
     if a.cols() != b.cols() {
         return Err(format!(
@@ -47,8 +51,16 @@ pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
     let mut new_data = Vec::with_capacity(new_rows * new_cols);
 
     // Column-major: copy columns of A then columns of B
-    for col in 0..a.cols() { for row in 0..a.rows() { new_data.push(a.data[row + col * a.rows()]); } }
-    for col in 0..b.cols() { for row in 0..b.rows() { new_data.push(b.data[row + col * b.rows()]); } }
+    for col in 0..a.cols() {
+        for row in 0..a.rows() {
+            new_data.push(a.data[row + col * a.rows()]);
+        }
+    }
+    for col in 0..b.cols() {
+        for row in 0..b.rows() {
+            new_data.push(b.data[row + col * b.rows()]);
+        }
+    }
 
     Tensor::new_2d(new_data, new_rows, new_cols)
 }
@@ -60,7 +72,12 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
     }
 
     // If any operand is a string or string array, perform string-array concatenation
-    let has_str = values.iter().any(|v| matches!(v, Value::String(_) | Value::StringArray(_) | Value::CharArray(_)));
+    let has_str = values.iter().any(|v| {
+        matches!(
+            v,
+            Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+        )
+    });
     if has_str {
         // Normalize all to string-arrays, then horizontal concat by columns
         // Determine row count: if any is string array, its rows; if string scalar or numeric scalar, rows=1
@@ -70,50 +87,107 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
         for v in values {
             match v {
                 Value::StringArray(sa) => {
-                    if rows.is_none() { rows = Some(sa.rows()); } else if rows != Some(sa.rows()) { return Err("string hcat: row mismatch".to_string()); }
+                    if rows.is_none() {
+                        rows = Some(sa.rows());
+                    } else if rows != Some(sa.rows()) {
+                        return Err("string hcat: row mismatch".to_string());
+                    }
                     cols_total += sa.cols();
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa = runmat_builtins::StringArray::new(vec![s.clone()], vec![1,1]).unwrap();
-                    if rows.is_none() { rows = Some(1); } else if rows != Some(1) { return Err("string hcat: row mismatch".to_string()); }
-                    cols_total += 1; blocks.push(sa);
+                    let sa =
+                        runmat_builtins::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    if rows.is_none() {
+                        rows = Some(1);
+                    } else if rows != Some(1) {
+                        return Err("string hcat: row mismatch".to_string());
+                    }
+                    cols_total += 1;
+                    blocks.push(sa);
                 }
                 Value::CharArray(ca) => {
                     // Convert char array to string array by rows
-                    if ca.rows == 0 { continue; }
-                    if rows.is_none() { rows = Some(ca.rows); } else if rows != Some(ca.rows) { return Err("string hcat: row mismatch".to_string()); }
+                    if ca.rows == 0 {
+                        continue;
+                    }
+                    if rows.is_none() {
+                        rows = Some(ca.rows);
+                    } else if rows != Some(ca.rows) {
+                        return Err("string hcat: row mismatch".to_string());
+                    }
                     let mut out: Vec<String> = Vec::with_capacity(ca.rows);
-                    for r in 0..ca.rows { let mut s=String::with_capacity(ca.cols); for c in 0..ca.cols { s.push(ca.data[r*ca.cols + c]); } out.push(s); }
-                    let sa = runmat_builtins::StringArray::new(out, vec![ca.rows,1]).unwrap();
-                    cols_total += 1; blocks.push(sa);
+                    for r in 0..ca.rows {
+                        let mut s = String::with_capacity(ca.cols);
+                        for c in 0..ca.cols {
+                            s.push(ca.data[r * ca.cols + c]);
+                        }
+                        out.push(s);
+                    }
+                    let sa = runmat_builtins::StringArray::new(out, vec![ca.rows, 1]).unwrap();
+                    cols_total += 1;
+                    blocks.push(sa);
                 }
                 Value::Num(n) => {
-                    let sa = runmat_builtins::StringArray::new(vec![n.to_string()], vec![1,1]).unwrap();
-                    if rows.is_none() { rows = Some(1); } else if rows != Some(1) { return Err("string hcat: row mismatch".to_string()); }
-                    cols_total += 1; blocks.push(sa);
+                    let sa =
+                        runmat_builtins::StringArray::new(vec![n.to_string()], vec![1, 1]).unwrap();
+                    if rows.is_none() {
+                        rows = Some(1);
+                    } else if rows != Some(1) {
+                        return Err("string hcat: row mismatch".to_string());
+                    }
+                    cols_total += 1;
+                    blocks.push(sa);
                 }
                 Value::Complex(re, im) => {
-                    let sa = runmat_builtins::StringArray::new(vec![runmat_builtins::Value::Complex(*re, *im).to_string()], vec![1,1]).unwrap();
-                    if rows.is_none() { rows = Some(1); } else if rows != Some(1) { return Err("string hcat: row mismatch".to_string()); }
-                    cols_total += 1; blocks.push(sa);
+                    let sa = runmat_builtins::StringArray::new(
+                        vec![runmat_builtins::Value::Complex(*re, *im).to_string()],
+                        vec![1, 1],
+                    )
+                    .unwrap();
+                    if rows.is_none() {
+                        rows = Some(1);
+                    } else if rows != Some(1) {
+                        return Err("string hcat: row mismatch".to_string());
+                    }
+                    cols_total += 1;
+                    blocks.push(sa);
                 }
                 Value::Int(i) => {
-                    let sa = runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1,1]).unwrap();
-                    if rows.is_none() { rows = Some(1); } else if rows != Some(1) { return Err("string hcat: row mismatch".to_string()); }
-                    cols_total += 1; blocks.push(sa);
+                    let sa =
+                        runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1, 1])
+                            .unwrap();
+                    if rows.is_none() {
+                        rows = Some(1);
+                    } else if rows != Some(1) {
+                        return Err("string hcat: row mismatch".to_string());
+                    }
+                    cols_total += 1;
+                    blocks.push(sa);
                 }
-                Value::Tensor(_) | Value::Cell(_) | _ => return Err(format!("Cannot concatenate value of type {v:?} with string array")),
+                Value::Tensor(_) | Value::Cell(_) | _ => {
+                    return Err(format!(
+                        "Cannot concatenate value of type {v:?} with string array"
+                    ))
+                }
             }
         }
         let rows = rows.unwrap_or(0);
         let mut data: Vec<String> = Vec::with_capacity(rows * cols_total);
-        for cacc in 0..cols_total { let _ = cacc; }
+        for cacc in 0..cols_total {
+            let _ = cacc;
+        }
         // Stitch columns block-by-block in column-major
         for block in &blocks {
-            for c in 0..block.cols() { for r in 0..rows { let idx = r + c*rows; data.push(block.data[idx].clone()); } }
+            for c in 0..block.cols() {
+                for r in 0..rows {
+                    let idx = r + c * rows;
+                    data.push(block.data[idx].clone());
+                }
+            }
         }
-        let sa = runmat_builtins::StringArray::new(data, vec![rows, cols_total]).map_err(|e| format!("string hcat: {e}"))?;
+        let sa = runmat_builtins::StringArray::new(data, vec![rows, cols_total])
+            .map_err(|e| format!("string hcat: {e}"))?;
         return Ok(Value::StringArray(sa));
     }
 
@@ -136,8 +210,13 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
             }
             Value::Complex(re, _im) => {
                 let matrix = Tensor::new_2d(vec![*re], 1, 1)?; // real part in numeric hcat coercion
-                if rows == 0 { rows = 1; } else if rows != 1 { return Err("Cannot concatenate scalar with multi-row matrix".to_string()); }
-                _total_cols += 1; matrices.push(matrix);
+                if rows == 0 {
+                    rows = 1;
+                } else if rows != 1 {
+                    return Err("Cannot concatenate scalar with multi-row matrix".to_string());
+                }
+                _total_cols += 1;
+                matrices.push(matrix);
             }
             Value::Int(i) => {
                 let matrix = Tensor::new_2d(vec![i.to_f64()], 1, 1)?;
@@ -155,7 +234,8 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                 } else if rows != m.rows() {
                     return Err(format!(
                         "Cannot concatenate matrices with different row counts: {} vs {}",
-                        rows, m.rows()
+                        rows,
+                        m.rows()
                     ));
                 }
                 _total_cols += m.cols();
@@ -181,7 +261,12 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
     }
 
     // If any operand is a string or string array, perform string-array vertical concatenation by stacking rows
-    let has_str = values.iter().any(|v| matches!(v, Value::String(_) | Value::StringArray(_) | Value::CharArray(_)));
+    let has_str = values.iter().any(|v| {
+        matches!(
+            v,
+            Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+        )
+    });
     if has_str {
         // Normalize to string-arrays; for scalars, treat as 1x1
         let mut cols: Option<usize> = None;
@@ -190,27 +275,96 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
         for v in values {
             match v {
                 Value::StringArray(sa) => {
-                    if cols.is_none() { cols = Some(sa.cols()); } else if cols != Some(sa.cols()) { return Err("string vcat: column mismatch".to_string()); }
-                    rows_total += sa.rows(); blocks.push(sa.clone());
+                    if cols.is_none() {
+                        cols = Some(sa.cols());
+                    } else if cols != Some(sa.cols()) {
+                        return Err("string vcat: column mismatch".to_string());
+                    }
+                    rows_total += sa.rows();
+                    blocks.push(sa.clone());
                 }
-                Value::String(s) => { let sa = runmat_builtins::StringArray::new(vec![s.clone()], vec![1,1]).unwrap(); rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa); }
+                Value::String(s) => {
+                    let sa =
+                        runmat_builtins::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    rows_total += 1;
+                    if cols.is_none() {
+                        cols = Some(1);
+                    } else if cols != Some(1) {
+                        return Err("string vcat: column mismatch".to_string());
+                    }
+                    blocks.push(sa);
+                }
                 Value::CharArray(ca) => {
-                    if ca.cols == 0 { continue; }
+                    if ca.cols == 0 {
+                        continue;
+                    }
                     let out: String = ca.data.iter().collect();
-                    let sa = runmat_builtins::StringArray::new(vec![out], vec![1,1]).unwrap();
-                    rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa);
+                    let sa = runmat_builtins::StringArray::new(vec![out], vec![1, 1]).unwrap();
+                    rows_total += 1;
+                    if cols.is_none() {
+                        cols = Some(1);
+                    } else if cols != Some(1) {
+                        return Err("string vcat: column mismatch".to_string());
+                    }
+                    blocks.push(sa);
                 }
-                Value::Num(n) => { let sa = runmat_builtins::StringArray::new(vec![n.to_string()], vec![1,1]).unwrap(); rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa); }
-                Value::Complex(re, im) => { let sa = runmat_builtins::StringArray::new(vec![runmat_builtins::Value::Complex(*re, *im).to_string()], vec![1,1]).unwrap(); rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa); }
-                Value::Int(i) => { let sa = runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1,1]).unwrap(); rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa); }
-                _ => return Err(format!("Cannot concatenate value of type {v:?} with string array")),
+                Value::Num(n) => {
+                    let sa =
+                        runmat_builtins::StringArray::new(vec![n.to_string()], vec![1, 1]).unwrap();
+                    rows_total += 1;
+                    if cols.is_none() {
+                        cols = Some(1);
+                    } else if cols != Some(1) {
+                        return Err("string vcat: column mismatch".to_string());
+                    }
+                    blocks.push(sa);
+                }
+                Value::Complex(re, im) => {
+                    let sa = runmat_builtins::StringArray::new(
+                        vec![runmat_builtins::Value::Complex(*re, *im).to_string()],
+                        vec![1, 1],
+                    )
+                    .unwrap();
+                    rows_total += 1;
+                    if cols.is_none() {
+                        cols = Some(1);
+                    } else if cols != Some(1) {
+                        return Err("string vcat: column mismatch".to_string());
+                    }
+                    blocks.push(sa);
+                }
+                Value::Int(i) => {
+                    let sa =
+                        runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1, 1])
+                            .unwrap();
+                    rows_total += 1;
+                    if cols.is_none() {
+                        cols = Some(1);
+                    } else if cols != Some(1) {
+                        return Err("string vcat: column mismatch".to_string());
+                    }
+                    blocks.push(sa);
+                }
+                _ => {
+                    return Err(format!(
+                        "Cannot concatenate value of type {v:?} with string array"
+                    ))
+                }
             }
         }
         let cols = cols.unwrap_or(0);
         let mut data: Vec<String> = Vec::with_capacity(rows_total * cols);
         // Stack rows: copy columns for each block into data
-        for block in &blocks { for c in 0..cols { for r in 0..block.rows() { let idx = r + c*block.rows(); data.push(block.data[idx].clone()); } } }
-        let sa = runmat_builtins::StringArray::new(data, vec![rows_total, cols]).map_err(|e| format!("string vcat: {e}"))?;
+        for block in &blocks {
+            for c in 0..cols {
+                for r in 0..block.rows() {
+                    let idx = r + c * block.rows();
+                    data.push(block.data[idx].clone());
+                }
+            }
+        }
+        let sa = runmat_builtins::StringArray::new(data, vec![rows_total, cols])
+            .map_err(|e| format!("string vcat: {e}"))?;
         return Ok(Value::StringArray(sa));
     }
 
@@ -233,8 +387,13 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
             }
             Value::Complex(re, _im) => {
                 let matrix = Tensor::new_2d(vec![*re], 1, 1)?;
-                if cols == 0 { cols = 1; } else if cols != 1 { return Err("Cannot concatenate scalar with multi-column matrix".to_string()); }
-                _total_rows += 1; matrices.push(matrix);
+                if cols == 0 {
+                    cols = 1;
+                } else if cols != 1 {
+                    return Err("Cannot concatenate scalar with multi-column matrix".to_string());
+                }
+                _total_rows += 1;
+                matrices.push(matrix);
             }
             Value::Int(i) => {
                 let matrix = Tensor::new_2d(vec![i.to_f64()], 1, 1)?;
@@ -252,7 +411,8 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                 } else if cols != m.cols() {
                     return Err(format!(
                         "Cannot concatenate matrices with different column counts: {} vs {}",
-                        cols, m.cols()
+                        cols,
+                        m.cols()
                     ));
                 }
                 _total_rows += m.rows();
@@ -281,12 +441,22 @@ pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> Result<Value, String> {
     // Validate rectangularity
     let mut all_cols_equal = true;
     let cols = rows[0].len();
-    for r in rows { if r.len() != cols { all_cols_equal = false; break; } }
-    if !all_cols_equal { return Err("Matrix construction: inconsistent number of columns in rows".to_string()); }
+    for r in rows {
+        if r.len() != cols {
+            all_cols_equal = false;
+            break;
+        }
+    }
+    if !all_cols_equal {
+        return Err("Matrix construction: inconsistent number of columns in rows".to_string());
+    }
 
     // First, concatenate each row horizontally
     let mut row_matrices: Vec<Value> = Vec::with_capacity(rows.len());
-    for row in rows { let row_result = hcat_values(row)?; row_matrices.push(row_result); }
+    for row in rows {
+        let row_result = hcat_values(row)?;
+        row_matrices.push(row_result);
+    }
 
     // Then concatenate all rows vertically
     match row_matrices.len() {

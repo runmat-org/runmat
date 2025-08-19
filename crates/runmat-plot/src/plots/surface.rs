@@ -1,6 +1,6 @@
 //! 3D surface plot implementation
 //!
-//! High-performance GPU-accelerated 3D surface rendering with MATLAB-compatible styling.
+//! High-performance GPU-accelerated 3D surface rendering.
 
 use crate::core::{BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
 use glam::{Vec3, Vec4};

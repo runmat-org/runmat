@@ -5,7 +5,8 @@ use std::convert::TryInto;
 
 #[test]
 fn logical_operators_and_short_circuit() {
-    let ast = parse("a = 0 && (1/0); b = 1 || (1/0); c = 0 & 5; d = 0 | 5; e = ~0; f = ~5;").unwrap();
+    let ast =
+        parse("a = 0 && (1/0); b = 1 || (1/0); c = 0 & 5; d = 0 | 5; e = ~0; f = ~5;").unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let a: f64 = (&vars[0]).try_into().unwrap();
@@ -21,5 +22,3 @@ fn logical_operators_and_short_circuit() {
     assert_eq!(e, 1.0);
     assert_eq!(f, 0.0);
 }
-
-

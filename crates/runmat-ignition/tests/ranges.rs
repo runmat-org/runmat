@@ -12,7 +12,9 @@ fn simple_range() {
         assert_eq!(t.rows(), 1);
         assert_eq!(t.cols(), 4);
         assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
-    } else { panic!("expected tensor"); }
+    } else {
+        panic!("expected tensor");
+    }
 }
 
 #[test]
@@ -22,7 +24,9 @@ fn range_with_step() {
     let vars = execute(&hir).unwrap();
     if let Value::Tensor(t) = &vars[0] {
         assert_eq!(t.data, vec![1.0, 3.0, 5.0]);
-    } else { panic!("expected tensor"); }
+    } else {
+        panic!("expected tensor");
+    }
 }
 
 #[test]
@@ -33,7 +37,7 @@ fn descending_range() {
     let vars = execute(&hir).unwrap();
     if let Value::Tensor(t) = &vars[0] {
         assert_eq!(t.data, vec![5.0, 3.0, 1.0]);
-    } else { panic!("expected tensor"); }
+    } else {
+        panic!("expected tensor");
+    }
 }
-
-

@@ -16,5 +16,3 @@ fn transpose_then_single_quoted_string_after_semicolon() {
         vec![Token::Ident, Token::Transpose, Token::Semicolon, Token::Str]
     );
 }
-
-

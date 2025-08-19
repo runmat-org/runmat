@@ -1,12 +1,6 @@
-RunMat GC
-=========
+# RunMat GC
 
-Overview
---------
-`runmat-gc` implements a production-oriented, generational mark-and-sweep garbage collector for RunMat. 
-The design prioritizes correctness and predictable semantics for a dynamic language runtime, while 
-keeping performance and simplicity at the forefront. It exposes a stable, handle-based API via 
-`GcPtr<T>` to avoid raw-pointer hazards and to keep integration with the interpreter straightforward.
+`runmat-gc` implements a production-oriented, generational mark-and-sweep garbage collector for RunMat. The design prioritizes correctness and predictable semantics for a dynamic language runtime, while keeping performance and simplicity at the forefront. It exposes a stable, handle-based API via `GcPtr<T>` to avoid raw-pointer hazards and to keep integration with the interpreter straightforward.
 
 Key properties:
 - Non-moving, generational allocation by default (young/old generations)
@@ -17,8 +11,8 @@ Key properties:
 - Stable handle type (`GcPtr<Value>`) re-exported from `runmat-gc-api`
 
 
-Architecture
-------------
+## Architecture
+
 The GC is composed of the following subsystems:
 
 - HighPerformanceGC: Top-level façade that unifies configuration, allocator, collector, roots, 
@@ -41,11 +35,11 @@ The GC is composed of the following subsystems:
   etc.). `GcConfig` governs thresholds (minor trigger ratio, young generation sizing, and more).
 
 
-Handle model (`GcPtr`)
-----------------------
+## Handle model (`GcPtr`)
+
 `GcPtr<T>` is a thin, stable handle to GC-managed objects. In the current implementation:
 
-- Allocation is non-moving, so the pointer remains stable for the object’s lifetime.
+- Allocation is non-moving, so the pointer remains stable for the object's lifetime.
 - `GcPtr<T>` implements `Deref`/`DerefMut` to provide `&T`/`&mut T`. The only `unsafe` required by 
   the system lives inside those trait impls; user code should not write any `unsafe` for dereferencing.
 - `GcPtr<T>` is `Copy + Clone`-like via a trivial bitwise copy (we implement `Clone`), so APIs that need 
@@ -56,8 +50,8 @@ Note on moving/compaction: If a future configuration introduces object moving/co
 forwarding/indirection layer so that existing `GcPtr` values remain valid without changing embeddings.
 
 
-Roots
------
+## Roots
+
 The collector discovers live objects by scanning registered roots. The system supports:
 
 - Stack roots: The interpreter maintains a vector of live `Value` slots; a VM-specific adapter 
@@ -70,16 +64,16 @@ The collector discovers live objects by scanning registered roots. The system su
 During collection, the GC merges explicit roots with remembered-set derived minor roots.
 
 
-Write barriers and remembered set
----------------------------------
+## Write barriers and remembered set
+
 A write barrier must run whenever an old-generation object gets a reference to a young-generation object. 
 The VM calls `gc_record_write(old, new)` at mutation sites (e.g., cell element writes, struct field 
 updates, object property updates). The barrier system stores card/slot metadata in `WriteBarrierManager` 
 so that minor collections only scan a compact set of remembered locations rather than the entire old gen.
 
 
-Generational mark-and-sweep
----------------------------
+## Generational mark-and-sweep
+
 Collections come in two flavors:
 
 - Minor (young-only):
@@ -89,14 +83,14 @@ Collections come in two flavors:
 
 - Major (all generations): Mark & sweep across all generations; clears remembered-set state.
 
-Promotion policy
-----------------
+## Promotion policy
+
 The allocator tracks survivor counts and performs promotion once an object survives a configurable 
 number of minor GCs. Promotion stats are reported via `GcStats` to tune policies.
 
 
-Configuration and statistics
-----------------------------
+## Configuration and statistics
+
 `GcConfig` parameters:
 - `young_generation_size`: target size for young generation (bytes)
 - `minor_gc_threshold`: utilization ratio to trigger a minor GC
@@ -108,8 +102,8 @@ Configuration and statistics
 - Other allocator/collector internal counters may be surfaced as needed
 
 
-Public API (selected)
----------------------
+## Public API (selected)
+
 - Allocation: `gc_allocate(value: Value) -> Result<GcPtr<Value>>`
 - Collection: `gc_collect_minor()`, `gc_collect_major()`
 - Roots: `gc_add_root(handle: GcPtr<Value>)`, `gc_remove_root(handle: GcPtr<Value>)`
@@ -130,8 +124,8 @@ gc_remove_root(v).unwrap();          // unpin when done
 ```
 
 
-Safety model
-------------
+## Safety model
+
 - The only `unsafe` lives inside `GcPtr<T>` deref implementations. All external usage goes through 
   safe APIs.
 - Non-moving allocation makes `GcPtr` addresses stable. The VM and runtime can store them without fear 
@@ -145,8 +139,8 @@ Safety model
   - Object property writes
 
 
-Testing
--------
+## Testing
+
 The repository includes a broad test suite:
 - Allocator/collector unit tests: allocation, freeing, promotion, stats accuracy
 - Stress tests: large allocation cycles, nested cells/structs, interpreter integration under load
@@ -159,8 +153,8 @@ cargo test --workspace -- --test-threads=1
 ```
 
 
-Integration with the interpreter (Ignition)
--------------------------------------------
+## Integration with the interpreter (Ignition)
+
 - The VM uses `GcPtr<Value>` throughout aggregates (e.g., `CellArray` stores `Vec<GcPtr<Value>>`).
 - All expansion and slice-assignment paths dereference `GcPtr` to read `Value` and write through handles 
   on mutation, with barrier calls at each write site.
@@ -168,8 +162,8 @@ Integration with the interpreter (Ignition)
   execution.
 
 
-Current status
---------------
+## Current status
+
 Implemented:
 - Generational allocator with promotion accounting
 - Mark-and-sweep collector over young/all generations
@@ -179,8 +173,8 @@ Implemented:
 - Integration in the interpreter and runtime, with passing test suites
 
 
-Future work (optimizations and completeness)
---------------------------------------------
+## Future work (optimizations and completeness)
+
 The following items are not required for correctness today but are desirable for performance, 
 observability, and long-run robustness:
 
@@ -193,9 +187,7 @@ observability, and long-run robustness:
 - Configurable card sizes / RS structures for high-churn workloads
 
 
-Contributing
-------------
+## Contributing
+
 Contributions that improve performance, observability, or add new tests are welcome. Please keep changes 
 focused and include benchmarks or tests where applicable.
-
-

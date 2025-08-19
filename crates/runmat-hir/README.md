@@ -78,36 +78,36 @@ High-level Intermediate Representation for MATLAB code. HIR is the semantic hub 
 
 Two complementary passes exist:
 
-1) Inter‑procedural return summaries
+1) Inter-procedural return summaries
 
 - `infer_function_output_types(&HirProgram) -> HashMap<String, Vec<Type>>`
   - Gathers all function names (top-level and class methods)
-  - Seeds summaries from each function’s own exits/fallthrough, then iterates to a small fixed point (cap at 3 iters)
+  - Seeds summaries from each function's own exits/fallthrough, then iterates to a small fixed point (cap at 3 iters)
   - Merges types at joins; Unknown ⊔ T = T; otherwise unify
   - Uses an internal `analyze_stmts(outputs, …, func_returns)` whose env joins propagate return types
 
-2) Per‑function variable environments
+2) Per-function variable environments
 
 - `infer_function_variable_types(&HirProgram) -> HashMap<String, HashMap<VarId, Type>`
   - Similar dataflow that produces a final environment for each function
   - Uses return summaries from (1) to type `FuncCall`
-  - Includes a simple callsite fallback for direct callees: when a callee’s summary is missing/Unknown, a single-pass analysis of the callee body (seeding parameter types conservatively) infers direct output assignments. This stabilizes per-position types for `[a,b]=f(...)` at callers.
+  - Includes a simple callsite fallback for direct callees: when a callee's summary is missing/Unknown, a single-pass analysis of the callee body (seeding parameter types conservatively) infers direct output assignments. This stabilizes per-position types for `[a,b]=f(...)` at callers.
 
-### Struct‑field flow inference
+### Struct-field flow inference
 
 - HIR uses `Type::Struct { known_fields: Option<Vec<String>> }` to conservatively track observed fields on variables.
 - The analysis refines struct knowledge in two ways:
   - Writes: `s.field = expr` marks `s` as Struct and adds `"field"` to `known_fields`.
-  - Conditions (then‑branch refinement): detect any of the following and add asserted fields:
+  - Conditions (then-branch refinement): detect any of the following and add asserted fields:
     - `isfield(s, 'x')`
     - `ismember('x', fieldnames(s))` or `ismember(fieldnames(s), 'x')`
     - `strcmp(fieldnames(s), 'x')` / `strcmpi(…)`, including `any(strcmp(…))` or `all(strcmp(…))`
     - Conjunctions using `&&` or `&` are traversed; negations are ignored (no refinement)
-- Refinements are applied to the then‑branch env only and merged back at joins using `Type::unify` for Structs.
+- Refinements are applied to the then-branch env only and merged back at joins using `Type::unify` for Structs.
 
 ## Multi-assign typing
 
-- `[a,b] = f(...)` is typed per-position using the callee’s return summary when available.
+- `[a,b] = f(...)` is typed per-position using the callee's return summary when available.
 - If a summary is incomplete or missing, a simple fallback (single-pass over the callee) infers direct assignments to outputs and fills Unknowns conservatively.
 - Mixed forms like `[~,b] = f(...)` are handled by storing `None` in the LHS vector and skipping the slot.
 
@@ -124,16 +124,16 @@ Two complementary passes exist:
 
 ## Public entry points
 
-- `lower(&AstProgram) -> Result<HirProgram, String>`: lowers AST, runs return‑summary inference (for seeding), then validates classes
+- `lower(&AstProgram) -> Result<HirProgram, String>`: lowers AST, runs return-summary inference (for seeding), then validates classes
 - `lower_with_context` / `lower_with_full_context`: lowering for REPL with preexisting variables/functions
 - Validation helpers: `validate_classdefs`, `collect_imports`, `normalize_imports`, `validate_imports`
 - Inference helpers: `infer_function_output_types`, `infer_function_variable_types`
 
 ## Testing
 
-- Mirrors parser coverage for syntax constructs; adds HIR‑specific tests:
-  - L‑value lowering (member/paren/brace), multi‑assign and `~` placeholder
-  - Control‑flow joins across if/elseif/else, switch/otherwise, while/for loops, try/catch
+- Mirrors parser coverage for syntax constructs; adds HIR-specific tests:
+  - L-value lowering (member/paren/brace), multi-assign and `~` placeholder
+  - Control-flow joins across if/elseif/else, switch/otherwise, while/for loops, try/catch
   - Class attribute validation (invalid combos, duplicates, conflicts)
   - Import normalization/ambiguity checks
   - Fuzz seeds for lowering edge cases
@@ -141,13 +141,13 @@ Two complementary passes exist:
 ## Notes and differences from MATLAB
 
 - MATLAB is dynamically typed; HIR attaches conservative static types for optimization only. Programs acceptable to MATLAB remain acceptable; Unknown is used when insufficient info.
-- Column‑major Tensor semantics are preserved throughout indexing/slicing/shape operations.
+- Column-major Tensor semantics are preserved throughout indexing/slicing/shape operations.
 - Class blocks are carried structurally; access/attribute validations run during lowering; advanced OOP attributes may have future passes.
 - Metaclass expressions are represented explicitly; postfix static member/method usage is compiled appropriately downstream.
 
 ## Roadmap / future enhancements
 
-- Inter‑procedural propagation of struct field knowledge across calls
+- Inter-procedural propagation of struct field knowledge across calls
 - Deeper OOP attribute validations (Hidden/Constant/Transient interplay; static/instance access rules)
 - Richer import resolution summaries for static method/property lookup in the HIR stage
 - Shape reasoning improvements for Tensor broadcasting and indexing
@@ -155,8 +155,8 @@ Two complementary passes exist:
 ## Remaining edges
 
 - Arguments metadata: carry `arguments ... end` declared names/constraints (when available from parser) and surface to runtime validation. Current parser accepts names; HIR will add optional metadata structs without breaking format.
-- Multi‑LHS validation: parser structurally restricts to identifiers/`~`; HIR enforces shape semantics at runtime. Additional unit tests exist; no further work is blocking.
-- Globals/Persistents: cross‑unit name binding is wired; additional tests around nested functions/closures will be added.
+- Multi-LHS validation: parser structurally restricts to identifiers/`~`; HIR enforces shape semantics at runtime. Additional unit tests exist; no further work is blocking.
+- Globals/Persistents: cross-unit name binding is wired; additional tests around nested functions/closures will be added.
 
 ## Minimal example
 
@@ -179,4 +179,4 @@ Function { name: "f", params: [s], outputs: [y], ... }
   Assign(Var(y), FuncCall("g", [Member(Var(s), "x")]))
 ```
 
-Return summaries infer type of `g`’s first output if available; variable analysis refines `s` as a Struct with fields `{x,y}` along the then‑branch.
+Return summaries infer type of `g`'s first output if available; variable analysis refines `s` as a Struct with fields `{x,y}` along the then-branch.

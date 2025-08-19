@@ -20,5 +20,3 @@ fn anonymous_function_and_handle_parse() {
         _ => panic!("expected function handle expr stmt"),
     }
 }
-
-

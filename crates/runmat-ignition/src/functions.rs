@@ -1,6 +1,6 @@
 use crate::instr::Instr;
-use runmat_hir::{HirStmt, VarId};
 use runmat_builtins::Value;
+use runmat_hir::{HirStmt, VarId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

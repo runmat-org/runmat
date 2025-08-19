@@ -20,5 +20,3 @@ fn multi_assign_parses() {
         _ => panic!("expected multi-assign"),
     }
 }
-
-

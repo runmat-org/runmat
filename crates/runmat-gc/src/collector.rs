@@ -57,12 +57,16 @@ impl MarkSweepCollector {
             if !self.marked_objects.lock().contains(&addr) {
                 collected += 1;
                 // Drop the value in place to run destructors if any
-                unsafe { std::ptr::drop_in_place(ptr as *mut Value); }
+                unsafe {
+                    std::ptr::drop_in_place(ptr as *mut Value);
+                }
                 // Space remains reserved; a free-list compactor can reclaim later
             } else {
                 // Survivor: keep; optional policy to mark for promotion
                 allocator.young_mark_survivor(ptr);
-                if allocator.note_survivor_and_maybe_promote(ptr) { promoted_this_cycle += 1; }
+                if allocator.note_survivor_and_maybe_promote(ptr) {
+                    promoted_this_cycle += 1;
+                }
                 any_survivor = true;
             }
         }
@@ -79,7 +83,9 @@ impl MarkSweepCollector {
         self.total_objects_collected += collected;
 
         let duration = start_time.elapsed();
-        if promoted_this_cycle > 0 { stats.record_promotion(promoted_this_cycle); }
+        if promoted_this_cycle > 0 {
+            stats.record_promotion(promoted_this_cycle);
+        }
         log::debug!("Young generation collection completed: {collected} collected, {promoted_this_cycle} promoted in {duration:?}");
 
         Ok(collected)
@@ -164,13 +170,19 @@ impl MarkSweepCollector {
             }
             Value::HandleObject(h) => {
                 let tgt = h.target.clone();
-                if !tgt.is_null() { self.mark_object(tgt, max_generation)?; }
+                if !tgt.is_null() {
+                    self.mark_object(tgt, max_generation)?;
+                }
             }
             Value::Listener(l) => {
                 let tgt = l.target.clone();
-                if !tgt.is_null() { self.mark_object(tgt, max_generation)?; }
+                if !tgt.is_null() {
+                    self.mark_object(tgt, max_generation)?;
+                }
                 let cb = l.callback.clone();
-                if !cb.is_null() { self.mark_object(cb, max_generation)?; }
+                if !cb.is_null() {
+                    self.mark_object(cb, max_generation)?;
+                }
             }
             Value::Tensor(_) | Value::ComplexTensor(_) => {
                 // Matrices don't contain references to other GC objects
@@ -185,28 +197,34 @@ impl MarkSweepCollector {
             Value::StringArray(_sa) => {
                 // String arrays hold owned Strings; no nested GC Values
             }
-            Value::Int(_) | Value::Num(_) | Value::Complex(_,_) | Value::Bool(_) | Value::LogicalArray(_) => {
+            Value::Int(_)
+            | Value::Num(_)
+            | Value::Complex(_, _)
+            | Value::Bool(_)
+            | Value::LogicalArray(_) => {
                 // Primitive values don't contain references
             }
-            Value::FunctionHandle(_) => { }
-            Value::ClassRef(_) => { }
+            Value::FunctionHandle(_) => {}
+            Value::ClassRef(_) => {}
             Value::Closure(c) => {
-                for v in &c.captures { self.mark_value_contents(v, max_generation)?; }
+                for v in &c.captures {
+                    self.mark_value_contents(v, max_generation)?;
+                }
             }
             Value::Object(obj) => {
-                for (_k, v) in &obj.properties {
+                for v in obj.properties.values() {
                     self.mark_value_contents(v, max_generation)?;
                 }
             }
             Value::Struct(st) => {
-                for (_k, v) in &st.fields {
+                for v in st.fields.values() {
                     self.mark_value_contents(v, max_generation)?;
                 }
             }
             Value::MException(_e) => {
                 // Contains only strings; no GC references
             }
-            Value::CharArray(_ca) => { }
+            Value::CharArray(_ca) => {}
         }
 
         Ok(())
@@ -223,24 +241,38 @@ impl MarkSweepCollector {
             }
             Value::HandleObject(h) => {
                 let tgt = h.target.clone();
-                if !tgt.is_null() { self.mark_object(tgt, _max_generation)?; }
+                if !tgt.is_null() {
+                    self.mark_object(tgt, _max_generation)?;
+                }
             }
             Value::Listener(l) => {
                 let tgt = l.target.clone();
-                if !tgt.is_null() { self.mark_object(tgt, _max_generation)?; }
+                if !tgt.is_null() {
+                    self.mark_object(tgt, _max_generation)?;
+                }
                 let cb = l.callback.clone();
-                if !cb.is_null() { self.mark_object(cb, _max_generation)?; }
+                if !cb.is_null() {
+                    self.mark_object(cb, _max_generation)?;
+                }
             }
             Value::StringArray(_sa) => {}
             Value::GpuTensor(_) => {}
             Value::FunctionHandle(_) => {}
             Value::ClassRef(_) => {}
-            Value::Closure(c) => { for v in &c.captures { self.mark_value_contents(v, _max_generation)?; } }
+            Value::Closure(c) => {
+                for v in &c.captures {
+                    self.mark_value_contents(v, _max_generation)?;
+                }
+            }
             Value::Object(obj) => {
-                for (_k, v) in &obj.properties { self.mark_value_contents(v, _max_generation)?; }
+                for v in obj.properties.values() {
+                    self.mark_value_contents(v, _max_generation)?;
+                }
             }
             Value::Struct(st) => {
-                for (_k, v) in &st.fields { self.mark_value_contents(v, _max_generation)?; }
+                for v in st.fields.values() {
+                    self.mark_value_contents(v, _max_generation)?;
+                }
             }
             Value::MException(_e) => {}
             Value::CharArray(_ca) => {}

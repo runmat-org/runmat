@@ -1,4 +1,4 @@
-use runmat_builtins::{builtin_functions, Tensor, Value, CellArray};
+use runmat_builtins::{builtin_functions, CellArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 #[runtime_builtin(name = "add")]
@@ -80,19 +80,25 @@ fn test_matrix_operations() {
 
 #[test]
 fn test_cell_arrays() {
-    let cell = Value::Cell(CellArray::new(
-        vec![
-            Value::Int(runmat_builtins::IntValue::I32(1)),
-            Value::String("test".to_string()),
-            Value::Bool(false),
-        ],
-        1,
-        3,
-    ).unwrap());
+    let cell = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::Int(runmat_builtins::IntValue::I32(1)),
+                Value::String("test".to_string()),
+                Value::Bool(false),
+            ],
+            1,
+            3,
+        )
+        .unwrap(),
+    );
 
     if let Value::Cell(contents) = cell {
         assert_eq!(contents.data.len(), 3);
-        assert_eq!(&*contents.data[0], &Value::Int(runmat_builtins::IntValue::I32(1)));
+        assert_eq!(
+            &*contents.data[0],
+            &Value::Int(runmat_builtins::IntValue::I32(1))
+        );
         assert_eq!(&*contents.data[1], &Value::String("test".to_string()));
         assert_eq!(&*contents.data[2], &Value::Bool(false));
     } else {

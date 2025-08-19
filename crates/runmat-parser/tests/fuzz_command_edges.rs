@@ -10,7 +10,10 @@ fn command_form_with_escaped_double_quotes_and_end() {
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0], Expr::String(ref s) if s.contains("he said \"\"hi\"\"")));
             // 'end' allowed as literal identifier in command-form args
-            assert!(matches!(args[1], Expr::Ident(ref s) if s == "end") || matches!(args[1], Expr::EndKeyword));
+            assert!(
+                matches!(args[1], Expr::Ident(ref s) if s == "end")
+                    || matches!(args[1], Expr::EndKeyword)
+            );
         }
         _ => panic!("expected command form call"),
     }
@@ -25,7 +28,10 @@ fn command_form_with_ellipsis_and_end_then_ident() {
             assert_eq!(name, "foo");
             assert_eq!(args.len(), 3);
             assert!(matches!(args[0], Expr::String(_)));
-            assert!(matches!(args[1], Expr::Ident(ref s) if s == "end") || matches!(args[1], Expr::EndKeyword));
+            assert!(
+                matches!(args[1], Expr::Ident(ref s) if s == "end")
+                    || matches!(args[1], Expr::EndKeyword)
+            );
             assert!(matches!(args[2], Expr::Ident(ref s) if s == "bar"));
         }
         _ => panic!("expected command form call"),
@@ -75,5 +81,3 @@ fn stress_dynamic_member_with_surrounding_tokens_errors() {
     let res3 = parse("cmd ...\n s.(x)");
     assert!(res3.is_err());
 }
-
-

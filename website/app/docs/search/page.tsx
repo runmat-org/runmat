@@ -4,7 +4,7 @@ import { DocsSearchResults } from '@/components/DocsSearchResults';
 export const dynamic = 'force-static';
 
 export const metadata: Metadata = {
-  title: 'Search – RunMat Docs',
+  title: 'Search - RunMat Docs',
   description: 'Search the RunMat documentation with fuzzy matching and highlighted results.',
 };
 

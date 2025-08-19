@@ -18,5 +18,3 @@ fn only_placeholders_are_allowed_syntax() {
     // '[~,~] = f(x)' should parse successfully
     assert!(parse("[~,~] = f(x)").is_ok());
 }
-
-

@@ -43,8 +43,11 @@ fn elementwise_mul_div_pow_tokens() {
     let src = ".* ./ .\\ .^";
     assert_eq!(
         tokenize(src),
-        vec![Token::DotStar, Token::DotSlash, Token::DotBackslash, Token::DotCaret]
+        vec![
+            Token::DotStar,
+            Token::DotSlash,
+            Token::DotBackslash,
+            Token::DotCaret
+        ]
     );
 }
-
-

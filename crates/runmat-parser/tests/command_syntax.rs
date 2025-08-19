@@ -38,8 +38,10 @@ fn command_form_with_end_token_as_arg() {
             assert_eq!(name, "foo");
             assert_eq!(args.len(), 2);
             // We currently parse end as EndKeyword only inside expression contexts; here it remains Ident("end")
-            assert!(matches!(args[0], Expr::Ident(ref s) if s == "end")
-                || matches!(args[0], Expr::EndKeyword));
+            assert!(
+                matches!(args[0], Expr::Ident(ref s) if s == "end")
+                    || matches!(args[0], Expr::EndKeyword)
+            );
             assert!(matches!(args[1], Expr::Ident(ref s) if s == "bar"));
         }
         _ => panic!("expected command form call"),
@@ -59,5 +61,3 @@ fn command_syntax_with_numbers_and_strings() {
         _ => panic!("expected command with number and string args"),
     }
 }
-
-

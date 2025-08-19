@@ -1,6 +1,6 @@
 # Instruction Set (Instr)
 
-This document describes each opcode’s semantics, stack/locals effects, and failure modes. It complements the high‑level README.
+This document describes each opcode's semantics, stack/locals effects, and failure modes. It complements the high-level README.
 
 Notation:
 - Stack top is on the right. `[...]` shows stack content before → after.
@@ -61,10 +61,10 @@ Stores (scatter)
 - StoreIndex(n): [base, i1..in, rhs] → [updated_base]
 - StoreIndexCell(n): [base, i1..in, rhs] → [updated_base]
 - StoreSlice(dims, numeric_count, colon_mask, end_mask): [base, numeric..., rhs] → [updated_base]
-- StoreSliceEx(dims, numeric_count, colon_mask, end_mask, end_offsets): like StoreSlice with end‑k offsets
+- StoreSliceEx(dims, numeric_count, colon_mask, end_mask, end_offsets): like StoreSlice with end-k offsets
 - StoreSlice1DRangeEnd { has_step, offset }: [base, start[,step], rhs] → [updated_base]
 
-Packing and Comma‑lists
+Packing and Comma-lists
 -----------------------
 - PackToRow(n): [v1, ..., vn] → [Tensor 1×n]
 - PackToCol(n): [v1, ..., vn] → [Tensor n×1]
@@ -75,7 +75,7 @@ Calls and Expansion
 - CallBuiltinExpandLast(name, fixed_argc, num_indices)
 - CallBuiltinExpandAt(name, before_count, num_indices, after_count)
 - CallBuiltinExpandMulti(name, specs: Vec<ArgSpec>)
-- CallFunction(name, argc): compile‑time resolved user function
+- CallFunction(name, argc): compile-time resolved user function
 - CallFunctionMulti(name, argc, outc): push `outc` return values
 - CallFunctionExpandAt(name, before_count, num_indices, after_count)
 - CallFunctionExpandMulti(name, specs)
@@ -109,5 +109,5 @@ All runtime failures are surfaced via mex identifiers (e.g., `MATLAB:IndexOutOfB
 
 Lowering notes
 --------------
-See `compiler.rs` for how high‑level constructs map to opcodes (e.g., ranges with end arithmetic, multi‑assign, 
+See `compiler.rs` for how high-level constructs map to opcodes (e.g., ranges with end arithmetic, multi-assign, 
 object/property access, feval/expansion composition).

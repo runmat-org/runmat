@@ -38,8 +38,17 @@ fn infer_variable_types_env() {
     let envs = infer_function_variable_types(&prog);
     let env = envs.get("q").unwrap();
     // y should be Num after joins; x remains Unknown
-    let y_id = if let runmat_hir::HirStmt::Function { outputs, .. } = &prog.body[0] { outputs[0] } else { panic!("expected function") };
-    assert_eq!(env.get(&y_id).cloned().unwrap_or(runmat_builtins::Type::Unknown), runmat_builtins::Type::Num);
+    let y_id = if let runmat_hir::HirStmt::Function { outputs, .. } = &prog.body[0] {
+        outputs[0]
+    } else {
+        panic!("expected function")
+    };
+    assert_eq!(
+        env.get(&y_id)
+            .cloned()
+            .unwrap_or(runmat_builtins::Type::Unknown),
+        runmat_builtins::Type::Num
+    );
 }
 
 #[test]
@@ -71,7 +80,9 @@ fn struct_flow_from_string_array_and_cell() {
     let envs = infer_function_variable_types(&prog);
     let env = envs.get("g").unwrap();
     // We cannot get VarId of s directly; ensure types map includes at least one Struct
-    let has_struct = env.values().any(|t| matches!(t, runmat_builtins::Type::Struct { .. }));
+    let has_struct = env
+        .values()
+        .any(|t| matches!(t, runmat_builtins::Type::Struct { .. }));
     assert!(has_struct);
 }
 
@@ -84,18 +95,24 @@ fn multi_lhs_resolution_from_summary() {
     let envs = infer_function_variable_types(&prog);
     let env = envs.get("caller").unwrap();
     // Find VarIds for u and v by scanning Hir
-    let mut u_id = None; let mut v_id = None;
+    let mut u_id = None;
+    let mut v_id = None;
     if let runmat_hir::HirStmt::Function { body, .. } = &prog.body[1] {
         for s in body {
             if let runmat_hir::HirStmt::MultiAssign(vars, _, _) = s {
-                u_id = vars[0]; v_id = vars[1];
+                u_id = vars[0];
+                v_id = vars[1];
             }
         }
     }
-    let u_ty = env.get(&u_id.unwrap()).cloned().unwrap_or(runmat_builtins::Type::Unknown);
-    let v_ty = env.get(&v_id.unwrap()).cloned().unwrap_or(runmat_builtins::Type::Unknown);
+    let u_ty = env
+        .get(&u_id.unwrap())
+        .cloned()
+        .unwrap_or(runmat_builtins::Type::Unknown);
+    let v_ty = env
+        .get(&v_id.unwrap())
+        .cloned()
+        .unwrap_or(runmat_builtins::Type::Unknown);
     assert_eq!(u_ty, runmat_builtins::Type::Num);
     assert_eq!(v_ty, runmat_builtins::Type::Num);
 }
-
-

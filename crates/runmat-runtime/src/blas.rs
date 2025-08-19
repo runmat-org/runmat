@@ -25,7 +25,10 @@ pub fn blas_matrix_mul(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
     if a.cols() != b.rows() {
         return Err(format!(
             "Inner matrix dimensions must agree: {}x{} * {}x{}",
-            a.rows(), a.cols(), b.rows(), b.cols()
+            a.rows(),
+            a.cols(),
+            b.rows(),
+            b.cols()
         ));
     }
 

@@ -40,5 +40,3 @@ fn function_handle_tokens() {
         ]
     );
 }
-
-

@@ -1,5 +1,7 @@
 use runmat_builtins::Value;
-use runmat_gc::{gc_register_root, gc_unregister_root, GlobalRoot, RootId, StackRoot, VariableArrayRoot};
+use runmat_gc::{
+    gc_register_root, gc_unregister_root, GlobalRoot, RootId, StackRoot, VariableArrayRoot,
+};
 
 /// RAII wrapper for GC root management during interpretation
 pub struct InterpretContext {
@@ -30,10 +32,17 @@ impl InterpretContext {
     }
 
     /// Register a snapshot of global values as a GC root for the duration of this context
-    pub fn register_global_values(&mut self, values: Vec<Value>, description: &str) -> Result<(), String> {
-        if values.is_empty() { return Ok(()); }
+    pub fn register_global_values(
+        &mut self,
+        values: Vec<Value>,
+        description: &str,
+    ) -> Result<(), String> {
+        if values.is_empty() {
+            return Ok(());
+        }
         let root = Box::new(GlobalRoot::new(values, description.to_string()));
-        let id = gc_register_root(root).map_err(|e| format!("Failed to register global root: {e:?}"))?;
+        let id =
+            gc_register_root(root).map_err(|e| format!("Failed to register global root: {e:?}"))?;
         self.extra_root_ids.push(id);
         Ok(())
     }
@@ -52,5 +61,3 @@ impl Drop for InterpretContext {
         }
     }
 }
-
-

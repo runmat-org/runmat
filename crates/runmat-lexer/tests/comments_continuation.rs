@@ -13,7 +13,7 @@ fn ellipsis_skips_to_end_of_line_even_with_comment() {
 fn block_comment_skipped() {
     let src = "1 + %{ block\nmore % inside %}\n 2";
     let toks = tokenize(src);
-    println!("TOKS: {:?}", toks);
+    println!("TOKS: {toks:?}");
     assert_eq!(toks, vec![Token::Integer, Token::Plus, Token::Integer]);
 }
 
@@ -31,5 +31,3 @@ fn line_comment_is_ignored() {
     let src = "a + b % comment";
     assert_eq!(tokenize(src), vec![Token::Ident, Token::Plus, Token::Ident]);
 }
-
-

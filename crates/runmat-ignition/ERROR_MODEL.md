@@ -3,15 +3,15 @@
 All interpreter errors are normalized through `mex(id, message)`, which returns a single string in the form `"<ID>: <message>"`. Tests assert on identifiers to prevent drift.
 
 ## Standard identifiers
-- MATLAB:UndefinedFunction – unknown function/builtin
-- MATLAB:UndefinedVariable – unknown variable
-- MATLAB:NotEnoughInputs / MATLAB:TooManyInputs – callsite arity
-- MATLAB:TooManyOutputs / MATLAB:VarargoutMismatch – output arity
-- MATLAB:SliceNonTensor – non‑tensor slicing attempt
-- MATLAB:IndexOutOfBounds – numeric index out of bounds
-- MATLAB:CellIndexType / MATLAB:CellSubscriptOutOfBounds – cell indexing
-- MATLAB:ExpandError – illegal cell/return expansion
-- MATLAB:MissingSubsref / MATLAB:MissingSubsasgn – missing overloads on object
+- MATLAB:UndefinedFunction - unknown function/builtin
+- MATLAB:UndefinedVariable - unknown variable
+- MATLAB:NotEnoughInputs / MATLAB:TooManyInputs - callsite arity
+- MATLAB:TooManyOutputs / MATLAB:VarargoutMismatch - output arity
+- MATLAB:SliceNonTensor - non-tensor slicing attempt
+- MATLAB:IndexOutOfBounds - numeric index out of bounds
+- MATLAB:CellIndexType / MATLAB:CellSubscriptOutOfBounds - cell indexing
+- MATLAB:ExpandError - illegal cell/return expansion
+- MATLAB:MissingSubsref / MATLAB:MissingSubsasgn - missing overloads on object
 
 ## Principles
 - The same programmer error should produce the same identifier across code paths.

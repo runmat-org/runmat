@@ -34,7 +34,7 @@ export async function generateStaticParams(): Promise<{ slug: string[] }[]> {
 export async function generateMetadata({ params }: { params: Promise<{ slug?: string[] }> }): Promise<Metadata> {
   const { slug = [] } = await params;
   const node = findNodeBySlug(slug);
-  const base: Metadata = { title: node ? `${node.title} – RunMat Docs` : "RunMat Docs" };
+  const base: Metadata = { title: node ? `${node.title} | Docs` : "RunMat Docs" };
   if (!node) return base;
   const seo = (node as DocsNode).seo;
   return {
@@ -121,42 +121,7 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
 }
 
 type Heading = { depth: number; text: string; id: string };
-function SearchResults({ query, source }: { query: string; source: string }) {
-  // naive search: show matched headings and surrounding paragraphs
-  const lines = source.split(/\r?\n/);
-  const q = query.toLowerCase();
-  const matches: { heading?: string; snippet: string }[] = [];
-  let currentHeading = '';
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const m = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (m) {
-      currentHeading = m[2];
-      continue;
-    }
-    if (line.toLowerCase().includes(q)) {
-      const snippet = lines.slice(Math.max(0, i - 2), Math.min(lines.length, i + 3)).join('\n');
-      matches.push({ heading: currentHeading, snippet });
-    }
-  }
-  return (
-    <div>
-      <h1 className="text-2xl font-semibold mb-4">Search results for “{query}”</h1>
-      {matches.length === 0 ? (
-        <p className="text-muted-foreground">No results found in this section.</p>
-      ) : (
-        <ul className="space-y-6">
-          {matches.map((m, i) => (
-            <li key={i} className="rounded border border-border p-4">
-              {m.heading && <div className="text-sm font-semibold mb-2">{m.heading}</div>}
-              <pre className="whitespace-pre-wrap text-sm text-muted-foreground">{m.snippet}</pre>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+
 function extractHeadings(md: string): Heading[] {
   const lines = md.split(/\r?\n/);
   const out: Heading[] = [];

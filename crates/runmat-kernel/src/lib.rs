@@ -1,6 +1,6 @@
 //! RunMat Jupyter Kernel
 //!
-//! A high-performance, V8-inspired Jupyter kernel for MATLAB/Octave code.
+//! A high-performance Jupyter kernel for RunMat.
 //! Implements the Jupyter messaging protocol over ZMQ with async execution.
 
 use serde::{Deserialize, Serialize};
@@ -86,7 +86,7 @@ impl Default for KernelInfo {
                 pygments_lexer: "matlab".to_string(),
                 codemirror_mode: "octave".to_string(),
             },
-            banner: "RunMat - High-performance MATLAB/Octave runtime".to_string(),
+            banner: "RunMat - Fast, Free, Modern MATLAB code runtime".to_string(),
             help_links: vec![HelpLink {
                 text: "RunMat Documentation".to_string(),
                 url: "https://github.com/runmat-org/runmat".to_string(),

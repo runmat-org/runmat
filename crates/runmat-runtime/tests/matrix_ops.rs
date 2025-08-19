@@ -125,7 +125,14 @@ fn test_builtin_functions() {
 #[test]
 fn test_builtin_dispatch() {
     // Test zeros function
-    let result = call_builtin("matrix_zeros", &[Value::Int(runmat_builtins::IntValue::I32(2)), Value::Int(runmat_builtins::IntValue::I32(3))]).unwrap();
+    let result = call_builtin(
+        "matrix_zeros",
+        &[
+            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_builtins::IntValue::I32(3)),
+        ],
+    )
+    .unwrap();
     if let Value::Tensor(m) = result {
         assert_eq!(m.rows(), 2);
         assert_eq!(m.cols(), 3);
@@ -135,7 +142,11 @@ fn test_builtin_dispatch() {
     }
 
     // Test eye function
-    let result = call_builtin("matrix_eye", &[Value::Int(runmat_builtins::IntValue::I32(2))]).unwrap();
+    let result = call_builtin(
+        "matrix_eye",
+        &[Value::Int(runmat_builtins::IntValue::I32(2))],
+    )
+    .unwrap();
     if let Value::Tensor(m) = result {
         assert_eq!(m.data, vec![1.0, 0.0, 0.0, 1.0]);
     } else {

@@ -11,7 +11,11 @@ fn classdef_minimal_empty() {
     let src = "classdef A\nend";
     let stmt = single_stmt(src);
     match stmt {
-        Stmt::ClassDef { name, super_class, members } => {
+        Stmt::ClassDef {
+            name,
+            super_class,
+            members,
+        } => {
             assert_eq!(name, "A");
             assert!(super_class.is_none());
             assert!(members.is_empty());
@@ -48,7 +52,11 @@ end
 "#;
     let stmt = single_stmt(src);
     match stmt {
-        Stmt::ClassDef { name, super_class, members } => {
+        Stmt::ClassDef {
+            name,
+            super_class,
+            members,
+        } => {
             assert_eq!(name, "MyClass");
             assert_eq!(super_class.as_deref(), Some("handle"));
             assert!(!members.is_empty());
@@ -160,8 +168,6 @@ fn classdef_enumeration_and_arguments_blocks_parse() {
     "#;
     let ast = runmat_parser::parse(src).unwrap();
     // Ensure both classes are present
-    assert!(matches!(ast.body[0], runmat_parser::Stmt::ClassDef{..}));
-    assert!(matches!(ast.body[1], runmat_parser::Stmt::ClassDef{..}));
+    assert!(matches!(ast.body[0], runmat_parser::Stmt::ClassDef { .. }));
+    assert!(matches!(ast.body[1], runmat_parser::Stmt::ClassDef { .. }));
 }
-
-

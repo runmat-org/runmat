@@ -36,9 +36,20 @@ export default function Footer() {
       </div>
       <div className="border-t">
         <div className="container flex flex-col items-center justify-between gap-4 py-6 md:flex-row">
-          <p className="text-center text-sm text-muted-foreground md:text-left">
+          <div className="text-sm text-muted-foreground md:text-left">
+            <p>
             © 2025 Dystr Inc. All rights reserved. MIT+ Licensed.
-          </p>
+            </p>
+            <p>
+              MATLAB is a registered trademark of The MathWorks, Inc.
+            </p>
+            <p>
+              GNU Octave is a registered trademark of the Free Software Foundation.
+            </p>
+            <p>
+              RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc. or the Free Software Foundation.
+            </p>
+          </ div>
           <p className="flex items-center text-center text-sm text-muted-foreground md:text-left">
             Made with
             <Heart className="mx-1 h-4 w-4 fill-red-500 text-red-500" />

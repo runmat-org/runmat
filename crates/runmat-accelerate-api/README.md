@@ -18,6 +18,13 @@ This crate intentionally avoids depending on other workspace crates to prevent d
 - `runmat-runtime` implements the MATLAB-facing builtins `gpuArray(x)` and `gather(x)`. These builtins call `runmat-accelerate-api::provider()` and, if a provider is registered, forward to it. Otherwise, they return CPU fallbacks (keeping semantics predictable even when no GPU is present).
 - `runmat-accelerate` implements one or more concrete providers and calls `register_provider(...)` during initialization (e.g., from the REPL/CLI startup or host app), so the runtime automatically benefits from GPU acceleration where appropriate.
 
+### Autograd & optimization (planned)
+This API is intentionally minimal; reverse-mode autograd and higher-level optimizations live above this layer in `runmat-accelerate` and the runtime/JIT. The expected integration is:
+
+- The runtime will provide a tape/graph for Tensor/Matrix ops (on CPU or device). Gradients are computed by composing known primitive gradients; providers can remain unaware of autograd.
+- When a provider offers fused kernels, the planner/JIT can map differentiated op chains to fewer device launches (elementwise fusion, simple BLAS fusions), reducing temporaries and transfers by default.
+- No changes to this API are required for basic autograd; future extensions (optional) may add hooks for fused gradient kernels and streams/queues.
+
 ### Safety and lifetime
 `register_provider` stores a `'static` reference. The caller must ensure the provider outlives the program (common in singletons created at startup). The handle (`GpuTensorHandle`) contains only POD metadata (no GC pointers) and is safe to move/copy.
 
@@ -61,5 +68,6 @@ unsafe { register_provider(&MyProvider); }
 - Add optional fields (dtype, strides) without breaking existing providers (via feature flags or additive fields).
 - Extend provider API for streams/queues, memory pools, unified/pinned memory, and device events.
 - Multi-device provider model and selection heuristics.
+- Document autograd integration points and optional provider hooks for fused gradient kernels.
 
 

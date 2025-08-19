@@ -1,6 +1,6 @@
 //! RunMat Plot - World-class interactive plotting library
 //!
-//! High-performance GPU-accelerated plotting with MATLAB-compatible API.
+//! High-performance GPU-accelerated plotting.
 //! Unified rendering pipeline for both interactive and static export.
 
 // ===== CORE ARCHITECTURE =====

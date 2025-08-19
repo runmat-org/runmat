@@ -19,5 +19,3 @@ fn global_and_persistent() {
         _ => panic!("expected persistent"),
     }
 }
-
-

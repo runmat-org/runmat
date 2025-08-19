@@ -34,16 +34,27 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut examples_lit: Option<Lit> = None;
     for arg in args {
         if let NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) = arg {
-            if path.is_ident("name") { name_lit = Some(lit); }
-            else if path.is_ident("category") { category_lit = Some(lit); }
-            else if path.is_ident("summary") { summary_lit = Some(lit); }
-            else if path.is_ident("keywords") { keywords_lit = Some(lit); }
-            else if path.is_ident("errors") { errors_lit = Some(lit); }
-            else if path.is_ident("related") { related_lit = Some(lit); }
-            else if path.is_ident("introduced") { introduced_lit = Some(lit); }
-            else if path.is_ident("status") { status_lit = Some(lit); }
-            else if path.is_ident("examples") { examples_lit = Some(lit); }
-            else { panic!("unknown attribute parameter"); }
+            if path.is_ident("name") {
+                name_lit = Some(lit);
+            } else if path.is_ident("category") {
+                category_lit = Some(lit);
+            } else if path.is_ident("summary") {
+                summary_lit = Some(lit);
+            } else if path.is_ident("keywords") {
+                keywords_lit = Some(lit);
+            } else if path.is_ident("errors") {
+                errors_lit = Some(lit);
+            } else if path.is_ident("related") {
+                related_lit = Some(lit);
+            } else if path.is_ident("introduced") {
+                introduced_lit = Some(lit);
+            } else if path.is_ident("status") {
+                status_lit = Some(lit);
+            } else if path.is_ident("examples") {
+                examples_lit = Some(lit);
+            } else {
+                // Gracefully ignore unknown parameters for better IDE experience
+            }
         }
     }
     let name_lit = name_lit.expect("expected `name = \"...\"` argument");
@@ -86,19 +97,37 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     // Detect if last parameter is variadic Vec<Value>
-    let is_last_variadic = param_types.last().map(|ty| {
-        // crude detection: type path starts with Vec and inner type is runmat_builtins::Value or Value
-        if let syn::Type::Path(tp) = ty {
-            if tp.path.segments.last().map(|s| s.ident == "Vec").unwrap_or(false) {
-                if let syn::PathArguments::AngleBracketed(ab) = &tp.path.segments.last().unwrap().arguments {
-                    if let Some(syn::GenericArgument::Type(syn::Type::Path(inner))) = ab.args.first() {
-                        return inner.path.segments.last().map(|s| s.ident == "Value").unwrap_or(false);
+    let is_last_variadic = param_types
+        .last()
+        .map(|ty| {
+            // crude detection: type path starts with Vec and inner type is runmat_builtins::Value or Value
+            if let syn::Type::Path(tp) = ty {
+                if tp
+                    .path
+                    .segments
+                    .last()
+                    .map(|s| s.ident == "Vec")
+                    .unwrap_or(false)
+                {
+                    if let syn::PathArguments::AngleBracketed(ab) =
+                        &tp.path.segments.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(syn::Type::Path(inner))) =
+                            ab.args.first()
+                        {
+                            return inner
+                                .path
+                                .segments
+                                .last()
+                                .map(|s| s.ident == "Value")
+                                .unwrap_or(false);
+                        }
                     }
                 }
             }
-        }
-        false
-    }).unwrap_or(false);
+            false
+        })
+        .unwrap_or(false);
 
     // Generate wrapper ident
     let wrapper_ident = format_ident!("__rt_wrap_{}", ident);
@@ -106,11 +135,16 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let conv_stmts: Vec<proc_macro2::TokenStream> = if is_last_variadic && param_len > 0 {
         let mut stmts = Vec::new();
         // Convert fixed params (all but last)
-        for (i, (ident, ty)) in param_idents.iter().zip(param_types.iter()).enumerate().take(param_len-1) {
+        for (i, (ident, ty)) in param_idents
+            .iter()
+            .zip(param_types.iter())
+            .enumerate()
+            .take(param_len - 1)
+        {
             stmts.push(quote! { let #ident : #ty = std::convert::TryInto::try_into(&args[#i])?; });
         }
         // Collect the rest into Vec<Value>
-        let last_ident = &param_idents[param_len-1];
+        let last_ident = &param_idents[param_len - 1];
         stmts.push(quote! {
             let #last_ident : Vec<runmat_builtins::Value> = {
                 let mut v = Vec::new();
@@ -149,13 +183,24 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
 
     // Prepare tokens for defaults and options
     let default_category = syn::LitStr::new("general", proc_macro2::Span::call_site());
-    let default_summary = syn::LitStr::new("Runtime builtin function", proc_macro2::Span::call_site());
+    let default_summary =
+        syn::LitStr::new("Runtime builtin function", proc_macro2::Span::call_site());
 
-    let category_tok: proc_macro2::TokenStream = match &category_lit { Some(syn::Lit::Str(ls)) => quote! { #ls }, _ => quote! { #default_category } };
-    let summary_tok: proc_macro2::TokenStream = match &summary_lit { Some(syn::Lit::Str(ls)) => quote! { #ls }, _ => quote! { #default_summary } };
+    let category_tok: proc_macro2::TokenStream = match &category_lit {
+        Some(syn::Lit::Str(ls)) => quote! { #ls },
+        _ => quote! { #default_category },
+    };
+    let summary_tok: proc_macro2::TokenStream = match &summary_lit {
+        Some(syn::Lit::Str(ls)) => quote! { #ls },
+        _ => quote! { #default_summary },
+    };
 
     fn opt_tok(lit: &Option<syn::Lit>) -> proc_macro2::TokenStream {
-        if let Some(syn::Lit::Str(ls)) = lit { quote! { Some(#ls) } } else { quote! { None } }
+        if let Some(syn::Lit::Str(ls)) = lit {
+            quote! { Some(#ls) }
+        } else {
+            quote! { None }
+        }
     }
     let category_opt_tok = opt_tok(&category_lit);
     let summary_opt_tok = opt_tok(&summary_lit);

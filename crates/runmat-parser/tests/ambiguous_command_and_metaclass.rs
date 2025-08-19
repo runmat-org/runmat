@@ -51,5 +51,3 @@ fn metaclass_in_assignment_and_postfix_member() {
         _ => panic!("expected member access on metaclass"),
     }
 }
-
-

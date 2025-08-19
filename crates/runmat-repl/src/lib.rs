@@ -60,10 +60,18 @@ fn format_type_info(value: &Value) -> String {
         Value::String(_) => "string".to_string(),
         Value::StringArray(sa) => {
             // MATLAB displays string arrays as m x n string array; for test's purpose, we classify scalar string arrays as "string"
-            if sa.shape == vec![1,1] { "string".to_string() } else { format!("{}x{} string array", sa.rows(), sa.cols()) }
+            if sa.shape == vec![1, 1] {
+                "string".to_string()
+            } else {
+                format!("{}x{} string array", sa.rows(), sa.cols())
+            }
         }
         Value::CharArray(ca) => {
-            if ca.rows == 1 && ca.cols == 1 { "char".to_string() } else { format!("{}x{} char array", ca.rows, ca.cols) }
+            if ca.rows == 1 && ca.cols == 1 {
+                "char".to_string()
+            } else {
+                format!("{}x{} char array", ca.rows, ca.cols)
+            }
         }
         Value::Tensor(m) => {
             if m.rows() == 1 && m.cols() == 1 {
@@ -83,10 +91,15 @@ fn format_type_info(value: &Value) -> String {
         }
         Value::GpuTensor(h) => {
             if h.shape.len() == 2 {
-                let r = h.shape[0]; let c = h.shape[1];
-                if r == 1 && c == 1 { "scalar (gpu)".to_string() }
-                else if r == 1 || c == 1 { format!("{}x{} vector (gpu)", r, c) }
-                else { format!("{}x{} matrix (gpu)", r, c) }
+                let r = h.shape[0];
+                let c = h.shape[1];
+                if r == 1 && c == 1 {
+                    "scalar (gpu)".to_string()
+                } else if r == 1 || c == 1 {
+                    format!("{}x{} vector (gpu)", r, c)
+                } else {
+                    format!("{}x{} matrix (gpu)", r, c)
+                }
             } else {
                 format!("Tensor{:?} (gpu)", h.shape)
             }
@@ -286,7 +299,10 @@ impl ReplEngine {
                 | runmat_hir::HirStmt::TryCatch { .. }
                 | runmat_hir::HirStmt::Global(_)
                 | runmat_hir::HirStmt::Persistent(_)
-                | runmat_hir::HirStmt::Import { path: _, wildcard: _ }
+                | runmat_hir::HirStmt::Import {
+                    path: _,
+                    wildcard: _,
+                }
                 | runmat_hir::HirStmt::ClassDef { .. } => true,
             }
         } else {
@@ -567,7 +583,11 @@ impl ReplEngine {
         // Variable array should already be prepared by prepare_variable_array_for_execution
 
         // Use the main Ignition interpreter which has full function and scoping support
-        match runmat_ignition::interpret_with_vars(bytecode, &mut self.variable_array, Some("<repl>")) {
+        match runmat_ignition::interpret_with_vars(
+            bytecode,
+            &mut self.variable_array,
+            Some("<repl>"),
+        ) {
             Ok(result) => {
                 // Update the variables HashMap for display purposes
                 self.variables.clear();

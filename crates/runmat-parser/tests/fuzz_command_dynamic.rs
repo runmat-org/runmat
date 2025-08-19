@@ -16,7 +16,8 @@ fn mixed_dynamic_member_with_command_tokens_errors() {
 
 #[test]
 fn imports_and_metaclass_static_same_line() {
-    let program = parse("import pkg.*; __register_test_classes(); v = ?Point.staticValue;").unwrap();
+    let program =
+        parse("import pkg.*; __register_test_classes(); v = ?Point.staticValue;").unwrap();
     assert_eq!(program.body.len(), 3);
     match &program.body[2] {
         Stmt::Assign(name, rhs, _) => {
@@ -32,5 +33,3 @@ fn imports_and_metaclass_static_same_line() {
         _ => panic!("expected assignment to metaclass static member"),
     }
 }
-
-

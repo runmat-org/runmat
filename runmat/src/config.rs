@@ -10,12 +10,13 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Main RunMat configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunMatConfig {
     /// Runtime configuration
     pub runtime: RuntimeConfig,
@@ -29,6 +30,9 @@ pub struct RunMatConfig {
     pub kernel: KernelConfig,
     /// Logging configuration
     pub logging: LoggingConfig,
+    /// Package manager configuration
+    #[serde(default)]
+    pub packages: PackagesConfig,
 }
 
 /// Runtime execution configuration
@@ -221,6 +225,66 @@ pub struct KernelPorts {
     pub heartbeat: Option<u16>,
 }
 
+/// Package manager configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PackagesConfig {
+    /// Enable package manager
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Registries to search for packages (first match wins)
+    #[serde(default = "default_registries")]
+    pub registries: Vec<Registry>,
+    /// Dependencies declared by the workspace (name -> spec)
+    #[serde(default)]
+    pub dependencies: HashMap<String, PackageSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Registry {
+    /// Registry logical name
+    pub name: String,
+    /// Base URL for index/API (e.g., https://packages.runmat.org)
+    pub url: String,
+}
+
+/// Package specification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "kebab-case")]
+pub enum PackageSpec {
+    /// Resolve from a registry by name
+    Registry {
+        /// Semver range (e.g. "^1.2"), or exact version
+        version: String,
+        /// Optional registry override (defaults to first registry)
+        #[serde(default)]
+        registry: Option<String>,
+        /// Optional feature flags
+        #[serde(default)]
+        features: Vec<String>,
+        /// Optional mark for optional dependency
+        #[serde(default)]
+        optional: bool,
+    },
+    /// Git repository
+    Git {
+        url: String,
+        #[serde(default)]
+        rev: Option<String>,
+        #[serde(default)]
+        features: Vec<String>,
+        #[serde(default)]
+        optional: bool,
+    },
+    /// Local path dependency (useful for development)
+    Path {
+        path: String,
+        #[serde(default)]
+        features: Vec<String>,
+        #[serde(default)]
+        optional: bool,
+    },
+}
+
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
@@ -370,6 +434,13 @@ fn default_max_render_time() -> u32 {
 
 fn default_lod_threshold() -> u32 {
     10000 // Points threshold for LOD
+}
+
+fn default_registries() -> Vec<Registry> {
+    vec![Registry {
+        name: "runmat".to_string(),
+        url: "https://packages.runmat.org".to_string(),
+    }]
 }
 
 impl Default for RuntimeConfig {
@@ -534,6 +605,20 @@ impl Default for JupyterPerformanceConfig {
     }
 }
 
+impl Default for RunMatConfig {
+    fn default() -> Self {
+        Self {
+            runtime: RuntimeConfig::default(),
+            jit: JitConfig::default(),
+            gc: GcConfig::default(),
+            plotting: PlottingConfig::default(),
+            kernel: KernelConfig::default(),
+            logging: LoggingConfig::default(),
+            packages: PackagesConfig::default(),
+        }
+    }
+}
+
 /// Configuration loader with multiple source support
 pub struct ConfigLoader;
 
@@ -572,6 +657,7 @@ impl ConfigLoader {
 
         // 2. Current directory
         let current_dir_configs = [
+            ".runmat", // preferred single-file format
             ".runmat.yaml",
             ".runmat.yml",
             ".runmat.json",
@@ -590,6 +676,7 @@ impl ConfigLoader {
 
         // 3. Home directory
         if let Some(home_dir) = dirs::home_dir() {
+            paths.push(home_dir.join(".runmat"));
             paths.push(home_dir.join(".runmat.yaml"));
             paths.push(home_dir.join(".runmat.yml"));
             paths.push(home_dir.join(".runmat.json"));
@@ -615,6 +702,15 @@ impl ConfigLoader {
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
         let config = match path.extension().and_then(|ext| ext.to_str()) {
+            // `.runmat` is a TOML alias by default (single canonical format)
+            None if path.file_name().and_then(|n| n.to_str()) == Some(".runmat") => {
+                toml::from_str(&content).with_context(|| {
+                    format!("Failed to parse .runmat (TOML) config: {}", path.display())
+                })?
+            }
+            Some("runmat") => toml::from_str(&content).with_context(|| {
+                format!("Failed to parse .runmat (TOML) config: {}", path.display())
+            })?,
             Some("yaml") | Some("yml") => serde_yaml::from_str(&content)
                 .with_context(|| format!("Failed to parse YAML config: {}", path.display()))?,
             Some("json") => serde_json::from_str(&content)
@@ -622,14 +718,16 @@ impl ConfigLoader {
             Some("toml") => toml::from_str(&content)
                 .with_context(|| format!("Failed to parse TOML config: {}", path.display()))?,
             _ => {
-                // Try to auto-detect format
-                if let Ok(config) = serde_yaml::from_str(&content) {
+                // Try auto-detect (prefer TOML for unknown/no extension)
+                if let Ok(config) = toml::from_str(&content) {
+                    config
+                } else if let Ok(config) = serde_yaml::from_str(&content) {
                     config
                 } else if let Ok(config) = serde_json::from_str(&content) {
                     config
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Could not parse config file {} (tried YAML, JSON, TOML)",
+                        "Could not parse config file {} (tried TOML, YAML, JSON)",
                         path.display()
                     ));
                 }

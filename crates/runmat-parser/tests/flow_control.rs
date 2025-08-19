@@ -5,7 +5,11 @@ fn switch_and_try_catch() {
     // Newline-separated block to exercise parse_block logic
     let program = parse("switch x\n case 1\n y=2;\n otherwise\n y=3;\n end").unwrap();
     match &program.body[0] {
-        Stmt::Switch { expr, cases, otherwise } => {
+        Stmt::Switch {
+            expr,
+            cases,
+            otherwise,
+        } => {
             assert!(matches!(expr, Expr::Ident(ref n) if n == "x"));
             assert_eq!(cases.len(), 1);
             assert!(otherwise.is_some());
@@ -15,7 +19,11 @@ fn switch_and_try_catch() {
 
     let program = parse("try x; catch e; y; end").unwrap();
     match &program.body[0] {
-        Stmt::TryCatch { try_body, catch_var, catch_body } => {
+        Stmt::TryCatch {
+            try_body,
+            catch_var,
+            catch_body,
+        } => {
             assert!(!try_body.is_empty());
             assert_eq!(catch_var.as_deref(), Some("e"));
             assert!(!catch_body.is_empty());
@@ -23,5 +31,3 @@ fn switch_and_try_catch() {
         _ => panic!("expected try/catch"),
     }
 }
-
-

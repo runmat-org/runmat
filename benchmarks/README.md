@@ -4,18 +4,18 @@ This suite compares RunMat and GNU Octave across representative MATLAB-style wor
 
 ### What's included
 
-- **Startup Time** (`startup_time.m`): end‑to‑end cold script execution.
-- **Matrix Operations** (`matrix_operations.m`): add, matmul, transpose, scalar‑mul over sizes `[100, 300, 500]`.
+- **Startup Time** (`startup_time.m`): end-to-end cold script execution.
+- **Matrix Operations** (`matrix_operations.m`): add, matmul, transpose, scalar-mul over sizes `[100, 300, 500]`.
 - **Math Functions** (`math_functions.m`): `sin, cos, exp, log, sqrt, sum, mean, std` over `[50k, 200k, 500k]`.
 - **Control Flow** (`control_flow.m`): simple loop, nested loops, conditionals, and function calls over `n = [1k, 5k, 10k]`.
 
-Per‑size timings are printed by the scripts via `fprintf`, while the runner measures total wall‑clock time per script (warmup + repeated runs) for the YAML.
+Per-size timings are printed by the scripts via `fprintf`, while the runner measures total wall-clock time per script (warmup + repeated runs) for the YAML.
 
 ### Prerequisites
 
 - Rust toolchain and Cargo
 - `bc` (for basic math in the runner)
-- Optional: `yq` (pretty‑printing YAML locally)
+- Optional: `yq` (pretty-printing YAML locally)
 - Optional: GNU Octave in `PATH` (for Octave comparisons)
   - macOS: `brew install octave`
   - Ubuntu/Debian: `sudo apt-get install octave`
@@ -76,12 +76,12 @@ results:
     runmat_jit: { avg_time: 0.005, min_time: 0.005, max_time: 0.005, speedup_vs_octave: "164.40x", speedup_vs_interpreter: "1.00x" }
 ```
 
-Note: The YAML aggregates total script time. Per‑size timings in the script output are for human inspection and are not parsed into YAML.
+Note: The YAML aggregates total script time. Per-size timings in the script output are for human inspection and are not parsed into YAML.
 
 ### Formatting and logging
 
 - `fprintf` in RunMat supports `%d`, `%f`, and `%.Nf` plus `\n` (newline). Prefer `%.6f` for timings.
-- Scripts use `tic`/`toc` for intra‑script measurements; the runner uses external wall‑clock time.
+- Scripts use `tic`/`toc` for intra-script measurements; the runner uses external wall-clock time.
 
 ### Customize sizes
 
@@ -97,16 +97,16 @@ Edit within the scripts:
   - measures its sections with `tic`/`toc`,
   - prints numeric results using `%` formats (e.g., `%.6f`).
 - Add the script (without extension) to the `benchmarks` array in `run_benchmarks.sh`.
-- Re‑run the suite.
+- Re-run the suite.
 
 ### Troubleshooting
 
 - **Octave times are N/A**: Ensure Octave is installed and on `PATH`.
 - **Permissions**: `chmod +x run_benchmarks.sh`.
-- **Headless environments**: All benchmarks are non‑GUI; Octave runs with `--no-gui`.
+- **Headless environments**: All benchmarks are non-GUI; Octave runs with `--no-gui`.
 
 ### Reproducibility notes
 
 - System metadata and tool versions are embedded in each YAML.
 - BLAS/LAPACK features are recorded in `software.runmat.build_features`.
-- For cross‑machine comparisons, run on AC power with minimal background load.
+- For cross-machine comparisons, run on AC power with minimal background load.

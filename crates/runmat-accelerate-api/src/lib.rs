@@ -15,26 +15,52 @@ pub trait AccelProvider: Send + Sync {
     fn device_info(&self) -> String;
 
     // Optional operator hooks (default to unsupported)
-    fn elem_add(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn elem_add(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_add not supported by provider"))
     }
-    fn elem_mul(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn elem_mul(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_mul not supported by provider"))
     }
-    fn elem_sub(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn elem_sub(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_sub not supported by provider"))
     }
-    fn elem_div(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn elem_div(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_div not supported by provider"))
     }
-    fn matmul(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn matmul(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("matmul not supported by provider"))
     }
 }
 
 static mut GLOBAL_PROVIDER: Option<&'static dyn AccelProvider> = None;
 
-/// Register a global acceleration provider. The caller must guarantee the provider lives for program lifetime.
+/// Register a global acceleration provider.
+///
+/// # Safety
+/// - The caller must guarantee that `p` is valid for the entire program lifetime
+///   (e.g., a `'static` singleton), as the runtime stores a raw reference globally.
+/// - Concurrent callers must ensure registration happens once or is properly
+///   synchronized; this function does not enforce thread-safety for re-registration.
 pub unsafe fn register_provider(p: &'static dyn AccelProvider) {
     GLOBAL_PROVIDER = Some(p);
 }
@@ -46,7 +72,9 @@ pub fn provider() -> Option<&'static dyn AccelProvider> {
 /// Convenience: perform elementwise add via provider if possible; otherwise return None
 pub fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
-        if let Ok(h) = p.elem_add(a, b) { return Some(h); }
+        if let Ok(h) = p.elem_add(a, b) {
+            return Some(h);
+        }
     }
     None
 }
@@ -63,5 +91,3 @@ pub struct HostTensorView<'a> {
     pub data: &'a [f64],
     pub shape: &'a [usize],
 }
-
-

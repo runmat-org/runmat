@@ -11,27 +11,27 @@ pub enum Value {
     /// Complex scalar value represented as (re, im)
     Complex(f64, f64),
     Bool(bool),
-    // MATLAB logical array (N-D of booleans). Scalars use Bool.
+    // Logical array (N-D of booleans). Scalars use Bool.
     LogicalArray(LogicalArray),
     String(String),
-    // MATLAB string array (R2016b+): N-D array of string scalars
+    // String array (R2016b+): N-D array of string scalars
     StringArray(StringArray),
-    // MATLAB char array (single-quoted): 2-D character array (rows x cols)
+    // Char array (single-quoted): 2-D character array (rows x cols)
     CharArray(CharArray),
     Tensor(Tensor),
     /// Complex numeric array; same column-major shape semantics as `Tensor`
     ComplexTensor(ComplexTensor),
     Cell(CellArray),
-    // MATLAB struct (scalar or nested). Struct arrays are represented in higher layers;
+    // Struct (scalar or nested). Struct arrays are represented in higher layers;
     // this variant holds a single struct's fields.
     Struct(StructValue),
     // GPU-resident tensor handle (opaque; buffer managed by backend)
     GpuTensor(runmat_accelerate_api::GpuTensorHandle),
     // Simple object instance until full class system lands
     Object(ObjectInstance),
-    /// MATLAB handle-object wrapper providing identity semantics and validity tracking
+    /// Handle-object wrapper providing identity semantics and validity tracking
     HandleObject(HandleRef),
-    /// Event listener handle for MATLAB-style events
+    /// Event listener handle for events
     Listener(Listener),
     // Function handle pointing to a named function (builtin or user)
     FunctionHandle(String),
@@ -87,6 +87,10 @@ pub struct StructValue {
 
 impl StructValue {
     pub fn new() -> Self { Self { fields: HashMap::new() } }
+}
+
+impl Default for StructValue {
+    fn default() -> Self { Self::new() }
 }
 
 
@@ -170,7 +174,7 @@ impl StringArray {
         Ok(StringArray { data, shape, rows, cols })
     }
     pub fn new_2d(data: Vec<String>, rows: usize, cols: usize) -> Result<Self, String> { Self::new(data, vec![rows, cols]) }
-    pub fn rows(&self) -> usize { self.shape.get(0).copied().unwrap_or(1) }
+    pub fn rows(&self) -> usize { self.shape.first().copied().unwrap_or(1) }
     pub fn cols(&self) -> usize { self.shape.get(1).copied().unwrap_or(1) }
 }
 
@@ -210,13 +214,15 @@ impl Tensor {
     pub fn zeros2(rows: usize, cols: usize) -> Self { Self::zeros(vec![rows, cols]) }
     pub fn ones2(rows: usize, cols: usize) -> Self { Self::ones(vec![rows, cols]) }
 
-    pub fn rows(&self) -> usize { self.shape.get(0).copied().unwrap_or(1) }
+    pub fn rows(&self) -> usize { self.shape.first().copied().unwrap_or(1) }
     pub fn cols(&self) -> usize { self.shape.get(1).copied().unwrap_or(1) }
 
     pub fn get2(&self, row: usize, col: usize) -> Result<f64, String> {
         let rows = self.rows(); let cols = self.cols();
         if row >= rows || col >= cols {
-            return Err(format!("Index ({}, {}) out of bounds for {}x{} tensor", row, col, rows, cols));
+            return Err(format!(
+                "Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"
+            ));
         }
         // Column-major linearization: lin = row + col*rows
         Ok(self.data[row + col * rows])
@@ -225,7 +231,9 @@ impl Tensor {
     pub fn set2(&mut self, row: usize, col: usize, value: f64) -> Result<(), String> {
         let rows = self.rows(); let cols = self.cols();
         if row >= rows || col >= cols {
-            return Err(format!("Index ({}, {}) out of bounds for {}x{} tensor", row, col, rows, cols));
+            return Err(format!(
+                "Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"
+            ));
         }
         // Column-major linearization
         self.data[row + col * rows] = value;
@@ -295,7 +303,8 @@ impl fmt::Display for StringArray {
                 write!(f, "[")?;
                 for (i, v) in self.data.iter().enumerate() {
                     if i > 0 { write!(f, " ")?; }
-                    write!(f, "\"{}\"", v.replace('"', "\""))?;
+                    let escaped = v.replace('"', "\\\"");
+                    write!(f, "\"{escaped}\"")?;
                 }
                 write!(f, "]")
             }
@@ -306,7 +315,8 @@ impl fmt::Display for StringArray {
                     for c in 0..cols {
                         if c > 0 { write!(f, " ")?; }
                         let v = &self.data[r + c * rows];
-                        write!(f, "\"{}\"", v.replace('"', "\""))?;
+                        let escaped = v.replace('"', "\\\"");
+                        write!(f, "\"{escaped}\"")?;
                     }
                     if r + 1 < rows { write!(f, "; ")?; }
                 }
@@ -354,7 +364,7 @@ impl fmt::Display for CharArray {
         for r in 0..self.rows {
             if r > 0 { write!(f, "; ")?; }
             write!(f, "'")?;
-            for c in 0..self.cols { let ch = self.data[r * self.cols + c]; if ch == '\'' { write!(f, "''")?; } else { write!(f, "{}", ch)?; } }
+            for c in 0..self.cols { let ch = self.data[r * self.cols + c]; if ch == '\'' { write!(f, "''")?; } else { write!(f, "{ch}")?; } }
             write!(f, "'")?;
         }
         write!(f, "]")
@@ -539,7 +549,7 @@ impl Type {
 
     /// Create a tensor type with known shape
     pub fn tensor_with_shape(shape: Vec<usize>) -> Self {
-        Type::Tensor { shape: Some(shape.into_iter().map(|d| Some(d)).collect()) }
+        Type::Tensor { shape: Some(shape.into_iter().map(Some).collect()) }
     }
 
     /// Create a cell array type with unknown element type
@@ -599,9 +609,9 @@ impl Type {
             Value::Bool(_) => Type::Bool,
             Value::LogicalArray(_) => Type::Logical,
             Value::String(_) => Type::String,
-            Value::StringArray(sa) => {
+            Value::StringArray(_sa) => {
                 // Model as Cell of String for type system for now
-                if sa.data.is_empty() { Type::cell_of(Type::String) } else { Type::cell_of(Type::String) }
+                Type::cell_of(Type::String)
             }
             Value::Tensor(t) => {
                 Type::Tensor { shape: Some(t.shape.iter().map(|&d| Some(d)).collect()) }
@@ -658,6 +668,7 @@ pub struct BuiltinFunction {
 }
 
 impl BuiltinFunction {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &'static str,
         description: &'static str,
@@ -750,7 +761,7 @@ fn format_number_short_g(value: f64) -> String {
         return "0".to_string();
     }
 
-    // Decide between fixed and scientific notation roughly like MATLAB short g
+    // Decide between fixed and scientific notation roughly like short g
     let use_scientific = !(1e-4..1e6).contains(&abs);
 
     if use_scientific {
@@ -816,6 +827,43 @@ impl MException {
     }
 }
 
+/// Reference to a GC-allocated object providing language handle semantics
+#[derive(Debug, Clone)]
+pub struct HandleRef {
+    pub class_name: String,
+    pub target: GcPtr<Value>,
+    pub valid: bool,
+}
+
+impl PartialEq for HandleRef {
+    fn eq(&self, other: &Self) -> bool {
+        let a = unsafe { self.target.as_raw() } as usize;
+        let b = unsafe { other.target.as_raw() } as usize;
+        a == b
+    }
+}
+
+/// Event listener handle for events
+#[derive(Debug, Clone, PartialEq)]
+pub struct Listener {
+    pub id: u64,
+    pub target: GcPtr<Value>,
+    pub event_name: String,
+    pub callback: GcPtr<Value>,
+    pub enabled: bool,
+    pub valid: bool,
+}
+
+impl Listener {
+    pub fn class_name(&self) -> String {
+        match unsafe { &*self.target.as_raw() } {
+            Value::Object(o) => o.class_name.clone(),
+            Value::HandleObject(h) => h.class_name.clone(),
+            _ => String::new(),
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -847,50 +895,13 @@ impl fmt::Display for Value {
                 write!(f, "<listener id={} {}@0x{:x} '{}' enabled={} valid={}>", l.id, l.class_name(), ptr, l.event_name, l.enabled, l.valid)
             }
             Value::Struct(st) => write!(f, "struct(fields={})", st.fields.len()),
-            Value::FunctionHandle(name) => write!(f, "@{}", name),
+            Value::FunctionHandle(name) => write!(f, "@{name}"),
             Value::Closure(c) => write!(f, "<closure {} captures={}>", c.function_name, c.captures.len()),
-            Value::ClassRef(name) => write!(f, "<class {}>", name),
+            Value::ClassRef(name) => write!(f, "<class {name}>") ,
             Value::MException(e) => write!(f, "MException(identifier='{}', message='{}')", e.identifier, e.message),
         }
     }
 }
-
-/// Reference-counted (by GC) inner object for handle classes
-#[derive(Debug, Clone)]
-pub struct HandleRef {
-    pub class_name: String,
-    pub target: GcPtr<Value>,
-    pub valid: bool,
-}
-
-impl PartialEq for HandleRef {
-    fn eq(&self, other: &Self) -> bool {
-        let a = unsafe { self.target.as_raw() } as usize;
-        let b = unsafe { other.target.as_raw() } as usize;
-        a == b
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Listener {
-    pub id: u64,
-    pub target: GcPtr<Value>,
-    pub event_name: String,
-    pub callback: GcPtr<Value>,
-    pub enabled: bool,
-    pub valid: bool,
-}
-
-impl Listener {
-    pub fn class_name(&self) -> String {
-        match unsafe { &*self.target.as_raw() } {
-            Value::Object(o) => o.class_name.clone(),
-            Value::HandleObject(h) => h.class_name.clone(),
-            _ => "".to_string(),
-        }
-    }
-}
-
 
 impl fmt::Display for ComplexTensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -900,7 +911,7 @@ impl fmt::Display for ComplexTensor {
                 for (i, (re, im)) in self.data.iter().enumerate() {
                     if i > 0 { write!(f, " ")?; }
                     let s = Value::Complex(*re, *im).to_string();
-                    write!(f, "{}", s)?;
+                    write!(f, "{s}")?;
                 }
                 write!(f, "]")
             }
@@ -912,7 +923,7 @@ impl fmt::Display for ComplexTensor {
                         if c > 0 { write!(f, " ")?; }
                         let (re, im) = self.data[r + c * rows];
                         let s = Value::Complex(re, im).to_string();
-                        write!(f, "{}", s)?;
+                        write!(f, "{s}")?;
                     }
                     if r + 1 < rows { write!(f, "; ")?; }
                 }
@@ -948,7 +959,7 @@ impl CellArray {
 
     pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {
         if row >= self.rows || col >= self.cols {
-            return Err(format!("Cell index ({}, {}) out of bounds for {}x{} cell array", row, col, self.rows, self.cols));
+            return Err(format!("Cell index ({row}, {col}) out of bounds for {}x{} cell array", self.rows, self.cols));
         }
         Ok((*self.data[row * self.cols + col]).clone())
     }
@@ -1083,6 +1094,6 @@ pub fn set_static_property_value_in_owner(class_name: &str, prop: &str, value: V
         set_static_property_value(&owner, prop, value);
         Ok(())
     } else {
-        Err(format!("Unknown static property '{}.{}'", class_name, prop))
+        Err(format!("Unknown static property '{class_name}.{prop}'"))
     }
 }

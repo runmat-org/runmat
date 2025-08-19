@@ -14,7 +14,8 @@ fn import_wildcard_and_specific() {
     }
     match &program.body[1] {
         Stmt::Import { path, wildcard } => {
-            let expected: Vec<String> = vec!["pkg".to_string(), "sub".to_string(), "Class".to_string()];
+            let expected: Vec<String> =
+                vec!["pkg".to_string(), "sub".to_string(), "Class".to_string()];
             assert_eq!(path, &expected);
             assert!(!*wildcard);
         }
@@ -42,5 +43,3 @@ fn imports_then_metaclass_contexts() {
         _ => panic!("expected metaclass expression after imports"),
     }
 }
-
-

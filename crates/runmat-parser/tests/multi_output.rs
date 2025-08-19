@@ -18,5 +18,3 @@ fn multi_output_with_placeholder() {
         _ => panic!("expected multi-assign"),
     }
 }
-
-

@@ -20,7 +20,10 @@ pub enum Expr {
     // Dynamic field: s.(expr)
     MemberDynamic(Box<Expr>, Box<Expr>),
     MethodCall(Box<Expr>, String, Vec<Expr>),
-    AnonFunc { params: Vec<String>, body: Box<Expr> },
+    AnonFunc {
+        params: Vec<String>,
+        body: Box<Expr>,
+    },
     FuncHandle(String),
     MetaClass(String),
 }
@@ -104,7 +107,10 @@ pub enum Stmt {
         outputs: Vec<String>,
         body: Vec<Stmt>,
     },
-    Import { path: Vec<String>, wildcard: bool },
+    Import {
+        path: Vec<String>,
+        wildcard: bool,
+    },
     ClassDef {
         name: String,
         super_class: Option<String>,
@@ -129,11 +135,26 @@ pub struct Attr {
 
 #[derive(Debug, PartialEq)]
 pub enum ClassMember {
-    Properties { attributes: Vec<Attr>, names: Vec<String> },
-    Methods { attributes: Vec<Attr>, body: Vec<Stmt> },
-    Events { attributes: Vec<Attr>, names: Vec<String> },
-    Enumeration { attributes: Vec<Attr>, names: Vec<String> },
-    Arguments { attributes: Vec<Attr>, names: Vec<String> },
+    Properties {
+        attributes: Vec<Attr>,
+        names: Vec<String>,
+    },
+    Methods {
+        attributes: Vec<Attr>,
+        body: Vec<Stmt>,
+    },
+    Events {
+        attributes: Vec<Attr>,
+        names: Vec<String>,
+    },
+    Enumeration {
+        attributes: Vec<Attr>,
+        names: Vec<String>,
+    },
+    Arguments {
+        attributes: Vec<Attr>,
+        names: Vec<String>,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -351,20 +372,28 @@ impl Parser {
                     Ok(Stmt::Assign(name, expr, false)) // Will be updated by parse_stmt_with_semicolon
                 } else if self.peek_token() == Some(&Token::Ident) {
                     // First, try complex lvalue assignment starting from an identifier: A(1)=x, A{1}=x, s.f=x, s.(n)=x
-                    if let Some(lv) = self.try_parse_lvalue_assign()? { return Ok(lv); }
+                    if let Some(lv) = self.try_parse_lvalue_assign()? {
+                        return Ok(lv);
+                    }
                     // Command-form at statement start if it looks like a sequence of simple arguments
                     // and is not immediately followed by indexing/member syntax.
                     if self.can_start_command_form() {
                         let name = self.next().unwrap().lexeme;
                         let args = self.parse_command_args();
                         Ok(Stmt::ExprStmt(Expr::FuncCall(name, args), false))
-                } else {
+                    } else {
                         // If we see Ident <space> Ident immediately followed by postfix opener,
                         // this is an ambiguous adjacency (e.g., "foo b(1)"). Emit a targeted error.
                         if matches!(self.peek_token_at(1), Some(Token::Ident))
                             && matches!(
                                 self.peek_token_at(2),
-                                Some(Token::LParen | Token::Dot | Token::LBracket | Token::LBrace | Token::Transpose)
+                                Some(
+                                    Token::LParen
+                                        | Token::Dot
+                                        | Token::LBracket
+                                        | Token::LBrace
+                                        | Token::Transpose
+                                )
                             )
                         {
                             return Err(self.error(
@@ -372,7 +401,7 @@ impl Parser {
                             ));
                         }
                         // Fall back to full expression parse (e.g., foo(1), foo.bar, etc.)
-                    let expr = self.parse_expr()?;
+                        let expr = self.parse_expr()?;
                         Ok(Stmt::ExprStmt(expr, false))
                     }
                 } else if let Some(lv) = self.try_parse_lvalue_assign()? {
@@ -392,22 +421,32 @@ impl Parser {
         // At entry, peek_token() is Some(Ident) for callee
         let mut i = 1;
         // At least one simple arg must follow
-        if !matches!(self.peek_token_at(i), Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)) {
+        if !matches!(
+            self.peek_token_at(i),
+            Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)
+        ) {
             return false;
         }
         // Consume all contiguous simple args
-        while matches!(self.peek_token_at(i), Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)) {
+        while matches!(
+            self.peek_token_at(i),
+            Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)
+        ) {
             i += 1;
         }
         // If the next token begins indexing/member or other expression syntax, do not use command-form
         match self.peek_token_at(i) {
-            Some(Token::LParen) | Some(Token::Dot) | Some(Token::LBracket) | Some(Token::LBrace) | Some(Token::Transpose) => return false,
+            Some(Token::LParen)
+            | Some(Token::Dot)
+            | Some(Token::LBracket)
+            | Some(Token::LBrace)
+            | Some(Token::Transpose) => false,
             // If next token is assignment, also not a command-form (would be ambiguous)
-            Some(Token::Assign) => return false,
+            Some(Token::Assign) => false,
             // End of statement is okay for command-form
-            None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline) => return true,
+            None | Some(Token::Semicolon) | Some(Token::Comma) | Some(Token::Newline) => true,
             // Otherwise conservatively allow
-            _ => return true,
+            _ => true,
         }
     }
 
@@ -433,9 +472,15 @@ impl Parser {
                     args.push(Expr::String(s));
                 }
                 // Stop on tokens that would start normal expression syntax
-                Some(Token::Slash) | Some(Token::Star) | Some(Token::Backslash)
-                | Some(Token::Plus) | Some(Token::Minus) | Some(Token::LParen)
-                | Some(Token::Dot) | Some(Token::LBracket) | Some(Token::LBrace)
+                Some(Token::Slash)
+                | Some(Token::Star)
+                | Some(Token::Backslash)
+                | Some(Token::Plus)
+                | Some(Token::Minus)
+                | Some(Token::LParen)
+                | Some(Token::Dot)
+                | Some(Token::LBracket)
+                | Some(Token::LBrace)
                 | Some(Token::Transpose) => break,
                 _ => break,
             }
@@ -466,7 +511,9 @@ impl Parser {
                 } else if self.consume(&Token::LBracket) {
                     let mut idxs = Vec::new();
                     idxs.push(self.parse_expr()?);
-                    while self.consume(&Token::Comma) { idxs.push(self.parse_expr()?); }
+                    while self.consume(&Token::Comma) {
+                        idxs.push(self.parse_expr()?);
+                    }
                     if !self.consume(&Token::RBracket) {
                         return Err(self.error_with_expected("expected ']'", "]"));
                     }
@@ -474,7 +521,9 @@ impl Parser {
                 } else if self.consume(&Token::LBrace) {
                     let mut idxs = Vec::new();
                     idxs.push(self.parse_expr()?);
-                    while self.consume(&Token::Comma) { idxs.push(self.parse_expr()?); }
+                    while self.consume(&Token::Comma) {
+                        idxs.push(self.parse_expr()?);
+                    }
                     if !self.consume(&Token::RBrace) {
                         return Err(self.error_with_expected("expected '}'", "}"));
                     }
@@ -492,10 +541,15 @@ impl Parser {
                     }
                     // Otherwise, member access
                     self.pos += 1; // consume '.'
-                    // Support dynamic field: .(expr) or static .ident
+                                   // Support dynamic field: .(expr) or static .ident
                     if self.consume(&Token::LParen) {
                         let name_expr = self.parse_expr()?;
-                        if !self.consume(&Token::RParen) { return Err(self.error_with_expected("expected ')' after dynamic field expression", ")")); }
+                        if !self.consume(&Token::RParen) {
+                            return Err(self.error_with_expected(
+                                "expected ')' after dynamic field expression",
+                                ")",
+                            ));
+                        }
                         base = Expr::MemberDynamic(Box::new(base), Box::new(name_expr));
                     } else {
                         let name = self.expect_ident()?;
@@ -507,17 +561,26 @@ impl Parser {
             }
             base
         } else {
-            self.pos = save; return Ok(None);
+            self.pos = save;
+            return Ok(None);
         };
-        if !self.consume(&Token::Assign) { self.pos = save; return Ok(None); }
+        if !self.consume(&Token::Assign) {
+            self.pos = save;
+            return Ok(None);
+        }
         let rhs = self.parse_expr()?;
         let stmt = match lvalue {
             Expr::Member(b, name) => Stmt::AssignLValue(LValue::Member(b, name), rhs, false),
-            Expr::MemberDynamic(b, n) => Stmt::AssignLValue(LValue::MemberDynamic(b, n), rhs, false),
+            Expr::MemberDynamic(b, n) => {
+                Stmt::AssignLValue(LValue::MemberDynamic(b, n), rhs, false)
+            }
             Expr::Index(b, idxs) => Stmt::AssignLValue(LValue::Index(b, idxs), rhs, false),
             Expr::IndexCell(b, idxs) => Stmt::AssignLValue(LValue::IndexCell(b, idxs), rhs, false),
             Expr::Ident(v) => Stmt::Assign(v, rhs, false),
-            _ => { self.pos = save; return Ok(None); }
+            _ => {
+                self.pos = save;
+                return Ok(None);
+            }
         };
         Ok(Some(stmt))
     }
@@ -721,7 +784,11 @@ impl Parser {
                 // Otherwise, member access
                 self.pos += 1; // consume '.'
                 let name = match self.next() {
-                    Some(TokenInfo { token: Token::Ident, lexeme, .. }) => lexeme,
+                    Some(TokenInfo {
+                        token: Token::Ident,
+                        lexeme,
+                        ..
+                    }) => lexeme,
                     _ => return Err("expected member name after '.'".into()),
                 };
                 if self.consume(&Token::LParen) {
@@ -787,18 +854,36 @@ impl Parser {
             // Consume packages (lowercase-leading) and exactly one Class segment (uppercase-leading), then stop.
             let mut parts: Vec<String> = Vec::new();
             let first = self.expect_ident()?;
-            let class_consumed = first.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+            let class_consumed = first
+                .chars()
+                .next()
+                .map(|c| c.is_uppercase())
+                .unwrap_or(false);
             parts.push(first);
-            while self.peek_token() == Some(&Token::Dot) && matches!(self.peek_token_at(1), Some(Token::Ident)) {
+            while self.peek_token() == Some(&Token::Dot)
+                && matches!(self.peek_token_at(1), Some(Token::Ident))
+            {
                 // Lookahead at the next identifier lexeme
-                let next_lex = if let Some(ti) = self.tokens.get(self.pos + 1) { ti.lexeme.clone() } else { String::new() };
-                let is_upper = next_lex.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
-                if class_consumed { break; }
+                let next_lex = if let Some(ti) = self.tokens.get(self.pos + 1) {
+                    ti.lexeme.clone()
+                } else {
+                    String::new()
+                };
+                let is_upper = next_lex
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false);
+                if class_consumed {
+                    break;
+                }
                 // Consume dot and ident
                 self.pos += 1; // consume '.'
                 let seg = self.expect_ident()?;
                 parts.push(seg);
-                if is_upper { break; }
+                if is_upper {
+                    break;
+                }
             }
             let base = Expr::MetaClass(parts.join("."));
             self.parse_postfix_with_base(base)
@@ -827,11 +912,16 @@ impl Parser {
                                 params.push(self.expect_ident()?);
                             }
                             if !self.consume(&Token::RParen) {
-                                return Err("expected ')' after anonymous function parameters".into());
+                                return Err(
+                                    "expected ')' after anonymous function parameters".into()
+                                );
                             }
                         }
                         let body = self.parse_expr().map_err(|e| e.message)?;
-                        Ok(Expr::AnonFunc { params, body: Box::new(body) })
+                        Ok(Expr::AnonFunc {
+                            params,
+                            body: Box::new(body),
+                        })
                     } else {
                         // function handle @name
                         let name = self.expect_ident()?;
@@ -863,7 +953,7 @@ impl Parser {
                 Token::ClassDef => {
                     // Rewind one token and defer to statement parser for classdef blocks
                     self.pos -= 1;
-                    return Err("classdef in expression context".into());
+                    Err("classdef in expression context".into())
                 }
                 _ => {
                     // Provide detailed error message about what token was unexpected
@@ -908,17 +998,21 @@ impl Parser {
             // Accept either comma-separated or whitespace-separated elements until ';' or ']'
             loop {
                 if self.consume(&Token::Comma) {
-                row.push(self.parse_expr()?);
+                    row.push(self.parse_expr()?);
                     continue;
                 }
                 // If next token ends the row/matrix, stop
-                if matches!(self.peek_token(), Some(Token::Semicolon) | Some(Token::RBracket)) {
+                if matches!(
+                    self.peek_token(),
+                    Some(Token::Semicolon) | Some(Token::RBracket)
+                ) {
                     break;
                 }
                 // Otherwise, treat whitespace as a separator and parse the next element
                 // Only proceed if the next token can start an expression
                 match self.peek_token() {
-                    Some(Token::Ident
+                    Some(
+                        Token::Ident
                         | Token::Integer
                         | Token::Float
                         | Token::Str
@@ -930,11 +1024,13 @@ impl Parser {
                         | Token::Minus
                         | Token::Colon
                         | Token::True
-                        | Token::False
+                        | Token::False,
                     ) => {
                         row.push(self.parse_expr()?);
                     }
-                    _ => { break; }
+                    _ => {
+                        break;
+                    }
                 }
             }
             rows.push(row);
@@ -1034,7 +1130,7 @@ impl Parser {
             }
         }
 
-        // Enforce MATLAB varargs placement constraints at parse time
+        // Enforce varargs placement constraints at parse time
         // varargin: at most once, must be last in params if present
         if let Some(idx) = params.iter().position(|p| p == "varargin") {
             if idx != params.len() - 1 {
@@ -1058,13 +1154,22 @@ impl Parser {
         // arguments ... end  (we accept a sequence of identifiers, validation semantics handled in HIR/runtime)
         if self.peek_token() == Some(&Token::Arguments) {
             self.pos += 1; // consume 'arguments'
-            // Accept a flat list of identifiers optionally separated by commas/semicolons
+                           // Accept a flat list of identifiers optionally separated by commas/semicolons
             loop {
-                if self.consume(&Token::End) { break; }
-                if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) { continue; }
-                if matches!(self.peek_token(), Some(Token::Ident)) { let _ = self.expect_ident()?; continue; }
+                if self.consume(&Token::End) {
+                    break;
+                }
+                if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+                    continue;
+                }
+                if matches!(self.peek_token(), Some(Token::Ident)) {
+                    let _ = self.expect_ident()?;
+                    continue;
+                }
                 // Tolerate newlines/whitespace-only between entries
-                if self.peek_token().is_none() { break; }
+                if self.peek_token().is_none() {
+                    break;
+                }
                 break;
             }
         }
@@ -1136,7 +1241,8 @@ impl Parser {
         loop {
             if self.consume(&Token::Case) {
                 let val = self.parse_expr()?;
-                let body = self.parse_block(|t| matches!(t, Token::Case | Token::Otherwise | Token::End))?;
+                let body =
+                    self.parse_block(|t| matches!(t, Token::Case | Token::Otherwise | Token::End))?;
                 cases.push((val, body));
             } else if self.consume(&Token::Otherwise) {
                 let body = self.parse_block(|t| matches!(t, Token::End))?;
@@ -1148,7 +1254,11 @@ impl Parser {
         if !self.consume(&Token::End) {
             return Err("expected 'end' for switch".into());
         }
-        Ok(Stmt::Switch { expr: control, cases, otherwise })
+        Ok(Stmt::Switch {
+            expr: control,
+            cases,
+            otherwise,
+        })
     }
 
     fn parse_try_catch(&mut self) -> Result<Stmt, String> {
@@ -1168,7 +1278,11 @@ impl Parser {
         if !self.consume(&Token::End) {
             return Err("expected 'end' after try/catch".into());
         }
-        Ok(Stmt::TryCatch { try_body, catch_var, catch_body })
+        Ok(Stmt::TryCatch {
+            try_body,
+            catch_var,
+            catch_body,
+        })
     }
 
     fn parse_import(&mut self) -> Result<Stmt, String> {
@@ -1214,49 +1328,85 @@ impl Parser {
                     self.pos += 1;
                     let attrs = self.parse_optional_attr_list();
                     let props = self.parse_properties_names_block()?;
-                    if !self.consume(&Token::End) { return Err("expected 'end' after properties".into()); }
-                    members.push(ClassMember::Properties { attributes: attrs, names: props });
+                    if !self.consume(&Token::End) {
+                        return Err("expected 'end' after properties".into());
+                    }
+                    members.push(ClassMember::Properties {
+                        attributes: attrs,
+                        names: props,
+                    });
                 }
                 Some(Token::Methods) => {
                     self.pos += 1;
                     let attrs = self.parse_optional_attr_list();
                     let body = self.parse_block(|t| matches!(t, Token::End))?;
-                    if !self.consume(&Token::End) { return Err("expected 'end' after methods".into()); }
-                    members.push(ClassMember::Methods { attributes: attrs, body });
+                    if !self.consume(&Token::End) {
+                        return Err("expected 'end' after methods".into());
+                    }
+                    members.push(ClassMember::Methods {
+                        attributes: attrs,
+                        body,
+                    });
                 }
                 Some(Token::Events) => {
                     self.pos += 1;
                     let attrs = self.parse_optional_attr_list();
                     let names = self.parse_name_block()?;
-                    if !self.consume(&Token::End) { return Err("expected 'end' after events".into()); }
-                    members.push(ClassMember::Events { attributes: attrs, names });
+                    if !self.consume(&Token::End) {
+                        return Err("expected 'end' after events".into());
+                    }
+                    members.push(ClassMember::Events {
+                        attributes: attrs,
+                        names,
+                    });
                 }
                 Some(Token::Enumeration) => {
                     self.pos += 1;
                     let attrs = self.parse_optional_attr_list();
                     let names = self.parse_name_block()?;
-                    if !self.consume(&Token::End) { return Err("expected 'end' after enumeration".into()); }
-                    members.push(ClassMember::Enumeration { attributes: attrs, names });
+                    if !self.consume(&Token::End) {
+                        return Err("expected 'end' after enumeration".into());
+                    }
+                    members.push(ClassMember::Enumeration {
+                        attributes: attrs,
+                        names,
+                    });
                 }
                 Some(Token::Arguments) => {
                     self.pos += 1;
                     let attrs = self.parse_optional_attr_list();
                     let names = self.parse_name_block()?;
-                    if !self.consume(&Token::End) { return Err("expected 'end' after arguments".into()); }
-                    members.push(ClassMember::Arguments { attributes: attrs, names });
+                    if !self.consume(&Token::End) {
+                        return Err("expected 'end' after arguments".into());
+                    }
+                    members.push(ClassMember::Arguments {
+                        attributes: attrs,
+                        names,
+                    });
                 }
-                Some(Token::End) => { self.pos += 1; break; }
+                Some(Token::End) => {
+                    self.pos += 1;
+                    break;
+                }
                 _ => break,
             }
         }
-        Ok(Stmt::ClassDef { name, super_class, members })
+        Ok(Stmt::ClassDef {
+            name,
+            super_class,
+            members,
+        })
     }
 
     fn parse_name_block(&mut self) -> Result<Vec<String>, String> {
         let mut names = Vec::new();
         while let Some(tok) = self.peek_token() {
-            if matches!(tok, Token::End) { break; }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) { continue; }
+            if matches!(tok, Token::End) {
+                break;
+            }
+            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+                continue;
+            }
             if let Some(Token::Ident) = self.peek_token() {
                 names.push(self.expect_ident()?);
             } else {
@@ -1270,8 +1420,12 @@ impl Parser {
         // Accept identifiers with optional default assignment: name, name = expr
         let mut names = Vec::new();
         while let Some(tok) = self.peek_token() {
-            if matches!(tok, Token::End) { break; }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) { continue; }
+            if matches!(tok, Token::End) {
+                break;
+            }
+            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+                continue;
+            }
             if let Some(Token::Ident) = self.peek_token() {
                 names.push(self.expect_ident()?);
                 // Optional default initializer: skip over `= expr` syntactically
@@ -1289,24 +1443,39 @@ impl Parser {
     fn parse_optional_attr_list(&mut self) -> Vec<Attr> {
         // Minimal parsing of attribute lists: (Attr, Attr=Value, ...)
         let mut attrs: Vec<Attr> = Vec::new();
-        if !self.consume(&Token::LParen) { return attrs; }
+        if !self.consume(&Token::LParen) {
+            return attrs;
+        }
         loop {
-            if self.consume(&Token::RParen) { break; }
+            if self.consume(&Token::RParen) {
+                break;
+            }
             match self.peek_token() {
                 Some(Token::Ident) => {
                     let name = self.expect_ident().unwrap_or_else(|_| "".to_string());
                     let mut value: Option<String> = None;
                     if self.consume(&Token::Assign) {
                         // Value could be ident, string or number; capture raw lexeme
-                        if let Some(tok) = self.next() { value = Some(tok.lexeme); }
+                        if let Some(tok) = self.next() {
+                            value = Some(tok.lexeme);
+                        }
                     }
                     attrs.push(Attr { name, value });
                     let _ = self.consume(&Token::Comma);
                 }
-                Some(Token::Comma) => { self.pos += 1; }
-                Some(Token::RParen) => { self.pos += 1; break; }
-                Some(_) => { self.pos += 1; }
-                None => { break; }
+                Some(Token::Comma) => {
+                    self.pos += 1;
+                }
+                Some(Token::RParen) => {
+                    self.pos += 1;
+                    break;
+                }
+                Some(_) => {
+                    self.pos += 1;
+                }
+                None => {
+                    break;
+                }
             }
         }
         attrs
@@ -1349,14 +1518,20 @@ impl Parser {
     }
 
     fn try_parse_multi_assign(&mut self) -> Result<Stmt, String> {
-        if !self.consume(&Token::LBracket) { return Err("not a multi-assign".into()); }
+        if !self.consume(&Token::LBracket) {
+            return Err("not a multi-assign".into());
+        }
         let mut names = Vec::new();
         names.push(self.expect_ident_or_tilde()?);
         while self.consume(&Token::Comma) {
             names.push(self.expect_ident_or_tilde()?);
         }
-        if !self.consume(&Token::RBracket) { return Err("expected ']'".into()); }
-        if !self.consume(&Token::Assign) { return Err("expected '='".into()); }
+        if !self.consume(&Token::RBracket) {
+            return Err("expected ']'".into());
+        }
+        if !self.consume(&Token::Assign) {
+            return Err("expected '='".into());
+        }
         let rhs = self.parse_expr().map_err(|e| e.message)?;
         Ok(Stmt::MultiAssign(names, rhs, false))
     }
@@ -1383,8 +1558,15 @@ impl Parser {
 
     fn expect_ident_or_tilde(&mut self) -> Result<String, String> {
         match self.next() {
-            Some(TokenInfo { token: Token::Ident, lexeme, .. }) => Ok(lexeme),
-            Some(TokenInfo { token: Token::Tilde, .. }) => Ok("~".to_string()),
+            Some(TokenInfo {
+                token: Token::Ident,
+                lexeme,
+                ..
+            }) => Ok(lexeme),
+            Some(TokenInfo {
+                token: Token::Tilde,
+                ..
+            }) => Ok("~".to_string()),
             _ => Err("expected identifier or '~'".into()),
         }
     }

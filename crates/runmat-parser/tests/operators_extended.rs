@@ -13,5 +13,3 @@ fn non_conjugate_transpose_and_dot_plus() {
         _ => panic!("expected dot-plus to parse as add"),
     }
 }
-
-

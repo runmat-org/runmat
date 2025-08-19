@@ -80,7 +80,9 @@ fn deeply_nested_lvalue_assignment() {
                                 Expr::Index(id, paren_idxs) => {
                                     assert!(matches!(**id, Expr::Ident(ref n) if n == "A"));
                                     assert_eq!(paren_idxs.len(), 1);
-                                    assert!(matches!(paren_idxs[0], Expr::Number(ref n) if n == "1"));
+                                    assert!(
+                                        matches!(paren_idxs[0], Expr::Number(ref n) if n == "1")
+                                    );
                                 }
                                 _ => panic!("member base not Index"),
                             }
@@ -103,5 +105,3 @@ fn multiple_assignment_kinds_sequence() {
     let program = parse("A=1; A(1)=2; A{1}=3; s.f = 4").unwrap();
     assert_eq!(program.body.len(), 4);
 }
-
-

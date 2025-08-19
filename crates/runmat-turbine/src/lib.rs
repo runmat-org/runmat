@@ -360,7 +360,9 @@ pub extern "C" fn runmat_value_lt(a_ptr: *const Value, b_ptr: *const Value) -> *
 
         let result = match (a, b) {
             (Value::Num(x), Value::Num(y)) => Value::Num(if x < y { 1.0 } else { 0.0 }),
-            (Value::Int(x), Value::Int(y)) => Value::Num(if x.to_i64() < y.to_i64() { 1.0 } else { 0.0 }),
+            (Value::Int(x), Value::Int(y)) => {
+                Value::Num(if x.to_i64() < y.to_i64() { 1.0 } else { 0.0 })
+            }
             (Value::Num(x), Value::Int(y)) => Value::Num(if *x < y.to_f64() { 1.0 } else { 0.0 }),
             (Value::Int(x), Value::Num(y)) => Value::Num(if x.to_f64() < *y { 1.0 } else { 0.0 }),
             _ => {
@@ -653,8 +655,12 @@ fn execute_user_function_isolated(
     let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;
 
-    let func_result_vars = runmat_ignition::interpret_with_vars(&func_bytecode, &mut func_vars, Some(function_def.name.as_str()))
-        .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {e}")))?;
+    let func_result_vars = runmat_ignition::interpret_with_vars(
+        &func_bytecode,
+        &mut func_vars,
+        Some(function_def.name.as_str()),
+    )
+    .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {e}")))?;
 
     // Copy back the modified variables
     func_vars = func_result_vars;
@@ -1166,15 +1172,48 @@ impl TurbineEngine {
                     count.hash(&mut hasher);
                 }
                 Instr::ReturnValue => "ReturnValue".hash(&mut hasher),
-                Instr::IndexSlice(d,n,c,e) => { "IndexSlice".hash(&mut hasher); d.hash(&mut hasher); n.hash(&mut hasher); c.hash(&mut hasher); e.hash(&mut hasher); }
-                Instr::CreateCell2D(r,c) => { "CreateCell2D".hash(&mut hasher); r.hash(&mut hasher); c.hash(&mut hasher); }
-                Instr::IndexCell(k) => { "IndexCell".hash(&mut hasher); k.hash(&mut hasher); }
-                Instr::LoadStaticProperty(class, prop) => { "LoadStaticProperty".hash(&mut hasher); class.hash(&mut hasher); prop.hash(&mut hasher); }
-                Instr::CallStaticMethod(class, method, argc) => { "CallStaticMethod".hash(&mut hasher); class.hash(&mut hasher); method.hash(&mut hasher); argc.hash(&mut hasher); }
-                Instr::EnterTry(catch_pc, catch_var) => { "EnterTry".hash(&mut hasher); catch_pc.hash(&mut hasher); catch_var.hash(&mut hasher); }
-                Instr::PopTry => { "PopTry".hash(&mut hasher); }
-                Instr::CallFeval(argc) => { "CallFeval".hash(&mut hasher); argc.hash(&mut hasher); }
-                _ => { "Other".hash(&mut hasher); }
+                Instr::IndexSlice(d, n, c, e) => {
+                    "IndexSlice".hash(&mut hasher);
+                    d.hash(&mut hasher);
+                    n.hash(&mut hasher);
+                    c.hash(&mut hasher);
+                    e.hash(&mut hasher);
+                }
+                Instr::CreateCell2D(r, c) => {
+                    "CreateCell2D".hash(&mut hasher);
+                    r.hash(&mut hasher);
+                    c.hash(&mut hasher);
+                }
+                Instr::IndexCell(k) => {
+                    "IndexCell".hash(&mut hasher);
+                    k.hash(&mut hasher);
+                }
+                Instr::LoadStaticProperty(class, prop) => {
+                    "LoadStaticProperty".hash(&mut hasher);
+                    class.hash(&mut hasher);
+                    prop.hash(&mut hasher);
+                }
+                Instr::CallStaticMethod(class, method, argc) => {
+                    "CallStaticMethod".hash(&mut hasher);
+                    class.hash(&mut hasher);
+                    method.hash(&mut hasher);
+                    argc.hash(&mut hasher);
+                }
+                Instr::EnterTry(catch_pc, catch_var) => {
+                    "EnterTry".hash(&mut hasher);
+                    catch_pc.hash(&mut hasher);
+                    catch_var.hash(&mut hasher);
+                }
+                Instr::PopTry => {
+                    "PopTry".hash(&mut hasher);
+                }
+                Instr::CallFeval(argc) => {
+                    "CallFeval".hash(&mut hasher);
+                    argc.hash(&mut hasher);
+                }
+                _ => {
+                    "Other".hash(&mut hasher);
+                }
             }
         }
 

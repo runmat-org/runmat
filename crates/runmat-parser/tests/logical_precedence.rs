@@ -20,5 +20,3 @@ fn logical_and_short_circuit_precedence() {
         _ => panic!("expected 'a & b | c' shape"),
     }
 }
-
-

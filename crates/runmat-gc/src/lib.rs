@@ -28,8 +28,8 @@ pub mod stats;
 pub mod compression;
 
 pub use allocator::{AllocatorStats, GenerationalAllocator, SizeClass};
-pub use barriers::{CardTable, WriteBarrier};
 use barriers::WriteBarrierManager;
+pub use barriers::{CardTable, WriteBarrier};
 pub use collector::MarkSweepCollector;
 pub use config::{GcConfig, GcConfigBuilder};
 // Re-export unified handle from API crate
@@ -78,7 +78,7 @@ pub struct HighPerformanceGC {
     collector: Mutex<MarkSweepCollector>,
 
     /// Explicit roots stored as raw addresses (address-keyed)
-    root_ptrs: Arc<RwLock<HashSet<*const Value>>>,
+    root_ptrs: Arc<Mutex<HashSet<usize>>>,
 
     /// Collection state
     collection_in_progress: AtomicBool,
@@ -100,7 +100,7 @@ impl HighPerformanceGC {
             config: Arc::new(RwLock::new(config)),
             allocator: Mutex::new(allocator),
             collector: Mutex::new(collector),
-            root_ptrs: Arc::new(RwLock::new(HashSet::new())),
+            root_ptrs: Arc::new(Mutex::new(HashSet::new())),
             collection_in_progress: AtomicBool::new(false),
             stats: Arc::new(GcStats::new()),
         })
@@ -159,23 +159,27 @@ impl HighPerformanceGC {
         // Build combined roots: explicit + external (root scanner + barriers)
         let mut combined_roots: Vec<GcPtr<Value>> = Vec::new();
         {
-            let roots = self.root_ptrs.read();
-            combined_roots.extend(roots.iter().map(|&p| unsafe { GcPtr::from_raw(p) }));
+            let roots = self.root_ptrs.lock();
+            combined_roots.extend(roots.iter().map(|&addr| unsafe { GcPtr::from_raw(addr as *const Value) }));
         }
         // External roots
-        if let Ok(mut ext) = ROOT_SCANNER.scan_roots() { combined_roots.append(&mut ext); }
+        if let Ok(mut ext) = ROOT_SCANNER.scan_roots() {
+            combined_roots.append(&mut ext);
+        }
         combined_roots.extend(gc_barrier_minor_roots());
 
         // Collect young generation via unified collector/allocator
         let mut allocator = self.allocator.lock();
         let mut collector = self.collector.lock();
-        let collected_count = collector.collect_young_generation(&mut allocator, &combined_roots, &self.stats)?;
+        let collected_count =
+            collector.collect_young_generation(&mut allocator, &combined_roots, &self.stats)?;
 
         // Clear dirty cards; keep remembered set for next minor cycle
         WRITE_BARRIERS.clear_after_minor_gc();
 
         let duration = start_time.elapsed();
-        self.stats.record_minor_collection(collected_count, duration);
+        self.stats
+            .record_minor_collection(collected_count, duration);
 
         self.collection_in_progress.store(false, Ordering::Release);
 
@@ -184,13 +188,13 @@ impl HighPerformanceGC {
         Ok(collected_count)
     }
 
-    /// Get object by handle
+    // /// Get object by handle
     // Address-keyed design: object table lookup removed
 
-    /// Mark objects transitively (follow references)
+    // /// Mark objects transitively (follow references)
     // Transitive marking handled by collector over allocator-backed objects
 
-    /// Find the GcObject that contains a specific Value
+    // /// Find the GcObject that contains a specific Value
     // Value-equality scans removed in favor of address-keyed marking
 
     /// Perform major collection (all generations)
@@ -208,22 +212,26 @@ impl HighPerformanceGC {
         // Build combined roots: explicit + external
         let mut combined_roots: Vec<GcPtr<Value>> = Vec::new();
         {
-            let roots = self.root_ptrs.read();
-            combined_roots.extend(roots.iter().map(|&p| unsafe { GcPtr::from_raw(p) }));
+            let roots = self.root_ptrs.lock();
+            combined_roots.extend(roots.iter().map(|&addr| unsafe { GcPtr::from_raw(addr as *const Value) }));
         }
-        if let Ok(mut ext) = ROOT_SCANNER.scan_roots() { combined_roots.append(&mut ext); }
+        if let Ok(mut ext) = ROOT_SCANNER.scan_roots() {
+            combined_roots.append(&mut ext);
+        }
         combined_roots.extend(gc_barrier_minor_roots());
 
         let mut allocator = self.allocator.lock();
         let mut collector = self.collector.lock();
-        let collected_count = collector.collect_all_generations(&mut allocator, &combined_roots, &self.stats)?;
+        let collected_count =
+            collector.collect_all_generations(&mut allocator, &combined_roots, &self.stats)?;
 
         // Clear all barriers after major GC
         WRITE_BARRIERS.clear_after_major_gc();
         allocator.clear_promotion_state();
 
         let duration = start_time.elapsed();
-        self.stats.record_major_collection(collected_count, duration);
+        self.stats
+            .record_major_collection(collected_count, duration);
 
         self.collection_in_progress.store(false, Ordering::Release);
 
@@ -234,26 +242,29 @@ impl HighPerformanceGC {
 
     /// Add a root to protect an object from collection
     pub fn add_root(&self, root: GcPtr<Value>) -> Result<()> {
-        let value_ptr = unsafe { root.as_raw() };
-        if value_ptr.is_null() { return Ok(()); }
-        self.root_ptrs.write().insert(value_ptr);
+        let value_ptr = unsafe { root.as_raw() } as usize;
+        if value_ptr == 0 {
+            return Ok(());
+        }
+        self.root_ptrs.lock().insert(value_ptr);
         Ok(())
     }
 
     /// Remove a root
     pub fn remove_root(&self, root: GcPtr<Value>) -> Result<()> {
-        let value_ptr = unsafe { root.as_raw() };
-        if value_ptr.is_null() { return Ok(()); }
-        self.root_ptrs.write().remove(&value_ptr);
+        let value_ptr = unsafe { root.as_raw() } as usize;
+        if value_ptr == 0 {
+            return Ok(());
+        }
+        self.root_ptrs.lock().remove(&value_ptr);
         Ok(())
     }
 
-    /// Find the handle for an object that contains the given value pointer
+    // /// Find the handle for an object that contains the given value pointer
     // Address-keyed roots: no handle lookup needed
-
     /// Get GC statistics
     pub fn stats(&self) -> GcStats {
-        (*self.stats).clone()
+        self.stats.as_ref().clone()
     }
 
     /// Configure the GC
@@ -331,9 +342,13 @@ pub fn gc_get_config() -> GcConfig {
 }
 
 /// Simplified root registration for backwards compatibility
-pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> { ROOT_SCANNER.register_root(root) }
+pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> {
+    ROOT_SCANNER.register_root(root)
+}
 
-pub fn gc_unregister_root(root_id: RootId) -> Result<()> { ROOT_SCANNER.unregister_root(root_id) }
+pub fn gc_unregister_root(root_id: RootId) -> Result<()> {
+    ROOT_SCANNER.unregister_root(root_id)
+}
 
 /// Record a write for GC barriers (approximate old->young tracking)
 pub fn gc_record_write(old: &Value, new: &Value) {
@@ -381,7 +396,7 @@ pub fn gc_reset_for_test() -> Result<()> {
     }
 
     {
-        let mut roots = GC.root_ptrs.write();
+        let mut roots = GC.root_ptrs.lock();
         roots.clear();
     }
 

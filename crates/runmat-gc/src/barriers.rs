@@ -441,7 +441,8 @@ mod tests {
 
     #[test]
     fn test_value_write_barrier_aware() {
-        let value = Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap());
+        let value =
+            Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap());
         assert!(value.has_young_references());
 
         let value2 = Value::Num(42.0);

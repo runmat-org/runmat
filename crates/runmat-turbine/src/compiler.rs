@@ -292,7 +292,9 @@ impl BytecodeCompiler {
 
                 match instr {
                     &Instr::PackToRow(_) | &Instr::PackToCol(_) => {
-                        return Err(TurbineError::ExecutionError("PackToRow/PackToCol not supported in JIT; use interpreter".to_string()));
+                        return Err(TurbineError::ExecutionError(
+                            "PackToRow/PackToCol not supported in JIT; use interpreter".to_string(),
+                        ));
                     }
                     Instr::DeclareGlobalNamed(_, _) | Instr::DeclarePersistentNamed(_, _) => {
                         // Ignore; VM manages globals/persistents

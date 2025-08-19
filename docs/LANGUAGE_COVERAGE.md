@@ -1,22 +1,31 @@
-# RunMat MATLAB Language Coverage Report
+# RunMat Language Coverage
 
-RunMat’s goal is to provide a high-performance, modern alternative to MATLAB, with complete language grammar and semantics. This document tracks language coverage in RunMat and compares it to GNU Octave where helpful. It focuses on core language features (syntax and semantics), not breadth of numeric libraries or toolboxes.
+RunMat's goal is to provide a high-performance, modern runtime to execute MATLAB code, with complete language grammar and semantics. This document tracks language coverage in RunMat and compares it to GNU Octave where helpful. It focuses on core language features (syntax and semantics), not breadth of numeric libraries or toolboxes.
 
 ## Language Feature Compatibility
 
 | Feature Category | Language Feature | RunMat Status | Octave Status | Notes |
 | :--- | :--- | :---: | :---: | :--- |
+| **Variables & Data Types** | Default numeric `double` | ✅ | ✅ | Column-major numeric tensors (`f64`). |
+| | Character arrays `'...'` | ✅ | ✅ | Char row vectors implemented. |
+| | String arrays `"..."` | ✅ | ❌ | RunMat `StringArray` with MATLAB-parity indexing/comparison; Octave's string type coverage varies. |
+| | `ans` default variable (REPL) | ✅ | ✅ | Handled by REPL. |
+| | `global` variables | ✅ | ✅ | Name-based, cross-function binding; write-through semantics. |
+| | `persistent` variables | ✅ | ✅ | Per-function lifetime, name- and slot-based restore. |
+| | Logical scalars/arrays | ✅ | ✅ | First-class logical type: scalar `bool` and N-D `LogicalArray`. `islogical`, `class`, `isa`, `size`, `numel`, `isempty` follow MATLAB; predicates (`isnan`, `isfinite`, `isinf`, comparisons) produce logical arrays; masks are preserved in indexing and assignment. |
+| | Integer scalars (`int8`…`uint64`) | ✅ | ❌ | Per-width scalar types (`int8`…`uint64`) (not a single platform `int`) with `class`/`isa` parity and numeric ops routed through MATLAB-compatible paths; integer arrays are planned. |
+| | Complex numbers | ✅ | ✅ | Complex scalars and arrays with arithmetic, comparisons, transpose (`'` conjugate, `.'` non-conjugate), element-wise power, and matrix power (integer exponents). |
 | **Matrices & Arrays** | Literals `[ … ]` | ✅ | ✅ | Rectangular and ragged cell literals supported; numeric tensors support rectangular construction. |
-| | Empty `[]` | ✅ | ✅ | Shape‑consistent behavior. |
+| | Empty `[]` | ✅ | ✅ | Shape-consistent behavior. |
 | **Advanced Data Types** | Cell arrays `{ … }` | ✅ | ✅ | `{}` indexing, expansion, assignment; expansion into slice targets. |
 | | Structs `s.field` | ✅ | ✅ | Dot access, nested assignment, field scatter over cells. |
-| | Function handles `@(x)x^2`, closures | ✅ | ✅ | Anonymous functions, free‑var capture, `feval`, nested functions. |
-| **Operators** | Arithmetic `+ - * / \ ^` | ✅ | ✅ | Left division and element‑wise left division supported. |
-| | Element‑wise `.* ./ .\ .^` | ✅ | ✅ | Broadcasting via slice rules; BLAS/LAPACK in runtime where applicable. |
-| | Relational `== ~= < <= > >=` | ✅ | ✅ | Element‑wise on arrays; scalar fallbacks. |
-| | Logical element‑wise (&, &#124;, ~) | ✅ | ✅ | Element‑wise logicals on numeric/logical masks. |
-| | Logical short‑circuit (&&, &#124;&#124;) | ✅ | ✅ | Semantics match MATLAB short‑circuit rules. |
-| | Transpose `'`, non‑conjugate `.'` | ✅ | ✅ | Distinction modeled; `'` is conjugate transpose for complex and `.'` is non‑conjugate; identical for real inputs. |
+| | Function handles `@(x)x^2`, closures | ✅ | ✅ | Anonymous functions, free-var capture, `feval`, nested functions. |
+| **Operators** | Arithmetic `+ - * / \ ^` | ✅ | ✅ | Left division and element-wise left division supported. |
+| | Element-wise `.* ./ .\ .^` | ✅ | ✅ | Broadcasting via slice rules; BLAS/LAPACK in runtime where applicable. |
+| | Relational `== ~= < <= > >=` | ✅ | ✅ | Element-wise on arrays; scalar fallbacks. |
+| | Logical element-wise (&, &#124;, ~) | ✅ | ✅ | Element-wise logicals on numeric/logical masks. |
+| | Logical short-circuit (&&, &#124;&#124;) | ✅ | ✅ | Semantics match MATLAB short-circuit rules. |
+| | Transpose `'`, non-conjugate `.'` | ✅ | ✅ | Distinction modeled; `'` is conjugate transpose for complex and `.'` is non-conjugate; identical for real inputs. |
 | | Colon `:` (ranges) | ✅ | ✅ | Construction and indexing; `start:step:end` with step validation. |
 | **Statements & Control Flow** | `if/elseif/else/end` | ✅ | ✅ | Full semantics. |
 | | `for` loops | ✅ | ✅ | Range iteration; standard MATLAB semantics. |
@@ -25,50 +34,42 @@ RunMat’s goal is to provide a high-performance, modern alternative to MATLAB, 
 | | `break`, `continue`, `return` | ✅ | ✅ | Full semantics. |
 | | `try/catch/end`, `rethrow` | ✅ | ✅ | `MException` objects with identifiers/messages. |
 | **Functions** | Definitions (`function … end`) | ✅ | ✅ | Named inputs/outputs, nested functions, closures. |
-| | Multiple returns `[a,b]=f()` | ✅ | ✅ | Multi‑LHS with placeholders (`~`), shape semantics enforced at runtime. |
-| | Anonymous functions `@(...)`, closures | ✅ | ✅ | Free‑var capture, closure creation, handles. |
-| | `varargin` / `varargout` | ✅ | ✅ | Cell packing/unpacking; MATLAB‑compatible arity checks with error ids (`TooManyInputs`, `VarargoutMismatch`). |
-| | `nargin` / `nargout` | ✅ | ✅ | MATLAB‑parity dynamic per‑call counts, including multi‑output calls. |
-| **Indexing & Data Access** | `A(...)` numeric indexing | ✅ | ✅ | N‑D, 1‑D linear, mixed selectors. |
-| | Slicing `A(:, 1:3)` | ✅ | ✅ | MATLAB‑parity N‑D gather/scatter with broadcast; 2‑D fast paths. |
-| | Logical indexing `A(A>5)` | ✅ | ✅ | MATLAB‑parity masks, mixed selectors, and assignment semantics. |
-| | `end` in indexing | ✅ | ✅ | MATLAB‑parity `end`, `end-k`, and N‑D `end` arithmetic across dims. |
+| | Multiple returns `[a,b]=f()` | ✅ | ✅ | Multi-LHS with placeholders (`~`), shape semantics enforced at runtime. |
+| | Anonymous functions `@(...)`, closures | ✅ | ✅ | Free-var capture, closure creation, handles. |
+| | `varargin` / `varargout` | ✅ | ✅ | Cell packing/unpacking; MATLAB-compatible arity checks with error ids (`TooManyInputs`, `VarargoutMismatch`). |
+| | `nargin` / `nargout` | ✅ | ✅ | MATLAB-parity dynamic per-call counts, including multi-output calls. |
+| **Indexing & Data Access** | `A(...)` numeric indexing | ✅ | ✅ | N-D, 1-D linear, mixed selectors. |
+| | Slicing `A(:, 1:3)` | ✅ | ✅ | MATLAB-parity N-D gather/scatter with broadcast; 2-D fast paths. |
+| | Logical indexing `A(A>5)` | ✅ | ✅ | MATLAB-parity masks, mixed selectors, and assignment semantics. |
+| | `end` in indexing | ✅ | ✅ | MATLAB-parity `end`, `end-k`, and N-D `end` arithmetic across dims. |
 | | Struct field access `s.f` | ✅ | ✅ | With field scatter over cells. |
-| | Cell content `C{...}` | ✅ | ✅ | Indexing and comma‑list expansion. |
-| | Function/cell expansion into slice targets | ✅ | ❌ | MATLAB‑compatible expansion into arbitrary slices using packing (`PackToRow/Col`); Octave behavior varies by construct. |
-| **Object‑Oriented Programming** | `classdef` | ✅ | ❌ | Full parser + runtime registry (attributes, methods/properties); Octave’s classdef support is partial. |
-| | Properties/Methods (static/instance), attributes | ✅ | ❌ | MATLAB‑parity access control, `Dependent`, static props/methods; Octave coverage is limited. |
-| | Enumerations | ✅ | ❌ | Parser + registration; MATLAB‑parity execution supported. |
+| | Cell content `C{...}` | ✅ | ✅ | Indexing and comma-list expansion. |
+| | Function/cell expansion into slice targets | ✅ | ❌ | MATLAB-compatible expansion into arbitrary slices using packing (`PackToRow/Col`); Octave behavior varies by construct. |
+| **Object-Oriented Programming** | `classdef` | ✅ | ❌ | Full parser + runtime registry (attributes, methods/properties); Octave's classdef support is partial. |
+| | Properties/Methods (static/instance), attributes | ✅ | ❌ | MATLAB-parity access control, `Dependent`, static props/methods; Octave coverage is limited. |
+| | Enumerations | ✅ | ❌ | Parser + registration; MATLAB-parity execution supported. |
 | | Events | ✅ | ❌ | `addlistener`/`notify` with callback dispatch and listener lifecycle (`enabled`/`valid`); integrates with `isvalid`/`delete`. |
 | | Handle classes `< handle` | ✅ | ❌ | Identity semantics, `isvalid`/`delete`, equality/inequality by identity, method/indexing dispatch via underlying target. |
-| | Operator overloading | ✅ | ❌ | `plus`, `mtimes`, relational/logical dispatch with MATLAB‑parity precedence; PICs planned in JIT. |
+| | Operator overloading | ✅ | ❌ | `plus`, `mtimes`, relational/logical dispatch with MATLAB-parity precedence; PICs planned in JIT. |
 | | Dot/method `obj.method()` | ✅ | ✅ | Instance and static dispatch; precedence with imports. |
-| **Packages, Imports & Name Resolution** | `import pkg.*` / `import pkg.name` | ✅ | ❌ | MATLAB‑parity precedence and diagnostics; Octave support varies. |
+| **Packages, Imports & Name Resolution** | `import pkg.*` / `import pkg.name` | ✅ | ❌ | MATLAB-parity precedence and diagnostics; Octave support varies. |
 | | Metaclass operator `?pkg.Class` | ✅ | ❌ | Enables static property/method access and participates in `Class.*` import resolution; not available in Octave. |
 | | Resolution precedence (locals > user > specific > wildcard > Class.*) | ✅ | ❌ | Exact MATLAB precedence; Octave differs in several cases. |
 | **Scripting & Syntax** | Scripts (`.m`) | ✅ | ✅ | Full support. |
-| | `%` comments | ✅ | ✅ | Single‑line comments. |
+| | `%` comments | ✅ | ✅ | Single-line comments. |
 | | Block comments `%{ … %}` | ✅ | ✅ | Block comment parsing. |
 | | Line continuation `...` | ✅ | ✅ | Full support. |
 | | Semicolon to suppress output | ✅ | ✅ | Full support. |
 | | Comma to separate statements | ✅ | ✅ | Statement sequencing. |
-| | Command‑form calls `func arg1 arg2` | ✅ | ✅ | Hardened parser (ambiguous cases resolved) with MATLAB‑compatible rules. |
-| **Exceptions & Errors** | `MException`, identifiers/messages | ✅ | ❌ | MATLAB‑compatible `MException` identifiers/messages across indexing, arity, and OOP; Octave identifiers differ. |
-| **Variables & Data Types** | Default numeric `double` | ✅ | ✅ | Column‑major numeric tensors (`f64`). |
-| | Character arrays `'...'` | ✅ | ✅ | Char row vectors implemented. |
-| | String arrays `"..."` | ✅ | ❌ | RunMat `StringArray` with MATLAB‑parity indexing/comparison; Octave’s string type coverage varies by version. |
-| | `ans` default variable (REPL) | ✅ | ✅ | Handled by REPL. |
-| | `global` variables | ✅ | ✅ | Name‑based, cross‑function binding; write‑through semantics. |
-| | `persistent` variables | ✅ | ✅ | Per‑function lifetime, name‑ and slot‑based restore. |
-| | Logical scalars/arrays | ✅ | ✅ | First‑class logical type: scalar `bool` and N‑D `LogicalArray`. `islogical`, `class`, `isa`, `size`, `numel`, `isempty` follow MATLAB; predicates (`isnan`, `isfinite`, `isinf`, comparisons) produce logical arrays; masks are preserved in indexing and assignment. |
-| | Integer scalars (`int8`…`uint64`) | ✅ | ❌ | Per‑width scalar types (`int8`…`uint64`) (not a single platform `int`) with `class`/`isa` parity and numeric ops routed through MATLAB‑compatible paths; integer arrays are planned. |
-| | Complex numbers | ✅ | ✅ | Complex scalars and arrays with arithmetic, comparisons, transpose (`'` conjugate, `.'` non‑conjugate), element‑wise power, and matrix power (integer exponents). |
+| | Command-form calls `func arg1 arg2` | ✅ | ✅ | Hardened parser (ambiguous cases resolved) with MATLAB-compatible rules. |
+| **Exceptions & Errors** | `MException`, identifiers/messages | ✅ | ❌ | MATLAB-compatible `MException` identifiers/messages across indexing, arity, and OOP; Octave identifiers differ. |
+
  
 ## Notes on semantics parity
  
-- N‑D indexing/slicing: RunMat implements gather/scatter with broadcast rules, logical masks, colon, and `end` arithmetic across dimensions; 2‑D fast paths for entire rows/columns are included. Error identifiers match MATLAB (`MATLAB:SliceNonTensor`, `MATLAB:IndexStepZero`, etc.).
-- Multi‑LHS and expansion: `[a,b]=f()` and `[~,b]=f()` are supported; function and cell expansions into slice targets are handled with dynamic packing (`PackToRow/PackToCol`).
-- Varargs and counts: `varargin`/`varargout` with strict count checks and `nargin`/`nargout` report per‑call counts consistently across single and multi‑output call sites.
+- N-D indexing/slicing: RunMat implements gather/scatter with broadcast rules, logical masks, colon, and `end` arithmetic across dimensions; 2-D fast paths for entire rows/columns are included. Error identifiers match MATLAB (`MATLAB:SliceNonTensor`, `MATLAB:IndexStepZero`, etc.).
+- Multi-LHS and expansion: `[a,b]=f()` and `[~,b]=f()` are supported; function and cell expansions into slice targets are handled with dynamic packing (`PackToRow/PackToCol`).
+- Varargs and counts: `varargin`/`varargout` with strict count checks and `nargin`/`nargout` report per-call counts consistently across single and multi-output call sites.
 - OOP: Static/instance members, operator overloading (`plus`, `mtimes`, relational/logical) and `subsref`/`subsasgn` dispatch ordering with standardized negative errors (`MATLAB:MissingSubsref`, `MATLAB:MissingSubsasgn`).
 - Imports and precedence: Specific imports shadow wildcard; locals and user functions take precedence; `Class.*` static resolution participates last; ambiguities are surfaced with clear diagnostics.
 - Metaclass: `?pkg.Class` produces a class reference enabling static property/method access and works with import resolution.
@@ -164,11 +165,11 @@ end
 
 ## Where RunMat intentionally goes beyond MATLAB
 
-- GPU‑native tensor execution: When a device provider is registered, element‑wise ops and matrix multiply execute on the GPU and return opaque `GpuTensorHandle`s, keeping data resident on device across chained ops. CPU paths remain available with identical MATLAB‑compatible semantics.
+- GPU-native tensor execution: When a device provider is registered, element-wise ops and matrix multiply execute on the GPU and return opaque `GpuTensorHandle`s, keeping data resident on device across chained ops. CPU paths remain available with identical MATLAB-compatible semantics.
 - Automatic device planning (in progress): A planner is being integrated to pick device placement based on tensor sizes/shapes and fuse compatible operations to minimize host↔device transfers, with room for overlapping compute/transfer via streams and memory pools.
-- Zero‑temporary slice expansion: Expansion of function outputs and cell contents into slice targets writes directly to the destination using dynamic packing, avoiding intermediate temporaries and reducing peak memory for large assignments.
-- HIR‑powered developer tooling: The HIR/type system tracks value kinds and tensor shapes across control flow and imports, enabling richer LSP features (hover types, shape/arity hints, precise go‑to‑definition across packages/classes, property completions from the class registry).
-- Deterministic import diagnostics: MATLAB‑parity import precedence with explicit, readable diagnostics for shadows/ambiguities (including participation of `Class.*` statics) improves debugging and code navigation.
+- Zero-temporary slice expansion: Expansion of function outputs and cell contents into slice targets writes directly to the destination using dynamic packing, avoiding intermediate temporaries and reducing peak memory for large assignments.
+- HIR-powered developer tooling: The HIR/type system tracks value kinds and tensor shapes across control flow and imports, enabling richer LSP features (hover types, shape/arity hints, precise go-to-definition across packages/classes, property completions from the class registry).
+- Deterministic import diagnostics: MATLAB-parity import precedence with explicit, readable diagnostics for shadows/ambiguities (including participation of `Class.*` statics) improves debugging and code navigation.
 - Stable, testable exceptions: A uniform `MException` model with stable identifiers/messages across indexing, arity, expansion, and OOP paths makes failures easy to assert in tests and consistent across releases.
 - Memory safety by construction: Rust implementation eliminates entire classes of memory bugs while sustaining high performance under heavy workloads.
 
@@ -177,7 +178,7 @@ end
 - 100% MATLAB language semantics coverage: Full parity for syntax, operators, control flow, indexing/slicing (incl. `end` arithmetic), OOP (`classdef`, properties/methods, operator overloading), events/handles, name resolution, and standardized `MException` identifiers. Practically, this means your existing MATLAB scripts run unchanged on RunMat. Octave remains partial or divergent in several of these areas (e.g., classdef/events/metaclass support and precedence nuances).
 - Metaclass operator `?Class` and static access through `Class.*` imports.
 - Consistent precedence for specific vs wildcard imports, including `Class.*` statics.
-- N‑D `end` arithmetic across dimensions in both gather and scatter with broadcast‑correct semantics and 2‑D fast paths.
+- N-D `end` arithmetic across dimensions in both gather and scatter with broadcast-correct semantics and 2-D fast paths.
 - Function/cell expansion directly into slice targets with dynamic packing without intermediate temporaries.
 - Uniform `MException` identifier/message model across indexing, arity, expansion, and OOP error paths.
 

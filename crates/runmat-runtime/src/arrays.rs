@@ -1,6 +1,6 @@
 //! Array generation functions
 //!
-//! This module provides MATLAB-compatible array generation functions like linspace, logspace,
+//! This module provides array generation functions like linspace, logspace,
 //! zeros, ones, eye, etc. These functions are optimized for performance and memory efficiency.
 
 use runmat_builtins::{Tensor, Value};
@@ -8,7 +8,13 @@ use runmat_macros::runtime_builtin;
 
 /// Generate linearly spaced vector
 /// linspace(x1, x2, n) generates n points between x1 and x2 (inclusive)
-#[runtime_builtin(name = "linspace")]
+#[runtime_builtin(
+    name = "linspace",
+    category = "array/creation",
+    summary = "Linearly spaced vector.",
+    examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
+    keywords = "linspace,range,vector"
+)]
 fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Tensor, String> {
     if n < 1 {
         return Err("Number of points must be positive".to_string());
@@ -38,7 +44,12 @@ fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Tensor, String> {
 
 /// Generate logarithmically spaced vector
 /// logspace(a, b, n) generates n points between 10^a and 10^b
-#[runtime_builtin(name = "logspace")]
+#[runtime_builtin(
+    name = "logspace",
+    category = "array/creation",
+    summary = "Logarithmically spaced vector.",
+    examples = "x = logspace(1, 3, 3)  % [10 100 1000]"
+)]
 fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Tensor, String> {
     if n < 1 {
         return Err("Number of points must be positive".to_string());
@@ -62,7 +73,14 @@ fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Tensor, String> {
 
 /// Generate zeros tensor with arbitrary dimensions
 /// zeros(d1, d2, ..., dk) creates a k-D tensor of zeros
-#[runtime_builtin(name = "zeros")]
+#[runtime_builtin(
+    name = "zeros",
+    category = "array/creation",
+    summary = "Array of all zeros.",
+    examples = "A = zeros(2,3)",
+    keywords = "zeros,allocate,create",
+    related = "ones,eye"
+)]
 fn zeros_var_builtin(rest: Vec<Value>) -> Result<Tensor, String> {
     if rest.is_empty() {
         return Err("zeros: expected at least 1 dimension".to_string());
@@ -70,39 +88,70 @@ fn zeros_var_builtin(rest: Vec<Value>) -> Result<Tensor, String> {
     let mut dims: Vec<usize> = Vec::with_capacity(rest.len());
     for v in &rest {
         let n: f64 = v.try_into()?;
-        if n < 0.0 { return Err("Matrix dimensions must be non-negative".to_string()); }
+        if n < 0.0 {
+            return Err("Matrix dimensions must be non-negative".to_string());
+        }
         dims.push(n as usize);
     }
-    // MATLAB semantics: zeros(n) -> n x n (2-D). For >1 args, use them as provided.
-    if dims.len() == 1 { dims = vec![dims[0], dims[0]]; }
+    // Semantics: zeros(n) -> n x n (2-D). For >1 args, use them as provided.
+    if dims.len() == 1 {
+        dims = vec![dims[0], dims[0]];
+    }
     Ok(Tensor::zeros(dims))
 }
 
 #[cfg(test)]
 fn zeros_builtin(m: i32, n: i32) -> Result<Tensor, String> {
-    if m < 0 || n < 0 { return Err("Matrix dimensions must be non-negative".to_string()); }
+    if m < 0 || n < 0 {
+        return Err("Matrix dimensions must be non-negative".to_string());
+    }
     Ok(Tensor::zeros(vec![m as usize, n as usize]))
 }
 
 /// Generate ones tensor with arbitrary dimensions
-#[runtime_builtin(name = "ones")]
+#[runtime_builtin(
+    name = "ones",
+    category = "array/creation",
+    summary = "Array of all ones.",
+    examples = "B = ones(3)",
+    keywords = "ones,allocate,create",
+    related = "zeros,eye"
+)]
 fn ones_var_builtin(rest: Vec<Value>) -> Result<Tensor, String> {
-    if rest.is_empty() { return Err("ones: expected at least 1 dimension".to_string()); }
+    if rest.is_empty() {
+        return Err("ones: expected at least 1 dimension".to_string());
+    }
     let mut dims: Vec<usize> = Vec::with_capacity(rest.len());
-    for v in &rest { let n: f64 = v.try_into()?; if n < 0.0 { return Err("Matrix dimensions must be non-negative".to_string()); } dims.push(n as usize); }
-    if dims.len() == 1 { dims = vec![dims[0], dims[0]]; }
+    for v in &rest {
+        let n: f64 = v.try_into()?;
+        if n < 0.0 {
+            return Err("Matrix dimensions must be non-negative".to_string());
+        }
+        dims.push(n as usize);
+    }
+    if dims.len() == 1 {
+        dims = vec![dims[0], dims[0]];
+    }
     Ok(Tensor::ones(dims))
 }
 
 #[cfg(test)]
 fn ones_builtin(m: i32, n: i32) -> Result<Tensor, String> {
-    if m < 0 || n < 0 { return Err("Matrix dimensions must be non-negative".to_string()); }
+    if m < 0 || n < 0 {
+        return Err("Matrix dimensions must be non-negative".to_string());
+    }
     Ok(Tensor::ones(vec![m as usize, n as usize]))
 }
 
 /// Generate identity matrix
 /// eye(n) creates an n×n identity matrix
-#[runtime_builtin(name = "eye")]
+#[runtime_builtin(
+    name = "eye",
+    category = "array/creation",
+    summary = "Identity matrix.",
+    examples = "I = eye(3)",
+    related = "zeros,ones"
+)]
 fn eye_builtin(n: i32) -> Result<Tensor, String> {
     if n < 0 {
         return Err("Matrix size must be non-negative".to_string());
@@ -271,7 +320,7 @@ fn meshgrid_builtin(x: Tensor, y: Tensor) -> Result<Tensor, String> {
     Tensor::new_2d(x_data, ny, nx)
 }
 
-/// Create a range vector (equivalent to start:end or start:step:end in MATLAB)
+/// Create a range vector (equivalent to start:end or start:step:end)
 pub fn create_range(start: f64, step: Option<f64>, end: f64) -> Result<Value, String> {
     let step = step.unwrap_or(1.0);
 

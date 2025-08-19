@@ -61,7 +61,8 @@ fn semicolon_and_comma_tokens() {
 #[test]
 fn ans_is_identifier() {
     let src = "ans = 1";
-    assert_eq!(tokenize(src), vec![Token::Ident, Token::Assign, Token::Integer]);
+    assert_eq!(
+        tokenize(src),
+        vec![Token::Ident, Token::Assign, Token::Integer]
+    );
 }
-
-

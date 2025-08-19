@@ -83,7 +83,9 @@ fn test_collection_with_live_objects() {
         assert_eq!(before_allocations, after_allocations);
 
         // Clean up roots
-        for ptr in &live_objects { gc_remove_root(ptr.clone()).expect("root removal should succeed"); }
+        for ptr in &live_objects {
+            gc_remove_root(ptr.clone()).expect("root removal should succeed");
+        }
     });
 }
 
@@ -185,7 +187,9 @@ fn test_collection_with_different_generations() {
         }
 
         // Clean up roots
-        for ptr in &young_objects { gc_remove_root(ptr.clone()).expect("root removal should succeed"); }
+        for ptr in &young_objects {
+            gc_remove_root(ptr.clone()).expect("root removal should succeed");
+        }
 
         // collected values are always valid (usize)
     });
@@ -322,6 +326,8 @@ fn test_collection_performance() {
         }
 
         // Clean up roots
-        for ptr in &objects { gc_remove_root(ptr.clone()).expect("root removal should succeed"); }
+        for ptr in &objects {
+            gc_remove_root(ptr.clone()).expect("root removal should succeed");
+        }
     });
 }

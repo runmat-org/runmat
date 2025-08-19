@@ -28,7 +28,13 @@ fn indexing_with_end_and_member_method() {
     match &program.body[0] {
         Stmt::ExprStmt(Expr::Index(base, idxs), true) => {
             assert!(matches!(**base, Expr::Ident(ref n) if n == "A"));
-            assert!(matches!(idxs.as_slice(), [Expr::Binary(_, BinOp::Colon, _)] | [Expr::Range(_, _, _)] | [Expr::Number(_), Expr::EndKeyword] | [Expr::Number(_), Expr::Colon, Expr::EndKeyword]));
+            assert!(matches!(
+                idxs.as_slice(),
+                [Expr::Binary(_, BinOp::Colon, _)]
+                    | [Expr::Range(_, _, _)]
+                    | [Expr::Number(_), Expr::EndKeyword]
+                    | [Expr::Number(_), Expr::Colon, Expr::EndKeyword]
+            ));
         }
         _ => panic!("expected indexing with end"),
     }
@@ -41,5 +47,3 @@ fn indexing_with_end_and_member_method() {
         _ => panic!("expected method call expression"),
     }
 }
-
-

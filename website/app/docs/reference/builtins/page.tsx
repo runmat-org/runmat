@@ -1,3 +1,3 @@
-export { default, dynamic, metadata } from './_index';
+export { default } from './_index';
 
 

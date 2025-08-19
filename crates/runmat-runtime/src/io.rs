@@ -1,12 +1,12 @@
 //! Input/Output operations for RunMat runtime
 //!
-//! This module provides MATLAB-compatible I/O functions like fprintf, disp, etc.
+//! This module provides language-compatible I/O functions like fprintf, disp, etc.
 
 use regex::Regex;
 use runmat_macros::runtime_builtin;
 use std::sync::{Mutex, OnceLock};
 
-/// Display a string to the console (MATLAB fprintf with single string argument)
+/// Display a string to the console (language fprintf with single string argument)
 #[runtime_builtin(name = "fprintf")]
 pub fn fprintf_string_builtin(format_str: String) -> Result<f64, String> {
     print!("{format_str}");
@@ -78,7 +78,7 @@ pub fn fprintf_format2_builtin(
     Ok(output.len() as f64)
 }
 
-/// Display a string with automatic newline (MATLAB disp)
+/// Display a string with automatic newline (language disp)
 #[runtime_builtin(name = "disp")]
 pub fn disp_string_builtin(s: String) -> Result<f64, String> {
     println!("{s}");
@@ -95,16 +95,16 @@ pub fn disp_number_builtin(n: f64) -> Result<f64, String> {
 // Global timer state for tic/toc functionality
 static TIMER_START: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
 
-/// Start a stopwatch timer (MATLAB tic function)
+/// Start a stopwatch timer (language tic function)
 #[runtime_builtin(name = "tic")]
 pub fn tic_builtin() -> Result<f64, String> {
     let timer = TIMER_START.get_or_init(|| Mutex::new(None));
     let mut start_time = timer.lock().map_err(|_| "Failed to acquire timer lock")?;
     *start_time = Some(std::time::Instant::now());
-    Ok(0.0) // tic returns 0 in MATLAB
+    Ok(0.0) // tic returns 0 in the language
 }
 
-/// Read elapsed time from stopwatch (MATLAB toc function)
+/// Read elapsed time from stopwatch (language toc function)
 #[runtime_builtin(name = "toc")]
 pub fn toc_builtin() -> Result<f64, String> {
     let timer = TIMER_START.get_or_init(|| Mutex::new(None));

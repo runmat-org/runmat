@@ -4,8 +4,8 @@
 //! should not be collected because they are reachable from the program's
 //! execution context (stacks, global variables, etc.).
 
-use crate::{GcError, GcPtr, Result};
 use crate::Value;
+use crate::{GcError, GcPtr, Result};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

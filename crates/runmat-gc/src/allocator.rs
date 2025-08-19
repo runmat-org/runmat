@@ -3,8 +3,8 @@
 //! Manages memory allocation across multiple generations, with optimized
 //! allocation strategies for different object lifetimes.
 
-use crate::{GcConfig, GcError, GcPtr, GcStats, Result};
 use crate::Value;
+use crate::{GcConfig, GcError, GcPtr, GcStats, Result};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -282,13 +282,19 @@ impl GenerationalAllocator {
     }
 
     /// Reset the young generation after a collection cycle
-    pub fn young_reset(&mut self) { self.generations[0].reset(); }
+    pub fn young_reset(&mut self) {
+        self.generations[0].reset();
+    }
 
     /// Mark a pointer in young generation as survivor (for potential policies)
-    pub fn young_mark_survivor(&mut self, ptr: *const u8) { self.generations[0].mark_survivor(ptr); }
+    pub fn young_mark_survivor(&mut self, ptr: *const u8) {
+        self.generations[0].mark_survivor(ptr);
+    }
 
     /// Get count of currently tracked young-generation allocations since last sweep
-    pub fn young_allocations_count(&self) -> usize { self.generations[0].allocated_ptrs.len() }
+    pub fn young_allocations_count(&self) -> usize {
+        self.generations[0].allocated_ptrs.len()
+    }
 
     /// Promote an object to the next generation
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -380,7 +386,7 @@ impl GenerationalAllocator {
             return Some(1);
         }
         // If pointer belongs to young blocks, treat as gen0; otherwise unknown
-        self.find_generation(ptr).map(|g| g)
+        self.find_generation(ptr)
     }
 
     /// Clear promotion bookkeeping (e.g., after major GC)

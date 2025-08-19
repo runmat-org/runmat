@@ -1,9 +1,0 @@
-[
-  { "name": "sin", "category": ["math", "trigonometry"], "signatures": [["x"]] },
-  { "name": "cos", "category": ["math", "trigonometry"], "signatures": [["x"]] },
-  { "name": "zeros", "category": ["array", "creation"], "signatures": [["m","n"]] },
-  { "name": "ones", "category": ["array", "creation"], "signatures": [["m","n"]] },
-  { "name": "mean", "category": ["statistics"], "signatures": [["A"]] },
-  { "name": "plot", "category": ["plotting"], "signatures": [["x","y"]] }
-]
-

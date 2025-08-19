@@ -89,7 +89,7 @@ fn end_colon_and_range() {
     match &prog.body[2] {
         HirStmt::ExprStmt(expr, true) => {
             assert!(matches!(expr.kind, HirExprKind::Range(_, _, _)));
-            assert!(matches!(expr.ty, Type::Tensor{..}));
+            assert!(matches!(expr.ty, Type::Tensor { .. }));
         }
         _ => panic!("expected range"),
     }
@@ -132,19 +132,31 @@ end
 "#;
     let prog = lower_src(src);
     // Just ensure all forms are present
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::If{..})));
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::While{..})));
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::For{..})));
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::Switch{..})));
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::TryCatch{..})));
+    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::If { .. })));
+    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::While { .. })));
+    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::For { .. })));
+    assert!(prog
+        .body
+        .iter()
+        .any(|s| matches!(s, HirStmt::Switch { .. })));
+    assert!(prog
+        .body
+        .iter()
+        .any(|s| matches!(s, HirStmt::TryCatch { .. })));
 }
 
 #[test]
 fn globals_persistents_and_multiassign() {
     let prog = lower_src("global a,b; persistent p; [x,y]=deal(1,2)");
     assert!(prog.body.iter().any(|s| matches!(s, HirStmt::Global(_))));
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::Persistent(_))));
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::MultiAssign(_, _, _))));
+    assert!(prog
+        .body
+        .iter()
+        .any(|s| matches!(s, HirStmt::Persistent(_))));
+    assert!(prog
+        .body
+        .iter()
+        .any(|s| matches!(s, HirStmt::MultiAssign(_, _, _))));
 }
 
 #[test]
@@ -161,9 +173,16 @@ z = f(3)
 "#;
     let prog = lower_src(src);
     // find function and call
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::Function{..})));
+    assert!(prog
+        .body
+        .iter()
+        .any(|s| matches!(s, HirStmt::Function { .. })));
     // Call lowered with inferred numeric type
-    let call_assign = prog.body.iter().find(|s| matches!(s, HirStmt::Assign(_, _, _))).unwrap();
+    let call_assign = prog
+        .body
+        .iter()
+        .find(|s| matches!(s, HirStmt::Assign(_, _, _)))
+        .unwrap();
     if let HirStmt::Assign(_, expr, _) = call_assign {
         // FuncCall return type should be numeric (Num) based on analysis
         assert_eq!(expr.ty, Type::Num);
@@ -174,10 +193,26 @@ z = f(3)
 fn methods_members_handles_and_anon() {
     let prog = lower_src("obj = 1; obj.method(1); obj.field; @sin; @(x) x+1");
     assert_eq!(prog.body.len(), 5);
-    match &prog.body[1] { HirStmt::ExprStmt(expr, true) => assert!(matches!(expr.kind, HirExprKind::MethodCall(_, _, _))), _ => panic!() }
-    match &prog.body[2] { HirStmt::ExprStmt(expr, true) => assert!(matches!(expr.kind, HirExprKind::Member(_, _))), _ => panic!() }
-    match &prog.body[3] { HirStmt::ExprStmt(expr, true) => assert!(matches!(expr.kind, HirExprKind::FuncHandle(_))), _ => panic!() }
-    match &prog.body[4] { HirStmt::ExprStmt(expr, false) => assert!(matches!(expr.kind, HirExprKind::AnonFunc{..})), _ => panic!() }
+    match &prog.body[1] {
+        HirStmt::ExprStmt(expr, true) => {
+            assert!(matches!(expr.kind, HirExprKind::MethodCall(_, _, _)))
+        }
+        _ => panic!(),
+    }
+    match &prog.body[2] {
+        HirStmt::ExprStmt(expr, true) => assert!(matches!(expr.kind, HirExprKind::Member(_, _))),
+        _ => panic!(),
+    }
+    match &prog.body[3] {
+        HirStmt::ExprStmt(expr, true) => assert!(matches!(expr.kind, HirExprKind::FuncHandle(_))),
+        _ => panic!(),
+    }
+    match &prog.body[4] {
+        HirStmt::ExprStmt(expr, false) => {
+            assert!(matches!(expr.kind, HirExprKind::AnonFunc { .. }))
+        }
+        _ => panic!(),
+    }
 }
 
 #[test]
@@ -204,7 +239,8 @@ classdef C < handle
 end
 "#;
     let prog = lower_src(src);
-    assert!(prog.body.iter().any(|s| matches!(s, HirStmt::ClassDef { .. })));
+    assert!(prog
+        .body
+        .iter()
+        .any(|s| matches!(s, HirStmt::ClassDef { .. })));
 }
-
-

@@ -104,7 +104,7 @@ All lexer tests pass when running the crate tests on their own.
 
 - Apostrophe vs string: extreme adjacency cases across `...` continuation and `%` comments are covered by tests; a few rare permutations may still be added as seeds (parser semantics unaffected).
 - Block comments are intentionally non-nesting; any future change would be a parser/runtime decision, not lexing.
-- Command-form is resolved in the parser; lexer’s role is complete for milestone.
+- Command-form is resolved in the parser; lexer's role is complete for milestone.
 
 ## Crate integration
 

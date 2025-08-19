@@ -181,8 +181,18 @@ fn test_builtin_blas_functions() {
     }
 
     // Test dot product builtin
-    let vec_a = CellArray::new(vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)], 1, 3).unwrap();
-    let vec_b = CellArray::new(vec![Value::Num(4.0), Value::Num(5.0), Value::Num(6.0)], 1, 3).unwrap();
+    let vec_a = CellArray::new(
+        vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)],
+        1,
+        3,
+    )
+    .unwrap();
+    let vec_b = CellArray::new(
+        vec![Value::Num(4.0), Value::Num(5.0), Value::Num(6.0)],
+        1,
+        3,
+    )
+    .unwrap();
 
     let dot_result = call_builtin("dot", &[Value::Cell(vec_a), Value::Cell(vec_b)]).unwrap();
 

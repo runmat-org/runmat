@@ -47,11 +47,30 @@ pub enum Instr {
     // N-D range/selectors with per-dimension modes and end arithmetic offsets for ranges
     // dims: total dims; numeric_count: count of extra numeric scalar indices following; colon_mask/end_mask like IndexSlice;
     // range_dims: list of dimension indices that are ranges; for each, we expect start [, step] pushed in order; end_offsets align with range_dims
-    IndexRangeEnd { dims: usize, numeric_count: usize, colon_mask: u32, end_mask: u32, range_dims: Vec<usize>, range_has_step: Vec<bool>, end_offsets: Vec<i64> },
+    IndexRangeEnd {
+        dims: usize,
+        numeric_count: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        range_dims: Vec<usize>,
+        range_has_step: Vec<bool>,
+        end_offsets: Vec<i64>,
+    },
     // 1-D range with end arithmetic: base on stack, then start [, step]
-    Index1DRangeEnd { has_step: bool, offset: i64 },
+    Index1DRangeEnd {
+        has_step: bool,
+        offset: i64,
+    },
     // Store with range+end arithmetic across dims; stack layout mirrors IndexRangeEnd plus RHS (on top)
-    StoreRangeEnd { dims: usize, numeric_count: usize, colon_mask: u32, end_mask: u32, range_dims: Vec<usize>, range_has_step: Vec<bool>, end_offsets: Vec<i64> },
+    StoreRangeEnd {
+        dims: usize,
+        numeric_count: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        range_dims: Vec<usize>,
+        range_has_step: Vec<bool>,
+        end_offsets: Vec<i64>,
+    },
     // Extended slice: supports end arithmetic per-numeric index via offsets list.
     // Tuple items are (numeric_position_in_order, offset) representing 'end - offset'.
     IndexSliceEx(usize, usize, u32, u32, Vec<(usize, i64)>),
@@ -62,25 +81,28 @@ pub enum Instr {
     // pushing exactly out_count values onto the stack
     IndexCellExpand(usize, usize), // (num_indices, out_count)
     // L-value element assignments
-    StoreIndex(usize),          // like Index, but pops RHS and updates base, then pushes updated base
-    StoreIndexCell(usize),      // like IndexCell, but for cell arrays; pops RHS and updates base
+    StoreIndex(usize), // like Index, but pops RHS and updates base, then pushes updated base
+    StoreIndexCell(usize), // like IndexCell, but for cell arrays; pops RHS and updates base
     // Store slice with colon/end semantics (mirrors IndexSlice)
     StoreSlice(usize, usize, u32, u32),
     // Store slice with end arithmetic offsets applied to numeric indices
     StoreSliceEx(usize, usize, u32, u32, Vec<(usize, i64)>),
     // Store with 1-D range having end arithmetic: base, start, [step], rhs
-    StoreSlice1DRangeEnd { has_step: bool, offset: i64 },
+    StoreSlice1DRangeEnd {
+        has_step: bool,
+        offset: i64,
+    },
     // Object/Class member/method operations
-    LoadMember(String),          // base on stack -> member value
-    LoadMemberDynamic,           // base, name on stack -> member value (structs and objects)
-    StoreMember(String),         // base, rhs on stack -> updated base
-    StoreMemberDynamic,          // base, name, rhs on stack -> updated base
-    LoadMethod(String),          // base on stack -> method handle
-    CallMethod(String, usize),   // base on stack along with args
+    LoadMember(String),        // base on stack -> member value
+    LoadMemberDynamic,         // base, name on stack -> member value (structs and objects)
+    StoreMember(String),       // base, rhs on stack -> updated base
+    StoreMemberDynamic,        // base, name, rhs on stack -> updated base
+    LoadMethod(String),        // base on stack -> method handle
+    CallMethod(String, usize), // base on stack along with args
     // Closures and handle invocation
     CreateClosure(String, usize), // function name and capture count; captures expected on stack
     // Static class access
-    LoadStaticProperty(String, String), // class, property
+    LoadStaticProperty(String, String),      // class, property
     CallStaticMethod(String, String, usize), // class, method, argc
     // Class definition at runtime
     RegisterClass {
@@ -130,7 +152,10 @@ pub enum Instr {
     LoadLocal(usize),  // Load from local variable (relative to current frame)
     StoreLocal(usize), // Store to local variable (relative to current frame)
     // Imports
-    RegisterImport { path: Vec<String>, wildcard: bool },
+    RegisterImport {
+        path: Vec<String>,
+        wildcard: bool,
+    },
     // Global and Persistent declarations
     DeclareGlobal(Vec<usize>),
     DeclarePersistent(Vec<usize>),
@@ -145,5 +170,3 @@ pub struct ArgSpec {
     pub num_indices: usize,
     pub expand_all: bool,
 }
-
-

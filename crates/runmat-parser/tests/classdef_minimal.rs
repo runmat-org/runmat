@@ -1,4 +1,4 @@
-use runmat_parser::{parse_simple as parse};
+use runmat_parser::parse_simple as parse;
 
 #[test]
 fn classdef_minimal_structure() {
@@ -27,5 +27,3 @@ end
     let program = parse(src).unwrap();
     assert_eq!(program.body.len(), 1);
 }
-
-

@@ -6,7 +6,7 @@
 - Named globals/persistents handled as no-ops in JIT; interpreter parity maintained.
 - Instruction set doc updated to include the new opcodes.
 
-Since we want a production-hardened system with (to start) full MATLAB code execution parity and we’ve driven the interpreter to 100% language semantics across grammar, HIR, and VM, the JIT should mirror all behavior, then exceed the VM on performance. Below is a prioritized, detailed plan with clear acceptance gates.
+Since we want a production-hardened system with (to start) full MATLAB code execution parity and we've driven the interpreter to 100% language semantics across grammar, HIR, and VM, the JIT should mirror all behavior, then exceed the VM on performance. Below is a prioritized, detailed plan with clear acceptance gates.
 
 - Baseline goals
   - 100% opcode coverage: compile every `Instr` without interpreter fallback.
@@ -49,7 +49,7 @@ Since we want a production-hardened system with (to start) full MATLAB code exec
   - Preserve precedence (locals > user functions > specific imports > wildcard imports > Class.* statics) with the same compile-time and runtime checks as the VM.
   - Builtin vs user-function dispatch must match VM outcomes, including ambiguity errors.
 - Acceptance
-  - For each opcode, add a JIT unit test invoking just that instruction’s semantics.
+  - For each opcode, add a JIT unit test invoking just that instruction's semantics.
   - Run the entire interpreter test suite in “JIT mode”; where tests use feval, varargout, cell/function expansion, indexing N-D gather/scatter, OOP, try/catch, ensure byte-for-byte mex-id/message parity.
 
 ### Phase 2 — Exceptions and error model uniformity
@@ -140,7 +140,7 @@ Since we want a production-hardened system with (to start) full MATLAB code exec
 - 100% of interpreter tests pass in JIT mode with `--test-threads=1`.
 - A “no-fallback” assertion demonstrating every executed opcode ran through native JIT paths.
 - GC stress + OOP/operator-overload suites green.
-- Microbenchmarks show clear wins over VM for: 2‑D gather/scatter, N‑D broadcast scatter, element-wise ops, small BLAS calls.
+- Microbenchmarks show clear wins over VM for: 2-D gather/scatter, N-D broadcast scatter, element-wise ops, small BLAS calls.
 
 ### Immediate next steps
 - Implement `PackToRow`/`PackToCol` lowering in Turbine; add focused tests (packing + slice stores).

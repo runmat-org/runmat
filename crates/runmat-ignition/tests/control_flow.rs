@@ -24,7 +24,9 @@ fn elseif_executes_correct_branch() {
 #[test]
 fn switch_case_otherwise_executes_correct_branch() {
     // The parser expects line-based case/otherwise; use newlines
-    let ast = parse("x=2; y=0; switch x\n case 1\n y=10;\n case 2\n y=20;\n otherwise\n y=30;\n end").unwrap();
+    let ast =
+        parse("x=2; y=0; switch x\n case 1\n y=10;\n case 2\n y=20;\n otherwise\n y=30;\n end")
+            .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let y: f64 = (&vars[1]).try_into().unwrap();
@@ -52,7 +54,10 @@ fn try_catch_catches_error_and_binds_identifier() {
 
 #[test]
 fn nested_break_and_continue_scopes() {
-    let ast = parse("x=0; for i=1:3; for j=1:3; if j-2; continue; end; if i-3; break; end; x=x+1; end; end").unwrap();
+    let ast = parse(
+        "x=0; for i=1:3; for j=1:3; if j-2; continue; end; if i-3; break; end; x=x+1; end; end",
+    )
+    .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     let x: f64 = (&vars[0]).try_into().unwrap();
@@ -74,7 +79,9 @@ fn block_comment_is_ignored() {
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     // Expect c = 3 somewhere
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
 }
 
 #[test]
@@ -84,7 +91,9 @@ fn apostrophe_is_transpose_when_adjacent() {
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     // sum is invariant under transpose: sum 10
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
 }
 
 #[test]
@@ -94,7 +103,12 @@ fn apostrophe_starts_char_array_when_not_adjacent() {
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
     // Expect a CharArray or String present
-    let has_text = vars.iter().any(|v| matches!(v, runmat_builtins::Value::CharArray(_) | runmat_builtins::Value::String(_)));
+    let has_text = vars.iter().any(|v| {
+        matches!(
+            v,
+            runmat_builtins::Value::CharArray(_) | runmat_builtins::Value::String(_)
+        )
+    });
     assert!(has_text);
 }
 
@@ -164,5 +178,3 @@ fn unsupported_cell_index_type_mex() {
     // Current runtime path attempts numeric coercion and reports conversion failure
     assert!(err2.contains("cannot convert CharArray") || err2.contains("MATLAB:CellIndexType"));
 }
-
-

@@ -15,11 +15,11 @@ export type Builtin = {
   slug: string;
   category: string[];
   summary: string;
-  status: 'implemented' | 'missing' | 'stubbed';
   signatures: BuiltinSignature[];
   errors?: string[];
   examples?: { title?: string; code: string }[];
   keywords?: string[];
+  internal?: boolean;
 };
 
 export function loadBuiltins(): Builtin[] {
@@ -28,17 +28,3 @@ export function loadBuiltins(): Builtin[] {
   const arr = JSON.parse(data) as Builtin[];
   return arr;
 }
-
-export function progress(builtins: Builtin[], universeTotal?: number) {
-  const implemented = builtins.filter((b) => b.status === 'implemented').length;
-  let total = universeTotal ?? builtins.length;
-  try {
-    const manifestPath = join(process.cwd(), 'docs', 'matlab_core_manifest.json');
-    const s = readFileSync(manifestPath, 'utf-8');
-    const u = JSON.parse(s) as { name: string }[];
-    total = u.length;
-  } catch {}
-  return { implemented, total, pct: total ? implemented / total : 0 };
-}
-
-

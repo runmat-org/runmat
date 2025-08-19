@@ -18,10 +18,20 @@ fn cos_complex(re: f64, im: f64) -> (f64, f64) {
 
 fn div_complex(a_re: f64, a_im: f64, b_re: f64, b_im: f64) -> (f64, f64) {
     let denom = b_re * b_re + b_im * b_im;
-    ((a_re * b_re + a_im * b_im) / denom, (a_im * b_re - a_re * b_im) / denom)
+    (
+        (a_re * b_re + a_im * b_im) / denom,
+        (a_im * b_re - a_re * b_im) / denom,
+    )
 }
 
-#[runtime_builtin(name = "sin")]
+#[runtime_builtin(
+    name = "sin",
+    category = "math/trigonometry",
+    summary = "Sine of input in radians (element-wise).",
+    examples = "y = sin(pi/2)",
+    keywords = "sine,trig,angle",
+    related = "cos,tan"
+)]
 fn sin_builtin(x: Value) -> Result<Value, String> {
     match x {
         Value::Num(n) => Ok(Value::Num(n.sin())),
@@ -35,11 +45,22 @@ fn sin_builtin(x: Value) -> Result<Value, String> {
             Ok(Value::Complex(r, i))
         }
         Value::ComplexTensor(ct) => {
-            let out: Vec<(f64, f64)> = ct.data.iter().map(|&(re, im)| sin_complex(re, im)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(out, ct.shape.clone())?))
+            let out: Vec<(f64, f64)> = ct
+                .data
+                .iter()
+                .map(|&(re, im)| sin_complex(re, im))
+                .collect();
+            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(
+                out,
+                ct.shape.clone(),
+            )?))
         }
         Value::LogicalArray(la) => {
-            let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0f64.sin() } else { 0.0f64.sin() }).collect();
+            let data: Vec<f64> = la
+                .data
+                .iter()
+                .map(|&b| if b != 0 { 1.0f64.sin() } else { 0.0f64.sin() })
+                .collect();
             Ok(Value::Tensor(Tensor::new(data, la.shape.clone())?))
         }
         Value::CharArray(ca) => {
@@ -52,7 +73,14 @@ fn sin_builtin(x: Value) -> Result<Value, String> {
     }
 }
 
-#[runtime_builtin(name = "cos")]
+#[runtime_builtin(
+    name = "cos",
+    category = "math/trigonometry",
+    summary = "Cosine of input in radians (element-wise).",
+    examples = "y = cos(0)",
+    keywords = "cosine,trig,angle",
+    related = "sin,tan"
+)]
 fn cos_builtin(x: Value) -> Result<Value, String> {
     match x {
         Value::Num(n) => Ok(Value::Num(n.cos())),
@@ -66,11 +94,22 @@ fn cos_builtin(x: Value) -> Result<Value, String> {
             Ok(Value::Complex(r, i))
         }
         Value::ComplexTensor(ct) => {
-            let out: Vec<(f64, f64)> = ct.data.iter().map(|&(re, im)| cos_complex(re, im)).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(out, ct.shape.clone())?))
+            let out: Vec<(f64, f64)> = ct
+                .data
+                .iter()
+                .map(|&(re, im)| cos_complex(re, im))
+                .collect();
+            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(
+                out,
+                ct.shape.clone(),
+            )?))
         }
         Value::LogicalArray(la) => {
-            let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0f64.cos() } else { 0.0f64.cos() }).collect();
+            let data: Vec<f64> = la
+                .data
+                .iter()
+                .map(|&b| if b != 0 { 1.0f64.cos() } else { 0.0f64.cos() })
+                .collect();
             Ok(Value::Tensor(Tensor::new(data, la.shape.clone())?))
         }
         Value::CharArray(ca) => {
@@ -83,7 +122,14 @@ fn cos_builtin(x: Value) -> Result<Value, String> {
     }
 }
 
-#[runtime_builtin(name = "tan")]
+#[runtime_builtin(
+    name = "tan",
+    category = "math/trigonometry",
+    summary = "Tangent of input in radians (element-wise).",
+    examples = "y = tan(pi/4)",
+    keywords = "tangent,trig,angle",
+    related = "sin,cos"
+)]
 fn tan_builtin(x: Value) -> Result<Value, String> {
     match x {
         Value::Num(n) => Ok(Value::Num(n.tan())),
@@ -99,15 +145,26 @@ fn tan_builtin(x: Value) -> Result<Value, String> {
             Ok(Value::Complex(r, i))
         }
         Value::ComplexTensor(ct) => {
-            let out: Vec<(f64, f64)> = ct.data.iter().map(|&(re, im)| {
-                let (sr, si) = sin_complex(re, im);
-                let (cr, ci) = cos_complex(re, im);
-                div_complex(sr, si, cr, ci)
-            }).collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(out, ct.shape.clone())?))
+            let out: Vec<(f64, f64)> = ct
+                .data
+                .iter()
+                .map(|&(re, im)| {
+                    let (sr, si) = sin_complex(re, im);
+                    let (cr, ci) = cos_complex(re, im);
+                    div_complex(sr, si, cr, ci)
+                })
+                .collect();
+            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(
+                out,
+                ct.shape.clone(),
+            )?))
         }
         Value::LogicalArray(la) => {
-            let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0f64.tan() } else { 0.0f64.tan() }).collect();
+            let data: Vec<f64> = la
+                .data
+                .iter()
+                .map(|&b| if b != 0 { 1.0f64.tan() } else { 0.0f64.tan() })
+                .collect();
             Ok(Value::Tensor(Tensor::new(data, la.shape.clone())?))
         }
         Value::CharArray(ca) => {
@@ -244,11 +301,19 @@ fn abs_runtime_builtin(x: Value) -> Result<Value, String> {
         }
         Value::Complex(re, im) => Ok(Value::Num((re * re + im * im).sqrt())),
         Value::ComplexTensor(ct) => {
-            let data: Vec<f64> = ct.data.iter().map(|(re, im)| (re * re + im * im).sqrt()).collect();
+            let data: Vec<f64> = ct
+                .data
+                .iter()
+                .map(|(re, im)| (re * re + im * im).sqrt())
+                .collect();
             Ok(Value::Tensor(Tensor::new_2d(data, ct.rows, ct.cols)?))
         }
         Value::LogicalArray(la) => {
-            let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }).collect();
+            let data: Vec<f64> = la
+                .data
+                .iter()
+                .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                .collect();
             let (rows, cols) = match la.shape.len() {
                 0 => (0, 0),
                 1 => (1, la.shape[0]),

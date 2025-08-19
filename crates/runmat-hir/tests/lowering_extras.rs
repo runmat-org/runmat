@@ -34,11 +34,20 @@ fn lvalue_assignment_lowering_total() {
     let p1 = lower_src("A=1;");
     assert_eq!(p1.body.len(), 1);
     let p2 = lower_src("A=1; A(1)=2;");
-    assert!(p2.body.iter().any(|s| matches!(s, HirStmt::AssignLValue(_,_,_))));
+    assert!(p2
+        .body
+        .iter()
+        .any(|s| matches!(s, HirStmt::AssignLValue(_, _, _))));
     let p3 = lower_src("A=1; A{1}=3;");
-    assert!(p3.body.iter().any(|s| matches!(s, HirStmt::AssignLValue(_,_,_))));
+    assert!(p3
+        .body
+        .iter()
+        .any(|s| matches!(s, HirStmt::AssignLValue(_, _, _))));
     let p4 = lower_src("s = struct(); s.f = 4;");
-    assert!(p4.body.iter().any(|s| matches!(s, HirStmt::AssignLValue(_,_,_))));
+    assert!(p4
+        .body
+        .iter()
+        .any(|s| matches!(s, HirStmt::AssignLValue(_, _, _))));
 }
 
 #[test]
@@ -49,5 +58,3 @@ fn import_normalization_and_ambiguity() {
     let err = runmat_hir::validate_imports(&hir);
     assert!(err.is_err());
 }
-
-

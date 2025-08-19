@@ -14,5 +14,3 @@ fn arithmetic_and_assignment() {
     assert_eq!(x, 3.0);
     assert_eq!(y, 9.0);
 }
-
-

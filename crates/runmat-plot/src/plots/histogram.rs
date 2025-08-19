@@ -1,6 +1,6 @@
 //! Histogram implementation
 //!
-//! High-performance histograms with GPU acceleration and MATLAB-compatible styling.
+//! High-performance histograms with GPU acceleration.
 
 use crate::core::{BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
 use glam::{Vec3, Vec4};

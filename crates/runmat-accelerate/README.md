@@ -8,6 +8,11 @@
 - Backends (e.g., `wgpu`, `cuda`, `rocm`, `metal`, `vulkan`, `opencl`) are feature-gated. Only one provider is registered globally, but a future multi-device planner can fan out.
 - `Planner` decides when to run ops on CPU vs GPU (size thresholds, op types, fusion opportunities). `Accelerator` exposes ergonomic entry points used by the runtime or higher layers.
 
+### Autograd and default optimization (planned)
+- Tensor/Matrix operations will participate in reverse-mode autograd by default. The runtime records a compact tape of primitive ops; gradients are computed by chaining primitive derivatives (no provider changes required).
+- The planner and JIT will fuse common elementwise chains and simple BLAS sequences to reduce temporaries and host↔device transfers automatically.
+- For providers that expose fused kernels, the planner can route differentiated graphs to those paths, improving both forward and backward performance.
+
 ### What it provides today
 - A scaffolding `Accelerator` with elementwise add routing: choose CPU path (delegating to `runmat-runtime`) or GPU path (via provider methods). The GPU path currently uses upload/compute/download placeholders and is ready to be backed by a real backend.
 - Integration points for `gpuArray`/`gather`: when a provider is registered, runtime builtins route through the provider API defined in `runmat-accelerate-api`.

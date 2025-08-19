@@ -216,7 +216,12 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                         .map(|t| matches!(t, Token::Dot) || last_is_value_token(t))
                         .unwrap_or(false);
                     if is_adjacent && prev_is_value_or_dot {
-                        out.push(SpannedToken { token: Token::Transpose, lexeme: "'".into(), start: span.start, end: span.end });
+                        out.push(SpannedToken {
+                            token: Token::Transpose,
+                            lexeme: "'".into(),
+                            start: span.start,
+                            end: span.end,
+                        });
                         continue;
                     }
                     // Otherwise, parse a full single-quoted string starting at this apostrophe
@@ -234,7 +239,11 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                                 j += 1; // include closing
                                 break;
                             }
-                        } else if c == '\n' || c == '\r' { break; } else { j += 1; }
+                        } else if c == '\n' || c == '\r' {
+                            break;
+                        } else {
+                            j += 1;
+                        }
                     }
                     if ok {
                         // Consume what we scanned and emit Str for the entire single-quoted literal
@@ -243,12 +252,22 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                         let lexeme = format!("'{}", &rem[..j]);
                         lex.bump(j); // advance past the content following the leading apostrophe
                         lex.extras.last_was_value = true;
-                        out.push(SpannedToken { token: Token::Str, lexeme, start: abs_start, end: abs_end });
+                        out.push(SpannedToken {
+                            token: Token::Str,
+                            lexeme,
+                            start: abs_start,
+                            end: abs_end,
+                        });
                         lex.extras.line_start = false;
                         continue;
                     } else {
                         // Unterminated; treat as Error
-                        out.push(SpannedToken { token: Token::Error, lexeme: "'".into(), start: span.start, end: span.end });
+                        out.push(SpannedToken {
+                            token: Token::Error,
+                            lexeme: "'".into(),
+                            start: span.start,
+                            end: span.end,
+                        });
                         continue;
                     }
                 }
@@ -273,7 +292,11 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                     let rem = lex.remainder();
                     let mut offset = 0usize;
                     for ch in rem.chars() {
-                        if ch == ' ' || ch == '\t' || ch == '\r' { offset += ch.len_utf8(); } else { break; }
+                        if ch == ' ' || ch == '\t' || ch == '\r' {
+                            offset += ch.len_utf8();
+                        } else {
+                            break;
+                        }
                     }
                     if rem[offset..].starts_with('\'') {
                         // Try to scan a valid single-quoted string with doubled '' escapes
@@ -290,7 +313,11 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                                     j += 1;
                                     break;
                                 }
-                            } else if c == '\n' { break; } else { j += 1; }
+                            } else if c == '\n' {
+                                break;
+                            } else {
+                                j += 1;
+                            }
                         }
                         if ok {
                             // Consume the scanned slice and emit a Str token
@@ -362,7 +389,10 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                             }
                         }
                         // If we ended on a closing quote, emit Str token
-                        if byte_index > start_off + 1 && &s[start_off..start_off + 1] == "\"" && s[start_off..byte_index].ends_with('"') {
+                        if byte_index > start_off + 1
+                            && &s[start_off..start_off + 1] == "\""
+                            && s[start_off..byte_index].ends_with('"')
+                        {
                             let start = span.start + start_off;
                             let end = span.start + byte_index;
                             // Mark as value for downstream transpose logic
@@ -503,7 +533,9 @@ fn last_is_value_token(tok: &Token) -> bool {
 // If regex matched but it's actually an unterminated quote (no closing '),
 // tell Logos to Skip so the single-quote token can be picked up as Transpose.
 #[allow(dead_code)]
-fn single_quoted_string_or_skip(_lexer: &mut Lexer<Token>) -> Filter<()> { Filter::Skip }
+fn single_quoted_string_or_skip(_lexer: &mut Lexer<Token>) -> Filter<()> {
+    Filter::Skip
+}
 
 fn double_quoted_string_emit(lexer: &mut Lexer<Token>) -> Filter<()> {
     // Always emit and mark as value
@@ -525,7 +557,7 @@ fn transpose_filter(lex: &mut Lexer<Token>) -> Filter<()> {
 }
 
 fn ellipsis_emit_and_skip_to_eol(lex: &mut Lexer<Token>) -> Filter<()> {
-    // After an ellipsis, MATLAB ignores the remainder of the physical line (including comments)
+    // After an ellipsis, ignore the remainder of the physical line (including comments)
     let rest = lex.remainder();
     if let Some(pos) = rest.find('\n') {
         lex.bump(pos); // position to before the newline; newline token will consume it
