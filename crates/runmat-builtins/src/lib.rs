@@ -29,6 +29,10 @@ pub enum Value {
     GpuTensor(runmat_accelerate_api::GpuTensorHandle),
     // Simple object instance until full class system lands
     Object(ObjectInstance),
+    /// MATLAB handle-object wrapper providing identity semantics and validity tracking
+    HandleObject(HandleRef),
+    /// Event listener handle for MATLAB-style events
+    Listener(Listener),
     // Function handle pointing to a named function (builtin or user)
     FunctionHandle(String),
     Closure(Closure),
@@ -619,6 +623,8 @@ impl Type {
             }
             Value::GpuTensor(h) => { Type::Tensor { shape: Some(h.shape.iter().map(|&d| Some(d)).collect()) } }
             Value::Object(_) => Type::Unknown,
+            Value::HandleObject(_) => Type::Unknown,
+            Value::Listener(_) => Type::Unknown,
             Value::Struct(_) => Type::Struct { known_fields: None },
             Value::FunctionHandle(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
             Value::Closure(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
@@ -832,6 +838,14 @@ impl fmt::Display for Value {
             
             Value::GpuTensor(h) => write!(f, "GpuTensor(shape={:?}, device={}, buffer={})", h.shape, h.device_id, h.buffer_id),
             Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
+            Value::HandleObject(h) => {
+                let ptr = unsafe { h.target.as_raw() } as usize;
+                write!(f, "<handle {} @0x{:x} valid={}>", h.class_name, ptr, h.valid)
+            }
+            Value::Listener(l) => {
+                let ptr = unsafe { l.target.as_raw() } as usize;
+                write!(f, "<listener id={} {}@0x{:x} '{}' enabled={} valid={}>", l.id, l.class_name(), ptr, l.event_name, l.enabled, l.valid)
+            }
             Value::Struct(st) => write!(f, "struct(fields={})", st.fields.len()),
             Value::FunctionHandle(name) => write!(f, "@{}", name),
             Value::Closure(c) => write!(f, "<closure {} captures={}>", c.function_name, c.captures.len()),
@@ -840,6 +854,43 @@ impl fmt::Display for Value {
         }
     }
 }
+
+/// Reference-counted (by GC) inner object for handle classes
+#[derive(Debug, Clone)]
+pub struct HandleRef {
+    pub class_name: String,
+    pub target: GcPtr<Value>,
+    pub valid: bool,
+}
+
+impl PartialEq for HandleRef {
+    fn eq(&self, other: &Self) -> bool {
+        let a = unsafe { self.target.as_raw() } as usize;
+        let b = unsafe { other.target.as_raw() } as usize;
+        a == b
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Listener {
+    pub id: u64,
+    pub target: GcPtr<Value>,
+    pub event_name: String,
+    pub callback: GcPtr<Value>,
+    pub enabled: bool,
+    pub valid: bool,
+}
+
+impl Listener {
+    pub fn class_name(&self) -> String {
+        match unsafe { &*self.target.as_raw() } {
+            Value::Object(o) => o.class_name.clone(),
+            Value::HandleObject(h) => h.class_name.clone(),
+            _ => "".to_string(),
+        }
+    }
+}
+
 
 impl fmt::Display for ComplexTensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

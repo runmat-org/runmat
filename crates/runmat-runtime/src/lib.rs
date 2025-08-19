@@ -264,7 +264,11 @@ fn string_conv(a: Value) -> Result<Value, String> {
             Ok(Value::StringArray(runmat_builtins::StringArray::new(vec![s], vec![1,1]).unwrap()))
         }
         Value::Int(i) => Ok(Value::StringArray(runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1,1]).unwrap())),
-        // Value::HandleObject removed; treat objects uniformly
+        Value::HandleObject(_) => {
+            // MATLAB string(handle) produces class-name-like text; keep conservative
+            Err("string: unsupported conversion from handle".to_string())
+        }
+        Value::Listener(_) => Err("string: unsupported conversion from listener".to_string()),
         other => Err(format!("string: unsupported conversion from {other:?}")),
     }
 }
@@ -296,7 +300,7 @@ fn logical_ctor(a: Value) -> Result<Value, String> {
             let data: Vec<u8> = t.data.iter().map(|(re,im)| if *re!=0.0 || *im!=0.0 {1} else {0}).collect();
             Ok(Value::LogicalArray(runmat_builtins::LogicalArray::new(data, t.shape).map_err(|e| format!("logical: {e}"))?))
         }
-        Value::Cell(_) | Value::Struct(_) | Value::Object(_) | Value::GpuTensor(_) | Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) | Value::MException(_) | Value::String(_) => {
+        Value::Cell(_) | Value::Struct(_) | Value::Object(_) | Value::GpuTensor(_) | Value::FunctionHandle(_) | Value::Closure(_) | Value::ClassRef(_) | Value::MException(_) | Value::String(_) | Value::HandleObject(_) | Value::Listener(_) => {
             Err("logical: unsupported conversion".to_string())
         }
     }
@@ -847,6 +851,7 @@ fn setfield_builtin(base: Value, field: String, rhs: Value) -> Result<Value, Str
             obj.properties.insert(field, rhs); Ok(Value::Object(obj))
         }
         Value::Struct(mut st) => { st.fields.insert(field, rhs); Ok(Value::Struct(st)) }
+        Value::HandleObject(_) | Value::Listener(_) => Err(format!("setfield unsupported on this value for field '{field}': handle/listener")),
         other => Err(format!("setfield unsupported on this value for field '{field}': {other:?}")),
     }
 }
@@ -865,7 +870,21 @@ fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<
             // Fallback to global method name
             crate::call_builtin(&method, &args)
         }
-        // handle classes not yet enabled
+        Value::HandleObject(h) => {
+            // Methods on handle classes dispatch to the underlying target's class namespace
+            let target = unsafe { &*h.target.as_raw() };
+            let class_name = match target {
+                Value::Object(o) => o.class_name.clone(),
+                Value::Struct(_) => h.class_name.clone(),
+                _ => h.class_name.clone(),
+            };
+            let qualified = format!("{}.{}", class_name, method);
+            let mut args = Vec::with_capacity(1 + rest.len());
+            args.push(Value::HandleObject(h.clone()));
+            args.extend(rest.into_iter());
+            if let Ok(v) = crate::call_builtin(&qualified, &args) { return Ok(v); }
+            crate::call_builtin(&method, &args)
+        }
         other => Err(format!("call_method unsupported on {other:?} for method '{method}'")),
     }
 }
@@ -878,7 +897,12 @@ fn subsasgn_dispatch(obj: Value, kind: String, payload: Value, rhs: Value) -> Re
             let qualified = format!("{}.subsasgn", o.class_name);
             crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])
         }
-        // no handle support yet
+        Value::HandleObject(h) => {
+            let target = unsafe { &*h.target.as_raw() };
+            let class_name = match target { Value::Object(o) => o.class_name.clone(), _ => h.class_name.clone(), };
+            let qualified = format!("{}.subsasgn", class_name);
+            crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])
+        }
         other => Err(format!("subsasgn: receiver must be object, got {other:?}")),
     }
 }
@@ -890,9 +914,97 @@ fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> Result<Value, S
             let qualified = format!("{}.subsref", o.class_name);
             crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])
         }
-        // no handle support yet
+        Value::HandleObject(h) => {
+            let target = unsafe { &*h.target.as_raw() };
+            let class_name = match target { Value::Object(o) => o.class_name.clone(), _ => h.class_name.clone(), };
+            let qualified = format!("{}.subsref", class_name);
+            crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])
+        }
         other => Err(format!("subsref: receiver must be object, got {other:?}")),
     }
+}
+
+// -------- Handle classes & events --------
+
+#[runmat_macros::runtime_builtin(name = "new_handle_object")]
+fn new_handle_object_builtin(class_name: String) -> Result<Value, String> {
+    // Create an underlying object instance and wrap it in a handle
+    let obj = new_object_builtin(class_name.clone())?;
+    let gc = runmat_gc::gc_allocate(obj).map_err(|e| format!("gc: {e}"))?;
+    Ok(Value::HandleObject(runmat_builtins::HandleRef { class_name, target: gc, valid: true }))
+}
+
+#[runmat_macros::runtime_builtin(name = "isvalid")]
+fn isvalid_builtin(v: Value) -> Result<Value, String> {
+    match v {
+        Value::HandleObject(h) => Ok(Value::Bool(h.valid)),
+        Value::Listener(l) => Ok(Value::Bool(l.valid && l.enabled)),
+        _ => Ok(Value::Bool(false)),
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "delete")]
+fn delete_builtin(v: Value) -> Result<Value, String> {
+    match v {
+        Value::HandleObject(mut h) => { h.valid = false; Ok(Value::HandleObject(h)) }
+        Value::Listener(mut l) => { l.valid = false; Ok(Value::Listener(l)) }
+        other => Err(format!("delete: unsupported value {other:?}")),
+    }
+}
+
+use std::sync::{Mutex, OnceLock};
+
+#[derive(Default)]
+struct EventRegistry { next_id: u64, listeners: std::collections::HashMap<(usize, String), Vec<runmat_builtins::Listener>> }
+
+static EVENT_REGISTRY: OnceLock<Mutex<EventRegistry>> = OnceLock::new();
+
+fn events() -> &'static Mutex<EventRegistry> { EVENT_REGISTRY.get_or_init(|| Mutex::new(EventRegistry::default())) }
+
+#[runmat_macros::runtime_builtin(name = "addlistener")]
+fn addlistener_builtin(target: Value, event_name: String, callback: Value) -> Result<Value, String> {
+    let key_ptr: usize = match &target {
+        Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
+        Value::Object(o) => o as *const _ as usize,
+        _ => return Err("addlistener: target must be handle or object".to_string()),
+    };
+    let mut reg = events().lock().unwrap();
+    let id = { reg.next_id += 1; reg.next_id };
+    let tgt_gc = match target { Value::HandleObject(h) => h.target, Value::Object(o) => runmat_gc::gc_allocate(Value::Object(o)).map_err(|e| format!("gc: {e}"))?, _ => unreachable!() };
+    let cb_gc = runmat_gc::gc_allocate(callback).map_err(|e| format!("gc: {e}"))?;
+    let listener = runmat_builtins::Listener { id, target: tgt_gc, event_name: event_name.clone(), callback: cb_gc, enabled: true, valid: true };
+    reg.listeners.entry((key_ptr, event_name)).or_default().push(listener.clone());
+    Ok(Value::Listener(listener))
+}
+
+#[runmat_macros::runtime_builtin(name = "notify")]
+fn notify_builtin(target: Value, event_name: String, rest: Vec<Value>) -> Result<Value, String> {
+    let key_ptr: usize = match &target {
+        Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
+        Value::Object(o) => o as *const _ as usize,
+        _ => return Err("notify: target must be handle or object".to_string()),
+    };
+    let mut to_call: Vec<runmat_builtins::Listener> = Vec::new();
+    {
+        let reg = events().lock().unwrap();
+        if let Some(list) = reg.listeners.get(&(key_ptr, event_name.clone())) {
+            for l in list { if l.valid && l.enabled { to_call.push(l.clone()); } }
+        }
+    }
+    for l in to_call {
+        // Call callback via feval-like protocol
+        let mut args = Vec::new();
+        args.push(target.clone());
+        args.extend(rest.iter().cloned());
+        let cbv: Value = (*l.callback).clone();
+        match &cbv {
+            Value::String(s) if s.starts_with('@') => { let mut a = vec![Value::String(s.clone())]; a.extend(args.into_iter()); let _ = crate::call_builtin("feval", &a)?; }
+            Value::FunctionHandle(name) => { let mut a = vec![Value::FunctionHandle(name.clone())]; a.extend(args.into_iter()); let _ = crate::call_builtin("feval", &a)?; }
+            Value::Closure(_) => { let mut a = vec![cbv.clone()]; a.extend(args.into_iter()); let _ = crate::call_builtin("feval", &a)?; }
+            _ => {}
+        }
+    }
+    Ok(Value::Num(0.0))
 }
 
 // Test-oriented dependent property handlers (global). If a class defines a Dependent

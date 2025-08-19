@@ -156,7 +156,22 @@ fn le_builtin(a: f64, b: f64) -> Result<f64, String> {
 #[runtime_builtin(name = "eq")]
 fn eq_builtin(a: Value, b: Value) -> Result<Value, String> {
     match (a, b) {
-        // Handle classes not yet implemented
+        // Handle identity semantics
+        (Value::HandleObject(ha), Value::HandleObject(hb)) => {
+            let pa = unsafe { ha.target.as_raw() } as usize;
+            let pb = unsafe { hb.target.as_raw() } as usize;
+            return Ok(Value::Num(if pa == pb { 1.0 } else { 0.0 }));
+        }
+        (Value::HandleObject(ha), other) => {
+            let pb = match other { Value::HandleObject(hb) => (unsafe { hb.target.as_raw() }) as usize, _ => 0usize };
+            let pa = (unsafe { ha.target.as_raw() }) as usize;
+            return Ok(Value::Num(if pa == pb && pb != 0 { 1.0 } else { 0.0 }));
+        }
+        (other, Value::HandleObject(hb)) => {
+            let pa = match other { Value::HandleObject(ha) => (unsafe { ha.target.as_raw() }) as usize, _ => 0usize };
+            let pb = (unsafe { hb.target.as_raw() }) as usize;
+            return Ok(Value::Num(if pa == pb && pa != 0 { 1.0 } else { 0.0 }));
+        }
         // Complex equality: element-wise on scalars; uses exact float compare for now
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => Ok(Value::Num(((ar==br) && (ai==bi)) as i32 as f64)),
         (Value::Complex(ar, ai), Value::Num(bn)) => Ok(Value::Num(((ai==0.0) && (ar==bn)) as i32 as f64)),
@@ -202,7 +217,22 @@ fn eq_builtin(a: Value, b: Value) -> Result<Value, String> {
 #[runtime_builtin(name = "ne")]
 fn ne_builtin(a: Value, b: Value) -> Result<Value, String> {
     match (a, b) {
-        // Handle classes not yet implemented
+        // Handle identity semantics
+        (Value::HandleObject(ha), Value::HandleObject(hb)) => {
+            let pa = unsafe { ha.target.as_raw() } as usize;
+            let pb = unsafe { hb.target.as_raw() } as usize;
+            return Ok(Value::Num(if pa != pb { 1.0 } else { 0.0 }));
+        }
+        (Value::HandleObject(ha), other) => {
+            let pb = match other { Value::HandleObject(hb) => (unsafe { hb.target.as_raw() }) as usize, _ => 0usize };
+            let pa = (unsafe { ha.target.as_raw() }) as usize;
+            return Ok(Value::Num(if pa != pb || pb == 0 { 1.0 } else { 0.0 }));
+        }
+        (other, Value::HandleObject(hb)) => {
+            let pa = match other { Value::HandleObject(ha) => (unsafe { ha.target.as_raw() }) as usize, _ => 0usize };
+            let pb = (unsafe { hb.target.as_raw() }) as usize;
+            return Ok(Value::Num(if pa != pb || pa == 0 { 1.0 } else { 0.0 }));
+        }
         // Complex inequality
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => Ok(Value::Num(((ar!=br) || (ai!=bi)) as i32 as f64)),
         (Value::Complex(ar, ai), Value::Num(bn)) => Ok(Value::Num(((ai!=0.0) || (ar!=bn)) as i32 as f64)),

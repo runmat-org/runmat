@@ -371,6 +371,11 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                 match (&a, &b) {
                     (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String("eq".to_string()), b.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa==bb {1.0}else{0.0})) } } }
                     (_, Value::Object(obj)) => { let args = vec![Value::Object(obj.clone()), Value::String("eq".to_string()), a.clone()]; match call_builtin("call_method", &args) { Ok(v) => stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; stack.push(Value::Num(if aa==bb {1.0}else{0.0})) } } }
+                    (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
+                        // Delegate to runtime eq builtin which implements identity semantics
+                        let v = runmat_runtime::call_builtin("eq", &[a.clone(), b.clone()])?;
+                        stack.push(v);
+                    }
                     (Value::Tensor(ta), Value::Tensor(tb)) => {
                         // Element-wise eq; shapes must match
                         if ta.shape != tb.shape { return Err(mex("MATLAB:ShapeMismatch", "shape mismatch for element-wise comparison")); }
@@ -436,6 +441,10 @@ pub fn interpret_with_vars(bytecode: &Bytecode, initial_vars: &mut [Value], curr
                                 }
                             }
                         }
+                    }
+                    (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
+                        let v = runmat_runtime::call_builtin("ne", &[a.clone(), b.clone()])?;
+                        stack.push(v);
                     }
                     (Value::Tensor(ta), Value::Tensor(tb)) => {
                         if ta.shape != tb.shape { return Err(mex("MATLAB:ShapeMismatch", "shape mismatch for element-wise comparison")); }

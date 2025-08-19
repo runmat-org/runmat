@@ -162,6 +162,16 @@ impl MarkSweepCollector {
                     self.mark_value_contents(cell_value, max_generation)?;
                 }
             }
+            Value::HandleObject(h) => {
+                let tgt = h.target.clone();
+                if !tgt.is_null() { self.mark_object(tgt, max_generation)?; }
+            }
+            Value::Listener(l) => {
+                let tgt = l.target.clone();
+                if !tgt.is_null() { self.mark_object(tgt, max_generation)?; }
+                let cb = l.callback.clone();
+                if !cb.is_null() { self.mark_object(cb, max_generation)?; }
+            }
             Value::Tensor(_) | Value::ComplexTensor(_) => {
                 // Matrices don't contain references to other GC objects
                 // (their data is Vec<f64>)
@@ -210,6 +220,16 @@ impl MarkSweepCollector {
                 for cell_value in &cells.data {
                     self.mark_value_contents(cell_value, _max_generation)?;
                 }
+            }
+            Value::HandleObject(h) => {
+                let tgt = h.target.clone();
+                if !tgt.is_null() { self.mark_object(tgt, _max_generation)?; }
+            }
+            Value::Listener(l) => {
+                let tgt = l.target.clone();
+                if !tgt.is_null() { self.mark_object(tgt, _max_generation)?; }
+                let cb = l.callback.clone();
+                if !cb.is_null() { self.mark_object(cb, _max_generation)?; }
             }
             Value::StringArray(_sa) => {}
             Value::GpuTensor(_) => {}
