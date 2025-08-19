@@ -191,8 +191,8 @@ export default function HowItWorksPage() {
               <div>
                 <h4 className="text-lg font-semibold mb-3">Why this architecture is different</h4>
                 <p className="text-muted-foreground leading-relaxed">
-                  Octave's classic interpreter does not expose a typed IR, limiting deep optimization and IDE tooling.
-                  MATLAB has powerful internal IRs but limited external LSP integration. RunMat's stable HIR/ABI and
+                  Octave&apos;s classic interpreter does not expose a typed IR, limiting deep optimization and IDE tooling.
+                  MATLAB has powerful internal IRs but limited external LSP integration. RunMat&apos;s stable HIR/ABI and
                   Cranelift backend make accelerators and editors plug in cleanly across platforms.
                 </p>
               </div>

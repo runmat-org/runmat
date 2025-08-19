@@ -31,7 +31,7 @@ function Sidebar() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      const isTypingField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || (target as any).isContentEditable);
+      const isTypingField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || (target).isContentEditable);
       if (!isTypingField && (e.key === '/' || e.key.toLowerCase() === 's') && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         inputRef?.focus();

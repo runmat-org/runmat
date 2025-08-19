@@ -878,6 +878,7 @@ pub fn infer_function_output_types(
 
 /// Infer variable types inside each function by performing a flow-sensitive analysis and
 /// returning the joined environment (types per VarId) at function exits and fallthrough.
+#[allow(clippy::type_complexity)]
 pub fn infer_function_variable_types(
     prog: &HirProgram,
 ) -> std::collections::HashMap<String, std::collections::HashMap<VarId, Type>> {
@@ -887,6 +888,7 @@ pub fn infer_function_variable_types(
     let returns_map = infer_function_output_types(prog);
 
     // Collect function defs for simple callsite fallback inference
+    #[allow(clippy::type_complexity)]
     let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
     for stmt in &prog.body {
         if let HirStmt::Function {
@@ -1554,8 +1556,7 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
         match v {
             "public" | "private" => Ok(()),
             other => Err(format!(
-                "invalid access value '{}' in {} (allowed: public, private)",
-                other, ctx
+                "invalid access value '{other}' in {ctx} (allowed: public, private)",
             )),
         }
     }
@@ -1613,11 +1614,10 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                                 let v = a.value.as_ref().ok_or_else(|| {
                                     format!(
                                         "Access requires value in class '{}' properties block",
-                                        name
                                     )
                                 })?;
                                 let v = norm_attr_value(v);
-                                validate_access_value(&format!("class '{}' properties", name), &v)?;
+                                validate_access_value(&format!("class '{}' properties"), &v)?;
                                 access_default = Some(v);
                                 continue;
                             }
@@ -1625,11 +1625,10 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                                 let v = a.value.as_ref().ok_or_else(|| {
                                     format!(
                                         "GetAccess requires value in class '{}' properties block",
-                                        name
                                     )
                                 })?;
                                 let v = norm_attr_value(v);
-                                validate_access_value(&format!("class '{}' properties", name), &v)?;
+                                validate_access_value(&format!("class '{}' properties"), &v)?;
                                 get_access = Some(v);
                                 continue;
                             }
@@ -1637,11 +1636,10 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                                 let v = a.value.as_ref().ok_or_else(|| {
                                     format!(
                                         "SetAccess requires value in class '{}' properties block",
-                                        name
                                     )
                                 })?;
                                 let v = norm_attr_value(v);
-                                validate_access_value(&format!("class '{}' properties", name), &v)?;
+                                validate_access_value(&format!("class '{}' properties"), &v)?;
                                 set_access = Some(v);
                                 continue;
                             }
@@ -1695,7 +1693,7 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                                     )
                                 })?;
                                 let v = norm_attr_value(v);
-                                validate_access_value(&format!("class '{}' methods", name), &v)?;
+                                validate_access_value(&format!("class '{}' methods"), &v)?;
                             }
                         }
                         if has_abstract && has_sealed {
@@ -1905,7 +1903,7 @@ pub mod remapping {
                 catch_body,
             } => HirStmt::TryCatch {
                 try_body: remap_function_body(try_body, var_map),
-                catch_var: catch_var.map(|v| var_map.get(&v).copied().unwrap_or(v)),
+                catch_var: catch_var.as_ref().map(|v| var_map.get(&v).copied().unwrap_or(v)),
                 catch_body: remap_function_body(catch_body, var_map),
             },
             HirStmt::Global(vars) => HirStmt::Global(
@@ -2055,10 +2053,8 @@ pub mod remapping {
                 collect_expr_variables(expr, vars);
             }
             HirStmt::MultiAssign(var_ids, expr, _) => {
-                for v in var_ids {
-                    if let Some(v) = v {
-                        vars.insert(*v);
-                    }
+                for v in var_ids.iter().flatten() {
+                    vars.insert(*v);
                 }
                 collect_expr_variables(expr, vars);
             }
@@ -2476,13 +2472,10 @@ impl Ctx {
                 catch_body,
             } => {
                 let try_hir = self.lower_stmts(try_body)?;
-                let catch_var_id = match catch_var {
-                    Some(name) => Some(match self.lookup(name) {
-                        Some(id) => id,
-                        None => self.define(name.clone()),
-                    }),
-                    None => None,
-                };
+                let catch_var_id = catch_var.as_ref().map(|name| match self.lookup(name) {
+                    Some(id) => id,
+                    None => self.define(name.clone()),
+                });
                 let catch_hir = self.lower_stmts(catch_body)?;
                 Ok(HirStmt::TryCatch {
                     try_body: try_hir,

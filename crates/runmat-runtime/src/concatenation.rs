@@ -165,7 +165,12 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                     cols_total += 1;
                     blocks.push(sa);
                 }
-                Value::Tensor(_) | Value::Cell(_) | _ => {
+                Value::Tensor(_) | Value::Cell(_) => {
+                    return Err(format!(
+                        "Cannot concatenate value of type {v:?} with string array"
+                    ))
+                }
+                _ => {
                     return Err(format!(
                         "Cannot concatenate value of type {v:?} with string array"
                     ))

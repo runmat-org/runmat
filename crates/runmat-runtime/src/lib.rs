@@ -88,9 +88,8 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             return new_object_builtin(name.to_string());
         }
         return Err(format!(
-            "{}: {}",
-            "MATLAB:UndefinedFunction",
-            format!("Undefined function: {}", name)
+            "{}: Undefined function: {name}",
+            "MATLAB:UndefinedFunction"
         ));
     }
 
@@ -167,11 +166,9 @@ fn char_builtin(a: Value) -> Result<Value, String> {
                 for r in 0..rows {
                     let idx = r + c * rows;
                     let s = &sa.data[idx];
-                    let mut j = 0usize;
-                    for ch in s.chars() {
+                    for (j, ch) in s.chars().enumerate() {
                         let oc = c * max_len + j;
                         out[r + oc * out_rows] = ch as u32 as f64;
-                        j += 1;
                     }
                 }
             }
@@ -930,7 +927,7 @@ fn regexp_builtin(a: Value, pat: Value) -> Result<Value, String> {
 fn regexpi_builtin(a: Value, pat: Value) -> Result<Value, String> {
     let s = to_string_scalar(&a)?;
     let p = to_string_scalar(&pat)?;
-    let re = Regex::new(&format!("(?i){}", p)).map_err(|e| format!("regexpi: {e}"))?;
+    let re = Regex::new(&format!("(?i){p}")).map_err(|e| format!("regexpi: {e}"))?;
     let mut matches: Vec<Value> = Vec::new();
     for cap in re.captures_iter(&s) {
         let full = cap
@@ -956,7 +953,7 @@ fn regexpi_builtin(a: Value, pat: Value) -> Result<Value, String> {
 fn strjoin_rowwise(a: Value, delim: Value) -> Result<Value, String> {
     let d = to_string_scalar(&delim)?;
     let sa = to_string_array(&a)?;
-    let rows = *sa.shape.get(0).unwrap_or(&sa.data.len());
+    let rows = *sa.shape.first().unwrap_or(&sa.data.len());
     let cols = *sa.shape.get(1).unwrap_or(&1);
     if rows == 0 || cols == 0 {
         return Ok(Value::StringArray(
@@ -1045,7 +1042,7 @@ fn getfield_builtin(base: Value, field: String) -> Result<Value, String> {
         Value::MException(me) => match field.as_str() {
             "message" => Ok(Value::String(me.message)),
             "identifier" => Ok(Value::String(me.identifier)),
-            _ => Err(format!("getfield: unknown field '{}' on MException", field)),
+            _ => Err(format!("getfield: unknown field '{field}' on MException")),
         },
         Value::Object(obj) => {
             if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
@@ -1057,18 +1054,18 @@ fn getfield_builtin(base: Value, field: String) -> Result<Value, String> {
                 }
                 match p.get_access {
                     runmat_builtins::Access::Private => {
-                        return Err(format!("Property '{}' is private", field))
+                        return Err(format!("Property '{field}' is private"))
                     }
                     _ => {}
                 }
                 if p.is_dependent {
                     // Try dynamic getter first
-                    let getter = format!("get.{}", field);
+                    let getter = format!("get.{field}");
                     if let Ok(v) = crate::call_builtin(&getter, &[Value::Object(obj.clone())]) {
                         return Ok(v);
                     }
                     // Fallback to backing field '<field>_backing'
-                    let backing = format!("{}_backing", field);
+                    let backing = format!("{field}_backing");
                     if let Some(vb) = obj.properties.get(&backing) {
                         return Ok(vb.clone());
                     }
@@ -1104,16 +1101,16 @@ fn error_builtin(rest: Vec<Value>) -> Result<Value, String> {
     }
     if rest.len() == 1 {
         let msg: String = (&rest[0]).try_into()?;
-        return Err(format!("MATLAB:error: {}", msg));
+        return Err(format!("MATLAB:error: {msg}"));
     }
     let ident: String = (&rest[0]).try_into()?;
     let msg: String = (&rest[1]).try_into()?;
     let id = if ident.contains(":") {
         ident
     } else {
-        format!("{}", ident)
+        format!("{ident}")
     };
-    Err(format!("{}: {}", id, msg))
+    Err(format!("{id}: {msg}"))
 }
 
 #[runmat_macros::runtime_builtin(name = "rethrow")]
@@ -1328,12 +1325,12 @@ fn setfield_builtin(base: Value, field: String, rhs: Value) -> Result<Value, Str
                 }
                 match p.set_access {
                     runmat_builtins::Access::Private => {
-                        return Err(format!("Property '{}' is private", field))
+                        return Err(format!("Property '{field}' is private"))
                     }
                     _ => {}
                 }
                 if p.is_dependent {
-                    let setter = format!("set.{}", field);
+                    let setter = format!("set.{field}");
                     // Try class/user-defined setter first
                     if let Ok(v) =
                         crate::call_builtin(&setter, &[Value::Object(obj.clone()), rhs.clone()])
@@ -1341,7 +1338,7 @@ fn setfield_builtin(base: Value, field: String, rhs: Value) -> Result<Value, Str
                         return Ok(v);
                     }
                     // Fallback: write to backing field '<field>_backing'
-                    let backing = format!("{}_backing", field);
+                    let backing = format!("{field}_backing");
                     obj.properties.insert(backing, rhs);
                     return Ok(Value::Object(obj));
                 }

@@ -16,7 +16,7 @@ fn transpose_to_column_major(matrix: &Matrix) -> Vec<f64> {
     result
 }
 
-/// Helper function to transpose a matrix from column-major to row-major  
+// /// Helper function to transpose a matrix from column-major to row-major  
 // Removed: not needed with column-major everywhere
 
 /// BLAS-accelerated matrix multiplication: C = A * B

@@ -9,7 +9,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { slugifyHeading } from "@/lib/utils";
 
 // Polyfill URL.canParse for Node environments that don't support it yet (e.g., Node 18)
-const _u: any = URL as any;
+const _u = URL;
 if (typeof _u.canParse !== "function") {
   _u.canParse = (input: string, base?: string) => {
     try {
@@ -153,7 +153,7 @@ function fallbackForSlug(slug: string[]) {
       "oop-semantics": "crates/runmat-ignition/OOP_SEMANTICS.md",
     };
     const file = map[slug[1]];
-    if (file) return { title: toTitleCase(slug[1].replace(/-/g, " ")), slug, file } as any;
+    if (file) return { title: toTitleCase(slug[1].replace(/-/g, " ")), slug, file };
   }
   return undefined;
 }

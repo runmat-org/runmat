@@ -22,7 +22,10 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     if (Array.isArray(node)) return node.map(toPlainText).join(' ');
     if (React.isValidElement(node)) {
       // recursively extract from element children (handles <code> etc.)
-      return toPlainText((node as any).props?.children);
+      // Fix: TypeScript error if node.props is not guaranteed to have 'children'
+      // Use type assertion to access 'children' safely
+      const props = (node as React.ReactElement).props as { children?: React.ReactNode };
+      return toPlainText(props.children);
     }
     return "";
   }
