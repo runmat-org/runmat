@@ -1,4 +1,4 @@
-## runmat-accelerate
+## RunMat Accelerate
 
 ### Purpose
 `runmat-accelerate` provides the high-level acceleration layer that integrates GPU backends with the language runtime. It implements provider(s) for `runmat-accelerate-api` so that `gpuArray`, `gather`, and (later) accelerated math and linear algebra can execute on devices transparently where appropriate.

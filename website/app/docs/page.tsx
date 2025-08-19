@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 export default function DocsPage() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-16 md:px-6 md:py-24">
+      <div className="container mx-auto px-4 py-16 md:px-6 md:py-6">
         <div className="mx-auto max-w-[58rem] text-center">
           <Badge variant="secondary" className="mb-4">
             Documentation

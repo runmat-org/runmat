@@ -356,12 +356,12 @@ fn value_vector_to_f64(values: &[Value]) -> Result<Vec<f64>, String> {
     for v in values {
         match v {
             Value::Num(n) => out.push(*n),
-            Value::Int(i) => out.push(*i as f64),
+            Value::Int(i) => out.push(i.to_f64()),
             Value::Cell(c) => {
                 for elem in &c.data {
                     match &**elem {
                         Value::Num(n) => out.push(*n),
-                        Value::Int(i) => out.push(*i as f64),
+                        Value::Int(i) => out.push(i.to_f64()),
                         _ => return Err(format!("Cannot convert {elem:?} to f64")),
                     }
                 }

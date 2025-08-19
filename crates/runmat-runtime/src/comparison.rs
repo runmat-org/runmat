@@ -156,6 +156,11 @@ fn le_builtin(a: f64, b: f64) -> Result<f64, String> {
 #[runtime_builtin(name = "eq")]
 fn eq_builtin(a: Value, b: Value) -> Result<Value, String> {
     match (a, b) {
+        // Handle classes not yet implemented
+        // Complex equality: element-wise on scalars; uses exact float compare for now
+        (Value::Complex(ar, ai), Value::Complex(br, bi)) => Ok(Value::Num(((ar==br) && (ai==bi)) as i32 as f64)),
+        (Value::Complex(ar, ai), Value::Num(bn)) => Ok(Value::Num(((ai==0.0) && (ar==bn)) as i32 as f64)),
+        (Value::Num(an), Value::Complex(br, bi)) => Ok(Value::Num(((bi==0.0) && (br==an)) as i32 as f64)),
         (Value::CharArray(ca), Value::CharArray(cb)) => {
             if ca.rows != cb.rows || ca.cols != cb.cols { return Err("shape mismatch for char array comparison".to_string()); }
             let out: Vec<f64> = ca.data.iter().zip(cb.data.iter()).map(|(x,y)| if x==y {1.0} else {0.0}).collect();
@@ -184,9 +189,9 @@ fn eq_builtin(a: Value, b: Value) -> Result<Value, String> {
         }
         (Value::String(a), Value::String(b)) => Ok(Value::Num(if a==b {1.0} else {0.0})),
         (Value::Num(a), Value::Num(b)) => Ok(Value::Num(if (a-b).abs() < f64::EPSILON {1.0} else {0.0})),
-        (Value::Int(a), Value::Int(b)) => Ok(Value::Num(if a==b {1.0} else {0.0})),
-        (Value::Int(a), Value::Num(b)) => Ok(Value::Num(if ((a as f64)-b).abs() < f64::EPSILON {1.0} else {0.0})),
-        (Value::Num(a), Value::Int(b)) => Ok(Value::Num(if (a-(b as f64)).abs() < f64::EPSILON {1.0} else {0.0})),
+        (Value::Int(a), Value::Int(b)) => Ok(Value::Num(if a.to_i64()==b.to_i64() {1.0} else {0.0})),
+        (Value::Int(a), Value::Num(b)) => Ok(Value::Num(if (a.to_f64()-b).abs() < f64::EPSILON {1.0} else {0.0})),
+        (Value::Num(a), Value::Int(b)) => Ok(Value::Num(if (a-b.to_f64()).abs() < f64::EPSILON {1.0} else {0.0})),
         (a, b) => {
             let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?;
             Ok(Value::Num(if (aa-bb).abs() < f64::EPSILON {1.0} else {0.0}))
@@ -197,6 +202,11 @@ fn eq_builtin(a: Value, b: Value) -> Result<Value, String> {
 #[runtime_builtin(name = "ne")]
 fn ne_builtin(a: Value, b: Value) -> Result<Value, String> {
     match (a, b) {
+        // Handle classes not yet implemented
+        // Complex inequality
+        (Value::Complex(ar, ai), Value::Complex(br, bi)) => Ok(Value::Num(((ar!=br) || (ai!=bi)) as i32 as f64)),
+        (Value::Complex(ar, ai), Value::Num(bn)) => Ok(Value::Num(((ai!=0.0) || (ar!=bn)) as i32 as f64)),
+        (Value::Num(an), Value::Complex(br, bi)) => Ok(Value::Num(((bi!=0.0) || (br!=an)) as i32 as f64)),
         (Value::CharArray(ca), Value::CharArray(cb)) => {
             if ca.rows != cb.rows || ca.cols != cb.cols { return Err("shape mismatch for char array comparison".to_string()); }
             let out: Vec<f64> = ca.data.iter().zip(cb.data.iter()).map(|(x,y)| if x!=y {1.0} else {0.0}).collect();
@@ -225,9 +235,9 @@ fn ne_builtin(a: Value, b: Value) -> Result<Value, String> {
         }
         (Value::String(a), Value::String(b)) => Ok(Value::Num(if a!=b {1.0} else {0.0})),
         (Value::Num(a), Value::Num(b)) => Ok(Value::Num(if (a-b).abs() >= f64::EPSILON {1.0} else {0.0})),
-        (Value::Int(a), Value::Int(b)) => Ok(Value::Num(if a!=b {1.0} else {0.0})),
-        (Value::Int(a), Value::Num(b)) => Ok(Value::Num(if ((a as f64)-b).abs() >= f64::EPSILON {1.0} else {0.0})),
-        (Value::Num(a), Value::Int(b)) => Ok(Value::Num(if (a-(b as f64)).abs() >= f64::EPSILON {1.0} else {0.0})),
+        (Value::Int(a), Value::Int(b)) => Ok(Value::Num(if a.to_i64()!=b.to_i64() {1.0} else {0.0})),
+        (Value::Int(a), Value::Num(b)) => Ok(Value::Num(if (a.to_f64()-b).abs() >= f64::EPSILON {1.0} else {0.0})),
+        (Value::Num(a), Value::Int(b)) => Ok(Value::Num(if (a-b.to_f64()).abs() >= f64::EPSILON {1.0} else {0.0})),
         (a, b) => {
             let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?;
             Ok(Value::Num(if (aa-bb).abs() >= f64::EPSILON {1.0} else {0.0}))

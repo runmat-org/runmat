@@ -4,7 +4,7 @@
 //! with optimizations for RunMat's value types and usage patterns.
 
 use crate::{GcConfig, GcPtr, GcStats, GenerationalAllocator, Result};
-use crate::Value;
+use runmat_builtins::Value;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -162,7 +162,7 @@ impl MarkSweepCollector {
                     self.mark_value_contents(cell_value, max_generation)?;
                 }
             }
-            Value::Tensor(_) => {
+            Value::Tensor(_) | Value::ComplexTensor(_) => {
                 // Matrices don't contain references to other GC objects
                 // (their data is Vec<f64>)
             }
@@ -175,7 +175,7 @@ impl MarkSweepCollector {
             Value::StringArray(_sa) => {
                 // String arrays hold owned Strings; no nested GC Values
             }
-            Value::Int(_) | Value::Num(_) | Value::Bool(_) => {
+            Value::Int(_) | Value::Num(_) | Value::Complex(_,_) | Value::Bool(_) | Value::LogicalArray(_) => {
                 // Primitive values don't contain references
             }
             Value::FunctionHandle(_) => { }

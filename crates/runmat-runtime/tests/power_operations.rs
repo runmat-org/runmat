@@ -8,19 +8,23 @@ fn test_scalar_power() {
     assert_eq!(result, Value::Num(8.0));
 
     // Test integer scalar
-    let result = power(&Value::Int(3), &Value::Int(2)).unwrap();
+    let result = power(&Value::Int(runmat_builtins::IntValue::I32(3)), &Value::Int(runmat_builtins::IntValue::I32(2))).unwrap();
     assert_eq!(result, Value::Num(9.0));
 
     // Test mixed types
-    let result = power(&Value::Num(2.5), &Value::Int(2)).unwrap();
+    let result = power(&Value::Num(2.5), &Value::Int(runmat_builtins::IntValue::I32(2))).unwrap();
     assert_eq!(result, Value::Num(6.25));
+
+    // Complex scalar power
+    let result = power(&Value::Complex(2.0, 0.0), &Value::Num(3.0)).unwrap();
+    if let Value::Complex(re, im) = result { assert!((re-8.0).abs()<1e-12 && im.abs()<1e-12); } else { panic!(); }
 }
 
 #[test]
 fn test_matrix_power() {
     // Test A^0 = I (identity)
     let matrix = Tensor::new_2d(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
-    let result = power(&Value::Tensor(matrix), &Value::Int(0)).unwrap();
+    let result = power(&Value::Tensor(matrix), &Value::Int(runmat_builtins::IntValue::I32(0))).unwrap();
 
     if let Value::Tensor(result_matrix) = result {
         assert_eq!(result_matrix.data, vec![1.0, 0.0, 0.0, 1.0]);
@@ -33,7 +37,7 @@ fn test_matrix_power() {
     // Test A^1 = A
     let matrix = Tensor::new_2d(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
     let expected = matrix.clone();
-    let result = power(&Value::Tensor(matrix), &Value::Int(1)).unwrap();
+    let result = power(&Value::Tensor(matrix), &Value::Int(runmat_builtins::IntValue::I32(1))).unwrap();
 
     if let Value::Tensor(result_matrix) = result {
         assert_eq!(result_matrix.data, expected.data);
@@ -46,7 +50,7 @@ fn test_matrix_power() {
     // Test A^2 = A * A
     // A = [1 3; 2 4] in column-major
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-    let result = power(&Value::Tensor(matrix), &Value::Int(2)).unwrap();
+    let result = power(&Value::Tensor(matrix), &Value::Int(runmat_builtins::IntValue::I32(2))).unwrap();
 
     if let Value::Tensor(result_matrix) = result {
         // [1 3; 2 4]^2 = [7 15; 10 22] => column-major [7,10,15,22]
@@ -81,7 +85,7 @@ fn test_matrix_power_non_integer_fails() {
 #[test]
 fn test_matrix_power_non_square_fails() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3).unwrap(); // 2x3 matrix
-    let result = power(&Value::Tensor(matrix), &Value::Int(2));
+    let result = power(&Value::Tensor(matrix), &Value::Int(runmat_builtins::IntValue::I32(2)));
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("square"));
 }
@@ -89,7 +93,7 @@ fn test_matrix_power_non_square_fails() {
 #[test]
 fn test_matrix_power_negative_fails() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-    let result = power(&Value::Tensor(matrix), &Value::Int(-1));
+    let result = power(&Value::Tensor(matrix), &Value::Int(runmat_builtins::IntValue::I32(-1)));
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Negative"));
 }
@@ -100,10 +104,10 @@ fn test_elementwise_vs_matrix_power() {
     let matrix = Tensor::new_2d(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
 
     // Matrix power: A^2 = A * A
-    let matrix_power_result = power(&Value::Tensor(matrix.clone()), &Value::Int(2)).unwrap();
+    let matrix_power_result = power(&Value::Tensor(matrix.clone()), &Value::Int(runmat_builtins::IntValue::I32(2))).unwrap();
 
     // Element-wise power: A.^2 = [a_ij^2]
-    let elementwise_result = elementwise_pow(&Value::Tensor(matrix), &Value::Int(2)).unwrap();
+    let elementwise_result = elementwise_pow(&Value::Tensor(matrix), &Value::Int(runmat_builtins::IntValue::I32(2))).unwrap();
 
     // Results should be different
     if let (Value::Tensor(m1), Value::Tensor(m2)) = (matrix_power_result, elementwise_result) {

@@ -18,7 +18,7 @@ pub fn fprintf_string_builtin(format_str: String) -> Result<f64, String> {
 }
 
 /// Format and display string with one numeric argument (fprintf with %d, %f, %.4f etc.)
-#[runtime_builtin(name = "fprintf")]
+// merged into single fprintf below if needed
 pub fn fprintf_format_builtin(format_str: String, value: f64) -> Result<f64, String> {
     // Parse a single numeric placeholder and format accordingly
     let fmt = Regex::new(r"%(?P<prec>\.\d+)?(?P<spec>[df])").unwrap();
@@ -46,7 +46,6 @@ pub fn fprintf_format_builtin(format_str: String, value: f64) -> Result<f64, Str
 }
 
 /// Format and display string with two numeric arguments
-#[runtime_builtin(name = "fprintf")]
 pub fn fprintf_format2_builtin(
     format_str: String,
     value1: f64,
@@ -87,7 +86,7 @@ pub fn disp_string_builtin(s: String) -> Result<f64, String> {
 }
 
 /// Display a number with automatic newline
-#[runtime_builtin(name = "disp")]
+// combine disp overloads via separate name or keep single string version; remove duplicate registration
 pub fn disp_number_builtin(n: f64) -> Result<f64, String> {
     println!("{n}");
     Ok(0.0)

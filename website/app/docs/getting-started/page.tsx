@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 export default function GettingStartedPage() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto max-w-4xl px-4 md:px-6 py-16 md:py-24">
+      <div className="container mx-auto px-4 md:px-6 py-16 md:py-4">
         
         {/* Header */}
         <div className="mb-12">

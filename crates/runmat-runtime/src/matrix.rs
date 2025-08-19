@@ -113,17 +113,111 @@ pub fn value_matmul(a: &runmat_builtins::Value, b: &runmat_builtins::Value) -> R
     }
     // CPU cases
     match (a, b) {
+        // Complex scalars and real/complex mixes
+        (Value::Complex(ar, ai), Value::Complex(br, bi)) => return Ok(Value::Complex(ar*br - ai*bi, ar*bi + ai*br)),
+        (Value::Complex(ar, ai), Value::Num(s)) => return Ok(Value::Complex(ar*s, ai*s)),
+        (Value::Num(s), Value::Complex(br, bi)) => return Ok(Value::Complex(s*br, s*bi)),
+        (Value::Tensor(t), Value::Complex(cr, ci)) => {
+            // real matrix times complex scalar
+            return Ok(Value::ComplexTensor(matrix_scalar_mul_complex(&t, *cr, *ci)));
+        }
+        (Value::Complex(cr, ci), Value::Tensor(t)) => {
+            // complex scalar times real matrix
+            return Ok(Value::ComplexTensor(matrix_scalar_mul_complex(&t, *cr, *ci)));
+        }
+        (Value::ComplexTensor(ct), Value::Num(s)) => {
+            return Ok(Value::ComplexTensor(matrix_scalar_mul_complex_tensor(ct, *s, 0.0)));
+        }
+        (Value::Num(s), Value::ComplexTensor(ct)) => {
+            return Ok(Value::ComplexTensor(matrix_scalar_mul_complex_tensor(ct, *s, 0.0)));
+        }
+        (Value::ComplexTensor(ct), Value::Complex(cr, ci)) => {
+            return Ok(Value::ComplexTensor(matrix_scalar_mul_complex_tensor(ct, *cr, *ci)));
+        }
+        (Value::Complex(cr, ci), Value::ComplexTensor(ct)) => {
+            return Ok(Value::ComplexTensor(matrix_scalar_mul_complex_tensor(ct, *cr, *ci)));
+        }
         (Value::Tensor(ta), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_mul(ta, tb)?)),
+        (Value::ComplexTensor(ta), Value::ComplexTensor(tb)) => Ok(Value::ComplexTensor(complex_matrix_mul(ta, tb)?)),
+        (Value::ComplexTensor(ta), Value::Tensor(tb)) => Ok(Value::ComplexTensor(complex_real_matrix_mul(ta, tb)?)),
+        (Value::Tensor(ta), Value::ComplexTensor(tb)) => Ok(Value::ComplexTensor(real_complex_matrix_mul(ta, tb)?)),
         (Value::Tensor(ta), Value::Num(s)) => Ok(Value::Tensor(matrix_scalar_mul(ta, *s))),
         (Value::Num(s), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_scalar_mul(tb, *s))),
-        (Value::Tensor(ta), Value::Int(i)) => Ok(Value::Tensor(matrix_scalar_mul(ta, *i as f64))),
-        (Value::Int(i), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_scalar_mul(tb, *i as f64))),
+        (Value::Tensor(ta), Value::Int(i)) => Ok(Value::Tensor(matrix_scalar_mul(ta, i.to_f64()))),
+        (Value::Int(i), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_scalar_mul(tb, i.to_f64()))),
         (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x * y)),
-        (Value::Int(x), Value::Num(y)) => Ok(Value::Num((*x as f64) * y)),
-        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x * (*y as f64))),
-        (Value::Int(x), Value::Int(y)) => Ok(Value::Num((*x as f64) * (*y as f64))),
+        (Value::Int(x), Value::Num(y)) => Ok(Value::Num(x.to_f64() * y)),
+        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x * y.to_f64())),
+        (Value::Int(x), Value::Int(y)) => Ok(Value::Num(x.to_f64() * y.to_f64())),
         _ => Err("matmul: unsupported operand types".to_string()),
     }
+}
+
+fn complex_matrix_mul(a: &runmat_builtins::ComplexTensor, b: &runmat_builtins::ComplexTensor) -> Result<runmat_builtins::ComplexTensor, String> {
+    if a.cols != b.rows { return Err(format!("Inner matrix dimensions must agree: {}x{} * {}x{}", a.rows, a.cols, b.rows, b.cols)); }
+    let rows = a.rows; let cols = b.cols; let kdim = a.cols;
+    let mut data: Vec<(f64,f64)> = vec![(0.0, 0.0); rows * cols];
+    for j in 0..cols {
+        for i in 0..rows {
+            let mut acc_re = 0.0; let mut acc_im = 0.0;
+            for k in 0..kdim {
+                let (ar, ai) = a.data[i + k * rows];
+                let (br, bi) = b.data[k + j * b.rows];
+                acc_re += ar*br - ai*bi;
+                acc_im += ar*bi + ai*br;
+            }
+            data[i + j * rows] = (acc_re, acc_im);
+        }
+    }
+    Ok(runmat_builtins::ComplexTensor::new_2d(data, rows, cols)?)
+}
+
+fn complex_real_matrix_mul(a: &runmat_builtins::ComplexTensor, b: &runmat_builtins::Tensor) -> Result<runmat_builtins::ComplexTensor, String> {
+    if a.cols != b.rows() { return Err(format!("Inner matrix dimensions must agree: {}x{} * {}x{}", a.rows, a.cols, b.rows(), b.cols())); }
+    let rows = a.rows; let cols = b.cols(); let kdim = a.cols;
+    let mut data: Vec<(f64,f64)> = vec![(0.0, 0.0); rows * cols];
+    for j in 0..cols {
+        for i in 0..rows {
+            let mut acc_re = 0.0; let mut acc_im = 0.0;
+            for k in 0..kdim {
+                let (ar, ai) = a.data[i + k * rows];
+                let br = b.data[k + j * b.rows()];
+                acc_re += ar*br;
+                acc_im += ai*br;
+            }
+            data[i + j * rows] = (acc_re, acc_im);
+        }
+    }
+    Ok(runmat_builtins::ComplexTensor::new_2d(data, rows, cols)?)
+}
+
+fn real_complex_matrix_mul(a: &runmat_builtins::Tensor, b: &runmat_builtins::ComplexTensor) -> Result<runmat_builtins::ComplexTensor, String> {
+    if a.cols() != b.rows { return Err(format!("Inner matrix dimensions must agree: {}x{} * {}x{}", a.rows(), a.cols(), b.rows, b.cols)); }
+    let rows = a.rows(); let cols = b.cols; let kdim = a.cols();
+    let mut data: Vec<(f64,f64)> = vec![(0.0, 0.0); rows * cols];
+    for j in 0..cols {
+        for i in 0..rows {
+            let mut acc_re = 0.0; let mut acc_im = 0.0;
+            for k in 0..kdim {
+                let ar = a.data[i + k * rows];
+                let (br, bi) = b.data[k + j * b.rows];
+                acc_re += ar*br;
+                acc_im += ar*bi;
+            }
+            data[i + j * rows] = (acc_re, acc_im);
+        }
+    }
+    Ok(runmat_builtins::ComplexTensor::new_2d(data, rows, cols)?)
+}
+
+fn matrix_scalar_mul_complex(a: &Tensor, cr: f64, ci: f64) -> runmat_builtins::ComplexTensor {
+    let data: Vec<(f64,f64)> = a.data.iter().map(|&x| (x*cr, x*ci)).collect();
+    runmat_builtins::ComplexTensor::new_2d(data, a.rows(), a.cols()).unwrap()
+}
+
+fn matrix_scalar_mul_complex_tensor(a: &runmat_builtins::ComplexTensor, cr: f64, ci: f64) -> runmat_builtins::ComplexTensor {
+    let data: Vec<(f64,f64)> = a.data.iter().map(|&(ar,ai)| (ar*cr - ai*ci, ar*ci + ai*cr)).collect();
+    runmat_builtins::ComplexTensor::new_2d(data, a.rows, a.cols).unwrap()
 }
 
 #[runtime_builtin(name = "mtimes")]
@@ -196,6 +290,40 @@ pub fn matrix_power(a: &Tensor, n: i32) -> Result<Tensor, String> {
     }
 
     Ok(result)
+}
+
+/// Complex matrix power: C = A^n (for positive integer n)
+/// Uses binary exponentiation with complex matrix multiply
+pub fn complex_matrix_power(a: &runmat_builtins::ComplexTensor, n: i32) -> Result<runmat_builtins::ComplexTensor, String> {
+    if a.rows != a.cols {
+        return Err(format!("Matrix must be square for matrix power: {}x{}", a.rows, a.cols));
+    }
+    if n < 0 {
+        return Err("Negative matrix powers not supported yet".to_string());
+    }
+    if n == 0 {
+        return Ok(complex_matrix_eye(a.rows));
+    }
+    if n == 1 {
+        return Ok(a.clone());
+    }
+    let mut result = complex_matrix_eye(a.rows);
+    let mut base = a.clone();
+    let mut exp = n as u32;
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = complex_matrix_mul(&result, &base)?;
+        }
+        base = complex_matrix_mul(&base, &base)?;
+        exp /= 2;
+    }
+    Ok(result)
+}
+
+fn complex_matrix_eye(n: usize) -> runmat_builtins::ComplexTensor {
+    let mut data: Vec<(f64,f64)> = vec![(0.0, 0.0); n * n];
+    for i in 0..n { data[i * n + i] = (1.0, 0.0); }
+    runmat_builtins::ComplexTensor::new_2d(data, n, n).unwrap()
 }
 
 /// Create identity matrix

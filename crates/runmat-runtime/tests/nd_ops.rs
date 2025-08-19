@@ -51,7 +51,7 @@ fn repmat_nd_vector_form() {
 
 #[test]
 fn linspace_basic() {
-    let v = rt::call_builtin("linspace", &[Value::Num(0.0), Value::Num(1.0), Value::Int(5)]).unwrap();
+    let v = rt::call_builtin("linspace", &[Value::Num(0.0), Value::Num(1.0), Value::Int(runmat_builtins::IntValue::I32(5))]).unwrap();
     if let Value::Tensor(t) = v { assert_eq!(t.shape, vec![1,5]); assert!((t.data[4]-1.0).abs() < 1e-9); } else { panic!("expected tensor") }
 }
 

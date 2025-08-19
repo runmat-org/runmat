@@ -6,15 +6,21 @@ use runmat_gc_api::GcPtr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    Int(i32),
+    Int(IntValue),
     Num(f64),
+    /// Complex scalar value represented as (re, im)
+    Complex(f64, f64),
     Bool(bool),
+    // MATLAB logical array (N-D of booleans). Scalars use Bool.
+    LogicalArray(LogicalArray),
     String(String),
     // MATLAB string array (R2016b+): N-D array of string scalars
     StringArray(StringArray),
     // MATLAB char array (single-quoted): 2-D character array (rows x cols)
     CharArray(CharArray),
     Tensor(Tensor),
+    /// Complex numeric array; same column-major shape semantics as `Tensor`
+    ComplexTensor(ComplexTensor),
     Cell(CellArray),
     // MATLAB struct (scalar or nested). Struct arrays are represented in higher layers;
     // this variant holds a single struct's fields.
@@ -29,6 +35,47 @@ pub enum Value {
     ClassRef(String),
     MException(MException),
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IntValue {
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+}
+
+impl IntValue {
+    pub fn to_i64(&self) -> i64 {
+        match self {
+            IntValue::I8(v) => *v as i64,
+            IntValue::I16(v) => *v as i64,
+            IntValue::I32(v) => *v as i64,
+            IntValue::I64(v) => *v,
+            IntValue::U8(v) => *v as i64,
+            IntValue::U16(v) => *v as i64,
+            IntValue::U32(v) => *v as i64,
+            IntValue::U64(v) => if *v > i64::MAX as u64 { i64::MAX } else { *v as i64 },
+        }
+    }
+    pub fn to_f64(&self) -> f64 { self.to_i64() as f64 }
+    pub fn is_zero(&self) -> bool { self.to_i64() == 0 }
+    pub fn class_name(&self) -> &'static str {
+        match self {
+            IntValue::I8(_) => "int8",
+            IntValue::I16(_) => "int16",
+            IntValue::I32(_) => "int32",
+            IntValue::I64(_) => "int64",
+            IntValue::U8(_) => "uint8",
+            IntValue::U16(_) => "uint16",
+            IntValue::U32(_) => "uint32",
+            IntValue::U64(_) => "uint64",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructValue {
     pub fields: HashMap<String, Value>,
@@ -48,11 +95,47 @@ pub struct Tensor {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ComplexTensor {
+    pub data: Vec<(f64, f64)>,
+    pub shape: Vec<usize>,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct StringArray {
     pub data: Vec<String>,
     pub shape: Vec<usize>,
     pub rows: usize,
     pub cols: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicalArray {
+    pub data: Vec<u8>, // 0 or 1 values; compact bitset can come later
+    pub shape: Vec<usize>,
+}
+
+impl LogicalArray {
+    pub fn new(data: Vec<u8>, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if data.len() != expected {
+            return Err(format!(
+                "LogicalArray data length {} doesn't match shape {:?} ({} elements)",
+                data.len(), shape, expected
+            ));
+        }
+        // Normalize to 0/1
+        let mut d = data;
+        for v in &mut d { *v = if *v != 0 { 1 } else { 0 }; }
+        Ok(LogicalArray { data: d, shape })
+    }
+    pub fn zeros(shape: Vec<usize>) -> Self {
+        let expected: usize = shape.iter().product();
+        LogicalArray { data: vec![0u8; expected], shape }
+    }
+    pub fn len(&self) -> usize { self.data.len() }
+    pub fn is_empty(&self) -> bool { self.data.is_empty() }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,6 +234,26 @@ impl Tensor {
     // No-compat constructors: prefer new/new_2d/zeros/zeros2/ones/ones2
 }
 
+impl ComplexTensor {
+    pub fn new(data: Vec<(f64, f64)>, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if data.len() != expected {
+            return Err(format!(
+                "ComplexTensor data length {} doesn't match shape {:?} ({} elements)",
+                data.len(), shape, expected
+            ));
+        }
+        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
+        Ok(ComplexTensor { data, shape, rows, cols })
+    }
+    pub fn new_2d(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Result<Self, String> { Self::new(data, vec![rows, cols]) }
+    pub fn zeros(shape: Vec<usize>) -> Self {
+        let size: usize = shape.iter().product();
+        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
+        ComplexTensor { data: vec![(0.0, 0.0); size], shape, rows, cols }
+    }
+}
+
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.shape.len() {
@@ -210,6 +313,36 @@ impl fmt::Display for StringArray {
     }
 }
 
+impl fmt::Display for LogicalArray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.shape.len() {
+            0 => write!(f, "[]"),
+            1 => {
+                write!(f, "[")?;
+                for (i, v) in self.data.iter().enumerate() {
+                    if i > 0 { write!(f, " ")?; }
+                    write!(f, "{}", if *v != 0 { 1 } else { 0 })?;
+                }
+                write!(f, "]")
+            }
+            2 => {
+                let rows = self.shape[0]; let cols = self.shape[1];
+                write!(f, "[")?;
+                for r in 0..rows {
+                    for c in 0..cols {
+                        if c > 0 { write!(f, " ")?; }
+                        let idx = r + c * rows;
+                        write!(f, "{}", if self.data[idx] != 0 { 1 } else { 0 })?;
+                    }
+                    if r + 1 < rows { write!(f, "; ")?; }
+                }
+                write!(f, "]")
+            }
+            _ => write!(f, "LogicalArray(shape={:?})", self.shape),
+        }
+    }
+}
+
 impl fmt::Display for CharArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Display as single-quoted rows separated by ;
@@ -225,11 +358,14 @@ impl fmt::Display for CharArray {
 }
 
 // From implementations for Value
-impl From<i32> for Value {
-    fn from(i: i32) -> Self {
-        Value::Int(i)
-    }
-}
+impl From<i32> for Value { fn from(i: i32) -> Self { Value::Int(IntValue::I32(i)) } }
+impl From<i64> for Value { fn from(i: i64) -> Self { Value::Int(IntValue::I64(i)) } }
+impl From<u32> for Value { fn from(i: u32) -> Self { Value::Int(IntValue::U32(i)) } }
+impl From<u64> for Value { fn from(i: u64) -> Self { Value::Int(IntValue::U64(i)) } }
+impl From<i16> for Value { fn from(i: i16) -> Self { Value::Int(IntValue::I16(i)) } }
+impl From<i8> for Value { fn from(i: i8) -> Self { Value::Int(IntValue::I8(i)) } }
+impl From<u16> for Value { fn from(i: u16) -> Self { Value::Int(IntValue::U16(i)) } }
+impl From<u8> for Value { fn from(i: u8) -> Self { Value::Int(IntValue::U8(i)) } }
 
 impl From<f64> for Value {
     fn from(f: f64) -> Self {
@@ -268,7 +404,7 @@ impl TryFrom<&Value> for i32 {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Int(i) => Ok(*i),
+            Value::Int(i) => Ok(i.to_i64() as i32),
             Value::Num(n) => Ok(*n as i32),
             _ => Err(format!("cannot convert {v:?} to i32")),
         }
@@ -280,7 +416,7 @@ impl TryFrom<&Value> for f64 {
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
             Value::Num(n) => Ok(*n),
-            Value::Int(i) => Ok(*i as f64),
+            Value::Int(i) => Ok(i.to_f64()),
             _ => Err(format!("cannot convert {v:?} to f64")),
         }
     }
@@ -291,7 +427,7 @@ impl TryFrom<&Value> for bool {
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
             Value::Bool(b) => Ok(*b),
-            Value::Int(i) => Ok(*i != 0),
+            Value::Int(i) => Ok(!i.is_zero()),
             Value::Num(n) => Ok(*n != 0.0),
             _ => Err(format!("cannot convert {v:?} to bool")),
         }
@@ -310,7 +446,7 @@ impl TryFrom<&Value> for String {
                 // Convert full char array to one string if it is a single row; else error
                 if ca.rows == 1 { Ok(ca.data.iter().collect()) } else { Err("cannot convert multi-row char array to scalar string".to_string()) }
             }
-            Value::Int(i) => Ok(i.to_string()),
+            Value::Int(i) => Ok(i.to_i64().to_string()),
             Value::Num(n) => Ok(n.to_string()),
             Value::Bool(b) => Ok(b.to_string()),
             _ => Err(format!("cannot convert {v:?} to String")),
@@ -357,6 +493,8 @@ pub enum Type {
     Num,
     /// Boolean type
     Bool,
+    /// Logical array type (N-D boolean array)
+    Logical,
     /// String type
     String,
     /// Tensor type with optional shape information (column-major semantics in runtime)
@@ -453,13 +591,18 @@ impl Type {
         match value {
             Value::Int(_) => Type::Int,
             Value::Num(_) => Type::Num,
+            Value::Complex(_,_) => Type::Num, // treat as numeric double (complex) in type system for now
             Value::Bool(_) => Type::Bool,
+            Value::LogicalArray(_) => Type::Logical,
             Value::String(_) => Type::String,
             Value::StringArray(sa) => {
                 // Model as Cell of String for type system for now
                 if sa.data.is_empty() { Type::cell_of(Type::String) } else { Type::cell_of(Type::String) }
             }
             Value::Tensor(t) => {
+                Type::Tensor { shape: Some(t.shape.iter().map(|&d| Some(d)).collect()) }
+            },
+            Value::ComplexTensor(t) => {
                 Type::Tensor { shape: Some(t.shape.iter().map(|&d| Some(d)).collect()) }
             },
             Value::Cell(cells) => {
@@ -549,6 +692,29 @@ pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
 
 pub fn constants() -> Vec<&'static Constant> {
     inventory::iter::<Constant>().collect()
+}
+
+// ----------------------
+// Builtin documentation metadata (optional, registered by macros)
+// ----------------------
+
+#[derive(Debug)]
+pub struct BuiltinDoc {
+    pub name: &'static str,
+    pub category: Option<&'static str>,
+    pub summary: Option<&'static str>,
+    pub keywords: Option<&'static str>,
+    pub errors: Option<&'static str>,
+    pub related: Option<&'static str>,
+    pub introduced: Option<&'static str>,
+    pub status: Option<&'static str>,
+    pub examples: Option<&'static str>,
+}
+
+inventory::collect!(BuiltinDoc);
+
+pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
+    inventory::iter::<BuiltinDoc>().collect()
 }
 
 // ----------------------
@@ -647,14 +813,23 @@ impl MException {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Int(i) => write!(f, "{i}"),
+            Value::Int(i) => write!(f, "{}", i.to_i64()),
             Value::Num(n) => write!(f, "{}", format_number_short_g(*n)),
+            Value::Complex(re, im) => {
+                if *im == 0.0 { write!(f, "{}", format_number_short_g(*re)) }
+                else if *re == 0.0 { write!(f, "{}i", format_number_short_g(*im)) }
+                else if *im < 0.0 { write!(f, "{}-{}i", format_number_short_g(*re), format_number_short_g(im.abs())) }
+                else { write!(f, "{}+{}i", format_number_short_g(*re), format_number_short_g(*im)) }
+            }
             Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
+            Value::LogicalArray(la) => write!(f, "{la}"),
             Value::String(s) => write!(f, "'{s}'"),
             Value::StringArray(sa) => write!(f, "{sa}"),
             Value::CharArray(ca) => write!(f, "{ca}"),
             Value::Tensor(m) => write!(f, "{m}"),
+            Value::ComplexTensor(m) => write!(f, "{m}"),
             Value::Cell(ca) => ca.fmt(f),
+            
             Value::GpuTensor(h) => write!(f, "GpuTensor(shape={:?}, device={}, buffer={})", h.shape, h.device_id, h.buffer_id),
             Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
             Value::Struct(st) => write!(f, "struct(fields={})", st.fields.len()),
@@ -662,6 +837,37 @@ impl fmt::Display for Value {
             Value::Closure(c) => write!(f, "<closure {} captures={}>", c.function_name, c.captures.len()),
             Value::ClassRef(name) => write!(f, "<class {}>", name),
             Value::MException(e) => write!(f, "MException(identifier='{}', message='{}')", e.identifier, e.message),
+        }
+    }
+}
+
+impl fmt::Display for ComplexTensor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.shape.len() {
+            0 | 1 => {
+                write!(f, "[")?;
+                for (i, (re, im)) in self.data.iter().enumerate() {
+                    if i > 0 { write!(f, " ")?; }
+                    let s = Value::Complex(*re, *im).to_string();
+                    write!(f, "{}", s)?;
+                }
+                write!(f, "]")
+            }
+            2 => {
+                let rows = self.rows; let cols = self.cols;
+                write!(f, "[")?;
+                for r in 0..rows {
+                    for c in 0..cols {
+                        if c > 0 { write!(f, " ")?; }
+                        let (re, im) = self.data[r + c * rows];
+                        let s = Value::Complex(re, im).to_string();
+                        write!(f, "{}", s)?;
+                    }
+                    if r + 1 < rows { write!(f, "; ")?; }
+                }
+                write!(f, "]")
+            }
+            _ => write!(f, "ComplexTensor(shape={:?})", self.shape),
         }
     }
 }

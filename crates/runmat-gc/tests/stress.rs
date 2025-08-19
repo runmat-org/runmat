@@ -17,7 +17,7 @@ fn test_massive_allocation_cycle() {
         for i in 0..1000 {
             let value = match i % 4 {
                 0 => Value::Num(i as f64),
-                1 => Value::Int(i),
+                1 => Value::Int(runmat_builtins::IntValue::I32(i as i32)),
                 2 => Value::Bool(i % 2 == 0),
                 _ => Value::String(format!("string_{i}")),
             };
@@ -205,7 +205,7 @@ fn test_gc_under_memory_pressure() {
             1 => Value::String(format!("pressure_test_{i}")),
             2 => Value::Tensor(runmat_builtins::Tensor::new_2d(vec![i as f64; 100], 10, 10).unwrap()),
             3 => {
-                let ca = runmat_builtins::CellArray::new(vec![Value::Num(i as f64), Value::Int(i)], 1, 2).unwrap();
+                let ca = runmat_builtins::CellArray::new(vec![Value::Num(i as f64), Value::Int(runmat_builtins::IntValue::I32(i as i32))], 1, 2).unwrap();
                 Value::Cell(ca)
             },
             _ => Value::Bool(i % 2 == 0),

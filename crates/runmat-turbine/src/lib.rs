@@ -60,9 +60,9 @@ pub extern "C" fn runmat_value_add(a_ptr: *const Value, b_ptr: *const Value) -> 
 
         let result = match (a, b) {
             (Value::Num(x), Value::Num(y)) => Value::Num(x + y),
-            (Value::Int(x), Value::Int(y)) => Value::Int(x + y),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x + (*y as f64)),
-            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) + y),
+            (Value::Int(x), Value::Int(y)) => Value::Num(x.to_f64() + y.to_f64()),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x + y.to_f64()),
+            (Value::Int(x), Value::Num(y)) => Value::Num(x.to_f64() + y),
             _ => {
                 error!("Unsupported addition: {a:?} + {b:?}");
                 return std::ptr::null_mut();
@@ -89,9 +89,9 @@ pub extern "C" fn runmat_value_sub(a_ptr: *const Value, b_ptr: *const Value) -> 
 
         let result = match (a, b) {
             (Value::Num(x), Value::Num(y)) => Value::Num(x - y),
-            (Value::Int(x), Value::Int(y)) => Value::Int(x - y),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x - (*y as f64)),
-            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) - y),
+            (Value::Int(x), Value::Int(y)) => Value::Num(x.to_f64() - y.to_f64()),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x - y.to_f64()),
+            (Value::Int(x), Value::Num(y)) => Value::Num(x.to_f64() - y),
             _ => {
                 error!("Unsupported subtraction: {a:?} - {b:?}");
                 return std::ptr::null_mut();
@@ -118,9 +118,9 @@ pub extern "C" fn runmat_value_mul(a_ptr: *const Value, b_ptr: *const Value) -> 
 
         let result = match (a, b) {
             (Value::Num(x), Value::Num(y)) => Value::Num(x * y),
-            (Value::Int(x), Value::Int(y)) => Value::Int(x * y),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x * (*y as f64)),
-            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) * y),
+            (Value::Int(x), Value::Int(y)) => Value::Num(x.to_f64() * y.to_f64()),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x * y.to_f64()),
+            (Value::Int(x), Value::Num(y)) => Value::Num(x.to_f64() * y),
             _ => {
                 error!("Unsupported multiplication: {a:?} * {b:?}");
                 return std::ptr::null_mut();
@@ -154,25 +154,25 @@ pub extern "C" fn runmat_value_div(a_ptr: *const Value, b_ptr: *const Value) -> 
                 Value::Num(x / y)
             }
             (Value::Int(x), Value::Int(y)) => {
-                if *y == 0 {
+                if y.is_zero() {
                     error!("Division by zero");
                     return std::ptr::null_mut();
                 }
-                Value::Num((*x as f64) / (*y as f64))
+                Value::Num(x.to_f64() / y.to_f64())
             }
             (Value::Num(x), Value::Int(y)) => {
-                if *y == 0 {
+                if y.is_zero() {
                     error!("Division by zero");
                     return std::ptr::null_mut();
                 }
-                Value::Num(x / (*y as f64))
+                Value::Num(x / y.to_f64())
             }
             (Value::Int(x), Value::Num(y)) => {
                 if *y == 0.0 {
                     error!("Division by zero");
                     return std::ptr::null_mut();
                 }
-                Value::Num((*x as f64) / y)
+                Value::Num(x.to_f64() / y)
             }
             _ => {
                 error!("Unsupported division: {a:?} / {b:?}");
@@ -360,9 +360,9 @@ pub extern "C" fn runmat_value_lt(a_ptr: *const Value, b_ptr: *const Value) -> *
 
         let result = match (a, b) {
             (Value::Num(x), Value::Num(y)) => Value::Num(if x < y { 1.0 } else { 0.0 }),
-            (Value::Int(x), Value::Int(y)) => Value::Num(if x < y { 1.0 } else { 0.0 }),
-            (Value::Num(x), Value::Int(y)) => Value::Num(if *x < (*y as f64) { 1.0 } else { 0.0 }),
-            (Value::Int(x), Value::Num(y)) => Value::Num(if (*x as f64) < *y { 1.0 } else { 0.0 }),
+            (Value::Int(x), Value::Int(y)) => Value::Num(if x.to_i64() < y.to_i64() { 1.0 } else { 0.0 }),
+            (Value::Num(x), Value::Int(y)) => Value::Num(if *x < y.to_f64() { 1.0 } else { 0.0 }),
+            (Value::Int(x), Value::Num(y)) => Value::Num(if x.to_f64() < *y { 1.0 } else { 0.0 }),
             _ => {
                 error!("Unsupported comparison: {a:?} < {b:?}");
                 return std::ptr::null_mut();
@@ -937,7 +937,7 @@ impl TurbineEngine {
         let mut f64_vars: Vec<f64> = Vec::with_capacity(vars.len());
         for value in vars.iter() {
             match value {
-                Value::Int(i) => f64_vars.push(*i as f64),
+                Value::Int(i) => f64_vars.push(i.to_f64()),
                 Value::Num(n) => f64_vars.push(*n),
                 Value::Bool(b) => f64_vars.push(if *b { 1.0 } else { 0.0 }),
                 _ => {
@@ -1259,7 +1259,7 @@ pub extern "C" fn runtime_builtin_f64_dispatch(
     // Call the runtime dispatcher
     match runmat_runtime::call_builtin(name, &value_args) {
         Ok(runmat_builtins::Value::Num(result)) => result,
-        Ok(runmat_builtins::Value::Int(result)) => result as f64,
+        Ok(runmat_builtins::Value::Int(result)) => result.to_f64(),
         Ok(runmat_builtins::Value::Bool(result)) => {
             if result {
                 1.0

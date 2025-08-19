@@ -4,44 +4,120 @@
 //! logarithmic, exponential, hyperbolic, and other mathematical operations.
 //! All functions are optimized for performance and handle both scalars and matrices.
 
-use runmat_builtins::Tensor;
+use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-// Trigonometric functions - scalar versions
+// Trigonometric functions - full MATLAB-compatible variants over Value
+fn sin_complex(re: f64, im: f64) -> (f64, f64) {
+    (re.sin() * im.cosh(), re.cos() * im.sinh())
+}
+
+fn cos_complex(re: f64, im: f64) -> (f64, f64) {
+    (re.cos() * im.cosh(), -(re.sin() * im.sinh()))
+}
+
+fn div_complex(a_re: f64, a_im: f64, b_re: f64, b_im: f64) -> (f64, f64) {
+    let denom = b_re * b_re + b_im * b_im;
+    ((a_re * b_re + a_im * b_im) / denom, (a_im * b_re - a_re * b_im) / denom)
+}
 
 #[runtime_builtin(name = "sin")]
-fn sin_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.sin())
+fn sin_builtin(x: Value) -> Result<Value, String> {
+    match x {
+        Value::Num(n) => Ok(Value::Num(n.sin())),
+        Value::Int(i) => Ok(Value::Num(i.to_f64().sin())),
+        Value::Tensor(t) => {
+            let data: Vec<f64> = t.data.iter().map(|&v| v.sin()).collect();
+            Ok(Value::Tensor(Tensor::new(data, t.shape.clone())?))
+        }
+        Value::Complex(re, im) => {
+            let (r, i) = sin_complex(re, im);
+            Ok(Value::Complex(r, i))
+        }
+        Value::ComplexTensor(ct) => {
+            let out: Vec<(f64, f64)> = ct.data.iter().map(|&(re, im)| sin_complex(re, im)).collect();
+            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(out, ct.shape.clone())?))
+        }
+        Value::LogicalArray(la) => {
+            let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0f64.sin() } else { 0.0f64.sin() }).collect();
+            Ok(Value::Tensor(Tensor::new(data, la.shape.clone())?))
+        }
+        Value::CharArray(ca) => {
+            let data: Vec<f64> = ca.data.iter().map(|&ch| (ch as u32 as f64).sin()).collect();
+            Ok(Value::Tensor(Tensor::new(data, vec![ca.rows, ca.cols])?))
+        }
+        Value::String(_) | Value::StringArray(_) => Err("sin: expected numeric input".to_string()),
+        Value::GpuTensor(_) => Err("sin: unsupported for gpuArray".to_string()),
+        other => Err(format!("sin: unsupported input {other:?}")),
+    }
 }
 
 #[runtime_builtin(name = "cos")]
-fn cos_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.cos())
+fn cos_builtin(x: Value) -> Result<Value, String> {
+    match x {
+        Value::Num(n) => Ok(Value::Num(n.cos())),
+        Value::Int(i) => Ok(Value::Num(i.to_f64().cos())),
+        Value::Tensor(t) => {
+            let data: Vec<f64> = t.data.iter().map(|&v| v.cos()).collect();
+            Ok(Value::Tensor(Tensor::new(data, t.shape.clone())?))
+        }
+        Value::Complex(re, im) => {
+            let (r, i) = cos_complex(re, im);
+            Ok(Value::Complex(r, i))
+        }
+        Value::ComplexTensor(ct) => {
+            let out: Vec<(f64, f64)> = ct.data.iter().map(|&(re, im)| cos_complex(re, im)).collect();
+            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(out, ct.shape.clone())?))
+        }
+        Value::LogicalArray(la) => {
+            let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0f64.cos() } else { 0.0f64.cos() }).collect();
+            Ok(Value::Tensor(Tensor::new(data, la.shape.clone())?))
+        }
+        Value::CharArray(ca) => {
+            let data: Vec<f64> = ca.data.iter().map(|&ch| (ch as u32 as f64).cos()).collect();
+            Ok(Value::Tensor(Tensor::new(data, vec![ca.rows, ca.cols])?))
+        }
+        Value::String(_) | Value::StringArray(_) => Err("cos: expected numeric input".to_string()),
+        Value::GpuTensor(_) => Err("cos: unsupported for gpuArray".to_string()),
+        other => Err(format!("cos: unsupported input {other:?}")),
+    }
 }
 
 #[runtime_builtin(name = "tan")]
-fn tan_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.tan())
-}
-
-// Trigonometric functions - matrix versions (element-wise)
-
-#[runtime_builtin(name = "sin")]
-fn sin_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
-    let data: Vec<f64> = x.data.iter().map(|&val| val.sin()).collect();
-    Tensor::new_2d(data, x.rows(), x.cols())
-}
-
-#[runtime_builtin(name = "cos")]
-fn cos_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
-    let data: Vec<f64> = x.data.iter().map(|&val| val.cos()).collect();
-    Tensor::new_2d(data, x.rows(), x.cols())
-}
-
-#[runtime_builtin(name = "tan")]
-fn tan_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
-    let data: Vec<f64> = x.data.iter().map(|&val| val.tan()).collect();
-    Tensor::new_2d(data, x.rows(), x.cols())
+fn tan_builtin(x: Value) -> Result<Value, String> {
+    match x {
+        Value::Num(n) => Ok(Value::Num(n.tan())),
+        Value::Int(i) => Ok(Value::Num(i.to_f64().tan())),
+        Value::Tensor(t) => {
+            let data: Vec<f64> = t.data.iter().map(|&v| v.tan()).collect();
+            Ok(Value::Tensor(Tensor::new(data, t.shape.clone())?))
+        }
+        Value::Complex(re, im) => {
+            let (sr, si) = sin_complex(re, im);
+            let (cr, ci) = cos_complex(re, im);
+            let (r, i) = div_complex(sr, si, cr, ci);
+            Ok(Value::Complex(r, i))
+        }
+        Value::ComplexTensor(ct) => {
+            let out: Vec<(f64, f64)> = ct.data.iter().map(|&(re, im)| {
+                let (sr, si) = sin_complex(re, im);
+                let (cr, ci) = cos_complex(re, im);
+                div_complex(sr, si, cr, ci)
+            }).collect();
+            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(out, ct.shape.clone())?))
+        }
+        Value::LogicalArray(la) => {
+            let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0f64.tan() } else { 0.0f64.tan() }).collect();
+            Ok(Value::Tensor(Tensor::new(data, la.shape.clone())?))
+        }
+        Value::CharArray(ca) => {
+            let data: Vec<f64> = ca.data.iter().map(|&ch| (ch as u32 as f64).tan()).collect();
+            Ok(Value::Tensor(Tensor::new(data, vec![ca.rows, ca.cols])?))
+        }
+        Value::String(_) | Value::StringArray(_) => Err("tan: expected numeric input".to_string()),
+        Value::GpuTensor(_) => Err("tan: unsupported for gpuArray".to_string()),
+        other => Err(format!("tan: unsupported input {other:?}")),
+    }
 }
 
 #[runtime_builtin(name = "asin")]
@@ -157,34 +233,31 @@ fn pow_builtin(base: f64, exponent: f64) -> Result<f64, String> {
 }
 
 // Basic math functions
-
 #[runtime_builtin(name = "abs")]
-fn abs_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.abs())
-}
-
-#[runtime_builtin(name = "abs")]
-fn abs_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
-    let data: Vec<f64> = x.data.iter().map(|&val| val.abs()).collect();
-    Tensor::new_2d(data, x.rows(), x.cols())
-}
-
-#[runtime_builtin(name = "exp")]
-fn exp_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
-    let data: Vec<f64> = x.data.iter().map(|&val| val.exp()).collect();
-    Tensor::new_2d(data, x.rows(), x.cols())
-}
-
-#[runtime_builtin(name = "log")]
-fn log_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
-    let data: Vec<f64> = x.data.iter().map(|&val| val.ln()).collect();
-    Tensor::new_2d(data, x.rows(), x.cols())
-}
-
-#[runtime_builtin(name = "sqrt")]
-fn sqrt_matrix_builtin(x: Tensor) -> Result<Tensor, String> {
-    let data: Vec<f64> = x.data.iter().map(|&val| val.sqrt()).collect();
-    Tensor::new_2d(data, x.rows(), x.cols())
+fn abs_runtime_builtin(x: Value) -> Result<Value, String> {
+    match x {
+        Value::Num(n) => Ok(Value::Num(n.abs())),
+        Value::Int(i) => Ok(Value::Num(i.to_f64().abs())),
+        Value::Tensor(t) => {
+            let data: Vec<f64> = t.data.iter().map(|&v| v.abs()).collect();
+            Ok(Value::Tensor(Tensor::new_2d(data, t.rows(), t.cols())?))
+        }
+        Value::Complex(re, im) => Ok(Value::Num((re * re + im * im).sqrt())),
+        Value::ComplexTensor(ct) => {
+            let data: Vec<f64> = ct.data.iter().map(|(re, im)| (re * re + im * im).sqrt()).collect();
+            Ok(Value::Tensor(Tensor::new_2d(data, ct.rows, ct.cols)?))
+        }
+        Value::LogicalArray(la) => {
+            let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }).collect();
+            let (rows, cols) = match la.shape.len() {
+                0 => (0, 0),
+                1 => (1, la.shape[0]),
+                _ => (la.shape[0], la.shape[1]),
+            };
+            Ok(Value::Tensor(Tensor::new_2d(data, rows, cols)?))
+        }
+        other => Err(format!("abs: unsupported input {other:?}")),
+    }
 }
 
 // Rounding and related functions
@@ -297,12 +370,14 @@ fn factorial_builtin(n: i32) -> Result<f64, String> {
 
 // Statistical functions
 
-#[runtime_builtin(name = "sum")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn sum_builtin(matrix: Tensor) -> Result<f64, String> {
     Ok(matrix.data.iter().sum())
 }
 
-#[runtime_builtin(name = "mean")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn mean_builtin(matrix: Tensor) -> Result<f64, String> {
     if matrix.data.is_empty() {
         return Err("Cannot compute mean of empty matrix".to_string());
@@ -336,80 +411,4 @@ fn var_builtin(matrix: Tensor) -> Result<f64, String> {
     Ok(variance)
 }
 
-#[runtime_builtin(name = "min")]
-fn min_vector_builtin(matrix: Tensor) -> Result<f64, String> {
-    matrix
-        .data
-        .iter()
-        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .copied()
-        .ok_or_else(|| "Cannot find minimum of empty matrix".to_string())
-}
-
-#[runtime_builtin(name = "max")]
-fn max_vector_builtin(matrix: Tensor) -> Result<f64, String> {
-    matrix
-        .data
-        .iter()
-        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .copied()
-        .ok_or_else(|| "Cannot find maximum of empty matrix".to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_trigonometric_functions() {
-        assert!((sin_builtin(0.0).unwrap() - 0.0).abs() < f64::EPSILON);
-        assert!((cos_builtin(0.0).unwrap() - 1.0).abs() < f64::EPSILON);
-        assert!((tan_builtin(0.0).unwrap() - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_inverse_trigonometric() {
-        assert!((asin_builtin(0.0).unwrap() - 0.0).abs() < f64::EPSILON);
-        assert!((acos_builtin(1.0).unwrap() - 0.0).abs() < f64::EPSILON);
-        assert!((atan_builtin(0.0).unwrap() - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_logarithmic_functions() {
-        assert!((ln_builtin(std::f64::consts::E).unwrap() - 1.0).abs() < f64::EPSILON);
-        assert!((log2_builtin(8.0).unwrap() - 3.0).abs() < f64::EPSILON);
-        assert!((log10_builtin(1000.0).unwrap() - 3.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_rounding_functions() {
-        assert_eq!(round_builtin(3.7).unwrap(), 4.0);
-        assert_eq!(floor_builtin(3.7).unwrap(), 3.0);
-        assert_eq!(ceil_builtin(3.2).unwrap(), 4.0);
-        assert_eq!(trunc_builtin(-3.7).unwrap(), -3.0);
-    }
-
-    #[test]
-    fn test_factorial() {
-        assert_eq!(factorial_builtin(0).unwrap(), 1.0);
-        assert_eq!(factorial_builtin(5).unwrap(), 120.0);
-        assert!(factorial_builtin(-1).is_err());
-    }
-
-    #[test]
-    fn test_statistical_functions() {
-        let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0, 5.0], 1, 5).unwrap();
-        assert_eq!(sum_builtin(matrix.clone()).unwrap(), 15.0);
-        assert_eq!(mean_builtin(matrix.clone()).unwrap(), 3.0);
-        assert_eq!(min_vector_builtin(matrix.clone()).unwrap(), 1.0);
-        assert_eq!(max_vector_builtin(matrix).unwrap(), 5.0);
-    }
-
-    #[test]
-    fn test_error_cases() {
-        assert!(asin_builtin(2.0).is_err());
-        assert!(ln_builtin(-1.0).is_err());
-        assert!(acosh_builtin(0.5).is_err());
-        assert!(atanh_builtin(1.5).is_err());
-    }
-}
+// Unit tests for mathematics live under crates/runmat-runtime/tests/mathematics.rs

@@ -1,0 +1,17 @@
+use runmat_builtins::Value;
+
+#[test]
+#[ignore]
+fn handle_identity_and_delete() {
+	let h1 = runmat_runtime::call_builtin("new_handle_object", &[Value::String("Point".to_string())]).unwrap();
+	let h2 = runmat_runtime::call_builtin("new_handle_object", &[Value::String("Point".to_string())]).unwrap();
+	let e = runmat_runtime::call_builtin("eq", &[h1.clone(), h2.clone()]).unwrap();
+	if let Value::Num(n) = e { assert_eq!(n, 0.0); } else { panic!(); }
+	let e2 = runmat_runtime::call_builtin("eq", &[h1.clone(), h1.clone()]).unwrap();
+	if let Value::Num(n) = e2 { assert_eq!(n, 1.0); } else { panic!(); }
+	let v = runmat_runtime::call_builtin("isvalid", &[h1.clone()]).unwrap(); if let Value::Bool(b) = v { assert!(b); } else { panic!(); }
+	let d = runmat_runtime::call_builtin("delete", &[h1.clone()]).unwrap();
+	let v2 = runmat_runtime::call_builtin("isvalid", &[d]).unwrap(); if let Value::Bool(b) = v2 { assert!(!b); } else { panic!(); }
+}
+
+

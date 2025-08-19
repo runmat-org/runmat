@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 export default function HowItWorksPage() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto max-w-4xl px-4 md:px-6 py-16 md:py-24">
+      <div className="container mx-auto px-4 md:px-6 py-16 md:py-4">
         
         {/* Header */}
         <div className="mb-12">
@@ -509,7 +509,7 @@ export default function HowItWorksPage() {
               <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">Enterprise Freedom: Break the License Prison</h4>
                 <p className="text-muted-foreground">
-                  No more per-seat licensing, no network license servers, no vendor audits. Deploy RunMat 
+                  No per-seat licensing, no network license servers, no vendor audits. Deploy RunMat 
                   across unlimited machines, scale teams without budget explosions, and never face 
                   astronomical renewal costs again. True computational freedom for organizations of any size.
                 </p>

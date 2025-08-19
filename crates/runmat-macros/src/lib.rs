@@ -24,13 +24,26 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     // Parse attribute arguments as `name = "..."`
     let args = parse_macro_input!(args as AttributeArgs);
     let mut name_lit: Option<Lit> = None;
+    let mut category_lit: Option<Lit> = None;
+    let mut summary_lit: Option<Lit> = None;
+    let mut keywords_lit: Option<Lit> = None;
+    let mut errors_lit: Option<Lit> = None;
+    let mut related_lit: Option<Lit> = None;
+    let mut introduced_lit: Option<Lit> = None;
+    let mut status_lit: Option<Lit> = None;
+    let mut examples_lit: Option<Lit> = None;
     for arg in args {
         if let NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) = arg {
-            if path.is_ident("name") {
-                name_lit = Some(lit);
-            } else {
-                panic!("unknown attribute parameter; only `name` is supported");
-            }
+            if path.is_ident("name") { name_lit = Some(lit); }
+            else if path.is_ident("category") { category_lit = Some(lit); }
+            else if path.is_ident("summary") { summary_lit = Some(lit); }
+            else if path.is_ident("keywords") { keywords_lit = Some(lit); }
+            else if path.is_ident("errors") { errors_lit = Some(lit); }
+            else if path.is_ident("related") { related_lit = Some(lit); }
+            else if path.is_ident("introduced") { introduced_lit = Some(lit); }
+            else if path.is_ident("status") { status_lit = Some(lit); }
+            else if path.is_ident("examples") { examples_lit = Some(lit); }
+            else { panic!("unknown attribute parameter"); }
         }
     }
     let name_lit = name_lit.expect("expected `name = \"...\"` argument");
@@ -134,18 +147,50 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     };
 
+    // Prepare tokens for defaults and options
+    let default_category = syn::LitStr::new("general", proc_macro2::Span::call_site());
+    let default_summary = syn::LitStr::new("Runtime builtin function", proc_macro2::Span::call_site());
+
+    let category_tok: proc_macro2::TokenStream = match &category_lit { Some(syn::Lit::Str(ls)) => quote! { #ls }, _ => quote! { #default_category } };
+    let summary_tok: proc_macro2::TokenStream = match &summary_lit { Some(syn::Lit::Str(ls)) => quote! { #ls }, _ => quote! { #default_summary } };
+
+    fn opt_tok(lit: &Option<syn::Lit>) -> proc_macro2::TokenStream {
+        if let Some(syn::Lit::Str(ls)) = lit { quote! { Some(#ls) } } else { quote! { None } }
+    }
+    let category_opt_tok = opt_tok(&category_lit);
+    let summary_opt_tok = opt_tok(&summary_lit);
+    let keywords_opt_tok = opt_tok(&keywords_lit);
+    let errors_opt_tok = opt_tok(&errors_lit);
+    let related_opt_tok = opt_tok(&related_lit);
+    let introduced_opt_tok = opt_tok(&introduced_lit);
+    let status_opt_tok = opt_tok(&status_lit);
+    let examples_opt_tok = opt_tok(&examples_lit);
+
     let register = quote! {
         runmat_builtins::inventory::submit! {
             runmat_builtins::BuiltinFunction::new(
                 #name_str,
-                "Runtime builtin function",
-                "general",
+                #summary_tok,
+                #category_tok,
                 "",
                 "",
                 vec![#(#inferred_param_types),*],
                 #inferred_return_type,
                 #wrapper_ident
             )
+        }
+        runmat_builtins::inventory::submit! {
+            runmat_builtins::BuiltinDoc {
+                name: #name_str,
+                category: #category_opt_tok,
+                summary: #summary_opt_tok,
+                keywords: #keywords_opt_tok,
+                errors: #errors_opt_tok,
+                related: #related_opt_tok,
+                introduced: #introduced_opt_tok,
+                status: #status_opt_tok,
+                examples: #examples_opt_tok,
+            }
         }
     };
 

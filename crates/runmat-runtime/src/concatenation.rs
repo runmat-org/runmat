@@ -93,8 +93,13 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                     if rows.is_none() { rows = Some(1); } else if rows != Some(1) { return Err("string hcat: row mismatch".to_string()); }
                     cols_total += 1; blocks.push(sa);
                 }
+                Value::Complex(re, im) => {
+                    let sa = runmat_builtins::StringArray::new(vec![runmat_builtins::Value::Complex(*re, *im).to_string()], vec![1,1]).unwrap();
+                    if rows.is_none() { rows = Some(1); } else if rows != Some(1) { return Err("string hcat: row mismatch".to_string()); }
+                    cols_total += 1; blocks.push(sa);
+                }
                 Value::Int(i) => {
-                    let sa = runmat_builtins::StringArray::new(vec![i.to_string()], vec![1,1]).unwrap();
+                    let sa = runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1,1]).unwrap();
                     if rows.is_none() { rows = Some(1); } else if rows != Some(1) { return Err("string hcat: row mismatch".to_string()); }
                     cols_total += 1; blocks.push(sa);
                 }
@@ -129,8 +134,13 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                 _total_cols += 1;
                 matrices.push(matrix);
             }
+            Value::Complex(re, _im) => {
+                let matrix = Tensor::new_2d(vec![*re], 1, 1)?; // real part in numeric hcat coercion
+                if rows == 0 { rows = 1; } else if rows != 1 { return Err("Cannot concatenate scalar with multi-row matrix".to_string()); }
+                _total_cols += 1; matrices.push(matrix);
+            }
             Value::Int(i) => {
-                let matrix = Tensor::new_2d(vec![*i as f64], 1, 1)?;
+                let matrix = Tensor::new_2d(vec![i.to_f64()], 1, 1)?;
                 if rows == 0 {
                     rows = 1;
                 } else if rows != 1 {
@@ -191,7 +201,8 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                     rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa);
                 }
                 Value::Num(n) => { let sa = runmat_builtins::StringArray::new(vec![n.to_string()], vec![1,1]).unwrap(); rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa); }
-                Value::Int(i) => { let sa = runmat_builtins::StringArray::new(vec![i.to_string()], vec![1,1]).unwrap(); rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa); }
+                Value::Complex(re, im) => { let sa = runmat_builtins::StringArray::new(vec![runmat_builtins::Value::Complex(*re, *im).to_string()], vec![1,1]).unwrap(); rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa); }
+                Value::Int(i) => { let sa = runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1,1]).unwrap(); rows_total += 1; if cols.is_none() { cols = Some(1); } else if cols != Some(1) { return Err("string vcat: column mismatch".to_string()); } blocks.push(sa); }
                 _ => return Err(format!("Cannot concatenate value of type {v:?} with string array")),
             }
         }
@@ -220,8 +231,13 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                 _total_rows += 1;
                 matrices.push(matrix);
             }
+            Value::Complex(re, _im) => {
+                let matrix = Tensor::new_2d(vec![*re], 1, 1)?;
+                if cols == 0 { cols = 1; } else if cols != 1 { return Err("Cannot concatenate scalar with multi-column matrix".to_string()); }
+                _total_rows += 1; matrices.push(matrix);
+            }
             Value::Int(i) => {
-                let matrix = Tensor::new_2d(vec![*i as f64], 1, 1)?;
+                let matrix = Tensor::new_2d(vec![i.to_f64()], 1, 1)?;
                 if cols == 0 {
                     cols = 1;
                 } else if cols != 1 {

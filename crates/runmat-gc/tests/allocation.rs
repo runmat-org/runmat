@@ -18,7 +18,7 @@ fn test_multiple_allocations() {
     let _ = gc_reset_for_test();
     let values = vec![
         Value::Num(1.0),
-        Value::Int(2),
+        Value::Int(runmat_builtins::IntValue::I32(2)),
         Value::Bool(true),
         Value::String("test".to_string()),
     ];
@@ -32,7 +32,7 @@ fn test_multiple_allocations() {
 
     // Verify all pointers are still valid
     assert_eq!(*ptrs[0], Value::Num(1.0));
-    assert_eq!(*ptrs[1], Value::Int(2));
+    assert_eq!(*ptrs[1], Value::Int(runmat_builtins::IntValue::I32(2)));
     assert_eq!(*ptrs[2], Value::Bool(true));
     assert_eq!(*ptrs[3], Value::String("test".to_string()));
 }

@@ -1,4 +1,4 @@
-## runmat-accelerate-api
+## RunMat Accelerate API
 
 ### Purpose
 `runmat-accelerate-api` defines the minimal, dependency-light interface between the language runtime and GPU acceleration providers. It exists so that:

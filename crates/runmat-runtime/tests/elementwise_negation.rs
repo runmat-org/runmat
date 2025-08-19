@@ -9,9 +9,9 @@ fn test_scalar_negation() {
     assert_eq!(result, Value::Num(-42.0));
 
     // Test integer scalar
-    let int = Value::Int(5);
+    let int = Value::Int(runmat_builtins::IntValue::I32(5));
     let result = elementwise_neg(&int).unwrap();
-    assert_eq!(result, Value::Int(-5));
+    assert_eq!(result, Value::Int(runmat_builtins::IntValue::I32(-5)));
 
     // Test boolean scalar
     let bool_val = Value::Bool(true);

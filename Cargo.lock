@@ -4319,6 +4319,7 @@ version = "0.0.1"
 dependencies = [
  "accelerate-src",
  "blas",
+ "clap",
  "glam",
  "inventory",
  "lapack",
@@ -4331,6 +4332,8 @@ dependencies = [
  "runmat-gc-api",
  "runmat-macros",
  "runmat-plot",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
