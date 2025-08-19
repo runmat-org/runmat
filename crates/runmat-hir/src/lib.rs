@@ -1903,7 +1903,7 @@ pub mod remapping {
                 catch_body,
             } => HirStmt::TryCatch {
                 try_body: remap_function_body(try_body, var_map),
-                catch_var: catch_var.as_ref().map(|v| var_map.get(&v).copied().unwrap_or(v)),
+                catch_var: catch_var.as_ref().map(|v| var_map.get(&v).copied().unwrap_or(*v)),
                 catch_body: remap_function_body(catch_body, var_map),
             },
             HirStmt::Global(vars) => HirStmt::Global(

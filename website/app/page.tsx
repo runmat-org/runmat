@@ -82,8 +82,7 @@ export default function HomePage() {
               <span className="gradient-brand">The Fast, Free, Modern<br />MATLAB Runtime</span>
           </h1>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              A free, high-performance runtime for MATLAB code with full language grammar and core semantics.
-              No license fees, no lock-in — just a blazing-fast, slim, modern engine.
+              Run your existing MATLAB/Octave code with full language grammar and core semantics. No license fees, no lock-in.
           </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
@@ -91,7 +90,7 @@ export default function HomePage() {
                   Download RunMat
                 </Link>
               </Button>
-              <Button variant="outline" size="lg" asChild className="h-12 px-8">
+              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
                 <Link href="/docs/getting-started">Get Started</Link>
               </Button>
             </div>
@@ -106,9 +105,6 @@ export default function HomePage() {
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl lg:text-6xl">
               Why Use RunMat?
             </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              Run your existing MATLAB/Octave code faster, and for free.
-            </p>
         </div>
           <div className="mx-auto grid justify-center gap-4 sm:grid-cols-2 lg:grid-cols-4 md:max-w-[80rem]">
             <Card>
@@ -126,11 +122,11 @@ export default function HomePage() {
             <Card>
               <CardHeader>
                 <div className="mb-2 text-3xl">⚡</div>
-                <CardTitle>150×–180× Faster</CardTitle>
+                <CardTitle>150x-180x Faster Than Octave</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Spend time computing, not waiting: instant startup and triple‑digit speedups vs Octave across startup,
+                  Instant startup and triple-digit speedups vs Octave across startup,
                   matrix ops, math, and control flow. Read the <Link className="underline" href="/blog/introducing-runmat">results</Link>.
                 </CardDescription>
               </CardContent>
@@ -171,7 +167,7 @@ export default function HomePage() {
               Same Language, Better Engine
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              Boots in 5ms, runs 150x-180x faster than GNU Octave, GPU optimizes by default, and is free to use forever.
+              Boots in 5ms, GPU optimizes by default, single compact cross-platform binary. A modern compiler for MATLAB code.
           </p>
           </div>
 
@@ -353,49 +349,18 @@ export default function HomePage() {
               <thead>
                 <tr className="text-left border-b border-border">
                   <th className="py-3 px-4">Benchmark</th>
-                  <th className="py-3 px-4 text-right">GNU Octave avg (s)</th>
-                  <th className="py-3 px-4 text-right">RunMat interp (s)</th>
-                  <th className="py-3 px-4 text-right">RunMat JIT (s)</th>
+                  <th className="py-3 px-4 text-right">Octave (s)</th>
+                  <th className="py-3 px-4 text-right">RunMat (s)</th>
                   <th className="py-3 px-4 text-right">Speedup</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b border-border/60"><td className="py-3 px-4">Startup Time</td><td className="py-3 px-4 text-right">0.9147</td><td className="py-3 px-4 text-right">0.0050</td><td className="py-3 px-4 text-right">0.0053</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">171.5×–182.9×</span></td></tr>
-                <tr className="border-b border-border/60"><td className="py-3 px-4">Matrix Operations</td><td className="py-3 px-4 text-right">0.8220</td><td className="py-3 px-4 text-right">0.0050</td><td className="py-3 px-4 text-right">0.0050</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">164.4×</span></td></tr>
-                <tr className="border-b border-border/60"><td className="py-3 px-4">Mathematical Functions</td><td className="py-3 px-4 text-right">0.8677</td><td className="py-3 px-4 text-right">0.0057</td><td className="py-3 px-4 text-right">0.0053</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">153.1×–162.7×</span></td></tr>
-                <tr><td className="py-3 px-4">Control Flow</td><td className="py-3 px-4 text-right">0.8757</td><td className="py-3 px-4 text-right">0.0057</td><td className="py-3 px-4 text-right">0.0057</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">154.5×</span></td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Startup Time</td><td className="py-3 px-4 text-right">0.9147</td><td className="py-3 px-4 text-right">0.0050</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">183x</span></td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Matrix Operations</td><td className="py-3 px-4 text-right">0.8220</td><td className="py-3 px-4 text-right">0.0050</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">164x</span></td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Mathematical Functions</td><td className="py-3 px-4 text-right">0.8677</td><td className="py-3 px-4 text-right">0.0057</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">163x</span></td></tr>
+                <tr><td className="py-3 px-4">Control Flow</td><td className="py-3 px-4 text-right">0.8757</td><td className="py-3 px-4 text-right">0.0057</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">155x</span></td></tr>
               </tbody>
             </table>
-          </div>
-        </div>
-      </section>
-
-      {/* Slim Core + Packages Section */}
-      <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
-        <div className="container mx-auto px-4 md:px-6">
-          <div className="mx-auto grid justify-center gap-6 md:grid-cols-2 md:max-w-[64rem]">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">Slim Core + Packages</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-sm">
-                  Minimal core with canonical builtins; everything else is a package. Install only what you need; docs are generated automatically.
-                </CardDescription>
-                <div className="mt-4 text-sm"><Link className="underline" href="/docs/package-manager">Read the Package Manager design draft →</Link></div>
-                <div className="mt-1 text-sm"><Link className="underline" href="/docs/design-philosophy">Read the Design Philosophy →</Link></div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">Portable & Lightweight</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-sm">
-                  Small static binaries with consistent performance on Linux/macOS/Windows. Great for laptops, clusters, CI — and for accelerators/LSPs that plug in cleanly.
-                </CardDescription>
-              </CardContent>
-            </Card>
           </div>
         </div>
       </section>
@@ -417,8 +382,8 @@ export default function HomePage() {
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
                 <Link href="/download">More Install Options</Link>
             </Button>
-              <Button variant="outline" size="lg" asChild className="h-12 px-8">
-              <Link href="/docs/getting-started">Get Started</Link>
+              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
+                <Link href="/docs/getting-started">Get Started</Link>
             </Button>
           </div>
         </div>
@@ -439,7 +404,7 @@ export default function HomePage() {
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
               <Link href="/blog/introducing-runmat">Read the Story</Link>
             </Button>
-              <Button variant="outline" size="lg" asChild className="h-12 px-8">
+              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
               <Link href="https://github.com/runmat-org/runmat">View on GitHub</Link>
             </Button>
           </div>

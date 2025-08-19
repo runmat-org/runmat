@@ -877,9 +877,9 @@ fn pad_builtin(a: Value, total_len: f64, rest: Vec<Value>) -> Result<Value, Stri
     let pad_count = n - s.chars().count();
     let pad_str: String = std::iter::repeat_n(ch, pad_count).collect();
     if direction == "left" {
-        format!("{pad_str}{s}")
+        Ok(Value::String(format!("{pad_str}{s}")))
     } else {
-        format!("{s}{pad_str}")
+        Ok(Value::String(format!("{s}{pad_str}")))
     }
 }
 
