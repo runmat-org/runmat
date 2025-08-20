@@ -138,8 +138,7 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Keep the core predictable; add only what you need. Install native Rust or source MATLAB packages and
-                  get docs generated automatically. See the <Link className="underline" href="/docs/package-manager">package manager</Link>.
+                  Small, predictable core, to which you can add what you need. Install native Rust or source MATLAB packages. See the <Link className="underline" href="/docs/package-manager">package manager</Link>.
                 </CardDescription>
               </CardContent>
             </Card>
