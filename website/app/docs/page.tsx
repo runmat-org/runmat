@@ -5,7 +5,7 @@ import Link from "next/link";
 import { BookOpen, Zap, Code, Cpu, Settings, Terminal, GitBranch, FileText } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "RunMat Documentation - Complete Guides and API Reference",
+  title: "Docs",
   description: "Complete guides and API reference to get you started with RunMat. Learn installation, usage, MATLAB migration, and advanced features.",
   openGraph: {
     title: "RunMat Documentation - Complete Guides and API Reference",

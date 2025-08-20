@@ -301,7 +301,7 @@ export default function HowItWorksPage() {
           </div>
 
           <div className="mt-6 text-sm text-muted-foreground">
-            Benchmarks run on Apple M2 Max (32GB RAM) under identical conditions. Full suite available in <code>/benchmarks</code>; reproduce with <code>./benchmarks/run_benchmarks.sh</code>. Note that we cannot benchmark RunMat against MathWorks's MATLAB and ecosystem because installing it requires agreeing to their strict and dense license agreement, which we will not.
+            Benchmarks run on Apple M2 Max (32GB RAM) under identical conditions. Full suite available in <code>/benchmarks</code>; reproduce with <code>./benchmarks/run_benchmarks.sh</code>. Note that we cannot benchmark RunMat against MathWorks&apos;s MATLAB and ecosystem because installing it requires agreeing to their strict and dense license agreement, which we will not.
           </div>
         </section>
 

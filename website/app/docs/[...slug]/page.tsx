@@ -34,7 +34,7 @@ export async function generateStaticParams(): Promise<{ slug: string[] }[]> {
 export async function generateMetadata({ params }: { params: Promise<{ slug?: string[] }> }): Promise<Metadata> {
   const { slug = [] } = await params;
   const node = findNodeBySlug(slug);
-  const base: Metadata = { title: node ? `${node.title} | Docs` : "RunMat Docs" };
+  const base: Metadata = { title: node ? `${node.title} | Docs` : "Docs" };
   if (!node) return base;
   const seo = (node as DocsNode).seo;
   return {

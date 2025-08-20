@@ -12,9 +12,9 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const b = loadBuiltins().find(x => x.slug === slug);
-  if (!b) return { title: 'Builtin - RunMat' };
+  if (!b) return { title: 'Builtin | Docs' };
   return {
-    title: `${b.name} - RunMat builtin`,
+    title: `${b.name} | Docs`,
     description: b.summary,
     openGraph: { title: `${b.name} - RunMat`, description: b.summary },
     twitter: { card: 'summary', title: `${b.name} - RunMat`, description: b.summary },
