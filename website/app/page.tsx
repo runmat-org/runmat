@@ -373,7 +373,7 @@ export default function HomePage() {
             Install in Seconds
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            Copy and paste one command to get started with RunMat
+              Copy and paste one command to get started with RunMat.
           </p>
           
           <OSInstallCommand className="w-full max-w-4xl" />
@@ -398,7 +398,7 @@ export default function HomePage() {
             Ready to Experience the Future?
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            Join researchers and engineers who&rsquo;ve made the switch to RunMat
+              Join researchers and engineers who&rsquo;ve made the switch to RunMat.
           </p>
           <div className="flex gap-4">
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">

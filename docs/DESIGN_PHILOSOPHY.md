@@ -40,12 +40,13 @@ What we deliberately do not put in the core:
 - Toolboxes. They live as packages.
 - Every historical corner-case. Compatibility is measured by principled semantics and clearly documented differences, not by folklore.
 
-## Language vs runtime
+## Language vs runtime vs IDE
 
-MATLAB is both a language and a large, proprietary standard library. We treat them separately.
+MATLAB is a language, a large proprietary standard library, an IDE, and an ecosystem of toolboxes. We treat each separately.
 
 - The language is a syntax and semantics for arrays, functions, control flow, and errors. That we support in the core.
 - The library (built-ins) is open-ended. RunMat ships a slim standard library and lets packages provide the rest. Documentation is generated from the runtime (not a hand-maintained spreadsheet of parity; parity is not a product goal).
+- RunMat is not an IDE. It is a runtime that can be used with any IDE (such as Cursor, VSCode, or IntelliJ).
 
 This separation keeps the core maintainable and lets the community move fast without destabilizing the runtime.
 

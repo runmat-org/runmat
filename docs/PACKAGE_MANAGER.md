@@ -177,14 +177,6 @@ The “waist” is minimal: Value/Type conversions, call ABI, error model, and d
 
 ---
 
-## Docs: generated from runtime
-
-- The exporter walks all registered built-ins (core + packages) and writes `website/content/builtins.json`.
-- Docs pages render from this JSON: names, categories, signatures, examples, errors, and related functions.
-- No parity scoreboard; what's implemented is what's documented.
-
----
-
 ## CLI
 
 ```text
