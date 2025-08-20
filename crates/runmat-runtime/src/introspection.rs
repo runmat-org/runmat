@@ -314,33 +314,3 @@ fn ismember_strings(a: Value, set: Value) -> Result<Value, String> {
         _ => Err("ismember: expected string or string array as first argument".to_string()),
     }
 }
-
-// ---------------------------
-// Struct utilities
-// ---------------------------
-
-#[runtime_builtin(name = "fieldnames")]
-fn fieldnames_builtin(s: Value) -> Result<Value, String> {
-    match s {
-        Value::Struct(st) => {
-            let mut names: Vec<Value> = Vec::with_capacity(st.fields.len());
-            for k in st.fields.keys() {
-                names.push(Value::String(k.clone()));
-            }
-            let cell = runmat_builtins::CellArray::new(names.clone(), 1, names.len())
-                .map_err(|e| format!("fieldnames: {e}"))?;
-            Ok(Value::Cell(cell))
-        }
-        _ => Err("fieldnames: input must be a struct".to_string()),
-    }
-}
-
-#[runtime_builtin(name = "isfield")]
-fn isfield_builtin(s: Value, name: Value) -> Result<bool, String> {
-    let key = extract_scalar_string(&name)
-        .ok_or_else(|| "isfield: field name must be string/char".to_string())?;
-    match s {
-        Value::Struct(st) => Ok(st.fields.contains_key(&key)),
-        _ => Err("isfield: first argument must be a struct".to_string()),
-    }
-}
