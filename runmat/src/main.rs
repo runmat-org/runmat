@@ -25,7 +25,7 @@ use std::time::Duration;
 #[derive(Parser)]
 #[command(
     name = "runmat",
-    version = "0.0.1",
+    version = "0.0.2",
     about = "High-performance MATLAB/Octave code runtime",
     long_about = r#"
 RunMat is a modern, high-performance runtime for MATLAB/Octave code built 
