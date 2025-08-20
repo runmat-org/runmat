@@ -8,6 +8,13 @@ use runmat_builtins::{Tensor, Value};
 /// Horizontally concatenate two matrices [A, B]
 /// In language: C = [A, B] creates a matrix with A and B side by side
 pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+    // Language semantics: [] acts as a neutral element for concatenation
+    if a.rows() == 0 && a.cols() == 0 {
+        return Ok(b.clone());
+    }
+    if b.rows() == 0 && b.cols() == 0 {
+        return Ok(a.clone());
+    }
     if a.rows() != b.rows() {
         return Err(format!(
             "Cannot horizontally concatenate matrices with different row counts: {} vs {}",
@@ -39,6 +46,13 @@ pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 /// Vertically concatenate two matrices [A; B]
 /// In language: C = [A; B] creates a matrix with A on top and B below
 pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
+    // Language semantics: [] acts as a neutral element for concatenation
+    if a.rows() == 0 && a.cols() == 0 {
+        return Ok(b.clone());
+    }
+    if b.rows() == 0 && b.cols() == 0 {
+        return Ok(a.clone());
+    }
     if a.cols() != b.cols() {
         return Err(format!(
             "Cannot vertically concatenate matrices with different column counts: {} vs {}",
@@ -234,6 +248,10 @@ pub fn hcat_values(values: &[Value]) -> Result<Value, String> {
                 matrices.push(matrix);
             }
             Value::Tensor(m) => {
+                // Skip true empty 0x0 operands (neutral element)
+                if m.rows() == 0 && m.cols() == 0 {
+                    continue;
+                }
                 if rows == 0 {
                     rows = m.rows();
                 } else if rows != m.rows() {
@@ -411,6 +429,10 @@ pub fn vcat_values(values: &[Value]) -> Result<Value, String> {
                 matrices.push(matrix);
             }
             Value::Tensor(m) => {
+                // Skip true empty 0x0 operands (neutral element)
+                if m.rows() == 0 && m.cols() == 0 {
+                    continue;
+                }
                 if cols == 0 {
                     cols = m.cols();
                 } else if cols != m.cols() {

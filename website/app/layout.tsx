@@ -5,6 +5,7 @@ import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { GoogleAnalytics } from "@/components/GoogleAnalytics";
+import { GoogleTagManager } from "@/components/GoogleTagManager";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -191,6 +192,7 @@ export default function RootLayout({
         <GoogleAnalytics />
       </head>
       <body className={`${inter.className} antialiased`}>
+        <GoogleTagManager />
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
