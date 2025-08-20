@@ -138,7 +138,7 @@ export default function HowItWorksPage() {
               <CardHeader><CardTitle>Slim builtins</CardTitle></CardHeader>
               <CardContent>
                 The core ships a curated standard library. Everything else comes from packages — native (Rust)
-                or source (MATLAB) — documented and indexed automatically.
+                or source (MATLAB).
               </CardContent>
             </Card>
           </div>
@@ -178,7 +178,7 @@ export default function HowItWorksPage() {
                 <h4 className="text-lg font-semibold mb-3">Portable by design</h4>
                 <p className="text-muted-foreground leading-relaxed">
                   Typed HIR lowers to Cranelift IR, which makes it trivial to target multiple architectures. That makes RunMat
-                  platform-agnostic and lightweight: small static binaries, predictable performance on Linux/macOS/Windows,
+                  platform-agnostic and lightweight: small static binaries, predictable performance on Linux/macOS/Windows or embedded devices,
                   and room for ahead-of-time or cached compilation where it helps startup.
                 </p>
               </div>
@@ -301,7 +301,7 @@ export default function HowItWorksPage() {
           </div>
 
           <div className="mt-6 text-sm text-muted-foreground">
-            Benchmarks run on Apple M2 Max (32GB RAM) under identical conditions. Full suite available in <code>/benchmarks</code>; reproduce with <code>./benchmarks/run_benchmarks.sh</code>. Note that we cannot benchmark RunMat against MATLAB because it requires agreeing to a license agreement, which we will not. 
+            Benchmarks run on Apple M2 Max (32GB RAM) under identical conditions. Full suite available in <code>/benchmarks</code>; reproduce with <code>./benchmarks/run_benchmarks.sh</code>. Note that we cannot benchmark RunMat against MathWorks's MATLAB and ecosystem because installing it requires agreeing to their strict and dense license agreement, which we will not.
           </div>
         </section>
 

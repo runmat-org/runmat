@@ -184,6 +184,9 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         out = out.replace(/([A-Za-z0-9_]+)<([A-Za-z0-9_]+)>/g, '`$1<$2>`');
         // Wrap brace groups in backticks to avoid MDX expression evaluation
         out = out.replace(/\{([^{}\n]+)\}/g, '`{$1}`');
+        // Protect literal HTML-like tags that appear in prose (e.g., <main>) from being parsed as JSX/HTML by MDX.
+        // We only target a small allowlist of known tokens used in docs to avoid interfering with intentional MDX components.
+        out = out.replace(/<\/?(main|anonymous)>/gi, (m) => '`' + m + '`');
         segments[s] = out;
       }
       lines[i] = segments.join('');

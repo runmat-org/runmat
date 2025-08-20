@@ -69,7 +69,7 @@ What it is:
 
 - A new runtime that accepts MATLAB syntax and executes the core semantics quickly.
 - A slim, production-oriented engine written in Rust with a stable Value/Type/ABI.
-- A system that grows through packages: built-ins implemented in Rust or MATLAB, documented and indexed automatically.
+- A system that grows through packages: built-ins implemented in Rust or MATLAB.
 - A **predictable core** of canonical built-ins (math, array ops, formatting/IO) with stable behavior; broader or niche functionality ships as packages.
 
 What it is not:
