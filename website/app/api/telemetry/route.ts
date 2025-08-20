@@ -12,10 +12,6 @@ const ALLOWED_EVENTS = new Set([
   "install_start",
   "install_complete",
   "install_failed",
-  "copy_install_command",
-  "select_os",
-  "page_interaction",
-  "kernel_install",
 ]);
 
 // Param keys we allow to forward as-is
@@ -25,9 +21,7 @@ const ALLOWED_PARAM_KEYS = new Set([
   "platform",
   "release",
   "method",
-  "event_category",
   "event_label",
-  "value",
 ]);
 
 function sanitize(input: unknown, fallback = "unknown"): string {
@@ -54,15 +48,16 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
-    const event = sanitize(body.event);
+    const event = sanitize(body.event || body.event_label);
     if (!ALLOWED_EVENTS.has(event)) {
+      console.error(`Invalid event: ${event}`);
       return NextResponse.json({ ok: false, error: "invalid_event" }, { status: 400 });
     }
 
     const cid = sanitize(body.cid, uuid());
 
     // Collect allowed params
-    const params: Record<string, unknown> = { anonymize_ip: true };
+    const params: Record<string, unknown> = {};
     for (const key of ALLOWED_PARAM_KEYS) {
       if (key in body) {
         const value = body[key];
@@ -89,9 +84,13 @@ export async function POST(req: NextRequest) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       cache: "no-store",
-    }).catch(() => undefined);
+    }).catch((err) => {
+      console.error(`Failed to post telemetry event: ${event}`, err);
+      return undefined;
+    });
 
     if (!resp || !resp.ok) {
+      console.error(`Failed to process telemetry event: ${event}`);
       return NextResponse.json({ ok: true, forwarded: false }, { status: 200 });
     }
 

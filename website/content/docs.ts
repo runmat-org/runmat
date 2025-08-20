@@ -95,9 +95,10 @@ export const docsTree: DocsNode[] = [
     ],
   },
   {
-    title: "Legal & Meta",
+    title: "Meta",
     children: [
       { title: "License", slug: ["license"], file: "LICENSE.md", seo: { description: "RunMat software license." } },
+      { title: "Telemetry", slug: ["telemetry"], file: "docs/TELEMETRY.md", seo: { description: "RunMat telemetry: what information is collected and how it is used." } },
     ],
   },
 ];
