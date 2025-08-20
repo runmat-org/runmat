@@ -26,7 +26,6 @@ canonical: "https://runmat.org/blog/introducing-runmat"
 - The core stays **small and fast**; everything else grows via a **package system** (native Rust or source MATLAB).
 - Core built-ins are **canonical** (e.g., `sin`, `cos`, `sum`, and `printf`-style formatting like `fprintf`/`sprintf`) and match the expected, documented behavior. When semantics are domain-specific or ambiguous, they live in packages.
 - Built in **Rust**, with **tiered execution** (interpreter first, JIT for hot code) and a **generational GC** tuned for numerics.
-- It's **not MATLAB** and **not Octave**. It's a different runtime with different goals and trade-offs.
 - Benchmarks show **150×–180× speedups** vs GNU Octave on representative workloads; see Performance below.
 
 ---
@@ -110,9 +109,10 @@ cat results/benchmark_YYYYMMDD_HHMMSS.yaml
 
 - **Ignition interpreter**: immediate execution, great for REPL and scripts.
 - **Turbine JIT**: hot functions get compiled to optimized machine code (Cranelift backend).
-- **Column-major arrays**: zero-copy interop to BLAS/LAPACK where appropriate.
-- **Generational GC**: non-moving young/old spaces, write barriers + remembered set, survivor promotion.
 - **Slim builtins**: a curated set in core; everything else via packages. Docs are generated from runtime metadata.
+- **Great developer experience**: built in Jupyter kernel, flow-sensitive inference for great autocomplete and type hints, and more.
+- **Portable**: single binary, no dependencies, runs on Linux/macOS/Windows and embedded devices.
+- **GPU-optimized**: built in, configurable, swappable GPU planner with reverse-mode autograd support by default. Run your code on GPUs without any modifications across CPU, CUDA, ROCm, Metal, Vulkan, OpenCL, and WGPU platforms (coming soon).
 
 For a deeper dive, see [How It Works](/docs/how-it-works) and the [Architecture & Internals](/docs/architecture) section.
 
@@ -157,4 +157,4 @@ If your code relies on many niche built-ins, the recommended path is to move tho
 
 *RunMat is not affiliated with MathWorks, Inc. “MATLAB” is a registered trademark of MathWorks, Inc. We reference it nominatively to describe the language whose grammar and semantics our independent runtime accepts.*
 
-*RunMat is developed by [Dystr](https://dystr.com).* 
+*RunMat is a free, open source community project developed by [Dystr](https://dystr.com).* 

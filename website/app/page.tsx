@@ -305,7 +305,7 @@ export default function HomePage() {
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">Full Language Semantics</h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              RunMat implements the full grammar and core semantics of the MATLAB language, rather than a subset. See
+              RunMat implements the full grammar and core semantics of the MATLAB language. See
               <Link className="underline ml-1" href="/docs/language-coverage">language coverage</Link>.
             </p>
           </div>
