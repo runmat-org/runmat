@@ -1,6 +1,6 @@
 //! Line plot implementation
 //!
-//! High-performance line plotting with GPU acceleration and MATLAB-compatible styling.
+//! High-performance line plotting with GPU acceleration.
 
 use crate::core::{
     vertex_utils, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex,

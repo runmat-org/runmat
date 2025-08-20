@@ -51,7 +51,7 @@ fn test_collection_with_live_objects() {
         let mut live_objects = Vec::new();
         for i in 0..10 {
             let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-            gc_add_root(ptr).expect("root registration should succeed"); // Explicitly protect from collection
+            gc_add_root(ptr.clone()).expect("root registration should succeed"); // Explicitly protect from collection
             live_objects.push(ptr);
         }
 
@@ -84,7 +84,7 @@ fn test_collection_with_live_objects() {
 
         // Clean up roots
         for ptr in &live_objects {
-            gc_remove_root(*ptr).expect("root removal should succeed");
+            gc_remove_root(ptr.clone()).expect("root removal should succeed");
         }
     });
 }
@@ -166,7 +166,7 @@ fn test_collection_with_different_generations() {
         let mut young_objects = Vec::new();
         for i in 0..5 {
             let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-            gc_add_root(ptr).expect("root registration should succeed"); // Protect from collection
+            gc_add_root(ptr.clone()).expect("root registration should succeed"); // Protect from collection
             young_objects.push(ptr);
         }
 
@@ -188,7 +188,7 @@ fn test_collection_with_different_generations() {
 
         // Clean up roots
         for ptr in &young_objects {
-            gc_remove_root(*ptr).expect("root removal should succeed");
+            gc_remove_root(ptr.clone()).expect("root removal should succeed");
         }
 
         // collected values are always valid (usize)
@@ -302,7 +302,7 @@ fn test_collection_performance() {
         let alloc_start = Instant::now();
         for i in 0..num_objects {
             let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation should succeed");
-            gc_add_root(ptr).expect("root registration should succeed"); // Protect from collection
+            gc_add_root(ptr.clone()).expect("root registration should succeed"); // Protect from collection
             objects.push(ptr);
         }
         let alloc_duration = alloc_start.elapsed();
@@ -327,7 +327,7 @@ fn test_collection_performance() {
 
         // Clean up roots
         for ptr in &objects {
-            gc_remove_root(*ptr).expect("root removal should succeed");
+            gc_remove_root(ptr.clone()).expect("root removal should succeed");
         }
     });
 }

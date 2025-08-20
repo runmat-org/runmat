@@ -9,9 +9,9 @@ fn double_fn(x: i32) -> Result<i32, String> {
 
 #[test]
 fn call_registered_builtin() {
-    let result = call_builtin("double", &[Value::Int(4)]).unwrap();
+    let result = call_builtin("double", &[Value::Int(runmat_builtins::IntValue::I32(4))]).unwrap();
     if let Value::Int(n) = result {
-        assert_eq!(n, 8);
+        assert_eq!(n.to_i64(), 8);
     } else {
         panic!();
     }

@@ -1,4 +1,4 @@
-//! Execution engine for MATLAB code within the Jupyter kernel
+//! Execution engine for RunMat code within the Jupyter kernel
 //!
 //! Provides a kernel-specific wrapper around the ReplEngine to adapt
 //! its interface for Jupyter protocol requirements.
@@ -9,7 +9,7 @@ use runmat_repl::ReplEngine;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-/// Execution engine managing MATLAB code execution state for the Jupyter kernel
+/// Execution engine managing RunMat code execution state for the Jupyter kernel
 pub struct ExecutionEngine {
     /// Current execution counter
     execution_count: u64,
@@ -121,7 +121,7 @@ impl ExecutionEngine {
         self.execution_count
     }
 
-    /// Execute MATLAB code
+    /// Execute code
     pub fn execute(&mut self, code: &str) -> Result<ExecutionResult> {
         let start_time = Instant::now();
         self.execution_count += 1;

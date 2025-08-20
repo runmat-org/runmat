@@ -75,6 +75,9 @@ impl ControlFlowGraph {
                 Instr::LoadString(_) => {
                     // String instructions don't affect control flow
                 }
+                Instr::DeclareGlobalNamed(_, _) | Instr::DeclarePersistentNamed(_, _) => {
+                    // No control flow impact
+                }
                 Instr::Jump(target) => {
                     block_starts.insert(*target);
                     // Instruction after jump starts new block (if reachable)
@@ -288,14 +291,22 @@ impl BytecodeCompiler {
                 let instr = &instructions[pc];
 
                 match instr {
+                    &Instr::PackToRow(_) | &Instr::PackToCol(_) => {
+                        return Err(TurbineError::ExecutionError(
+                            "PackToRow/PackToCol not supported in JIT; use interpreter".to_string(),
+                        ));
+                    }
+                    Instr::DeclareGlobalNamed(_, _) | Instr::DeclarePersistentNamed(_, _) => {
+                        // Ignore; VM manages globals/persistents
+                    }
                     Instr::LoadConst(val) => {
                         let const_val = builder.ins().f64const(*val);
                         local_stack.push(const_val);
                     }
-                    Instr::LoadString(_) => {
+                    Instr::LoadString(_) | Instr::LoadCharRow(_) | Instr::LoadBool(_) => {
                         // Strings cannot be compiled to JIT - fall back to interpreter
                         return Err(TurbineError::ExecutionError(
-                            "String operations not supported in JIT mode".to_string(),
+                            "Non-numeric literal not supported in JIT mode".to_string(),
                         ));
                     }
                     Instr::LoadVar(idx) => {
@@ -573,6 +584,52 @@ impl BytecodeCompiler {
                         let zero = builder.ins().iconst(types::I32, 0);
                         builder.ins().return_(&[zero]);
                         block_terminated = true;
+                    }
+                    // Not yet supported in JIT; require interpreter
+                    Instr::IndexSlice(_, _, _, _)
+                    | Instr::CreateCell2D(_, _)
+                    | Instr::IndexCell(_)
+                    | Instr::LoadStaticProperty(_, _)
+                    | Instr::CallStaticMethod(_, _, _)
+                    | Instr::EnterTry(_, _)
+                    | Instr::PopTry
+                    | Instr::UPlus
+                    | Instr::AndAnd(_)
+                    | Instr::OrOr(_)
+                    | Instr::IndexSliceEx(_, _, _, _, _)
+                    | Instr::IndexRangeEnd { .. }
+                    | Instr::Index1DRangeEnd { .. }
+                    | Instr::StoreRangeEnd { .. }
+                    | Instr::StoreSlice(_, _, _, _)
+                    | Instr::StoreSliceEx(_, _, _, _, _)
+                    | Instr::StoreSlice1DRangeEnd { .. }
+                    | Instr::LoadMember(_)
+                    | Instr::LoadMemberDynamic
+                    | Instr::StoreMember(_)
+                    | Instr::StoreMemberDynamic
+                    | Instr::CreateClosure(_, _)
+                    | Instr::CallMethod(_, _)
+                    | Instr::IndexCellExpand(_, _)
+                    | Instr::StoreIndex(_)
+                    | Instr::StoreIndexCell(_)
+                    | Instr::LoadMethod(_)
+                    | Instr::RegisterClass { .. }
+                    | Instr::CallBuiltinExpandLast(_, _, _)
+                    | Instr::CallBuiltinExpandAt(_, _, _, _)
+                    | Instr::CallBuiltinExpandMulti(_, _)
+                    | Instr::CallFunctionExpandMulti(_, _)
+                    | Instr::CallFunctionMulti(_, _, _)
+                    | Instr::CallBuiltinMulti(_, _, _)
+                    | Instr::CallFunctionExpandAt(_, _, _, _)
+                    | Instr::Swap
+                    | Instr::RegisterImport { .. }
+                    | Instr::DeclareGlobal(_)
+                    | Instr::DeclarePersistent(_)
+                    | Instr::CallFeval(_)
+                    | Instr::CallFevalExpandMulti(_) => {
+                        return Err(TurbineError::ExecutionError(
+                            "Unsupported instruction in JIT; use interpreter".to_string(),
+                        ));
                     }
                 }
 

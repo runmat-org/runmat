@@ -8,6 +8,9 @@ fn main() -> Result<()> {
     // Initialize logging
     env_logger::init();
 
+    // Install a minimal in-process acceleration provider so gpuArray/gather round-trip
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+
     // Initialize the REPL engine with GC test context for safety
     let mut engine = gc_test_context(ReplEngine::new)?;
 
@@ -17,7 +20,7 @@ fn main() -> Result<()> {
 
     // Welcome message
     println!("RunMat REPL v{}", env!("CARGO_PKG_VERSION"));
-    println!("High-performance MATLAB/Octave runtime with JIT compilation");
+    println!("High-performance MATLAB/Octave language runtime");
     println!("Type 'help' for help, 'exit' to quit, '.info' for system information");
     println!();
 
@@ -126,7 +129,7 @@ fn show_help() {
     println!("  .gc-collect       Force garbage collection");
     println!("  .reset-stats      Reset execution statistics");
     println!();
-    println!("MATLAB/Octave syntax is supported:");
+    println!("MATLAB/Octave compatible syntax is supported:");
     println!("  x = 1 + 2                         # Assignment");
     println!("  y = [1, 2, 3]                    # Vectors");
     println!("  z = [1, 2; 3, 4]                 # Matrices");

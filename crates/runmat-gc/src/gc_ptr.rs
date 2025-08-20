@@ -253,11 +253,7 @@ pub trait IntoGcPtr<T> {
     fn into_gc_ptr(self) -> crate::Result<GcPtr<T>>;
 }
 
-impl IntoGcPtr<runmat_builtins::Value> for runmat_builtins::Value {
-    fn into_gc_ptr(self) -> crate::Result<GcPtr<runmat_builtins::Value>> {
-        crate::gc_allocate(self)
-    }
-}
+// Removed runmat_builtins coupling to avoid dependency cycle
 
 #[cfg(test)]
 mod tests {

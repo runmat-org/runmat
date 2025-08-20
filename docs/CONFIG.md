@@ -3,7 +3,7 @@
 RunMat provides a modern, explicit configuration system designed for clarity
 and portability. It supports multiple file formats, sane defaults, rich
 environment variable overrides, and precise CLI flag precedence — a major step
-up from MATLAB's largely process‑flag driven approach.
+up from legacy largely process-flag driven approach.
 
 This document is the definitive reference for all configuration options.
 
@@ -12,7 +12,7 @@ This document is the definitive reference for all configuration options.
 Configuration sources (highest to lowest precedence):
 1. Command-line flags
 2. Environment variables (`RUSTMAT_*`)
-3. Configuration files (`.runmat.yaml`, `runmat.config.json`, …)
+3. Configuration files (`.runmat`, `.runmat.yaml`, `runmat.config.json`, …)
 4. Built-in defaults
 
 Loading follows `runmat::config::ConfigLoader::load()` which:
@@ -27,10 +27,11 @@ Checked in order; first existing file is loaded:
 
 1. Explicit path via `RUSTMAT_CONFIG`
 2. Current directory candidates:
+   - `.runmat` (preferred; TOML syntax)
    - `.runmat.yaml`, `.runmat.yml`, `.runmat.json`, `.runmat.toml`
    - `runmat.config.yaml`, `runmat.config.yml`, `runmat.config.json`, `runmat.config.toml`
 3. Home directory:
-   - `~/.runmat.yaml`, `~/.runmat.yml`, `~/.runmat.json`
+   - `~/.runmat`, `~/.runmat.yaml`, `~/.runmat.yml`, `~/.runmat.json`
    - `~/.config/runmat/config.yaml`, `config.yml`, `config.json`
 4. System-wide (Unix):
    - `/etc/runmat/config.yaml`, `config.yml`, `config.json`
@@ -40,6 +41,52 @@ If nothing exists, defaults are used.
 ## File formats
 
 RunMat supports YAML, JSON and TOML. Examples below encode the same config.
+
+### TOML (.runmat)
+```toml
+[runtime]
+timeout = 600
+verbose = true
+snapshot_path = "./stdlib.snapshot"
+
+[jit]
+enabled = true
+threshold = 25
+optimization_level = "speed"
+
+[gc]
+preset = "low-latency"
+young_size_mb = 64
+threads = 4
+collect_stats = true
+
+[kernel]
+ip = "127.0.0.1"
+
+[logging]
+level = "info"
+debug = false
+
+[plotting]
+mode = "auto"
+force_headless = false
+backend = "auto"
+
+[packages]
+enabled = true
+
+[[packages.registries]]
+name = "runmat"
+url = "https://packages.runmat.dev"
+
+[packages.dependencies]
+# Resolve from registry
+"linalg-plus" = { source = "registry", version = "^1.2" }
+# Git dependency
+"viz-tools" = { source = "git", url = "https://github.com/acme/viz-tools", rev = "main" }
+# Local path during development
+"my-local-ext" = { source = "path", path = "../my-local-ext" }
+```
 
 ### YAML (.runmat.yaml)
 ```yaml
@@ -262,6 +309,23 @@ parentheses.
       - `lod_threshold: u32` (10000)
       - `texture_compression: bool` (true)
 
+### packages
+- `enabled: bool` (true)
+- `registries: list<registry>` (defaults to the official `runmat` registry)
+- `dependencies: map<string, package>` (empty)
+
+Note: Package manager features are not yet released. The schema is shared to help early adopters prepare;
+the `runmat pkg` commands will print a “coming soon” message until the first release lands.
+
+Registry schema:
+- `name: string`
+- `url: string`
+
+Package schema (tagged union by `source`):
+- `{ source = "registry", version: string, registry?: string, features?: list<string>, optional?: bool }`
+- `{ source = "git", url: string, rev?: string, features?: list<string>, optional?: bool }`
+- `{ source = "path", path: string, features?: list<string>, optional?: bool }`
+
 ## Environment variables (overrides)
 
 All `RUSTMAT_*` variables map onto the above fields. Notable ones:
@@ -363,7 +427,7 @@ runmat run simple_intro.m
 - Clear, documented precedence (flags > env > files > defaults).
 - Explicit, typed configuration with sensible defaults and enums.
 - First-class plotting/JIT/GC settings in config (not only runtime flags).
-- Built-in generators/validators and human‑readable dumps via `config show`.
+- Built-in generators/validators and human-readable dumps via `config show`.
 - Portable configs you can commit, review, and diff.
 
 ## Troubleshooting

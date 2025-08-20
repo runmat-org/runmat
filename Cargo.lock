@@ -4100,6 +4100,7 @@ dependencies = [
  "log",
  "openssl",
  "openssl-sys",
+ "runmat-accelerate",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",
@@ -4122,10 +4123,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-accelerate"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "once_cell",
+ "pollster",
+ "runmat-accelerate-api",
+ "runmat-builtins",
+ "runmat-hir",
+ "runmat-runtime",
+ "serde",
+ "thiserror 1.0.69",
+ "wgpu",
+]
+
+[[package]]
+name = "runmat-accelerate-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+]
+
+[[package]]
 name = "runmat-builtins"
 version = "0.0.1"
 dependencies = [
  "inventory",
+ "runmat-accelerate-api",
+ "runmat-gc-api",
  "runmat-macros",
  "serde",
  "trybuild",
@@ -4143,13 +4170,19 @@ dependencies = [
  "page_size",
  "parking_lot",
  "rand",
+ "runmat-accelerate-api",
  "runmat-builtins",
+ "runmat-gc-api",
  "runmat-hir",
  "runmat-ignition",
  "runmat-parser",
  "serde",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "runmat-gc-api"
+version = "0.1.0"
 
 [[package]]
 name = "runmat-hir"
@@ -4267,6 +4300,7 @@ dependencies = [
  "anyhow",
  "env_logger 0.11.8",
  "log",
+ "runmat-accelerate",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",
@@ -4285,14 +4319,21 @@ version = "0.0.1"
 dependencies = [
  "accelerate-src",
  "blas",
+ "clap",
  "glam",
  "inventory",
  "lapack",
  "openblas-src",
  "regex",
+ "runmat-accelerate",
+ "runmat-accelerate-api",
  "runmat-builtins",
+ "runmat-gc",
+ "runmat-gc-api",
  "runmat-macros",
  "runmat-plot",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

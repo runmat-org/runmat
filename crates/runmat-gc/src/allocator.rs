@@ -3,9 +3,9 @@
 //! Manages memory allocation across multiple generations, with optimized
 //! allocation strategies for different object lifetimes.
 
+use crate::Value;
 use crate::{GcConfig, GcError, GcPtr, GcStats, Result};
-use runmat_builtins::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Size classes for object allocation
@@ -54,6 +54,9 @@ pub struct Generation {
 
     /// Objects that survived collection and may be promoted (stored as addresses)
     survivor_objects: Vec<usize>,
+
+    /// Addresses of allocated objects (object starts) in this generation
+    allocated_ptrs: Vec<*const u8>,
 }
 
 impl Generation {
@@ -77,6 +80,7 @@ impl Generation {
             allocated_bytes: AtomicUsize::new(0),
             max_size,
             survivor_objects: Vec::new(),
+            allocated_ptrs: Vec::new(),
         }
     }
 
@@ -101,6 +105,8 @@ impl Generation {
             if let Some(ptr) = block.allocate(aligned_size) {
                 self.allocated_bytes
                     .fetch_add(aligned_size, Ordering::Relaxed);
+                // Track allocation start address for GC bookkeeping
+                self.allocated_ptrs.push(ptr as *const u8);
                 return Ok(ptr);
             }
         }
@@ -118,6 +124,7 @@ impl Generation {
         if let Some(ptr) = block.allocate(aligned_size) {
             self.allocated_bytes
                 .fetch_add(aligned_size, Ordering::Relaxed);
+            self.allocated_ptrs.push(ptr as *const u8);
             Ok(ptr)
         } else {
             Err(GcError::OutOfMemory(
@@ -151,6 +158,11 @@ impl Generation {
         std::mem::take(&mut self.survivor_objects)
     }
 
+    /// Drain allocated object pointers from this generation
+    pub fn take_allocated_ptrs(&mut self) -> Vec<*const u8> {
+        std::mem::take(&mut self.allocated_ptrs)
+    }
+
     /// Reset generation (after collection)
     pub fn reset(&mut self) {
         for blocks in self.blocks.values_mut() {
@@ -163,6 +175,7 @@ impl Generation {
         }
         self.allocated_bytes.store(0, Ordering::Relaxed);
         self.survivor_objects.clear();
+        self.allocated_ptrs.clear();
     }
 }
 
@@ -217,6 +230,12 @@ pub struct GenerationalAllocator {
 
     /// Total allocations counter
     total_allocations: AtomicUsize,
+
+    /// Logical promotion tracking (non-moving): pointer -> survival count
+    survival_counts: HashMap<*const u8, usize>,
+
+    /// Set of pointers logically promoted to older generation
+    promoted_ptrs: HashSet<*const u8>,
 }
 
 impl GenerationalAllocator {
@@ -234,6 +253,8 @@ impl GenerationalAllocator {
             generations,
             config: config.clone(),
             total_allocations: AtomicUsize::new(0),
+            survival_counts: HashMap::new(),
+            promoted_ptrs: HashSet::new(),
         }
     }
 
@@ -255,24 +276,38 @@ impl GenerationalAllocator {
         Ok(unsafe { GcPtr::from_raw(ptr as *const Value) })
     }
 
+    /// Drain allocated object pointers from the young generation
+    pub fn young_take_allocations(&mut self) -> Vec<*const u8> {
+        self.generations[0].take_allocated_ptrs()
+    }
+
+    /// Reset the young generation after a collection cycle
+    pub fn young_reset(&mut self) {
+        self.generations[0].reset();
+    }
+
+    /// Mark a pointer in young generation as survivor (for potential policies)
+    pub fn young_mark_survivor(&mut self, ptr: *const u8) {
+        self.generations[0].mark_survivor(ptr);
+    }
+
+    /// Get count of currently tracked young-generation allocations since last sweep
+    pub fn young_allocations_count(&self) -> usize {
+        self.generations[0].allocated_ptrs.len()
+    }
+
     /// Promote an object to the next generation
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn promote(&mut self, ptr: *const Value, from_gen: usize) -> Result<GcPtr<Value>> {
-        if from_gen + 1 >= self.generations.len() {
-            // Already in oldest generation
-            return Ok(unsafe { GcPtr::from_raw(ptr) });
-        }
+    pub fn promote(&mut self, ptr: *const Value, _from_gen: usize) -> Result<GcPtr<Value>> {
+        // Non-moving logical promotion: mark pointer as promoted for barrier/collection logic
+        let raw = ptr as *const u8;
+        self.promoted_ptrs.insert(raw);
+        Ok(unsafe { GcPtr::from_raw(ptr) })
+    }
 
-        // Copy object to next generation
-        let value = unsafe { (*ptr).clone() };
-        let size = self.estimate_value_size(&value);
-
-        let new_ptr = self.generations[from_gen + 1].allocate(size)?;
-        unsafe {
-            std::ptr::write(new_ptr as *mut Value, value);
-        }
-
-        Ok(unsafe { GcPtr::from_raw(new_ptr as *const Value) })
+    /// Check if young generation currently tracks any survivors
+    pub fn young_has_survivors(&self) -> bool {
+        !self.generations[0].survivor_objects.is_empty()
     }
 
     /// Find which generation contains a pointer
@@ -331,26 +366,43 @@ impl GenerationalAllocator {
         Ok(())
     }
 
+    /// Increment survival count and promote if threshold reached
+    /// Increment survival count; return true if promotion occurred this cycle
+    pub fn note_survivor_and_maybe_promote(&mut self, ptr: *const u8) -> bool {
+        let count = self.survival_counts.entry(ptr).or_insert(0);
+        *count += 1;
+        if *count >= self.config.promotion_threshold {
+            self.promoted_ptrs.insert(ptr);
+            // Decay/reset survival count after promotion to avoid runaway growth
+            self.survival_counts.remove(&ptr);
+            return true;
+        }
+        false
+    }
+
+    /// Query logical generation of a pointer: 0 for young, >=1 for promoted/old
+    pub fn logical_generation(&self, ptr: *const u8) -> Option<usize> {
+        if self.promoted_ptrs.contains(&ptr) {
+            return Some(1);
+        }
+        // If pointer belongs to young blocks, treat as gen0; otherwise unknown
+        self.find_generation(ptr)
+    }
+
+    /// Clear promotion bookkeeping (e.g., after major GC)
+    pub fn clear_promotion_state(&mut self) {
+        self.survival_counts.clear();
+        // Keep promoted set to continue treating them as old
+    }
+
     /// Estimate the memory size of a Value
     #[allow(clippy::only_used_in_recursion)]
-    fn estimate_value_size(&self, value: &Value) -> usize {
-        match value {
-            Value::Int(_) | Value::Num(_) | Value::Bool(_) => std::mem::size_of::<Value>(),
-            Value::String(s) => std::mem::size_of::<Value>() + s.len(),
-            Value::Matrix(m) => {
-                std::mem::size_of::<Value>()
-                    + std::mem::size_of::<runmat_builtins::Matrix>()
-                    + m.data.len() * std::mem::size_of::<f64>()
-            }
-            Value::Cell(cells) => {
-                std::mem::size_of::<Value>()
-                    + cells.len() * std::mem::size_of::<Value>()
-                    + cells
-                        .iter()
-                        .map(|v| self.estimate_value_size(v))
-                        .sum::<usize>()
-            }
-        }
+    fn estimate_value_size(&self, _value: &Value) -> usize {
+        // IMPORTANT: We currently allocate only the outer Value header in the GC heap.
+        // Nested payloads (Vecs, strings, tensors) are managed by Rust's allocator and
+        // dropped via drop_in_place during sweep. Estimating deep sizes over-reserves and
+        // causes artificial OOMs in tests. We'll move to GC-managed aggregates later.
+        std::mem::size_of::<Value>()
     }
 
     /// Get allocator statistics

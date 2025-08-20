@@ -1,6 +1,6 @@
 //! Scatter plot implementation
 //!
-//! High-performance scatter plotting with GPU acceleration and MATLAB-compatible styling.
+//! High-performance scatter plotting with GPU acceleration.
 
 use crate::core::{
     vertex_utils, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex,

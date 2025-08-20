@@ -1,0 +1,6890 @@
+[
+  {
+    "name": "__make_cell",
+    "slug": "__make_cell",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": true
+  },
+  {
+    "name": "__register_test_classes",
+    "slug": "__register_test_classes",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": true
+  },
+  {
+    "name": "abs",
+    "slug": "abs",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "acos",
+    "slug": "acos",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "acosh",
+    "slug": "acosh",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "addlistener",
+    "slug": "addlistener",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "string",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "all",
+    "slug": "all",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "angle",
+    "slug": "angle",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "any",
+    "slug": "any",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "asin",
+    "slug": "asin",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "asinh",
+    "slug": "asinh",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "atan",
+    "slug": "atan",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "atan2",
+    "slug": "atan2",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "double",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "atanh",
+    "slug": "atanh",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "bar",
+    "slug": "bar",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "string"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "call_method",
+    "slug": "call_method",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "string",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "cat",
+    "slug": "cat",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "double",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "ceil",
+    "slug": "ceil",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "cellstr",
+    "slug": "cellstr",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "char",
+    "slug": "char",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "Circle.area",
+    "slug": "circle.area",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "class",
+    "slug": "class",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "string"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "classref",
+    "slug": "classref",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "contains",
+    "slug": "contains",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "cos",
+    "slug": "cos",
+    "category": [
+      "math/trigonometry"
+    ],
+    "summary": "Cosine of input in radians (element-wise).",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "y = cos(0)"
+      }
+    ],
+    "keywords": [
+      "cosine",
+      "trig",
+      "angle"
+    ],
+    "internal": false
+  },
+  {
+    "name": "cosh",
+    "slug": "cosh",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "Ctor.Ctor",
+    "slug": "ctor.ctor",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "deal",
+    "slug": "deal",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "delete",
+    "slug": "delete",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "diag",
+    "slug": "diag",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "disp",
+    "slug": "disp",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "e",
+    "slug": "e",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "endsWith",
+    "slug": "endswith",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "eps",
+    "slug": "eps",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "eq",
+    "slug": "eq",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "erase",
+    "slug": "erase",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "eraseBetween",
+    "slug": "erasebetween",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "error",
+    "slug": "error",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "exp",
+    "slug": "exp",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "exp10",
+    "slug": "exp10",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "exp2",
+    "slug": "exp2",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "extractBetween",
+    "slug": "extractbetween",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "eye",
+    "slug": "eye",
+    "category": [
+      "array/creation"
+    ],
+    "summary": "Identity matrix.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "I = eye(3)"
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "factorial",
+    "slug": "factorial",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "false",
+    "slug": "false",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "feval",
+    "slug": "feval",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "fieldnames",
+    "slug": "fieldnames",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "fill",
+    "slug": "fill",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "double",
+          "int",
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "find",
+    "slug": "find",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "floor",
+    "slug": "floor",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "fprintf",
+    "slug": "fprintf",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "fract",
+    "slug": "fract",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "gamma",
+    "slug": "gamma",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "gather",
+    "slug": "gather",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "ge",
+    "slug": "ge",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "double",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "get.p",
+    "slug": "get.p",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "getfield",
+    "slug": "getfield",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "getmethod",
+    "slug": "getmethod",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "gpuArray",
+    "slug": "gpuarray",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "gt",
+    "slug": "gt",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "double",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "hist",
+    "slug": "hist",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "string"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "imag",
+    "slug": "imag",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "ind2sub",
+    "slug": "ind2sub",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "Inf",
+    "slug": "inf",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "isa",
+    "slug": "isa",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "ischar",
+    "slug": "ischar",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "isempty",
+    "slug": "isempty",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "isfield",
+    "slug": "isfield",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "isfinite",
+    "slug": "isfinite",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "isinf",
+    "slug": "isinf",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "islogical",
+    "slug": "islogical",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "ismember",
+    "slug": "ismember",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "isnan",
+    "slug": "isnan",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "isnumeric",
+    "slug": "isnumeric",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "isstring",
+    "slug": "isstring",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "isvalid",
+    "slug": "isvalid",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "join",
+    "slug": "join",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "le",
+    "slug": "le",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "double",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "length",
+    "slug": "length",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "linspace",
+    "slug": "linspace",
+    "category": [
+      "array/creation"
+    ],
+    "summary": "Linearly spaced vector.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "double",
+          "double",
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]"
+      }
+    ],
+    "keywords": [
+      "linspace",
+      "range",
+      "vector"
+    ],
+    "internal": false
+  },
+  {
+    "name": "ln",
+    "slug": "ln",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "log",
+    "slug": "log",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "log10",
+    "slug": "log10",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "log2",
+    "slug": "log2",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "logical",
+    "slug": "logical",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "logspace",
+    "slug": "logspace",
+    "category": [
+      "array/creation"
+    ],
+    "summary": "Logarithmically spaced vector.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "double",
+          "double",
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "x = logspace(1, 3, 3)  % [10 100 1000]"
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "lower",
+    "slug": "lower",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "lt",
+    "slug": "lt",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "double",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "make_anon",
+    "slug": "make_anon",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "string",
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "make_handle",
+    "slug": "make_handle",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "matrix_eye",
+    "slug": "matrix_eye",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "matrix_ones",
+    "slug": "matrix_ones",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "int",
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "matrix_transpose",
+    "slug": "matrix_transpose",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "matrix_zeros",
+    "slug": "matrix_zeros",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "int",
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "max",
+    "slug": "max",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "mean",
+    "slug": "mean",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "mesh",
+    "slug": "mesh",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "Tensor",
+          "Tensor",
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "string"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "meshgrid",
+    "slug": "meshgrid",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "Tensor",
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "min",
+    "slug": "min",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "mtimes",
+    "slug": "mtimes",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "NaN",
+    "slug": "nan",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "ndims",
+    "slug": "ndims",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "ne",
+    "slug": "ne",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "new_handle_object",
+    "slug": "new_handle_object",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "new_object",
+    "slug": "new_object",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "notify",
+    "slug": "notify",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "string",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "numel",
+    "slug": "numel",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "ones",
+    "slug": "ones",
+    "category": [
+      "array/creation"
+    ],
+    "summary": "Array of all ones.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "B = ones(3)"
+      }
+    ],
+    "keywords": [
+      "ones",
+      "allocate",
+      "create"
+    ],
+    "internal": false
+  },
+  {
+    "name": "orderfields",
+    "slug": "orderfields",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.and",
+    "slug": "overidx.and",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.eq",
+    "slug": "overidx.eq",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.gt",
+    "slug": "overidx.gt",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.ldivide",
+    "slug": "overidx.ldivide",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.lt",
+    "slug": "overidx.lt",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.mtimes",
+    "slug": "overidx.mtimes",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.or",
+    "slug": "overidx.or",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.plus",
+    "slug": "overidx.plus",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.rdivide",
+    "slug": "overidx.rdivide",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.subsasgn",
+    "slug": "overidx.subsasgn",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z",
+          "a"
+        ],
+        "inTypes": [
+          "any",
+          "string",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 4
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.subsref",
+    "slug": "overidx.subsref",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "string",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.times",
+    "slug": "overidx.times",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.uplus",
+    "slug": "overidx.uplus",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "OverIdx.xor",
+    "slug": "overidx.xor",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "pad",
+    "slug": "pad",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "double",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "permute",
+    "slug": "permute",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "pi",
+    "slug": "pi",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "PkgF.foo",
+    "slug": "pkgf.foo",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "PkgG.foo",
+    "slug": "pkgg.foo",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "plot",
+    "slug": "plot",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "Tensor",
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "string"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "Point.move",
+    "slug": "point.move",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "double",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "Point.origin",
+    "slug": "point.origin",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "pow",
+    "slug": "pow",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "double",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "prod",
+    "slug": "prod",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "rand",
+    "slug": "rand",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "int",
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "randn",
+    "slug": "randn",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "int",
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "range",
+    "slug": "range",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "double",
+          "double",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "real",
+    "slug": "real",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "regexp",
+    "slug": "regexp",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "regexpi",
+    "slug": "regexpi",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "repmat",
+    "slug": "repmat",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "reshape",
+    "slug": "reshape",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "rethrow",
+    "slug": "rethrow",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "rmfield",
+    "slug": "rmfield",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "round",
+    "slug": "round",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "scatter",
+    "slug": "scatter",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "Tensor",
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "string"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "scatter3",
+    "slug": "scatter3",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "Tensor",
+          "Tensor",
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "string"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "set.p",
+    "slug": "set.p",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "setfield",
+    "slug": "setfield",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "string",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "Shape.area",
+    "slug": "shape.area",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "sign",
+    "slug": "sign",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "sin",
+    "slug": "sin",
+    "category": [
+      "math/trigonometry"
+    ],
+    "summary": "Sine of input in radians (element-wise).",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "y = sin(pi/2)"
+      }
+    ],
+    "keywords": [
+      "sine",
+      "trig",
+      "angle"
+    ],
+    "internal": false
+  },
+  {
+    "name": "sinh",
+    "slug": "sinh",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "size",
+    "slug": "size",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "split",
+    "slug": "split",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "sprintf",
+    "slug": "sprintf",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "string",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "sqrt",
+    "slug": "sqrt",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "sqrt2",
+    "slug": "sqrt2",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "squeeze",
+    "slug": "squeeze",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "startsWith",
+    "slug": "startswith",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "std",
+    "slug": "std",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "strcat",
+    "slug": "strcat",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "strcmp",
+    "slug": "strcmp",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "strcmpi",
+    "slug": "strcmpi",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "string",
+    "slug": "string",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "string.empty",
+    "slug": "string.empty",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "strings",
+    "slug": "strings",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "strip",
+    "slug": "strip",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "strjoin",
+    "slug": "strjoin",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "strncmp",
+    "slug": "strncmp",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "any",
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "strrep",
+    "slug": "strrep",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "strtrim",
+    "slug": "strtrim",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "struct",
+    "slug": "struct",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "sub2ind",
+    "slug": "sub2ind",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "subsasgn",
+    "slug": "subsasgn",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z",
+          "a"
+        ],
+        "inTypes": [
+          "any",
+          "string",
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 4
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "subsref",
+    "slug": "subsref",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "any",
+          "string",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "sum",
+    "slug": "sum",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "any",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "surf",
+    "slug": "surf",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y",
+          "z"
+        ],
+        "inTypes": [
+          "Tensor",
+          "Tensor",
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "string"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 3
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "tan",
+    "slug": "tan",
+    "category": [
+      "math/trigonometry"
+    ],
+    "summary": "Tangent of input in radians (element-wise).",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "y = tan(pi/4)"
+      }
+    ],
+    "keywords": [
+      "tangent",
+      "trig",
+      "angle"
+    ],
+    "internal": false
+  },
+  {
+    "name": "tanh",
+    "slug": "tanh",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "tic",
+    "slug": "tic",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "toc",
+    "slug": "toc",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "tril",
+    "slug": "tril",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "triu",
+    "slug": "triu",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "true",
+    "slug": "true",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "logical"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "trunc",
+    "slug": "trunc",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "double"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "upper",
+    "slug": "upper",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "var",
+    "slug": "var",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "warning",
+    "slug": "warning",
+    "category": [
+      "general"
+    ],
+    "summary": "Runtime builtin function",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x",
+          "y"
+        ],
+        "inTypes": [
+          "string",
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "internal": false
+  },
+  {
+    "name": "zeros",
+    "slug": "zeros",
+    "category": [
+      "array/creation"
+    ],
+    "summary": "Array of all zeros.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "Tensor"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "A = zeros(2,3)"
+      }
+    ],
+    "keywords": [
+      "zeros",
+      "allocate",
+      "create"
+    ],
+    "internal": false
+  }
+]

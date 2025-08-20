@@ -1,7 +1,7 @@
 //! Modern dark theme system with professional styling
 //!
-//! Provides a sleek, modern dark theme that's more beautiful than MATLAB,
-//! with excellent contrast, readability, and visual hierarchy.
+//! Provides a sleek, modern dark theme with excellent contrast,
+//! readability, and visual hierarchy.
 
 use glam::Vec4;
 

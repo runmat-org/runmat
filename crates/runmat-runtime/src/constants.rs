@@ -1,10 +1,22 @@
 //! Mathematical constants and special values
 //!
-//! This module provides MATLAB-compatible mathematical constants like pi, e, inf, nan, etc.
+//! This module provides language-compatible mathematical constants like pi, e, inf, nan, etc.
 //! These are registered as global constants that can be accessed as variables.
 
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
+
+/// Logical scalar true (language-compatible)
+#[runtime_builtin(name = "true")]
+fn true_builtin() -> Result<bool, String> {
+    Ok(true)
+}
+
+/// Logical scalar false (language-compatible)
+#[runtime_builtin(name = "false")]
+fn false_builtin() -> Result<bool, String> {
+    Ok(false)
+}
 
 /// Mathematical constant π (pi)
 #[runtime_builtin(name = "pi")]
@@ -36,15 +48,15 @@ fn eps_builtin() -> Result<f64, String> {
     Ok(f64::EPSILON)
 }
 
-/// Alternative name for infinity (MATLAB compatibility)
+/// Alternative name for infinity (language compatibility)
 #[runtime_builtin(name = "Inf")]
-fn inf_matlab_builtin() -> Result<f64, String> {
+fn inf_language_builtin() -> Result<f64, String> {
     Ok(f64::INFINITY)
 }
 
-/// Alternative name for NaN (MATLAB compatibility)
+/// Alternative name for NaN (language compatibility)
 #[runtime_builtin(name = "NaN")]
-fn nan_matlab_builtin() -> Result<f64, String> {
+fn nan_language_builtin() -> Result<f64, String> {
     Ok(f64::NAN)
 }
 
@@ -101,10 +113,16 @@ mod tests {
     }
 
     #[test]
-    fn test_matlab_compatibility() {
-        // Test MATLAB-style names
-        assert_eq!(inf_matlab_builtin().unwrap(), inf_builtin().unwrap());
-        assert!(nan_matlab_builtin().unwrap().is_nan());
+    fn test_true_false_builtins() {
+        assert!(true_builtin().unwrap());
+        assert!(!false_builtin().unwrap());
+    }
+
+    #[test]
+    fn test_language_compatibility() {
+        // Test language-style names
+        assert_eq!(inf_language_builtin().unwrap(), inf_builtin().unwrap());
+        assert!(nan_language_builtin().unwrap().is_nan());
     }
 }
 
@@ -162,5 +180,20 @@ runmat_builtins::inventory::submit! {
     runmat_builtins::Constant {
         name: "sqrt2",
         value: Value::Num(std::f64::consts::SQRT_2),
+    }
+}
+
+// Register logical constants so bare identifiers resolve without requiring a call
+runmat_builtins::inventory::submit! {
+    runmat_builtins::Constant {
+        name: "true",
+        value: Value::Bool(true),
+    }
+}
+
+runmat_builtins::inventory::submit! {
+    runmat_builtins::Constant {
+        name: "false",
+        value: Value::Bool(false),
     }
 }

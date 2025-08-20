@@ -4,7 +4,7 @@
 //! objects in older generations that reference younger objects are
 //! included in minor collection roots.
 
-use runmat_builtins::Value;
+use crate::Value;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -136,7 +136,7 @@ impl WriteBarrierAware for Value {
             Value::Cell(cells) => {
                 // Check if any cell values are young
                 // This is a placeholder - in reality we'd check generations
-                !cells.is_empty()
+                !cells.data.is_empty()
             }
             _ => false,
         }
@@ -330,6 +330,10 @@ impl WriteBarrierManager {
     }
 }
 
+// Ensure thread-safety for global usage; internal synchronization guards shared state
+unsafe impl Send for WriteBarrierManager {}
+unsafe impl Sync for WriteBarrierManager {}
+
 /// Combined statistics for write barrier manager
 #[derive(Debug, Clone)]
 pub struct WriteBarrierManagerStats {
@@ -437,7 +441,8 @@ mod tests {
 
     #[test]
     fn test_value_write_barrier_aware() {
-        let value = Value::Cell(vec![Value::Num(42.0)]);
+        let value =
+            Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap());
         assert!(value.has_young_references());
 
         let value2 = Value::Num(42.0);

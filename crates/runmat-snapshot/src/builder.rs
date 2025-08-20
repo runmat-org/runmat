@@ -1186,6 +1186,9 @@ mod tests {
         let builtin = runmat_builtins::BuiltinFunction::new(
             "matmul",
             "Test builtin function",
+            "Category",
+            "",
+            "",
             vec![],
             runmat_builtins::Type::Num,
             |_| Ok(runmat_builtins::Value::Num(0.0)),

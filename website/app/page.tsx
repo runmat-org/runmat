@@ -9,7 +9,7 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "RunMat - Fast, Free, Modern MATLAB Runtime",
   description:
-    "Run MATLAB code for free with RunMat: high-performance, open-source runtime with Jupyter kernel, BLAS/LAPACK, beautiful plotting, and JIT compilation.",
+    "Run MATLAB code fast and free. RunMat implements full language grammar and core semantics with a slim, portable core, V8-inspired tiered execution, and a package-first standard library.",
   keywords: [
     "run matlab online",
     "free matlab runtime",
@@ -82,8 +82,7 @@ export default function HomePage() {
               <span className="gradient-brand">The Fast, Free, Modern<br />MATLAB Runtime</span>
           </h1>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              A free, high-performance runtime for MATLAB code.
-              No license fees, no vendor lock-in, just blazing-fast numerical computing and beautiful visualizations.
+              Run your existing MATLAB/Octave code with full language grammar and core semantics. No license fees, no lock-in.
           </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
@@ -91,7 +90,7 @@ export default function HomePage() {
                   Download RunMat
                 </Link>
               </Button>
-              <Button variant="outline" size="lg" asChild className="h-12 px-8">
+              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
                 <Link href="/docs/getting-started">Get Started</Link>
               </Button>
             </div>
@@ -106,60 +105,56 @@ export default function HomePage() {
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl lg:text-6xl">
               Why Use RunMat?
             </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              All the power of MATLAB without the price tag or limitations
-            </p>
         </div>
           <div className="mx-auto grid justify-center gap-4 sm:grid-cols-2 lg:grid-cols-4 md:max-w-[80rem]">
-          <Card>
-            <CardHeader>
-              <div className="mb-2 text-3xl">⚡</div>
-              <CardTitle>Dramatically Faster</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>
-                Advanced optimization technology that makes your MATLAB code run significantly 
-                faster than alternatives like GNU Octave. Same syntax, better performance.
-              </CardDescription>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <div className="mb-2 text-3xl">🛡️</div>
-              <CardTitle>Rock Solid Reliability</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>
-                Never lose your work to crashes or memory errors. Built with modern safety 
-                technology to ensure your simulations and analyses complete successfully.
-              </CardDescription>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <div className="mb-2 text-3xl">🎨</div>
-              <CardTitle>Beautiful Plots</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>
-                GPU-accelerated plotting with modern aesthetics. Interactive 2D/3D 
-                visualizations that export to any format.
-              </CardDescription>
-            </CardContent>
-          </Card>
             <Card>
               <CardHeader>
-                <div className="mb-2 text-3xl">📓</div>
-                <CardTitle>Jupyter Kernel</CardTitle>
+                <div className="mb-2 text-3xl">✅</div>
+                <CardTitle>Full Language Semantics</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Run MATLAB code directly in Jupyter notebooks with full interactive support.
-                  Perfect for data science and research workflows.
+                  Run the whole language, not a subset: proper indexing (<code>end</code>/colon/masks), multiple returns,
+                  classdef OOP, events/handles. What you already write just works. See <Link className="underline" href="/docs/language-coverage">coverage</Link>.
                 </CardDescription>
               </CardContent>
-            </Card>          
-        </div>
+            </Card>
+            <Card>
+              <CardHeader>
+                <div className="mb-2 text-3xl">⚡</div>
+                <CardTitle>150x-180x Faster Than Octave</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>
+                  Instant startup and triple-digit speedups vs Octave across startup,
+                  matrix ops, math, and control flow. Read the <Link className="underline" href="/blog/introducing-runmat">results</Link>.
+                </CardDescription>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <div className="mb-2 text-3xl">📦</div>
+                <CardTitle>Slim Core + Packages</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>
+                  Small, predictable core, to which you can add what you need. Install native Rust or source MATLAB packages. See the <Link className="underline" href="/docs/package-manager">package manager</Link>.
+                </CardDescription>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <div className="mb-2 text-3xl">🧱</div>
+                <CardTitle>Portable & Lightweight</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription>
+                  Same code, everywhere: small static binaries with consistent performance on Linux/macOS/Windows and embedded devices.
+                  Great for laptops, clusters, and CI.
+                </CardDescription>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </section>
 
@@ -168,10 +163,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
           <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-6xl">
-            Same MATLAB Syntax, Better Performance
+              Same Language, Better Engine
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              Copy-paste your existing MATLAB/Octave code and watch it run faster and for free
+              Boots in 5ms, GPU optimizes by default, single compact cross-platform binary. A modern compiler for MATLAB code.
           </p>
           </div>
 
@@ -304,63 +299,68 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Technical Details Section */}
+      {/* Language Semantics Section */}
       <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
         <div className="container mx-auto px-4 md:px-6">
-        <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-          <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-6xl">
-            Built with Modern Technology
-          </h2>
-          <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            For developers: RunMat leverages cutting-edge systems programming
-          </p>
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">Full Language Semantics</h2>
+            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
+              RunMat implements the full grammar and core semantics of the MATLAB language, rather than a subset. See
+              <Link className="underline ml-1" href="/docs/language-coverage">language coverage</Link>.
+            </p>
+          </div>
+          <div className="overflow-x-auto mx-auto max-w-[48rem]">
+            <table className="w-full text-base md:text-lg">
+              <thead>
+                <tr className="text-left border-b border-border">
+                  <th className="py-3 px-4">Feature Category</th>
+                  <th className="py-3 px-4 text-center">RunMat</th>
+                  <th className="py-3 px-4 text-center">Octave</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Grammar & parser (full surface)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center">✅</td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Arrays & indexing (end, colon, masks, N-D)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center">✅</td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Multiple returns, varargin/varargout, nargin/nargout</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center">✅</td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">classdef OOP + operator overloading</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Events/handles (addlistener/notify/isvalid/delete)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Imports precedence & static access (Class.*)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Metaclass operator ?Class</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">String arrays (double-quoted)</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
+                <tr><td className="py-3 px-4">Standardized MException identifiers</td><td className="py-3 px-4 text-center text-green-600">✅</td><td className="py-3 px-4 text-center text-red-500">❌</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div className="mx-auto grid justify-center gap-4 sm:grid-cols-2 md:max-w-[64rem]">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">V8-Inspired JIT Compilation</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription className="text-sm">
-                Advanced tiered execution with Ignition interpreter and Turbine JIT compiler 
-                using Cranelift for near-native performance on mathematical workloads.
-              </CardDescription>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Memory Safety with Rust</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription className="text-sm">
-                Zero-cost abstractions, guaranteed memory safety, and fearless concurrency 
-                eliminate entire classes of bugs common in numerical computing.
-              </CardDescription>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">GPU-Accelerated Graphics</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription className="text-sm">
-                Modern rendering pipeline built on wgpu with WebGL/Metal/Vulkan backends 
-                for interactive 60fps visualizations and scientific plotting.
-              </CardDescription>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Instant Startup</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription className="text-sm">
-                  Revolutionary snapshotting technology enables sub-5ms cold starts and 
-                persistent workspace state across sessions.
-              </CardDescription>
-            </CardContent>
-          </Card>
-        </div>
+      </section>
+
+      {/* Benchmarks Section */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">Blazing Fast Performance</h2>
+            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
+              Summary from our public benchmarks (Apple M2 Max, 32GB). Reproduce with <code>benchmarks</code> in the repo.
+            </p>
+          </div>
+          <div className="overflow-x-auto mx-auto max-w-[48rem]">
+            <table className="w-full text-base md:text-lg">
+              <thead>
+                <tr className="text-left border-b border-border">
+                  <th className="py-3 px-4">Benchmark</th>
+                  <th className="py-3 px-4 text-right">Octave (s)</th>
+                  <th className="py-3 px-4 text-right">RunMat (s)</th>
+                  <th className="py-3 px-4 text-right">Speedup</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Startup Time</td><td className="py-3 px-4 text-right">0.9147</td><td className="py-3 px-4 text-right">0.0050</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">183x</span></td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Matrix Operations</td><td className="py-3 px-4 text-right">0.8220</td><td className="py-3 px-4 text-right">0.0050</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">164x</span></td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Mathematical Functions</td><td className="py-3 px-4 text-right">0.8677</td><td className="py-3 px-4 text-right">0.0057</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">163x</span></td></tr>
+                <tr><td className="py-3 px-4">Control Flow</td><td className="py-3 px-4 text-right">0.8757</td><td className="py-3 px-4 text-right">0.0057</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">155x</span></td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -372,7 +372,7 @@ export default function HomePage() {
             Install in Seconds
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            Copy and paste one command to get started with RunMat
+              Copy and paste one command to get started with RunMat.
           </p>
           
           <OSInstallCommand className="w-full max-w-4xl" />
@@ -381,8 +381,8 @@ export default function HomePage() {
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
                 <Link href="/download">More Install Options</Link>
             </Button>
-              <Button variant="outline" size="lg" asChild className="h-12 px-8">
-              <Link href="/docs/getting-started">Get Started</Link>
+              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
+                <Link href="/docs/getting-started">Get Started</Link>
             </Button>
           </div>
         </div>
@@ -397,14 +397,14 @@ export default function HomePage() {
             Ready to Experience the Future?
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            Join researchers and engineers who&rsquo;ve made the switch to RunMat
+              Join researchers and engineers who&rsquo;ve made the switch to RunMat.
           </p>
           <div className="flex gap-4">
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
-              <Link href="/blog/introducing-runmat">Read the Story</Link>
+                <Link href="/blog/introducing-runmat">Read The Story</Link>
             </Button>
-              <Button variant="outline" size="lg" asChild className="h-12 px-8">
-              <Link href="https://github.com/runmat-org/runmat">View on GitHub</Link>
+              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
+                <Link href="https://github.com/runmat-org/runmat">View On GitHub</Link>
             </Button>
           </div>
         </div>

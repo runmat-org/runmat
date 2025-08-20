@@ -1,6 +1,6 @@
-//! RunMat - High-performance MATLAB/Octave runtime
+//! RunMat - High-performance MATLAB/Octave code runtime
 //!
-//! A modern, V8-inspired MATLAB runtime with Jupyter kernel support,
+//! A modern, V8-inspired MATLAB code runtime with Jupyter kernel support,
 //! JIT compilation, generational garbage collection, and excellent developer ergonomics.
 
 use anyhow::{Context, Result};
@@ -22,12 +22,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// RunMat - High-performance MATLAB/Octave runtime
 #[derive(Parser)]
 #[command(
     name = "runmat",
     version = "0.0.1",
-    about = "High-performance MATLAB/Octave runtime with JIT compilation and GC",
+    about = "High-performance MATLAB/Octave code runtime",
     long_about = r#"
 RunMat is a modern, high-performance runtime for MATLAB/Octave code built 
 by Dystr (https://dystr.com).
@@ -55,7 +54,7 @@ Examples:
   runmat                                   # Start interactive REPL with JIT
   runmat --no-jit                          # Start REPL with interpreter only
   runmat --gc-preset low-latency           # Optimize GC for low latency
-  runmat script.m                          # Execute MATLAB script
+  runmat script.m                          # Execute MATLAB/Octave script
   runmat --install-kernel                  # Install as Jupyter kernel
   runmat kernel                            # Start Jupyter kernel
   runmat kernel-connection connection.json # Start with connection file
@@ -299,6 +298,11 @@ enum Commands {
         #[command(subcommand)]
         config_command: ConfigCommand,
     },
+    /// Package manager (coming soon)
+    Pkg {
+        #[command(subcommand)]
+        pkg_command: PkgCommand,
+    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -364,6 +368,20 @@ enum ConfigCommand {
     },
     /// Show configuration file locations
     Paths,
+}
+
+#[derive(Subcommand, Clone)]
+enum PkgCommand {
+    /// Add a dependency (coming soon)
+    Add { name: String },
+    /// Remove a dependency (coming soon)
+    Remove { name: String },
+    /// Install dependencies (coming soon)
+    Install,
+    /// Update dependencies (coming soon)
+    Update,
+    /// Publish current package (coming soon)
+    Publish,
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -479,7 +497,18 @@ async fn main() -> Result<()> {
     }
 
     // Load configuration with CLI overrides
-    let mut config = load_configuration(&cli)?;
+    let mut config = match load_configuration(&cli) {
+        Ok(c) => c,
+        Err(e) => {
+            // Be forgiving for pkg commands: if config path is a directory `.runmat`, continue with defaults
+            if matches!(cli.command, Some(Commands::Pkg { .. })) {
+                eprintln!("Warning: {e}. Using default configuration for pkg command.");
+                RunMatConfig::default()
+            } else {
+                return Err(e);
+            }
+        }
+    };
     apply_cli_overrides(&mut config, &cli);
 
     // Initialize logging based on final config
@@ -498,6 +527,9 @@ async fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .filter_level(log_level)
         .init();
+
+    // Register a minimal in-process acceleration provider so gpuArray/gather work out of the box
+    runmat_accelerate::simple_provider::register_inprocess_provider();
 
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
     debug!("Configuration loaded: {config:?}");
@@ -579,8 +611,16 @@ fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
         let is_from_env = config_from_env.as_ref() == Some(config_file);
 
         if config_file.exists() {
-            info!("Loading configuration from: {}", config_file.display());
-            return ConfigLoader::load_from_file(config_file);
+            if config_file.is_dir() {
+                // Ignore directories per policy; fall back to standard loader
+                info!(
+                    "Config path is a directory, ignoring: {}",
+                    config_file.display()
+                );
+            } else {
+                info!("Loading configuration from: {}", config_file.display());
+                return ConfigLoader::load_from_file(config_file);
+            }
         } else if !is_from_env {
             // Only exit if explicitly specified via CLI, not env var
             error!(
@@ -593,7 +633,35 @@ fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
     }
 
     // Use the standard loader (which will also check RUSTMAT_CONFIG but gracefully)
-    ConfigLoader::load()
+    match ConfigLoader::load() {
+        Ok(c) => Ok(c),
+        Err(e) => {
+            // Ignore directory config paths and fall back to defaults
+            if let Ok(conf_env) = std::env::var("RUSTMAT_CONFIG") {
+                let p = PathBuf::from(conf_env);
+                if p.is_dir() {
+                    info!(
+                        "Config path from env is a directory, ignoring: {}",
+                        p.display()
+                    );
+                    return Ok(RunMatConfig::default());
+                }
+            }
+
+            if let Some(home) = dirs::home_dir() {
+                let dir = home.join(".runmat");
+                if dir.is_dir() {
+                    info!(
+                        "Home config path is a directory, ignoring: {}",
+                        dir.display()
+                    );
+                    return Ok(RunMatConfig::default());
+                }
+            }
+
+            Err(e)
+        }
+    }
 }
 
 /// Apply CLI argument overrides to configuration
@@ -762,6 +830,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
             height,
         } => execute_plot_command(mode, width, height, config).await,
         Commands::Config { config_command } => execute_config_command(config_command, config).await,
+        Commands::Pkg { pkg_command } => execute_pkg_command(pkg_command).await,
     }
 }
 
@@ -1453,6 +1522,18 @@ async fn execute_config_command(
                 }
             }
         }
+    }
+    Ok(())
+}
+
+async fn execute_pkg_command(pkg_command: PkgCommand) -> Result<()> {
+    let msg = "RunMat package manager is coming soon. Track progress in the repo.";
+    match pkg_command {
+        PkgCommand::Add { name } => println!("pkg add {name}: {msg}"),
+        PkgCommand::Remove { name } => println!("pkg remove {name}: {msg}"),
+        PkgCommand::Install => println!("pkg install: {msg}"),
+        PkgCommand::Update => println!("pkg update: {msg}"),
+        PkgCommand::Publish => println!("pkg publish: {msg}"),
     }
     Ok(())
 }

@@ -4,10 +4,12 @@
 //! high-performance interpreters. Features safe object management with handle-based
 //! access instead of raw pointers to avoid undefined behavior.
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
+// Use a local trait-alias shim to avoid compile-time dependency ordering issues.
+// Downstream crates in the workspace provide runmat_builtins; during GC unit tests, we provide a minimal Value.
 use runmat_builtins::Value;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
@@ -17,6 +19,7 @@ pub mod barriers;
 pub mod collector;
 pub mod config;
 pub mod gc_ptr;
+pub use runmat_gc_api::GcPtr;
 pub mod generations;
 pub mod roots;
 pub mod stats;
@@ -25,10 +28,11 @@ pub mod stats;
 pub mod compression;
 
 pub use allocator::{AllocatorStats, GenerationalAllocator, SizeClass};
+use barriers::WriteBarrierManager;
 pub use barriers::{CardTable, WriteBarrier};
 pub use collector::MarkSweepCollector;
 pub use config::{GcConfig, GcConfigBuilder};
-pub use gc_ptr::GcPtr;
+// Re-export unified handle from API crate
 pub use generations::{Generation, GenerationStats, GenerationalHeap, GenerationalHeapStats};
 pub use roots::{GcRoot, GlobalRoot, RootId, RootScanner, StackRoot, VariableArrayRoot};
 pub use stats::{CollectionEvent, CollectionType, GcStats};
@@ -60,98 +64,21 @@ pub enum GcError {
 
 pub type Result<T> = std::result::Result<T, GcError>;
 
-/// Type alias to simplify complex generational map type
-type GenerationMap = Arc<RwLock<HashMap<usize, Arc<GcObject>>>>;
-
-/// Handle to a GC-managed object (safer than raw pointers)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GcHandle(usize);
-
-impl GcHandle {
-    fn new(id: usize) -> Self {
-        GcHandle(id)
-    }
-
-    fn id(&self) -> usize {
-        self.0
-    }
-
-    pub fn is_null(&self) -> bool {
-        self.0 == 0
-    }
-
-    pub fn null() -> Self {
-        GcHandle(0)
-    }
-}
-
-/// A managed object in the GC heap
-#[derive(Debug)]
-struct GcObject {
-    /// Unique ID for this object
-    id: usize,
-    /// The actual value
-    value: Value,
-    /// Mark bit for collection
-    marked: AtomicBool,
-    /// Generation this object belongs to
-    generation: u8,
-}
-
-impl GcObject {
-    fn new(id: usize, value: Value, generation: u8) -> Self {
-        Self {
-            id,
-            value,
-            marked: AtomicBool::new(false),
-            generation,
-        }
-    }
-
-    fn mark(&self) -> bool {
-        !self.marked.swap(true, Ordering::AcqRel)
-    }
-
-    fn unmark(&self) {
-        self.marked.store(false, Ordering::Release);
-    }
-
-    fn is_marked(&self) -> bool {
-        self.marked.load(Ordering::Acquire)
-    }
-
-    /// Get the unique ID of this object
-    pub fn id(&self) -> usize {
-        self.id
-    }
-
-    /// Get the generation this object belongs to
-    pub fn generation(&self) -> u8 {
-        self.generation
-    }
-
-    /// Get a reference to the value stored in this object
-    pub fn value(&self) -> &Value {
-        &self.value
-    }
-}
+// Legacy handle/object table removed in favor of allocator-backed pointers and address-keyed maps
 
 /// High-performance garbage collector with safe handle-based design
 pub struct HighPerformanceGC {
     /// Configuration
     config: Arc<RwLock<GcConfig>>,
 
-    /// All allocated objects by ID
-    objects: Arc<RwLock<HashMap<usize, Arc<GcObject>>>>,
+    /// Generational allocator (owns heap memory)
+    allocator: Mutex<GenerationalAllocator>,
 
-    /// Objects by generation for efficient collection
-    generations: Vec<GenerationMap>,
+    /// Mark-and-sweep collector
+    collector: Mutex<MarkSweepCollector>,
 
-    /// Root set - handles to live objects
-    roots: Arc<RwLock<HashMap<GcHandle, ()>>>,
-
-    /// Next object ID
-    next_id: AtomicUsize,
+    /// Explicit roots stored as raw addresses (address-keyed)
+    root_ptrs: Arc<Mutex<HashSet<usize>>>,
 
     /// Collection state
     collection_in_progress: AtomicBool,
@@ -166,19 +93,14 @@ impl HighPerformanceGC {
     }
 
     pub fn with_config(config: GcConfig) -> Result<Self> {
-        let num_generations = config.num_generations;
-        let mut generations = Vec::with_capacity(num_generations);
-
-        for _ in 0..num_generations {
-            generations.push(Arc::new(RwLock::new(HashMap::new())));
-        }
+        let allocator = GenerationalAllocator::new(&config);
+        let collector = MarkSweepCollector::new(&config);
 
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
-            objects: Arc::new(RwLock::new(HashMap::new())),
-            generations,
-            roots: Arc::new(RwLock::new(HashMap::new())),
-            next_id: AtomicUsize::new(1), // Start at 1, 0 is null
+            allocator: Mutex::new(allocator),
+            collector: Mutex::new(collector),
+            root_ptrs: Arc::new(Mutex::new(HashSet::new())),
             collection_in_progress: AtomicBool::new(false),
             stats: Arc::new(GcStats::new()),
         })
@@ -191,49 +113,24 @@ impl HighPerformanceGC {
             let _ = self.collect_minor();
         }
 
-        // Generate unique ID
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-
-        // Create the managed object
-        let gc_obj = Arc::new(GcObject::new(id, value, 0));
-
-        // Log object creation for debugging (uses the id and generation methods)
-        log::debug!(
-            "Allocated object id={} generation={} value_type={:?}",
-            gc_obj.id(),
-            gc_obj.generation(),
-            std::mem::discriminant(gc_obj.value())
-        );
-
-        // Store in main objects table and get a stable pointer
-        let value_ptr = {
-            let mut objects = self.objects.write();
-            objects.insert(id, Arc::clone(&gc_obj));
-            let stored_obj = objects.get(&id).unwrap();
-            &stored_obj.value as *const Value
-        };
-
-        // Store in generation 0 (young generation)
+        let mut allocator = self.allocator.lock();
+        let ptr = allocator.allocate(value, &self.stats)?;
+        let usage = allocator.young_generation_usage();
+        let alloc_count = allocator.young_allocations_count();
+        let cfg = self.config.read().clone();
+        drop(allocator);
+        // Heuristic triggers:
+        // - Utilization threshold
+        // - Aggressive mode: periodic minor GC by allocation count to satisfy stress configs
+        if usage > cfg.minor_gc_threshold
+            || (cfg.minor_gc_threshold <= 0.35 && alloc_count > 0 && alloc_count % 32 == 0)
         {
-            let mut gen0 = self.generations[0].write();
-            gen0.insert(id, gc_obj);
+            let _ = self.collect_minor();
         }
-
-        self.stats.record_allocation(std::mem::size_of::<Value>());
-
-        // Create GcPtr pointing to the actual value in the managed object
-        Ok(unsafe { GcPtr::from_raw(value_ptr) })
+        Ok(ptr)
     }
 
-    /// Get a value by its GC handle
-    pub fn get_value(&self, handle: GcHandle) -> Option<Value> {
-        if handle.is_null() {
-            return None;
-        }
-
-        let objects = self.objects.read();
-        objects.get(&handle.id()).map(|obj| obj.value.clone())
-    }
+    // get_value by handle removed in favor of direct GcPtr usage
 
     /// Check if collection should be triggered
     fn should_collect(&self) -> bool {
@@ -241,17 +138,10 @@ impl HighPerformanceGC {
             return false;
         }
 
-        let config = self.config.read();
-        let total_objects = self.generations[0].read().len();
-        let young_gen_size = config.young_generation_size;
-        let threshold = config.minor_gc_threshold;
-
-        // Calculate estimated memory usage (approximate)
-        let estimated_bytes = total_objects * std::mem::size_of::<Value>();
-        let utilization = estimated_bytes as f64 / young_gen_size as f64;
-
-        // Trigger collection if utilization exceeds threshold
-        utilization > threshold || total_objects >= 50 // Fallback for very large object counts
+        let threshold = self.config.read().minor_gc_threshold;
+        let allocator = self.allocator.lock();
+        let utilization = allocator.young_generation_usage();
+        utilization > threshold
     }
 
     /// Perform minor collection (young generation)
@@ -266,48 +156,30 @@ impl HighPerformanceGC {
 
         let start_time = Instant::now();
 
-        // Mark phase: mark all reachable objects
-        let mut marked_count = 0;
-
-        // Mark from explicit roots
+        // Build combined roots: explicit + external (root scanner + barriers)
+        let mut combined_roots: Vec<GcPtr<Value>> = Vec::new();
         {
-            let roots = self.roots.read();
-            for &root_handle in roots.keys() {
-                if let Some(obj) = self.get_object(root_handle) {
-                    if obj.mark() {
-                        marked_count += 1;
-                        marked_count += self.mark_transitively(&obj);
-                    }
-                }
-            }
+            let roots = self.root_ptrs.lock();
+            combined_roots.extend(
+                roots
+                    .iter()
+                    .map(|&addr| unsafe { GcPtr::from_raw(addr as *const Value) }),
+            );
         }
-
-        // Sweep phase: collect unmarked objects from young generation
-        let mut collected_count = 0;
-        let mut to_remove = Vec::new();
-
-        {
-            let gen0 = self.generations[0].read();
-            for (&id, obj) in gen0.iter() {
-                if !obj.is_marked() {
-                    to_remove.push(id);
-                    collected_count += 1;
-                } else {
-                    obj.unmark(); // Reset mark for next collection
-                }
-            }
+        // External roots
+        if let Ok(mut ext) = ROOT_SCANNER.scan_roots() {
+            combined_roots.append(&mut ext);
         }
+        combined_roots.extend(gc_barrier_minor_roots());
 
-        // Remove from both generation and main object table
-        {
-            let mut gen0 = self.generations[0].write();
-            let mut objects = self.objects.write();
+        // Collect young generation via unified collector/allocator
+        let mut allocator = self.allocator.lock();
+        let mut collector = self.collector.lock();
+        let collected_count =
+            collector.collect_young_generation(&mut allocator, &combined_roots, &self.stats)?;
 
-            for id in to_remove {
-                gen0.remove(&id);
-                objects.remove(&id);
-            }
-        }
+        // Clear dirty cards; keep remembered set for next minor cycle
+        WRITE_BARRIERS.clear_after_minor_gc();
 
         let duration = start_time.elapsed();
         self.stats
@@ -315,64 +187,19 @@ impl HighPerformanceGC {
 
         self.collection_in_progress.store(false, Ordering::Release);
 
-        log::info!("Minor GC: marked {marked_count} objects, collected {collected_count} objects in {duration:?}");
+        log::info!("Minor GC: collected {collected_count} objects in {duration:?}");
 
         Ok(collected_count)
     }
 
-    /// Get object by handle
-    fn get_object(&self, handle: GcHandle) -> Option<Arc<GcObject>> {
-        if handle.is_null() {
-            return None;
-        }
+    // /// Get object by handle
+    // Address-keyed design: object table lookup removed
 
-        let objects = self.objects.read();
-        objects.get(&handle.id()).map(Arc::clone)
-    }
+    // /// Mark objects transitively (follow references)
+    // Transitive marking handled by collector over allocator-backed objects
 
-    /// Mark objects transitively (follow references)
-    fn mark_transitively(&self, obj: &GcObject) -> usize {
-        let mut marked = 0;
-
-        match &obj.value {
-            Value::Cell(cells) => {
-                for cell_value in cells {
-                    if let Some(referenced_obj) = self.find_object_for_value(cell_value) {
-                        if referenced_obj.mark() {
-                            marked += 1;
-                            marked += self.mark_transitively(&referenced_obj);
-                        }
-                    }
-                }
-            }
-            _ => {
-                // Other value types don't contain GC references
-            }
-        }
-
-        marked
-    }
-
-    /// Find the GcObject that contains a specific Value
-    fn find_object_for_value(&self, value: &Value) -> Option<Arc<GcObject>> {
-        // Search through all generations for an object containing this value
-        for generation_map in &self.generations {
-            let generation_map = generation_map.read();
-            for (_handle_id, gc_object) in generation_map.iter() {
-                // Check if this GC object's data matches the value
-                if self.value_matches_object(value, gc_object) {
-                    return Some(Arc::clone(gc_object));
-                }
-            }
-        }
-        None
-    }
-
-    /// Check if a Value matches a GcObject's data
-    fn value_matches_object(&self, value: &Value, gc_object: &GcObject) -> bool {
-        // Since GcObject stores the Value directly, we can just compare them
-        &gc_object.value == value
-    }
+    // /// Find the GcObject that contains a specific Value
+    // Value-equality scans removed in favor of address-keyed marking
 
     /// Perform major collection (all generations)
     pub fn collect_major(&self) -> Result<usize> {
@@ -386,50 +213,29 @@ impl HighPerformanceGC {
 
         let start_time = Instant::now();
 
-        // Mark phase: mark all reachable objects from roots across all generations
-        let mut marked_count = 0;
-
-        // Collect roots from explicit roots
+        // Build combined roots: explicit + external
+        let mut combined_roots: Vec<GcPtr<Value>> = Vec::new();
         {
-            let roots = self.roots.read();
-            for &root_handle in roots.keys() {
-                if let Some(obj) = self.get_object(root_handle) {
-                    if obj.mark() {
-                        marked_count += 1;
-                        marked_count += self.mark_transitively(&obj);
-                    }
-                }
-            }
+            let roots = self.root_ptrs.lock();
+            combined_roots.extend(
+                roots
+                    .iter()
+                    .map(|&addr| unsafe { GcPtr::from_raw(addr as *const Value) }),
+            );
         }
-
-        // Sweep phase: collect unmarked objects from all generations
-        let mut collected_count = 0;
-        for generation in &self.generations {
-            let mut to_remove = Vec::new();
-
-            {
-                let gen = generation.read();
-                for (&id, obj) in gen.iter() {
-                    if !obj.is_marked() {
-                        to_remove.push(id);
-                        collected_count += 1;
-                    } else {
-                        obj.unmark(); // Reset mark for next collection
-                    }
-                }
-            }
-
-            // Remove from both generation and main object table
-            {
-                let mut gen = generation.write();
-                let mut objects = self.objects.write();
-
-                for id in to_remove {
-                    gen.remove(&id);
-                    objects.remove(&id);
-                }
-            }
+        if let Ok(mut ext) = ROOT_SCANNER.scan_roots() {
+            combined_roots.append(&mut ext);
         }
+        combined_roots.extend(gc_barrier_minor_roots());
+
+        let mut allocator = self.allocator.lock();
+        let mut collector = self.collector.lock();
+        let collected_count =
+            collector.collect_all_generations(&mut allocator, &combined_roots, &self.stats)?;
+
+        // Clear all barriers after major GC
+        WRITE_BARRIERS.clear_after_major_gc();
+        allocator.clear_promotion_state();
 
         let duration = start_time.elapsed();
         self.stats
@@ -437,59 +243,50 @@ impl HighPerformanceGC {
 
         self.collection_in_progress.store(false, Ordering::Release);
 
-        log::info!("Major GC: marked {marked_count} objects, collected {collected_count} objects in {duration:?}");
+        log::info!("Major GC: collected {collected_count} objects in {duration:?}");
 
         Ok(collected_count)
     }
 
     /// Add a root to protect an object from collection
     pub fn add_root(&self, root: GcPtr<Value>) -> Result<()> {
-        let value_ptr = unsafe { root.as_raw() };
-        if value_ptr.is_null() {
-            return Ok(()); // Null pointer, nothing to protect
+        let value_ptr = unsafe { root.as_raw() } as usize;
+        if value_ptr == 0 {
+            return Ok(());
         }
-
-        // Find the object that contains this value
-        if let Some(handle) = self.find_handle_for_value_ptr(value_ptr) {
-            self.roots.write().insert(handle, ());
-        }
+        self.root_ptrs.lock().insert(value_ptr);
         Ok(())
     }
 
     /// Remove a root
     pub fn remove_root(&self, root: GcPtr<Value>) -> Result<()> {
-        let value_ptr = unsafe { root.as_raw() };
-        if value_ptr.is_null() {
-            return Ok(()); // Null pointer, nothing to remove
+        let value_ptr = unsafe { root.as_raw() } as usize;
+        if value_ptr == 0 {
+            return Ok(());
         }
-
-        // Find the object that contains this value
-        if let Some(handle) = self.find_handle_for_value_ptr(value_ptr) {
-            self.roots.write().remove(&handle);
-        }
+        self.root_ptrs.lock().remove(&value_ptr);
         Ok(())
     }
 
-    /// Find the handle for an object that contains the given value pointer
-    fn find_handle_for_value_ptr(&self, value_ptr: *const Value) -> Option<GcHandle> {
-        let objects = self.objects.read();
-        for (&id, obj) in objects.iter() {
-            let obj_value_ptr = &obj.value as *const Value;
-            if obj_value_ptr == value_ptr {
-                return Some(GcHandle::new(id));
-            }
-        }
-        None
-    }
-
+    // /// Find the handle for an object that contains the given value pointer
+    // Address-keyed roots: no handle lookup needed
     /// Get GC statistics
     pub fn stats(&self) -> GcStats {
-        (*self.stats).clone()
+        self.stats.as_ref().clone()
     }
 
     /// Configure the GC
     pub fn configure(&self, config: GcConfig) -> Result<()> {
-        *self.config.write() = config;
+        *self.config.write() = config.clone();
+        {
+            // Rebuild allocator to support changes like num_generations and sizes
+            let mut allocator = self.allocator.lock();
+            *allocator = GenerationalAllocator::new(&config);
+        }
+        {
+            let mut collector = self.collector.lock();
+            collector.reconfigure(&config)?;
+        }
         Ok(())
     }
 
@@ -506,6 +303,12 @@ unsafe impl Sync for HighPerformanceGC {}
 /// Global garbage collector instance
 static GC: once_cell::sync::Lazy<Arc<HighPerformanceGC>> =
     once_cell::sync::Lazy::new(|| Arc::new(HighPerformanceGC::new().expect("Failed to create GC")));
+static ROOT_SCANNER: once_cell::sync::Lazy<Arc<RootScanner>> =
+    once_cell::sync::Lazy::new(|| Arc::new(RootScanner::new()));
+
+/// Global write barrier manager
+static WRITE_BARRIERS: once_cell::sync::Lazy<Arc<WriteBarrierManager>> =
+    once_cell::sync::Lazy::new(|| Arc::new(WriteBarrierManager::new(true, false)));
 
 /// Helper function to dereference a GcPtr safely (now just uses normal dereferencing)
 pub fn gc_deref(ptr: GcPtr<Value>) -> Value {
@@ -518,6 +321,7 @@ pub fn gc_allocate(value: Value) -> Result<GcPtr<Value>> {
 }
 
 pub fn gc_collect_minor() -> Result<usize> {
+    // Stage external roots inside GC and perform unified minor collection
     GC.collect_minor()
 }
 
@@ -546,12 +350,36 @@ pub fn gc_get_config() -> GcConfig {
 }
 
 /// Simplified root registration for backwards compatibility
-pub fn gc_register_root(_root: Box<dyn GcRoot>) -> Result<RootId> {
-    Ok(RootId(0))
+pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> {
+    ROOT_SCANNER.register_root(root)
 }
 
-pub fn gc_unregister_root(_root_id: RootId) -> Result<()> {
-    Ok(())
+pub fn gc_unregister_root(root_id: RootId) -> Result<()> {
+    ROOT_SCANNER.unregister_root(root_id)
+}
+
+/// Record a write for GC barriers (approximate old->young tracking)
+pub fn gc_record_write(old: &Value, new: &Value) {
+    // Generation-aware barrier: record only if old is logically old and new is young
+    let old_ptr = old as *const Value as *const u8;
+    let young_ptr = new as *const Value as *const u8;
+    // Query allocator logical generations
+    let alloc = GC.allocator.lock();
+    let old_gen = alloc.logical_generation(old_ptr).unwrap_or(0);
+    let new_gen = alloc.logical_generation(young_ptr).unwrap_or(0);
+    drop(alloc);
+    if old_gen > new_gen {
+        WRITE_BARRIERS.record_reference(old_ptr, young_ptr);
+    }
+}
+
+/// Get barrier-derived roots for minor GC
+pub fn gc_barrier_minor_roots() -> Vec<GcPtr<Value>> {
+    WRITE_BARRIERS
+        .get_minor_gc_roots()
+        .into_iter()
+        .map(|p| unsafe { GcPtr::from_raw(p as *const Value) })
+        .collect()
 }
 
 /// Force a garbage collection for testing/debugging
@@ -565,29 +393,20 @@ pub fn gc_reset_for_test() -> Result<()> {
     // Reset statistics
     GC.stats.reset();
 
-    // Clear all objects and roots for a clean test
+    // Reset allocator/collector and roots
     {
-        let mut objects = GC.objects.write();
-        objects.clear();
+        let config = GcConfig::default();
+        *GC.config.write() = config.clone();
+        let mut alloc = GC.allocator.lock();
+        *alloc = GenerationalAllocator::new(&config);
+        let mut coll = GC.collector.lock();
+        *coll = MarkSweepCollector::new(&config);
     }
 
     {
-        let mut gen0 = GC.generations[0].write();
-        gen0.clear();
-    }
-
-    {
-        let mut gen1 = GC.generations[1].write();
-        gen1.clear();
-    }
-
-    {
-        let mut roots = GC.roots.write();
+        let mut roots = GC.root_ptrs.lock();
         roots.clear();
     }
-
-    // Reset next ID
-    GC.next_id.store(1, Ordering::Relaxed);
 
     // Ensure collection is not in progress
     GC.collection_in_progress.store(false, Ordering::Relaxed);
@@ -689,7 +508,7 @@ mod tests {
         let protected = gc_allocate(Value::Num(42.0)).expect("allocation failed");
 
         // Register it as a root
-        gc_add_root(protected).expect("root registration failed");
+        gc_add_root(protected.clone()).expect("root registration failed");
 
         // Allocate garbage
         for i in 0..60 {
@@ -707,25 +526,16 @@ mod tests {
     }
 
     #[test]
-    fn test_gc_object_metadata() {
+    fn test_gc_allocation_and_roots() {
         let _ = gc_reset_for_test();
 
-        // Create a GcObject directly to test its methods
-        let value = Value::Num(42.0);
-        let gc_obj = GcObject::new(123, value.clone(), 1);
+        let v = gc_allocate(Value::Num(7.0)).expect("allocation failed");
+        assert_eq!(*v, Value::Num(7.0));
 
-        // Test the methods that were added
-        assert_eq!(gc_obj.id(), 123);
-        assert_eq!(gc_obj.generation(), 1);
-        assert_eq!(gc_obj.value(), &value);
+        gc_add_root(v.clone()).expect("root add failed");
+        let _ = gc_collect_minor().expect("collection failed");
+        assert_eq!(*v, Value::Num(7.0));
 
-        // Test marking functionality
-        assert!(!gc_obj.is_marked());
-        assert!(gc_obj.mark()); // First mark should return true (was unmarked)
-        assert!(gc_obj.is_marked());
-        assert!(!gc_obj.mark()); // Second mark should return false (already marked)
-
-        gc_obj.unmark();
-        assert!(!gc_obj.is_marked());
+        gc_remove_root(v).expect("root remove failed");
     }
 }

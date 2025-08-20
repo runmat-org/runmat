@@ -1,25 +1,25 @@
 #![cfg(feature = "blas-lapack")]
 
-use runmat_builtins::{Matrix, Value};
+use runmat_builtins::{CellArray, Tensor as Matrix, Value};
 use runmat_runtime::{blas::*, call_builtin, lapack::*, matrix_transpose};
 
 #[test]
 fn test_blas_matrix_multiplication() {
-    let a = Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-    let b = Matrix::new(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
+    let a = Matrix::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let b = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
 
     let result = blas_matrix_mul(&a, &b).unwrap();
 
     // [1 2] * [2 1] = [4 5]
     // [3 4]   [1 2]   [10 11]
-    assert_eq!(result.data, vec![4.0, 5.0, 10.0, 11.0]);
-    assert_eq!(result.rows, 2);
-    assert_eq!(result.cols, 2);
+    assert_eq!(result.data, vec![4.0, 10.0, 5.0, 11.0]);
+    assert_eq!(result.rows(), 2);
+    assert_eq!(result.cols(), 2);
 }
 
 #[test]
 fn test_blas_matrix_vector_multiplication() {
-    let matrix = Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let matrix = Matrix::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let vector = vec![2.0, 3.0];
 
     let result = blas_matrix_vector_mul(&matrix, &vector).unwrap();
@@ -69,7 +69,7 @@ fn test_lapack_linear_solve() {
     // x + 3y = 6
     // Solution: x = 1.8, y = 1.4
 
-    let a = Matrix::new(vec![2.0, 1.0, 1.0, 3.0], 2, 2).unwrap();
+    let a = Matrix::new_2d(vec![2.0, 1.0, 1.0, 3.0], 2, 2).unwrap();
     let b = vec![5.0, 6.0];
 
     let solution = lapack_solve_linear_system(&a, &b).unwrap();
@@ -80,27 +80,27 @@ fn test_lapack_linear_solve() {
 
 #[test]
 fn test_lapack_lu_decomposition() {
-    let matrix = Matrix::new(vec![4.0, 3.0, 2.0, 1.0], 2, 2).unwrap();
+    let matrix = Matrix::new_2d(vec![4.0, 3.0, 2.0, 1.0], 2, 2).unwrap();
 
     let lu = lapack_lu_decomposition(&matrix).unwrap();
 
     // Verify dimensions
-    assert_eq!(lu.lu_matrix.rows, 2);
-    assert_eq!(lu.lu_matrix.cols, 2);
+    assert_eq!(lu.lu_matrix.rows(), 2);
+    assert_eq!(lu.lu_matrix.cols(), 2);
     assert_eq!(lu.pivots.len(), 2);
 }
 
 #[test]
 fn test_lapack_qr_decomposition() {
-    let matrix = Matrix::new(vec![1.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
+    let matrix = Matrix::new_2d(vec![1.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
 
     let qr = lapack_qr_decomposition(&matrix).unwrap();
 
     // Verify dimensions
-    assert_eq!(qr.q.rows, 2);
-    assert_eq!(qr.q.cols, 2);
-    assert_eq!(qr.r.rows, 2);
-    assert_eq!(qr.r.cols, 2);
+    assert_eq!(qr.q.rows(), 2);
+    assert_eq!(qr.q.cols(), 2);
+    assert_eq!(qr.r.rows(), 2);
+    assert_eq!(qr.r.cols(), 2);
 
     // Q should be orthogonal (Q^T * Q = I)
     let qt_q = blas_matrix_mul(&matrix_transpose(&qr.q), &qr.q).unwrap();
@@ -117,7 +117,7 @@ fn test_lapack_qr_decomposition() {
 fn test_lapack_eigenvalues() {
     // Test with a symmetric matrix: [[2, 1], [1, 2]]
     // Eigenvalues should be 1 and 3
-    let matrix = Matrix::new(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
+    let matrix = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
 
     let eig = lapack_eigenvalues(&matrix, false).unwrap();
 
@@ -135,7 +135,7 @@ fn test_lapack_eigenvalues() {
 fn test_lapack_determinant() {
     // Test determinant of [[2, 1], [1, 2]]
     // det = 2*2 - 1*1 = 3
-    let matrix = Matrix::new(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
+    let matrix = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
 
     let det = lapack_determinant(&matrix).unwrap();
 
@@ -146,7 +146,7 @@ fn test_lapack_determinant() {
 fn test_lapack_matrix_inverse() {
     // Test inverse of [[2, 1], [1, 2]]
     // Inverse should be [[2/3, -1/3], [-1/3, 2/3]]
-    let matrix = Matrix::new(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
+    let matrix = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
 
     let inv = lapack_matrix_inverse(&matrix).unwrap();
 
@@ -169,20 +169,30 @@ fn test_lapack_matrix_inverse() {
 #[test]
 fn test_builtin_blas_functions() {
     // Test BLAS matrix multiplication builtin
-    let a = Matrix::new(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-    let b = Matrix::new(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
+    let a = Matrix::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let b = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
 
-    let result = call_builtin("blas_matmul", &[Value::Matrix(a), Value::Matrix(b)]).unwrap();
+    let result = call_builtin("blas_matmul", &[Value::Tensor(a), Value::Tensor(b)]).unwrap();
 
-    if let Value::Matrix(m) = result {
-        assert_eq!(m.data, vec![4.0, 5.0, 10.0, 11.0]);
+    if let Value::Tensor(m) = result {
+        assert_eq!(m.data, vec![4.0, 10.0, 5.0, 11.0]);
     } else {
         panic!("Expected matrix result");
     }
 
     // Test dot product builtin
-    let vec_a = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
-    let vec_b = vec![Value::Num(4.0), Value::Num(5.0), Value::Num(6.0)];
+    let vec_a = CellArray::new(
+        vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)],
+        1,
+        3,
+    )
+    .unwrap();
+    let vec_b = CellArray::new(
+        vec![Value::Num(4.0), Value::Num(5.0), Value::Num(6.0)],
+        1,
+        3,
+    )
+    .unwrap();
 
     let dot_result = call_builtin("dot", &[Value::Cell(vec_a), Value::Cell(vec_b)]).unwrap();
 
@@ -196,14 +206,14 @@ fn test_builtin_blas_functions() {
 #[test]
 fn test_builtin_lapack_functions() {
     // Test linear solve builtin
-    let a = Matrix::new(vec![2.0, 1.0, 1.0, 3.0], 2, 2).unwrap();
-    let b_vec = vec![Value::Num(5.0), Value::Num(6.0)];
+    let a = Matrix::new_2d(vec![2.0, 1.0, 1.0, 3.0], 2, 2).unwrap();
+    let b_vec = CellArray::new(vec![Value::Num(5.0), Value::Num(6.0)], 2, 1).unwrap();
 
-    let solution = call_builtin("solve", &[Value::Matrix(a), Value::Cell(b_vec)]).unwrap();
+    let solution = call_builtin("solve", &[Value::Tensor(a), Value::Cell(b_vec)]).unwrap();
 
     if let Value::Cell(sol) = solution {
-        assert_eq!(sol.len(), 2);
-        if let (Value::Num(x), Value::Num(y)) = (&sol[0], &sol[1]) {
+        assert_eq!(sol.data.len(), 2);
+        if let (Value::Num(x), Value::Num(y)) = (&*sol.data[0], &*sol.data[1]) {
             assert!((x - 1.8).abs() < 1e-10);
             assert!((y - 1.4).abs() < 1e-10);
         } else {
@@ -214,8 +224,8 @@ fn test_builtin_lapack_functions() {
     }
 
     // Test determinant builtin
-    let matrix = Matrix::new(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
-    let det_result = call_builtin("det", &[Value::Matrix(matrix)]).unwrap();
+    let matrix = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
+    let det_result = call_builtin("det", &[Value::Tensor(matrix)]).unwrap();
 
     if let Value::Num(det) = det_result {
         assert!((det - 3.0).abs() < 1e-10);
@@ -227,13 +237,13 @@ fn test_builtin_lapack_functions() {
 #[test]
 fn test_error_handling() {
     // Test dimension mismatch errors
-    let a = Matrix::new(vec![1.0, 2.0], 1, 2).unwrap();
-    let b = Matrix::new(vec![1.0, 2.0, 3.0], 1, 3).unwrap();
+    let a = Matrix::new_2d(vec![1.0, 2.0], 1, 2).unwrap();
+    let b = Matrix::new_2d(vec![1.0, 2.0, 3.0], 1, 3).unwrap();
 
     assert!(blas_matrix_mul(&a, &b).is_err());
 
     // Test non-square matrix errors
-    let non_square = Matrix::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3).unwrap();
+    let non_square = Matrix::new_2d(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3).unwrap();
     assert!(lapack_determinant(&non_square).is_err());
     assert!(lapack_matrix_inverse(&non_square).is_err());
 

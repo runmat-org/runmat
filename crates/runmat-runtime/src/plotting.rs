@@ -3,7 +3,7 @@
 //! These functions integrate with the configuration system to provide
 //! interactive GUI plotting, static exports, and Jupyter notebook support.
 
-use runmat_builtins::Matrix;
+use runmat_builtins::Tensor;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::figure::PlotElement;
 use runmat_plot::plots::*;
@@ -176,12 +176,12 @@ fn jupyter_export(_figure: &mut Figure) -> Result<String, String> {
 }
 
 /// Extract numeric vector from a Matrix
-fn extract_numeric_vector(matrix: &Matrix) -> Vec<f64> {
+fn extract_numeric_vector(matrix: &Tensor) -> Vec<f64> {
     matrix.data.clone()
 }
 
 #[runtime_builtin(name = "plot")]
-fn plot_builtin(x: Matrix, y: Matrix) -> Result<String, String> {
+fn plot_builtin(x: Tensor, y: Tensor) -> Result<String, String> {
     let x_data = extract_numeric_vector(&x);
     let y_data = extract_numeric_vector(&y);
 
@@ -210,7 +210,7 @@ fn plot_builtin(x: Matrix, y: Matrix) -> Result<String, String> {
 }
 
 #[runtime_builtin(name = "scatter")]
-fn scatter_builtin(x: Matrix, y: Matrix) -> Result<String, String> {
+fn scatter_builtin(x: Tensor, y: Tensor) -> Result<String, String> {
     let x_data = extract_numeric_vector(&x);
     let y_data = extract_numeric_vector(&y);
 
@@ -239,7 +239,7 @@ fn scatter_builtin(x: Matrix, y: Matrix) -> Result<String, String> {
 }
 
 #[runtime_builtin(name = "bar")]
-fn bar_builtin(values: Matrix) -> Result<String, String> {
+fn bar_builtin(values: Tensor) -> Result<String, String> {
     let data = extract_numeric_vector(&values);
 
     // Create simple string labels
@@ -262,7 +262,7 @@ fn bar_builtin(values: Matrix) -> Result<String, String> {
 }
 
 #[runtime_builtin(name = "hist")]
-fn hist_builtin(values: Matrix) -> Result<String, String> {
+fn hist_builtin(values: Tensor) -> Result<String, String> {
     let data = extract_numeric_vector(&values);
     let bins = 10; // Default number of bins
 
@@ -285,7 +285,7 @@ fn hist_builtin(values: Matrix) -> Result<String, String> {
 // 3D Plotting Functions
 
 #[runtime_builtin(name = "surf")]
-fn surf_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
+fn surf_builtin(x: Tensor, y: Tensor, z: Tensor) -> Result<String, String> {
     // Convert matrices to 3D surface format
     // For now, assume z is a flattened grid
     let x_data = extract_numeric_vector(&x);
@@ -321,7 +321,7 @@ fn surf_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
 }
 
 #[runtime_builtin(name = "scatter3")]
-fn scatter3_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
+fn scatter3_builtin(x: Tensor, y: Tensor, z: Tensor) -> Result<String, String> {
     let x_data = extract_numeric_vector(&x);
     let y_data = extract_numeric_vector(&y);
     let z_data = extract_numeric_vector(&z);
@@ -368,7 +368,7 @@ fn scatter3_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
 }
 
 #[runtime_builtin(name = "mesh")]
-fn mesh_builtin(x: Matrix, y: Matrix, z: Matrix) -> Result<String, String> {
+fn mesh_builtin(x: Tensor, y: Tensor, z: Tensor) -> Result<String, String> {
     // Similar to surf but wireframe mode
     let result = surf_builtin(x, y, z)?;
     Ok(result.replace("Surface", "Mesh (wireframe)"))

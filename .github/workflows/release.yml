@@ -317,6 +317,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
 
       - name: Install cargo-workspaces
         run: cargo install cargo-workspaces --locked
@@ -361,15 +363,16 @@ jobs:
             fi
           done
 
-      - name: Bump workspace crate versions
+      - name: Bump workspace crate versions (idempotent)
         shell: bash
         run: |
           set -euxo pipefail
+          # If Cargo.toml already set to RELEASE_VERSION, this is a no-op
           cargo workspaces version custom "$RELEASE_VERSION" \
             --force '*' \
             --no-git-commit \
             --exact \
-            --yes
+            --yes || true
 
       - name: Publish all crates in dependency order
         shell: bash
@@ -380,16 +383,24 @@ jobs:
           # Ensure we are on a branch (not detached); prefer main if tag checkout
           if ! git symbolic-ref -q HEAD >/dev/null; then
             git fetch origin +refs/heads/*:refs/remotes/origin/*
-            DEFAULT_BRANCH="${GITHUB_REF_NAME:-main}"
-            if git show-ref --verify --quiet "refs/heads/$DEFAULT_BRANCH"; then
-              git checkout "$DEFAULT_BRANCH"
+            # Always use main as the publishing base to avoid treating tag name as a branch
+            if git show-ref --verify --quiet "refs/heads/main"; then
+              git checkout main
             else
               git checkout -B main origin/main || true
             fi
           fi
           # Ensure git has a CA bundle configured (some environments lack http.cainfo)
-          git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt || true
-          git config --global http.cainfo /etc/ssl/certs/ca-certificates.crt || true
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt || true
+            git config --global http.cainfo /etc/ssl/certs/ca-certificates.crt || true
+          elif [ -f /etc/pki/tls/certs/ca-bundle.crt ]; then
+            git config --global http.sslcainfo /etc/pki/tls/certs/ca-bundle.crt || true
+            git config --global http.cainfo /etc/pki/tls/certs/ca-bundle.crt || true
+          elif [ -f /etc/ssl/ca-bundle.pem ]; then
+            git config --global http.sslcainfo /etc/ssl/ca-bundle.pem || true
+            git config --global http.cainfo /etc/ssl/ca-bundle.pem || true
+          fi
           # Publish in correct order, skipping already published crates
           cargo workspaces publish --all --yes --allow-dirty --skip-published \
             --token "$CARGO_REGISTRY_TOKEN"

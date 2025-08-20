@@ -1,7 +1,6 @@
 import { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { 
   Download, 
   Terminal, 
@@ -9,25 +8,22 @@ import {
   FileText,
   CheckCircle,
   ArrowRight,
-  Clock,
-  Users
 } from "lucide-react";
 import Link from "next/link";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
 
 export const metadata: Metadata = {
-  title: "Getting Started with RunMat",
+  title: "Getting Started | Docs",
   description: "Learn how to install and use RunMat, the modern MATLAB/Octave runtime. Complete guide for researchers, engineers, and students.",
 };
 
 export default function GettingStartedPage() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto max-w-4xl px-4 md:px-6 py-16 md:py-24">
+      <div className="container mx-auto px-4 md:px-0 py-16 md:py-4">
         
         {/* Header */}
         <div className="mb-12">
-          <Badge variant="secondary" className="mb-4">Documentation</Badge>
           <h1 className="text-4xl lg:text-5xl font-bold mb-6">
             Getting Started with RunMat
           </h1>

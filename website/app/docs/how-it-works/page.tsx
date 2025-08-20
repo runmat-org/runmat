@@ -1,5 +1,4 @@
 import { Metadata } from "next";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
@@ -16,60 +15,58 @@ import {
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "How RunMat Works - Architecture and Design",
-  description: "Deep dive into RunMat's V8-inspired architecture, tiered execution, JIT compilation, garbage collection, and plotting system. A comprehensive technical guide.",
+  title: "How RunMat Works | Docs",
+  description: "RunMat implements the full MATLAB language grammar and core semantics with a modern, V8-inspired engine, a slim core, generational GC, and a package-first model.",
 };
 
 export default function HowItWorksPage() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto max-w-4xl px-4 md:px-6 py-16 md:py-24">
+      <div className="container mx-auto px-4 md:px-0 py-16 md:py-4">
         
         {/* Header */}
         <div className="mb-12">
-          <Badge variant="secondary" className="mb-4">Technical Deep Dive</Badge>
           <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">
             How RunMat Works
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed">
-            Here&apos;s how we built a MATLAB runtime that starts in 5ms and runs many workloads
-            significantly faster than existing implementations like GNU Octave.
+            RunMat is a new, modern runtime for MATLAB code. It implements the full language grammar and core
+            semantics — arrays and indexing, control flow, functions and multiple returns, cells/structs, and
+            classdef OOP — with a fast, V8-inspired engine.
           </p>
           <p className="text-lg text-muted-foreground leading-relaxed mt-8">
-            Traditional MATLAB interpreters can
-            feel sluggish for compute-intensive workloads. RunMat takes a different approach with a V8-inspired
-            architecture that prioritizes performance without sacrificing
-            compatibility.
+            We keep the core slim and blazing fast, then grow the ecosystem with packages. This isn&apos;t an attempt
+            to replicate every historical builtin; it&apos;s a clean, fast runtime for the MATLAB language with an
+            open extension model.
           </p>
         </div>
 
         {/* The Problem with Traditional Scientific Computing */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">Why Octave and MATLAB are Slow</h2>
+          <h2 className="text-3xl font-bold mb-6 text-foreground">Why legacy approaches are slow</h2>
           <div className="bg-gradient-to-r from-amber-100 to-yellow-100 dark:from-amber-900/40 dark:to-yellow-900/40 rounded-lg p-6 mb-8 border border-amber-200 dark:border-amber-800">
               <p className="text-lg leading-relaxed">
-                <strong>Slow Startup:</strong> MATLAB takes 10+ seconds to start because it loads massive runtime environments, 
-                initializes complex licensing systems, and builds symbol tables from scratch every time. Even with JIT compilation, 
-                the startup overhead dominates short-running scripts.
+              <strong>Heavy startup:</strong> Large monolithic runtimes load thousands of functions, licensing systems,
+              and global tables on boot. That overhead dominates short-running scripts.
               </p>
               <p className="text-lg leading-relaxed mt-4">
-                <strong>Runtime Inefficiencies:</strong> Traditional interpreters execute code line-by-line, translating every 
-                operation at runtime. A simple matrix multiplication gets parsed, analyzed, and dispatched to BLAS libraries — 
-                every single time. Loop bodies get re-interpreted on each iteration.
+              <strong>Runtime inefficiencies:</strong> Traditional interpreters translate operations line-by-line on every
+              execution. Hot loops are re-interpreted over and over; dispatch overhead swamps the math.
               </p>
               <p className="text-lg leading-relaxed mt-4 text-muted-foreground">
-                <strong>The result?</strong> You spend more time waiting for MATLAB to start than actually running your code, 
-                especially for quick calculations and iterative development.
+              <strong>The result?</strong> You wait — at startup, at every loop, and whenever the runtime can&apos;t optimize to
+              the way your code actually behaves.
               </p>
             </div>
         </section>
 
         {/* The RunMat Solution */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">The RunMat Approach: Adaptive Compilation</h2>
+          <h2 className="text-3xl font-bold mb-6 text-foreground">RunMat: slim core + adaptive compilation</h2>
           <p className="text-lg text-muted-foreground mb-8">
-            RunMat takes a different approach inspired by modern JavaScript engines like V8. Instead of treating 
-            every line of code the same, we use <strong>adaptive compilation</strong> that optimizes frequently-executed code paths.
+            Inspired by modern JavaScript engines, RunMat starts instantly in a high-performance interpreter and
+            upgrades hot code to native machine code. The core is intentionally small and predictable, so the engine
+            can be ruthlessly optimized.
           </p>
 
           <div className="grid md:grid-cols-2 gap-8 mb-8">
@@ -82,9 +79,8 @@ export default function HowItWorksPage() {
                   <h3 className="text-xl font-semibold">Phase 1: Instant Execution</h3>
                 </div>
                 <p className="text-muted-foreground leading-relaxed">
-                  Your code runs immediately through our <strong>Ignition interpreter</strong> — no compilation wait time. 
-                  Good for interactive exploration, prototyping, and one-off calculations. While executing, we track 
-                  which functions are called frequently.
+                  Your code runs immediately through our <strong>Ignition interpreter</strong> — no compilation wait time.
+                  Perfect for interactive work, tests, and scripts. While executing, we profile which functions are hot.
                 </p>
               </CardContent>
             </Card>
@@ -97,9 +93,8 @@ export default function HowItWorksPage() {
                   <h3 className="text-xl font-semibold">Phase 2: Machine Code</h3>
               </div>
                 <p className="text-muted-foreground leading-relaxed">
-                  Functions that run frequently get upgraded to native machine code via our <strong>Turbine JIT compiler</strong>. 
-                  Same code, but now with optimizations like loop unrolling, function inlining, vectorization, and 
-                  specialized paths for your specific data types and usage patterns.
+                  Functions that run frequently get upgraded to native machine code via the <strong>Turbine JIT</strong>:
+                  loop optimizations, type-specialized paths, and vectorization tailored to your data and call patterns.
                 </p>
             </CardContent>
           </Card>
@@ -109,12 +104,10 @@ export default function HowItWorksPage() {
             <div className="flex items-start">
               <BarChart3 className="h-6 w-6 text-blue-600 mr-3 mt-1 flex-shrink-0" />
               <div>
-                <h4 className="text-lg font-semibold mb-3">Why This Approach Wins</h4>
-          <p className="text-muted-foreground leading-relaxed">
-                  Unlike traditional ahead-of-time compilers that optimize for average cases, our JIT compiler 
-                  sees <em>exactly</em> how your code behaves at runtime. It knows your matrix sizes, your data types, 
-                  your calling patterns — and optimizes accordingly. The 20% of your code that runs 80% of the time 
-                  gets the full performance treatment.
+                <h4 className="text-lg font-semibold mb-3">Why this approach wins</h4>
+                <p className="text-muted-foreground leading-relaxed">
+                  The RunMat JIT sees <em>exactly</em> how your code behaves: matrix sizes, datatypes, calling patterns.
+                  The 20% of your code that runs 80% of the time gets the full optimization budget.
                 </p>
               </div>
             </div>
@@ -123,7 +116,91 @@ export default function HowItWorksPage() {
 
 
 
-        {/* Performance Characteristics (moved up) */}
+        {/* Language and Semantics */}
+        <section className="mb-12">
+          <h2 className="text-3xl font-bold mb-6 text-foreground">Language compatibility and semantics</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-muted-foreground">
+            <Card>
+              <CardHeader><CardTitle>Full grammar</CardTitle></CardHeader>
+              <CardContent>
+                Expressions, statements, functions with multiple returns, indexing <code>() [] { }</code>, command-form,
+                and classdef are all accepted by the parser.
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Core semantics</CardTitle></CardHeader>
+              <CardContent>
+                Column-major arrays and slicing (<code>end</code>, colon ranges, logical masks); cells and structs; OOP
+                dispatch and <code>subsref</code>/<code>subsasgn</code>; <code>try/catch</code>, <code>global</code>, <code>persistent</code>.
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Slim builtins</CardTitle></CardHeader>
+              <CardContent>
+                The core ships a curated standard library. Everything else comes from packages — native (Rust)
+                or source (MATLAB) — documented and indexed automatically.
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
+        {/* HIR & AST: acceleration and tooling */}
+        <section className="mb-12">
+          <h2 className="text-3xl font-bold mb-6 text-foreground">HIR & AST: foundation for acceleration and tooling</h2>
+          <p className="text-lg text-muted-foreground mb-6">
+            RunMat lowers source to a high-level, typed IR (HIR) with flow-sensitive inference. A stable AST→HIR pipeline
+            gives the engine precise structure and types, which unlocks acceleration and first-class editor tooling.
+          </p>
+          <div className="grid md:grid-cols-2 gap-6">
+            <Card>
+              <CardContent className="p-6">
+                <h4 className="text-lg font-semibold mb-3">Seamless Accelerate</h4>
+                <p className="text-muted-foreground">
+                  Tensor/Matrix ops are explicit in HIR, so the planner can route work to CPU or GPU, fuse common
+                  elementwise chains, and support reverse-mode autograd by default — without changing user code.
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-6">
+                <h4 className="text-lg font-semibold mb-3">Great IntelliSense (LSP)</h4>
+                <p className="text-muted-foreground">
+                  Typed nodes power hover types, signature help, go-to-definition across packages, property/field
+                  completion from the class registry, and precise diagnostics. The same HIR backs the interpreter and JIT.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+          <div className="bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-950/30 dark:to-green-950/30 rounded-lg p-6 mt-6">
+            <div className="flex items-start">
+              <BarChart3 className="h-6 w-6 text-blue-600 mr-3 mt-1 flex-shrink-0" />
+              <div>
+                <h4 className="text-lg font-semibold mb-3">Portable by design</h4>
+                <p className="text-muted-foreground leading-relaxed">
+                  Typed HIR lowers to Cranelift IR, which makes it trivial to target multiple architectures. That makes RunMat
+                  platform-agnostic and lightweight: small static binaries, predictable performance on Linux/macOS/Windows,
+                  and room for ahead-of-time or cached compilation where it helps startup.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-950/30 dark:to-green-950/30 rounded-lg p-6 mt-6">
+            <div className="flex items-start">
+              <BarChart3 className="h-6 w-6 text-blue-600 mr-3 mt-1 flex-shrink-0" />
+              <div>
+                <h4 className="text-lg font-semibold mb-3">Why this architecture is different</h4>
+                <p className="text-muted-foreground leading-relaxed">
+                  Octave&apos;s classic interpreter does not expose a typed IR, limiting deep optimization and IDE tooling.
+                  MATLAB has powerful internal IRs but limited external LSP integration. RunMat&apos;s stable HIR/ABI and
+                  Cranelift backend make accelerators and editors plug in cleanly across platforms.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Performance Characteristics */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground">
             Performance Characteristics
@@ -224,7 +301,7 @@ export default function HowItWorksPage() {
           </div>
 
           <div className="mt-6 text-sm text-muted-foreground">
-            Benchmarks run on Apple M2 Max (32GB RAM) under identical conditions. Full suite available in <code>/benchmarks</code>; reproduce with <code>./benchmarks/run_benchmarks.sh</code>.
+            Benchmarks run on Apple M2 Max (32GB RAM) under identical conditions. Full suite available in <code>/benchmarks</code>; reproduce with <code>./benchmarks/run_benchmarks.sh</code>. Note that we cannot benchmark RunMat against MATLAB because it requires agreeing to a license agreement, which we will not. 
           </div>
         </section>
 
@@ -329,15 +406,15 @@ export default function HowItWorksPage() {
                 <h4 className="text-lg font-semibold mb-3">Generational Collection</h4>
                 <p className="text-muted-foreground">
                   Young objects (like temporary calculation results) get collected quickly and frequently. 
-                  Old objects (like your main data matrices) get touched rarely, minimizing overhead.
+                  Old objects (like your main data matrices) are scanned rarely via remembered sets, minimizing overhead.
                   </p>
                 </div>
               <div>
-                <h4 className="text-lg font-semibold mb-3">Background Threads</h4>
+                <h4 className="text-lg font-semibold mb-3">Short, predictable pauses</h4>
                 <p className="text-muted-foreground">
-                  Memory cleanup happens in the background while your calculations continue. No more 
-                  &quot;GC pause&quot; interruptions in the middle of your analysis.
-                  </p>
+                  Minor collections are stop-the-world but fast. Write barriers track old→young edges so minor GCs
+                  only scan what changed, not the entire heap.
+                </p>
                 </div>
               </div>
           </div>
@@ -413,14 +490,15 @@ export default function HowItWorksPage() {
           </div>
         </section>
 
-        {/* Complete Ecosystem */}
+        {/* Packages and Ecosystem */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
             <GitBranch className="h-8 w-8 text-blue-600 mr-3" />
-            A Complete Scientific Computing Ecosystem
+            Packages: extend the runtime without bloating the core
           </h2>
           <p className="text-lg text-muted-foreground mb-6">
-            RunMat isn&apos;t just a faster interpreter — it&apos;s a complete rethinking of the scientific computing experience:
+            RunMat keeps the core minimal. New functions, types, and accelerators ship as packages — native (Rust)
+            for maximum performance, or source (MATLAB) for portability.
           </p>
           
           <div className="space-y-6">
@@ -442,7 +520,7 @@ export default function HowItWorksPage() {
 
             <Card>
               <CardContent className="p-6">
-                <h4 className="text-xl font-semibold mb-3">First-Class Jupyter Integration</h4>
+                <h4 className="text-xl font-semibold mb-3">First-class Jupyter integration</h4>
                 <p className="text-muted-foreground mb-4">
                   Built for the notebook era. Install RunMat as a Jupyter kernel with one command, 
                   and enjoy the same performance in your favorite notebook environment. 
@@ -457,7 +535,7 @@ export default function HowItWorksPage() {
 
             <Card>
               <CardContent className="p-6">
-                <h4 className="text-xl font-semibold mb-3">Modern Cloud & Container Deployment</h4>
+                <h4 className="text-xl font-semibold mb-3">Modern cloud & container deployment</h4>
                 <p className="text-muted-foreground mb-4">
                   Single static binary with zero dependencies makes deployment trivial. Run MATLAB code in Docker 
                   containers, Kubernetes clusters, or cloud functions. No complex runtime environments, no licensing 
@@ -500,7 +578,7 @@ export default function HowItWorksPage() {
                 <p className="text-muted-foreground">
                   Why limit matrix operations to your CPU? Direct CUDA and ROCm integration will 
                   automatically offload heavy computations to your GPU, turning your graphics card 
-                  into a scientific supercomputer - without having to purchase yet another license.
+                  into a scientific supercomputer.
                 </p>
               </CardContent>
             </Card>
@@ -509,13 +587,41 @@ export default function HowItWorksPage() {
               <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">Enterprise Freedom: Break the License Prison</h4>
                 <p className="text-muted-foreground">
-                  No more per-seat licensing, no network license servers, no vendor audits. Deploy RunMat 
+                  No per-seat licensing, no network license servers, no vendor audits. Deploy RunMat 
                   across unlimited machines, scale teams without budget explosions, and never face 
                   astronomical renewal costs again. True computational freedom for organizations of any size.
                 </p>
               </CardContent>
             </Card>
 
+          </div>
+        </section>
+
+        {/* Contrast: MATLAB, Octave, RunMat */}
+        <section className="mb-12">
+          <h2 className="text-3xl font-bold mb-6 text-foreground">How RunMat differs</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader><CardTitle>MATLAB</CardTitle></CardHeader>
+              <CardContent className="text-muted-foreground">
+                Proprietary, massive standard library, heavy startup, license-gated deployment.
+                Incredible breadth; less flexible for custom runtime needs.
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>GNU Octave</CardTitle></CardHeader>
+              <CardContent className="text-muted-foreground">
+                Open-source and compatible with many scripts; classic interpreter architecture
+                emphasizes portability over peak performance and startup speed.
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>RunMat</CardTitle></CardHeader>
+              <CardContent className="text-muted-foreground">
+                Open-source, modern engine with full language grammar and core semantics,
+                fast startup, tiered execution, generational GC, and a package-first library model.
+              </CardContent>
+            </Card>
           </div>
         </section>
 
@@ -542,9 +648,7 @@ export default function HowItWorksPage() {
                   </Link>
                 </Button>
                 <Button variant="outline" asChild>
-                  <Link href="/docs/builtin-functions">
-                    API Reference
-                  </Link>
+                  <Link href="/docs/reference/builtins">API Reference</Link>
                 </Button>
               </div>
             </CardContent>

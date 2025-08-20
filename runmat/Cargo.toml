@@ -45,6 +45,7 @@ runmat-gc = { path = "../crates/runmat-gc" }
 runmat-builtins = { path = "../crates/runmat-builtins" }
 runmat-snapshot = { path = "../crates/runmat-snapshot" }
 runmat-plot = { path = "../crates/runmat-plot" }
+runmat-accelerate = { path = "../crates/runmat-accelerate" }
 
 [features]
 # GUI plotting features and BLAS/LAPACK (enabled by default)

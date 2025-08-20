@@ -73,9 +73,3 @@ tempfile = "3"
 serial_test = "2"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 env_logger = "0.10"
-
-[[example]]
-name = "interactive_demo"
-required-features = ["gui"]
-
-

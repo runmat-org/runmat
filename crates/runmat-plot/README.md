@@ -1,6 +1,6 @@
 # RunMat Plot
 
-RunMat Plot is a **world-class interactive plotting library for Rust**, designed to provide comprehensive 2D/3D plotting with a MATLAB-compatible API. It is built from the ground up for performance, featuring a GPU-accelerated rendering pipeline using `wgpu`, a modern theming system, and seamless integration with Jupyter notebooks.
+RunMat Plot is a **world-class interactive plotting library for Rust**, designed to provide comprehensive 2D/3D plotting. It is built from the ground up for performance, featuring a GPU-accelerated rendering pipeline using `wgpu`, a modern theming system, and seamless integration with Jupyter notebooks.
 
 As a core component of the [RunMat project](../..//docs/ARCHITECTURE.md), it serves as the powerful handle-graphics engine for all visualization tasks.
 
@@ -11,7 +11,7 @@ As a core component of the [RunMat project](../..//docs/ARCHITECTURE.md), it ser
 - **Advanced 3D Visualization**: Create stunning 3D surface plots and point clouds with configurable colormaps and shading.
 - **Interactive GUI**: A feature-rich interactive window built with `winit` and `egui`, offering smooth camera controls, zooming, panning, and UI overlays.
 - **Multi-Plot Figures**: Combine multiple plot types in a single figure with automatic bounds computation, legends, and grid lines.
-- **MATLAB Compatibility**: A familiar, MATLAB-style API for quickly creating plots (e.g., `plot()`, `surf()`, `scatter3()`).
+- **Language Compatibility**: A familiar, language-agnostic API for quickly creating plots (e.g., `plot()`, `surf()`, `scatter3()`).
 - **Jupyter Notebook Integration**: Display plots directly in Jupyter notebooks as static images or interactive HTML widgets.
 - **Modern Theming System**: A professional and configurable styling system with beautiful presets like `ModernDark`.
 
@@ -36,7 +36,7 @@ The `runmat-plot` crate is designed with a layered architecture to separate conc
 
 -   **`src/styling` - Theming & Appearance**: This module controls the visual style.
     -   `PlotThemeConfig` allows for complete customization of colors, fonts, and layout via RunMat's central configuration system (e.g., `.runmat.yaml`).
-    -   `ModernDarkTheme` provides a professional, out-of-the-box dark theme that is more beautiful than MATLAB's default.
+    -   `ModernDarkTheme` provides a professional, out-of-the-box dark theme.
 
 ## Crate Layout
 
@@ -182,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 -   **3D Point Clouds**: High-performance 3D visualization with interactive camera controls
 -   **GPU Performance**: Excellent rendering performance for large datasets via WGPU acceleration
 -   **Cross-Platform**: Works on Windows, Linux, and macOS (with triangle rendering limitation)
--   **MATLAB API Compatibility**: Familiar `plot()`, `scatter()`, `scatter3()` function interface
+-   **Language Compatibility**: Familiar `plot()`, `scatter()`, `scatter3()` function interface
 
 ## Roadmap & TODOs
 

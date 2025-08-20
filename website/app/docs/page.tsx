@@ -1,9 +1,8 @@
 import { Metadata } from "next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { BookOpen, Zap, Code, Cpu, Settings, Terminal, GitBranch } from "lucide-react";
+import { BookOpen, Zap, Code, Cpu, Settings, Terminal, GitBranch, FileText } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "RunMat Documentation - Complete Guides and API Reference",
@@ -18,11 +17,8 @@ export const metadata: Metadata = {
 export default function DocsPage() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-16 md:px-6 md:py-24">
+      <div className="container mx-auto px-4 py-16 md:px-6 md:py-6">
         <div className="mx-auto max-w-[58rem] text-center">
-          <Badge variant="secondary" className="mb-4">
-            Documentation
-          </Badge>
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
             RunMat Documentation
           </h1>
@@ -113,7 +109,7 @@ export default function DocsPage() {
           </Link>
 
           {/* Built-in Functions */}
-          <Link href="/docs/builtin-functions" className="block">
+          <Link href="/docs/reference/builtins" className="block">
             <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
@@ -172,24 +168,45 @@ export default function DocsPage() {
             </Card>
           </Link>
 
-          {/* MATLAB Migration */}
-          <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 opacity-60">
+          {/* Roadmap */}
+          <Link href="/docs/roadmap" className="block">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Zap className="h-6 w-6 text-primary" />
-                <CardTitle>MATLAB Migration</CardTitle>
+                  <CardTitle>Roadmap</CardTitle>
               </div>
               <CardDescription>
-                Step-by-step guide to migrate your MATLAB projects to RunMat
+                  Track RunMat&apos;s development roadmap and progress
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="text-sm text-muted-foreground">
-                Coming Soon
+                  View Roadmap →
               </div>
             </CardContent>
           </Card>
+          </Link>
 
+          {/* License */}
+          <Link href="/license" className="block">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <FileText className="h-6 w-6 text-primary" />
+                  <CardTitle>License</CardTitle>
+                </div>
+                <CardDescription>
+                  View RunMat&apos;s license and terms of use (MIT+)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-muted-foreground">
+                  View License →
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
         </div>
 
         {/* Quick Links */}
@@ -204,7 +221,7 @@ export default function DocsPage() {
             </Button>
             <Button variant="outline" size="default" asChild>
               <Link href="https://github.com/runmat-org/runmat" target="_blank">
-                View on GitHub
+                View On GitHub
               </Link>
             </Button>
             <Button variant="outline" size="default" asChild>

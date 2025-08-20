@@ -105,7 +105,7 @@ fn test_matrix_literal_semicolon_preservation() {
         program,
         Program {
             body: vec![Stmt::ExprStmt(
-                Expr::Matrix(vec![vec![
+                Expr::Tensor(vec![vec![
                     Expr::Number("1".into()),
                     Expr::Number("2".into()),
                     Expr::Number("3".into())

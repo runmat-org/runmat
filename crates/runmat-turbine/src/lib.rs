@@ -60,9 +60,9 @@ pub extern "C" fn runmat_value_add(a_ptr: *const Value, b_ptr: *const Value) -> 
 
         let result = match (a, b) {
             (Value::Num(x), Value::Num(y)) => Value::Num(x + y),
-            (Value::Int(x), Value::Int(y)) => Value::Int(x + y),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x + (*y as f64)),
-            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) + y),
+            (Value::Int(x), Value::Int(y)) => Value::Num(x.to_f64() + y.to_f64()),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x + y.to_f64()),
+            (Value::Int(x), Value::Num(y)) => Value::Num(x.to_f64() + y),
             _ => {
                 error!("Unsupported addition: {a:?} + {b:?}");
                 return std::ptr::null_mut();
@@ -89,9 +89,9 @@ pub extern "C" fn runmat_value_sub(a_ptr: *const Value, b_ptr: *const Value) -> 
 
         let result = match (a, b) {
             (Value::Num(x), Value::Num(y)) => Value::Num(x - y),
-            (Value::Int(x), Value::Int(y)) => Value::Int(x - y),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x - (*y as f64)),
-            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) - y),
+            (Value::Int(x), Value::Int(y)) => Value::Num(x.to_f64() - y.to_f64()),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x - y.to_f64()),
+            (Value::Int(x), Value::Num(y)) => Value::Num(x.to_f64() - y),
             _ => {
                 error!("Unsupported subtraction: {a:?} - {b:?}");
                 return std::ptr::null_mut();
@@ -118,9 +118,9 @@ pub extern "C" fn runmat_value_mul(a_ptr: *const Value, b_ptr: *const Value) -> 
 
         let result = match (a, b) {
             (Value::Num(x), Value::Num(y)) => Value::Num(x * y),
-            (Value::Int(x), Value::Int(y)) => Value::Int(x * y),
-            (Value::Num(x), Value::Int(y)) => Value::Num(x * (*y as f64)),
-            (Value::Int(x), Value::Num(y)) => Value::Num((*x as f64) * y),
+            (Value::Int(x), Value::Int(y)) => Value::Num(x.to_f64() * y.to_f64()),
+            (Value::Num(x), Value::Int(y)) => Value::Num(x * y.to_f64()),
+            (Value::Int(x), Value::Num(y)) => Value::Num(x.to_f64() * y),
             _ => {
                 error!("Unsupported multiplication: {a:?} * {b:?}");
                 return std::ptr::null_mut();
@@ -154,25 +154,25 @@ pub extern "C" fn runmat_value_div(a_ptr: *const Value, b_ptr: *const Value) -> 
                 Value::Num(x / y)
             }
             (Value::Int(x), Value::Int(y)) => {
-                if *y == 0 {
+                if y.is_zero() {
                     error!("Division by zero");
                     return std::ptr::null_mut();
                 }
-                Value::Num((*x as f64) / (*y as f64))
+                Value::Num(x.to_f64() / y.to_f64())
             }
             (Value::Num(x), Value::Int(y)) => {
-                if *y == 0 {
+                if y.is_zero() {
                     error!("Division by zero");
                     return std::ptr::null_mut();
                 }
-                Value::Num(x / (*y as f64))
+                Value::Num(x / y.to_f64())
             }
             (Value::Int(x), Value::Num(y)) => {
                 if *y == 0.0 {
                     error!("Division by zero");
                     return std::ptr::null_mut();
                 }
-                Value::Num((*x as f64) / y)
+                Value::Num(x.to_f64() / y)
             }
             _ => {
                 error!("Unsupported division: {a:?} / {b:?}");
@@ -360,9 +360,11 @@ pub extern "C" fn runmat_value_lt(a_ptr: *const Value, b_ptr: *const Value) -> *
 
         let result = match (a, b) {
             (Value::Num(x), Value::Num(y)) => Value::Num(if x < y { 1.0 } else { 0.0 }),
-            (Value::Int(x), Value::Int(y)) => Value::Num(if x < y { 1.0 } else { 0.0 }),
-            (Value::Num(x), Value::Int(y)) => Value::Num(if *x < (*y as f64) { 1.0 } else { 0.0 }),
-            (Value::Int(x), Value::Num(y)) => Value::Num(if (*x as f64) < *y { 1.0 } else { 0.0 }),
+            (Value::Int(x), Value::Int(y)) => {
+                Value::Num(if x.to_i64() < y.to_i64() { 1.0 } else { 0.0 })
+            }
+            (Value::Num(x), Value::Int(y)) => Value::Num(if *x < y.to_f64() { 1.0 } else { 0.0 }),
+            (Value::Int(x), Value::Num(y)) => Value::Num(if x.to_f64() < *y { 1.0 } else { 0.0 }),
             _ => {
                 error!("Unsupported comparison: {a:?} < {b:?}");
                 return std::ptr::null_mut();
@@ -653,8 +655,12 @@ fn execute_user_function_isolated(
     let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;
 
-    let func_result_vars = runmat_ignition::interpret_with_vars(&func_bytecode, &mut func_vars)
-        .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {e}")))?;
+    let func_result_vars = runmat_ignition::interpret_with_vars(
+        &func_bytecode,
+        &mut func_vars,
+        Some(function_def.name.as_str()),
+    )
+    .map_err(|e| TurbineError::ExecutionError(format!("Failed to execute function: {e}")))?;
 
     // Copy back the modified variables
     func_vars = func_result_vars;
@@ -937,7 +943,7 @@ impl TurbineEngine {
         let mut f64_vars: Vec<f64> = Vec::with_capacity(vars.len());
         for value in vars.iter() {
             match value {
-                Value::Int(i) => f64_vars.push(*i as f64),
+                Value::Int(i) => f64_vars.push(i.to_f64()),
                 Value::Num(n) => f64_vars.push(*n),
                 Value::Bool(b) => f64_vars.push(if *b { 1.0 } else { 0.0 }),
                 _ => {
@@ -1025,7 +1031,7 @@ impl TurbineEngine {
         debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
 
         // Use the main Ignition interpreter which has full feature support
-        match runmat_ignition::interpret_with_vars(bytecode, vars) {
+        match runmat_ignition::interpret_with_vars(bytecode, vars, Some("<main>")) {
             Ok(_) => Ok((0, false)), // false indicates interpreter was used, vars are updated in-place
             Err(e) => Err(TurbineError::ExecutionError(e)),
         }
@@ -1082,6 +1088,10 @@ impl TurbineEngine {
                 Instr::LoadString(s) => {
                     "LoadString".hash(&mut hasher);
                     s.hash(&mut hasher);
+                }
+                Instr::LoadBool(b) => {
+                    "LoadBool".hash(&mut hasher);
+                    b.hash(&mut hasher);
                 }
                 Instr::LoadVar(idx) => {
                     "LoadVar".hash(&mut hasher);
@@ -1162,6 +1172,48 @@ impl TurbineEngine {
                     count.hash(&mut hasher);
                 }
                 Instr::ReturnValue => "ReturnValue".hash(&mut hasher),
+                Instr::IndexSlice(d, n, c, e) => {
+                    "IndexSlice".hash(&mut hasher);
+                    d.hash(&mut hasher);
+                    n.hash(&mut hasher);
+                    c.hash(&mut hasher);
+                    e.hash(&mut hasher);
+                }
+                Instr::CreateCell2D(r, c) => {
+                    "CreateCell2D".hash(&mut hasher);
+                    r.hash(&mut hasher);
+                    c.hash(&mut hasher);
+                }
+                Instr::IndexCell(k) => {
+                    "IndexCell".hash(&mut hasher);
+                    k.hash(&mut hasher);
+                }
+                Instr::LoadStaticProperty(class, prop) => {
+                    "LoadStaticProperty".hash(&mut hasher);
+                    class.hash(&mut hasher);
+                    prop.hash(&mut hasher);
+                }
+                Instr::CallStaticMethod(class, method, argc) => {
+                    "CallStaticMethod".hash(&mut hasher);
+                    class.hash(&mut hasher);
+                    method.hash(&mut hasher);
+                    argc.hash(&mut hasher);
+                }
+                Instr::EnterTry(catch_pc, catch_var) => {
+                    "EnterTry".hash(&mut hasher);
+                    catch_pc.hash(&mut hasher);
+                    catch_var.hash(&mut hasher);
+                }
+                Instr::PopTry => {
+                    "PopTry".hash(&mut hasher);
+                }
+                Instr::CallFeval(argc) => {
+                    "CallFeval".hash(&mut hasher);
+                    argc.hash(&mut hasher);
+                }
+                _ => {
+                    "Other".hash(&mut hasher);
+                }
             }
         }
 
@@ -1246,7 +1298,7 @@ pub extern "C" fn runtime_builtin_f64_dispatch(
     // Call the runtime dispatcher
     match runmat_runtime::call_builtin(name, &value_args) {
         Ok(runmat_builtins::Value::Num(result)) => result,
-        Ok(runmat_builtins::Value::Int(result)) => result as f64,
+        Ok(runmat_builtins::Value::Int(result)) => result.to_f64(),
         Ok(runmat_builtins::Value::Bool(result)) => {
             if result {
                 1.0
@@ -1366,9 +1418,9 @@ pub extern "C" fn runtime_create_matrix(
     let elements = unsafe { std::slice::from_raw_parts(elements_ptr, elements_len) }.to_vec();
 
     // Create matrix
-    match runmat_builtins::Matrix::new(elements, rows, cols) {
+    match runmat_builtins::Tensor::new_2d(elements, rows, cols) {
         Ok(matrix) => {
-            let value = runmat_builtins::Value::Matrix(matrix);
+            let value = runmat_builtins::Value::Tensor(matrix);
             // Allocate in GC memory and return pointer
             match runmat_gc::gc_allocate(value) {
                 Ok(gc_ptr) => unsafe { gc_ptr.as_raw() as i64 },

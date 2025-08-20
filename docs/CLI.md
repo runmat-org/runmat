@@ -38,7 +38,7 @@ runmat [GLOBAL OPTIONS] [COMMAND] [ARGS]
 runmat [GLOBAL OPTIONS] <script.m>
 ```
 
-Global options apply to all commands. Commands offer task‑oriented workflows.
+Global options apply to all commands. Commands offer task-oriented workflows.
 
 ## Global options
 
@@ -63,8 +63,6 @@ Global options apply to all commands. Commands offer task‑oriented workflows.
 
 Environment booleans accept: `1/0`, `true/false`, `yes/no`, `on/off`,
 `enable/disable`.
-
-## Commands
 
 ### repl
 Start interactive REPL.
@@ -125,6 +123,22 @@ Env vars: `RUSTMAT_KERNEL_IP`, `RUSTMAT_KERNEL_KEY`, and optional port vars
 `RUSTMAT_CONTROL_PORT`, `RUSTMAT_HB_PORT`.
 
 - `kernel-connection <connection.json>`: start with an existing connection file.
+
+## Commands
+
+### pkg (coming soon)
+Package manager commands. These are not yet released; the binary will acknowledge the command and exit
+with status 0 once the initial scaffolding lands.
+
+```sh
+runmat pkg add <name>[@version]
+runmat pkg remove <name>
+runmat pkg install
+runmat pkg update
+runmat pkg publish
+```
+
+All pkg subcommands currently print: "RunMat package manager is coming soon. Track progress in the repo."
 
 ### version
 ```sh

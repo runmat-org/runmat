@@ -5,7 +5,7 @@
 //! safe memory management.
 
 use cranelift::prelude::*;
-use runmat_builtins::Value;
+use runmat_builtins::{CellArray, Value};
 use runmat_gc::{gc_allocate, GcPtr};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -53,7 +53,7 @@ impl JitMemoryManager {
         // Store in pool for reuse
         {
             let mut pool = self.string_pool.write().unwrap();
-            pool.insert(s.to_string(), gc_ptr);
+            pool.insert(s.to_string(), gc_ptr.clone());
         }
 
         // Return pointer and length
@@ -81,9 +81,11 @@ impl JitMemoryManager {
             }
         }
 
-        // Allocate new array in GC as a Cell of Num values
+        // Allocate new array in GC as a 1xN Cell of Num values
         let cell_values: Vec<Value> = values.iter().map(|&v| Value::Num(v)).collect();
-        let cell_value = Value::Cell(cell_values);
+        let cell_array = CellArray::new(cell_values, 1, values.len())
+            .map_err(|e| format!("Failed to build cell array: {e}"))?;
+        let cell_value = Value::Cell(cell_array);
         let gc_ptr =
             gc_allocate(cell_value).map_err(|e| format!("Failed to allocate array in GC: {e}"))?;
 

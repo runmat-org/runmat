@@ -3,6 +3,8 @@ import { MDXRemote } from 'next-mdx-remote/rsc';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { MermaidDiagram } from '@/components/MermaidDiagram';
+import { slugifyHeading } from '@/lib/utils';
+import { HeadingAnchor } from '@/components/HeadingAnchor';
 
 type MDXComponent = (props: { children?: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null;
 type MarkdownRendererComponents = Record<string, MDXComponent | ((props: { children: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null)>;
@@ -14,16 +16,74 @@ type MarkdownRendererProps = {
 
 // Server component to render Markdown/MDX content with shared components
 export async function MarkdownRenderer({ source, components = {} }: MarkdownRendererProps) {
+  function toPlainText(node: React.ReactNode): string {
+    if (node == null) return "";
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(toPlainText).join(' ');
+    if (React.isValidElement(node)) {
+      // recursively extract from element children (handles <code> etc.)
+      // Fix: TypeScript error if node.props is not guaranteed to have 'children'
+      // Use type assertion to access 'children' safely
+      const props = (node as React.ReactElement).props as { children?: React.ReactNode };
+      return toPlainText(props.children);
+    }
+    return "";
+  }
+
   const defaultComponents: MarkdownRendererComponents = {
     h1: ({ children, ...props }: { children: React.ReactNode }) => (
       <h1 className="text-4xl font-bold mt-12 mb-6 text-foreground first:mt-0" {...props}>{children}</h1>
     ),
-    h2: ({ children, ...props }: { children: React.ReactNode }) => (
-      <h2 className="text-3xl font-semibold mt-10 mb-5 text-foreground" {...props}>{children}</h2>
-    ),
-    h3: ({ children, ...props }: { children: React.ReactNode }) => (
-      <h3 className="text-2xl font-semibold mt-8 mb-4 text-foreground" {...props}>{children}</h3>
-    ),
+    h2: ({ children, ...props }: { children: React.ReactNode }) => {
+      const text = toPlainText(children);
+      const id = slugifyHeading(text.replace(/`/g, ''));
+      return (
+        <h2 id={id} className="group scroll-mt-24 text-3xl font-semibold mt-10 mb-5 text-foreground" {...props}>
+          {children}
+          <HeadingAnchor id={id} />
+        </h2>
+      );
+    },
+    h3: ({ children, ...props }: { children: React.ReactNode }) => {
+      const text = toPlainText(children);
+      const id = slugifyHeading(text.replace(/`/g, ''));
+      return (
+        <h3 id={id} className="group scroll-mt-24 text-2xl font-semibold mt-8 mb-4 text-foreground" {...props}>
+          {children}
+          <HeadingAnchor id={id} />
+        </h3>
+      );
+    },
+    h4: ({ children, ...props }: { children: React.ReactNode }) => {
+      const text = toPlainText(children);
+      const id = slugifyHeading(text.replace(/`/g, ''));
+      return (
+        <h4 id={id} className="group scroll-mt-24 text-xl font-semibold mt-6 mb-3 text-foreground" {...props}>
+          {children}
+          <HeadingAnchor id={id} />
+        </h4>
+      );
+    },
+    h5: ({ children, ...props }: { children: React.ReactNode }) => {
+      const text = toPlainText(children);
+      const id = slugifyHeading(text.replace(/`/g, ''));
+      return (
+        <h5 id={id} className="group scroll-mt-24 text-lg font-semibold mt-5 mb-2 text-foreground" {...props}>
+          {children}
+          <HeadingAnchor id={id} />
+        </h5>
+      );
+    },
+    h6: ({ children, ...props }: { children: React.ReactNode }) => {
+      const text = toPlainText(children);
+      const id = slugifyHeading(text.replace(/`/g, ''));
+      return (
+        <h6 id={id} className="group scroll-mt-24 text-base font-semibold mt-4 mb-2 text-foreground" {...props}>
+          {children}
+          <HeadingAnchor id={id} />
+        </h6>
+      );
+    },
     p: ({ children, ...props }: { children: React.ReactNode }) => {
       const hasBlock = React.Children.toArray(children).some(child => {
         if (React.isValidElement(child)) {
@@ -101,9 +161,39 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
   } as const;
 
   const merged: MarkdownRendererComponents = { ...defaultComponents, ...components };
+  // Sanitize MDX pitfalls before compiling:
+  // - Angle-bracket generics like Vec<ArgSpec> get interpreted as JSX. Wrap them in backticks.
+  // - Bare braces like { dims, numeric_count } in prose are treated as JS expressions. Wrap in backticks outside code fences.
+  function sanitizeMarkdown(input: string): string {
+    const lines = input.split(/\r?\n/);
+    let inFence = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      // Process only parts of the line that are not inside inline code (backticks)
+      const segments = line.split(/(`[^`]*`)/g);
+      for (let s = 0; s < segments.length; s++) {
+        const seg = segments[s];
+        if (seg.startsWith('`') && seg.endsWith('`')) continue; // keep inline code untouched
+        let out = seg;
+        // Wrap Rust-like generics in backticks
+        out = out.replace(/([A-Za-z0-9_]+)<([A-Za-z0-9_]+)>/g, '`$1<$2>`');
+        // Wrap brace groups in backticks to avoid MDX expression evaluation
+        out = out.replace(/\{([^{}\n]+)\}/g, '`{$1}`');
+        segments[s] = out;
+      }
+      lines[i] = segments.join('');
+    }
+    return lines.join('\n');
+  }
+  const sanitized = sanitizeMarkdown(source);
   return (
     <MDXRemote
-      source={source}
+      source={sanitized}
       components={merged}
       options={{
         mdxOptions: {

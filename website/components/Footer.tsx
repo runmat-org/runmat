@@ -1,12 +1,31 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import Logo from "@/components/Logo";
 import SubscribeForm from "@/components/SubscribeForm";
 
 export default function Footer() {
+  // Default to plain Dystr URL during SSR; hydrate with UTM params on client
+  const [dystrHref, setDystrHref] = useState("https://dystr.com");
+  useEffect(() => {
+    try {
+      const baseUrl = "https://dystr.com";
+      const url = new URL(baseUrl);
+      const params = new URLSearchParams(window.location.search);
+      params.forEach((value, key) => {
+        if (key.toLowerCase().startsWith("utm_") && value) {
+          url.searchParams.append(key, value);
+        }
+      });
+      setDystrHref(url.toString());
+    } catch {
+      // ignore; keep base URL
+    }
+  }, []);
+
   return (
     <footer className="border-t bg-background">
       <div className="container relative mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-8 py-8 px-4 md:px-6">
@@ -36,15 +55,26 @@ export default function Footer() {
       </div>
       <div className="border-t">
         <div className="container flex flex-col items-center justify-between gap-4 py-6 md:flex-row">
-          <p className="text-center text-sm text-muted-foreground md:text-left">
+          <div className="text-sm text-muted-foreground md:text-left">
+            <p>
             © 2025 Dystr Inc. All rights reserved. MIT+ Licensed.
-          </p>
+            </p>
+            <p>
+              MATLAB is a registered trademark of The MathWorks, Inc.
+            </p>
+            <p>
+              GNU Octave is a registered trademark of the Free Software Foundation.
+            </p>
+            <p>
+              RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc. or the Free Software Foundation.
+            </p>
+          </div>
           <p className="flex items-center text-center text-sm text-muted-foreground md:text-left">
             Made with
             <Heart className="mx-1 h-4 w-4 fill-red-500 text-red-500" />
             for the scientific community by{" "}
             <Link
-              href="https://dystr.com"
+              href={dystrHref}
               target="_blank"
               rel="noopener noreferrer"
               className="ml-1 font-medium underline underline-offset-4"

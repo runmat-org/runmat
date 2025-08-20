@@ -1,216 +1,160 @@
 ---
-title: "Introducing RunMat: A Fast, Free, Modern MATLAB Runtime"
-description: "A blazing-fast, memory-safe, open-source runtime for MATLAB and GNU Octave code. Built in Rust with a V8-inspired JIT compiler, advanced garbage collection, and GPU-accelerated plotting."
+title: "Introducing RunMat: A Fast, Free, Modern MATLAB Code Runtime"
+description: "A fast, open-source runtime for MATLAB code. Slim core written in Rust, V8-inspired execution, generational GC, and a package-first standard library."
 date: "2025-08-07"
 author: "Nabeel Allana"
-readTime: "8 min read"
+readTime: "7 min read"
 slug: "introducing-runmat"
-tags: ["MATLAB", "Rust", "JIT", "scientific computing", "open source"]
-keywords: "MATLAB alternative, Rust scientific computing, JIT compiler, numerical computing, open source MATLAB, GNU Octave replacement"
-excerpt: "RunMat solves scientific computing's triple bind: expensive MATLAB licenses, slow free alternatives, and memory safety issues. Run MATLAB code with high performance and Rust safety, completely free."
+tags: ["MATLAB", "Rust", "JIT", "Octave", "scientific computing", "open source"]
+keywords: "MATLAB runtime, GNU Octave comparison, Rust scientific computing, JIT compiler, numerical computing, open source"
+excerpt: "RunMat is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
 image: "/images/blog/runmat-hero.png"
-imageAlt: "RunMat logo with performance charts showing 10x speedup over GNU Octave"
+imageAlt: "RunMat logo with performance charts"
 ogType: "article"
-ogTitle: "Introducing RunMat: Fast, Free, Modern MATLAB Runtime"
+ogTitle: "Introducing RunMat: Fast, Free, Modern MATLAB Code Runtime"
 ogDescription: "Run MATLAB code with performance and Rust safety, completely free."
 twitterCard: "summary_large_image"
-twitterTitle: "RunMat: Fast, Free, Modern MATLAB Runtime built in Rust"
-twitterDescription: "10x faster than GNU Octave, 99.99% MATLAB compatible, completely free. Built in Rust with V8-inspired JIT compilation."
+twitterTitle: "RunMat: A modern, fast MATLAB code runtime built in Rust"
+twitterDescription: "Slim core, tiered execution, generational GC. Open-source, designed for performance and extensibility."
 canonical: "https://runmat.org/blog/introducing-runmat"
 ---
 
-## The Problem: Scientific Computing's Triple Bind
+## TL;DR
 
-If you're a researcher, engineer, or student in any technical field, you've likely encountered this frustrating reality: **MATLAB is the language you learned in school, but it's expensive, and the free alternatives are painfully slow.**
-
-This creates an impossible choice:
-
-- **Pay the toll:** MATLAB licenses cost $2,150+ annually per user, with additional toolboxes costing thousands more. For students, universities, and open source projects, this is often prohibitive.
-- **Accept terrible performance:** GNU Octave, the primary free alternative, is dramatically slower than MATLAB. Our benchmarks show **150-180x slower performance** (versus RunMat) across typical workloads—a 5-second computation takes 15+ minutes in Octave. Your research crawls, simulations become unusable, and productivity plummets.
-- **Learn a new language:** Python's NumPy/SciPy ecosystem is powerful, but it means abandoning the MATLAB syntax you already know and rewriting existing codebases. This is time-consuming and error-prone.
-- **Risk crashes and security issues:** Traditional implementations in C/C++ are vulnerable to memory bugs, segfaults, and security vulnerabilities that can corrupt research data or compromise systems.
-**We refuse to accept this trade-off.** RunMat delivers high-performance execution of MATLAB code with the safety of modern systems programming and the accessibility of open source — often running MATLAB scripts faster than the original runtime while maintaining nearly perfect compatibility with the syntax you already know.
-
-## What Makes RunMat Different
-
-### 🚀 V8-Inspired Performance Architecture
-
-**What is V8?** V8 is Google's JavaScript engine that powers Chrome, Node.js, and most of the modern web. It's what makes JavaScript—once considered a "slow toy language"—fast enough to run complex applications like Google Docs, Discord, and VS Code. V8's secret? A sophisticated *tiered execution system* that we've adapted for numerical computing.
-
-**Why does this matter for scientific computing?** Traditional MATLAB interpreters execute your code line-by-line, every single time. V8 proved there's a better way: start fast, then optimize the code that actually matters.
-
-RunMat implements this proven approach with three components:
-
-- **Ignition Interpreter:** Your code starts running instantly in our lightweight baseline interpreter. No compilation delays, no waiting—just immediate execution.
-- **Turbine JIT Compiler:** As your code runs, our profiler identifies "hot" functions (loops that run thousands of times, frequently-called functions). These get compiled to optimized native machine code using Cranelift, achieving near-C performance.
-- **Intelligent Hotspot Detection:** Not all code benefits from optimization. Our system learns which 20% of your code does 80% of the work and focuses optimization efforts there.
-
-**The result?** Your scripts start immediately and automatically get faster as they run, without any action required from you. It's like having an expert systems programmer continuously optimizing your code in the background.
-
-### ⚡ Zero Cold Start with Snapshotting
-
-One of MATLAB's biggest pain points is slow startup time. RunMat eliminates this with revolutionary snapshotting:
-
-- **Instant startup:** Pre-computed snapshots mean RunMat boots in under 50ms
-- **Workspace persistence:** Your variables and functions survive between sessions
-- **Incremental compilation:** Only changed code gets recompiled
-- **Cloud-ready:** Snapshots enable serverless scientific computing
-
-### 🛡️ Memory Safety Without Performance Cost
-
-Built in Rust, RunMat eliminates entire classes of bugs that plague traditional scientific software:
-
-- **No segfaults:** Rust's ownership system prevents memory access violations
-- **No data races:** Thread safety is guaranteed at compile time
-- **No buffer overflows:** Array bounds are checked without performance overhead
-- **Predictable performance:** Our garbage collector uses generational collection optimized for numerical workloads
-
-### 🎨 Beautiful, GPU-Accelerated Plotting
-
-RunMat's plotting system is built from the ground up for modern hardware:
-
-- **GPU acceleration:** All rendering happens on the GPU via WebGL/Metal/Vulkan
-- **Interactive by default:** Zoom, pan, and rotate with 60fps performance
-- **Multiple backends:** Export to PNG, SVG, PDF, or interactive web widgets
-- **Modern aesthetics:** Beautiful themes that make your data shine
-- **MATLAB compatibility:** Familiar plotting syntax that just works
-
-## Performance That Speaks for Itself
-
-Our comprehensive benchmarks demonstrate RunMat's dramatic performance advantages over GNU Octave. These results were obtained on an Apple M2 Max with 32GB RAM running both systems under identical conditions:
-
-### **🚀 Startup Performance: 182x Faster**
-- **GNU Octave**: 914ms average startup time
-- **RunMat**: 5ms average startup time
-- **Speedup**: **182.93x faster** cold start performance
-
-### **⚡ Matrix Operations: 164x Faster**
-Testing matrix addition, multiplication, transpose, and scalar operations on matrices up to 500×500:
-- **GNU Octave**: 822ms average execution
-- **RunMat**: 5ms average execution  
-- **Speedup**: **164.40x faster** matrix computations
-
-### **🧮 Mathematical Functions: 153-163x Faster**
-Trigonometric, exponential, and statistical functions on arrays up to 500,000 elements:
-- **GNU Octave**: 868ms average execution
-- **RunMat Interpreter**: 5.7ms average (**153.13x faster**)
-- **RunMat JIT**: 5.3ms average (**162.69x faster**)
-
-### **🔄 Control Flow: 154x Faster**
-Loops, conditionals, and function calls with up to 10,000 iterations:
-- **GNU Octave**: 876ms average execution
-- **RunMat**: 5.7ms average execution
-- **Speedup**: **154.54x faster** control flow execution
-
-### **Key Performance Insights:**
-- **Consistent speedups**: 150-180x faster across all workload types
-- **JIT benefits**: Additional 6-13% performance boost for mathematical functions
-- **Sub-5ms startup**: Revolutionary snapshotting eliminates MATLAB's notorious cold start delays
-- **Memory safety**: Zero crashes or memory leaks in extensive testing
-- **BLAS/LAPACK integration**: Leverages optimized linear algebra libraries
-
-*Full benchmark suite available in `/benchmarks`. Run `./benchmarks/run_benchmarks.sh` to reproduce these results on your system.*
-
-## Goal: Near-Perfect MATLAB Compatibility
-
-**Our goal is 99.99% compatibility with existing MATLAB code.** This isn't just about supporting the "common subset"—we're building a high-performance runtime that handles the edge cases, quirks, and advanced features that real MATLAB codebases depend on.
-
-**Currently supported (and growing daily):**
-
-- **All matrix operations:** Creation, indexing, slicing, broadcasting, linear algebra
-- **Complete control flow:** if/elseif/else, for loops, while loops, break/continue, nested structures
-- **Function system:** Function definitions, calling, overloading, anonymous functions, closures
-- **Mathematical functions:** 50+ built-in functions including trigonometric, statistical, and special functions (rapidly expanding)
-- **Advanced plotting:** 2D/3D plotting, multiple plot types, customization, interactive features
-- **Data I/O:** File reading/writing, CSV, binary formats, workspace management
-- **Variable management:** Workspaces, scoping, global variables, persistent variables
-- **Array operations:** Element-wise operations (.*, ./, .^), concatenation, reshaping
-
-**Migration is effortless:** In most cases, you can literally copy-paste your existing MATLAB code into RunMat and it will run faster than before. No rewriting, no porting, no learning new syntax.
-
-## How RunMat Works
-
-RunMat's architecture is designed for both simplicity and performance, inspired by modern JavaScript engines like V8:
-
-### **🔄 Execution Pipeline**
-
-Your MATLAB code flows through a carefully optimized pipeline:
-
-1. **Parsing & Analysis**: RunMat's lexer and parser break down your MATLAB syntax into an optimized internal representation, handling all the edge cases and quirks that make MATLAB unique.
-
-2. **Smart Compilation**: The system generates efficient bytecode that can run immediately in our interpreter (Ignition) while identifying opportunities for optimization.
-
-3. **Adaptive Optimization**: Hot code paths are automatically compiled to native machine code using our JIT compiler (Turbine), delivering near-C performance where it matters most.
-
-### **🧠 Core Components**
-
-- **Ignition Interpreter**: Provides instant startup and reliable execution for all MATLAB constructs
-- **Turbine JIT**: Compiles frequently-used code to optimized native instructions  
-- **Runtime System**: Implements MATLAB's built-in functions with high-performance BLAS/LAPACK integration
-- **Memory Manager**: Generational garbage collector optimized for numerical computing workloads
-- **Snapshot System**: Enables instant startup and workspace persistence across sessions
-
-### **🎯 User Interfaces**
-
-- **REPL**: Interactive command-line interface for exploratory computing
-- **Jupyter Integration**: Full notebook support for data science workflows  
-- **Plotting Engine**: GPU-accelerated visualization with familiar MATLAB syntax
-
-This modular design means RunMat can serve everything from quick interactive calculations to long-running scientific simulations, all while maintaining the MATLAB syntax and semantics you already know.
-
-## Open Source by Design
-
-RunMat is completely open source under the MIT license (with attribution requirements). This ensures:
-
-- **Free forever:** No licensing fees, no usage restrictions for most users
-- **Community-driven:** Development happens in the open with community input
-- **Extensible:** Add your own functions and features
-- **Transparent:** No black boxes, no vendor lock-in
-- **Educational:** Perfect for teaching and learning
-
-## Get Started Today
-
-### Install RunMat in seconds
-
-```bash
-# Linux/macOS
-curl -fsSL https://runmat.org/install.sh | sh
-
-# Windows
-iwr https://runmat.org/install.ps1 | iex
-```
-
-### Run your first script and see the 150x speedup
-
-```bash
-echo "plot(sin(0:0.1:2*pi))" | runmat
-```
-
-**That's it!** For alternative installation methods (package managers, Cargo, direct downloads), visit our [download page](/download).
-
-## Why This Matters
-
-The performance improvements have practical implications for real workflows:
-
-- **Faster iteration cycles**: What takes 15 minutes in Octave runs in 5 seconds, enabling rapid prototyping
-- **Truly interactive development**: Sub-5ms startup enables real-time exploratory computing  
-- **Significant cost savings**: Avoid MATLAB's $2,150+ annual per-user licensing while often achieving superior performance for MATLAB code execution
-- **Reduced infrastructure costs**: Computations that needed clusters can run on laptops
-- **Memory safety**: Rust's ownership model prevents entire classes of bugs that corrupt research data
-
-## What's Next
-
-RunMat represents just the beginning. We're building a complete ecosystem for scientific computing:
-
-- **Full built-in coverage**: Our roadmap targets implementing the entire MATLAB built-in function set with high-quality, well-tested equivalents.
-- **Major toolboxes**: Signal Processing, Statistics & Machine Learning, Image Processing, Optimization, Control Systems, and more. These APIs are well understood, and we're using LLM-assisted tooling to accelerate development while keeping rigorous tests and benchmarks to ensure correctness and performance.
-- **High-performance graphics**: Our wgpu-based graphics engine is designed for extremely dense visualizations—think multi-million-point scatter/point clouds, large mesh rendering, and complex interactive scenes—while staying responsive and visually crisp.
-- **Extensibility first**: RunMat is an open, modular runtime. Add functions, contribute toolboxes, build custom accelerators, and integrate with your pipelines.
-
-Were actively seeking contributors. If you'd like to help implement built-ins, toolboxes, plotting primitives, or docs, head over to our GitHub repository and jump in: https://github.com/runmat-org/runmat
-
-**Spread the word** and share RunMat with your friends and colleagues. Scientific computing deserves better tools, and together we can make high-performance, accessible computing the new standard for researchers, engineers, and students worldwide.
+- **RunMat** is a modern, open-source runtime that executes MATLAB code fast.
+- We implement the **full language grammar** and the **core semantics** (arrays, indexing, control flow, functions, cells/structs, OOP).
+- The core stays **small and fast**; everything else grows via a **package system** (native Rust or source MATLAB).
+- Core built-ins are **canonical** (e.g., `sin`, `cos`, `sum`, and `printf`-style formatting like `fprintf`/`sprintf`) and match the expected, documented behavior. When semantics are domain-specific or ambiguous, they live in packages.
+- Built in **Rust**, with **tiered execution** (interpreter first, JIT for hot code) and a **generational GC** tuned for numerics.
+- It's **not MATLAB** and **not Octave**. It's a different runtime with different goals and trade-offs.
+- Benchmarks show **150×–180× speedups** vs GNU Octave on representative workloads; see Performance below.
 
 ---
 
-*RunMat is developed by [Dystr](https://dystr.com) - a next generation computational platform for engineering teams. Learn more at [dystr.com](https://dystr.com).*
+## Why another runtime?
+
+If you've written MATLAB code, you know the trade-offs:
+
+- MATLAB is powerful but proprietary and heavy to start; deployment is license-bound.
+- GNU Octave is free and compatible with lots of code, but startup and hot-path performance can be limiting.
+- Moving to a new language means rewriting and - perhaps most importantly - **retraining**.
+
+RunMat aims for a third path: keep the MATLAB language you know, but put it on a modern engine with a smaller core, clean semantics, and open extensibility.
+
+---
+
+## Language compatibility at a glance
+
+A quick view of core language semantics. Full details: [here](/docs/language-coverage).
+
+| Feature Category | RunMat | Octave |
+| :-- | :--: | :--: |
+| Grammar & parser (full MATLAB surface) | ✅ | ✅ |
+| Arrays & indexing (`end`, colon, logical masks, N-D slicing) | ✅ | ✅ |
+| Multiple returns, `varargin`/`varargout`, `nargin`/`nargout` | ✅ | ✅ |
+| OOP `classdef` (props/methods), operator overloading | ✅ | ❌ |
+| Events/handles (`addlistener`, `notify`, `isvalid`, `delete`) | ✅ | ❌ |
+| Imports precedence & static access (`Class.*`) | ✅ | ❌ |
+| Metaclass operator `?Class` | ✅ | ❌ |
+| String arrays (double-quoted) | ✅ | ❌ |
+| Standardized `MException` identifiers | ✅ | ❌ |
+
+If something you rely on is not in the core, packages are the intended extension point.
+
+---
+
+## What RunMat is (and is not)
+
+What it is:
+
+- A new runtime that accepts MATLAB syntax and executes the core semantics quickly.
+- A slim, production-oriented engine written in Rust with a stable Value/Type/ABI.
+- A system that grows through packages: built-ins implemented in Rust or MATLAB, documented and indexed automatically.
+- A **predictable core** of canonical built-ins (math, array ops, formatting/IO) with stable behavior; broader or niche functionality ships as packages.
+
+What it is not:
+
+- Not a re-packaging of MATLAB. We don't ship MATLAB code, assets, or toolboxes.
+- Every historical builtin. We prioritize a small, consistent core and let packages provide breadth.
+- Not affiliated with MathWorks; not a drop-in replacement for every workflow.
+
+Legal clarity: RunMat is an independent project that implements a compatible language runtime. “MATLAB” is a MathWorks trademark; we use it nominatively to describe the language whose grammar and semantics our compiler/interpreter accepts. We are not endorsed by or associated with MathWorks.
+
+---
+
+## Performance
+
+On an Apple M2 Max (32GB), our micro-benchmarks (matrix ops, math functions, control-flow loops) show large speedups over GNU Octave on the same machine:
+
+### Summary results
+
+| Benchmark | GNU Octave avg (s) | RunMat interp avg (s) | RunMat JIT avg (s) | Speedup vs Octave |
+| :-- | --: | --: | --: | --: |
+| Startup Time | 0.9147 | 0.0050 | 0.0053 | <span className="text-green-600 font-semibold">172x–183x faster</span> |
+| Matrix Operations | 0.8220 | 0.0050 | 0.0050 | <span className="text-green-600 font-semibold">164x faster</span> |
+| Mathematical Functions | 0.8677 | 0.0057 | 0.0053 | <span className="text-green-600 font-semibold">153x–163x faster</span> |
+| Control Flow | 0.8757 | 0.0057 | 0.0057 | <span className="text-green-600 font-semibold">155x faster</span> |
+
+- We don't compare to MATLAB here due to licensing constraints (we decline to install Matlab and agree with their license terms). Our focus is the design: a slim core and a modern engine.
+- Benchmarks are in the repo under `/benchmarks` with a script to reproduce. Numbers vary by hardware, BLAS, and build settings; please measure on your workload. To reproduce locally:
+
+```bash
+cd benchmarks
+./run_benchmarks.sh
+cat results/benchmark_YYYYMMDD_HHMMSS.yaml
+```
+
+---
+
+## How it works
+
+- **Ignition interpreter**: immediate execution, great for REPL and scripts.
+- **Turbine JIT**: hot functions get compiled to optimized machine code (Cranelift backend).
+- **Column-major arrays**: zero-copy interop to BLAS/LAPACK where appropriate.
+- **Generational GC**: non-moving young/old spaces, write barriers + remembered set, survivor promotion.
+- **Slim builtins**: a curated set in core; everything else via packages. Docs are generated from runtime metadata.
+
+For a deeper dive, see [How It Works](/docs/how-it-works) and the [Architecture & Internals](/docs/architecture) section.
+
+---
+
+## Packages: extending the runtime
+
+Two ways to add capabilities:
+
+- **Native (Rust) packages**: implement built-ins with `#[runtime_builtin]`, get strong typing and speed, and ship as a dynamic library.
+- **Source (MATLAB) packages**: ship `.m` files; RunMat interprets or compiles them.
+
+Documentation is generated from runtime metadata, so everything you add shows up in the reference automatically. See the [Package Manager](/docs/package-manager) doc for the full design and examples.
+
+---
+
+## What you can run today
+
+- Core language: arrays, slicing (`end`, colon, logical masks), functions and multiple returns, cells/structs, OOP (`classdef` with properties/methods), `try/catch`, `global`, `persistent`, function handles, command-form.
+- A curated builtin set in the runtime (canonical math like `sin/cos/tan`, reductions like `sum/min/max`, basic string/formatting via `fprintf/sprintf`, array creation like `zeros/ones/eye`), with more coming through packages.
+
+If your code relies on many niche built-ins, the recommended path is to move those pieces into packages. The docs call out differences and migration notes where they exist.
+
+---
+
+## MATLAB, Octave, RunMat — a quick contrast
+
+- **MATLAB**: proprietary, massive standard library, heavy startup, license-gated deployment. Feature-rich; closed source.
+- **GNU Octave**: free, community-driven project with partial compatibility with MATLAB scripts. It carries a broad builtin surface and a classic interpreter architecture, but startup times and hot-loop performance can be poor. Octave is a full application; its design optimizes for breadth and compatibility.
+- **RunMat**: open-source, modern engine with full language grammar and core semantics. We deliberately keep the core small and fast (canonical built-ins only) and move breadth into packages. This lets us optimize the engine aggressively for performance and predictability while still enabling a large library surface via the package system.
+
+---
+
+## Try it & get involved
+
+- Read the docs: Getting Started, Design Philosophy, and How It Works.
+- Browse the builtin reference; it's generated from the runtime.
+- Star the repo and open issues: https://github.com/runmat-org/runmat
+- Interested in contributing? Packages are the best place to start (Rust or MATLAB source).
+
+---
+
+*RunMat is not affiliated with MathWorks, Inc. “MATLAB” is a registered trademark of MathWorks, Inc. We reference it nominatively to describe the language whose grammar and semantics our independent runtime accepts.*
+
+*RunMat is developed by [Dystr](https://dystr.com).* 

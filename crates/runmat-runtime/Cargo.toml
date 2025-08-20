@@ -12,6 +12,9 @@ inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
 runmat-plot = { workspace = true }
+runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+runmat-gc = { path = "../runmat-gc" }
+runmat-gc-api = { path = "../runmat-gc-api" }
 glam = "0.24"
 tokio = { workspace = true }
 
@@ -49,5 +52,31 @@ blas-lapack = ["blas", "lapack", "accelerate-src", "openblas-src"]
 # Other platforms: Uses OpenBLAS
 blas-only = ["blas", "accelerate-src", "openblas-src"]
 
+# Internal testing utilities (class registry seeders)
+test-classes = []
+
+# Documentation/export utilities
+doc_export = ["serde", "serde_json", "clap"]
+
 [dev-dependencies]
 runmat-macros = { workspace = true } 
+runmat-accelerate = { workspace = true }
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+optional = true
+
+[dependencies.serde_json]
+version = "1.0"
+optional = true
+
+[dependencies.clap]
+version = "4.5"
+features = ["derive"]
+optional = true
+
+[[bin]]
+name = "export_builtins"
+path = "src/bin/export_builtins.rs"
+required-features = ["doc_export"]
