@@ -196,6 +196,8 @@ rm -rf "$TEMP_DIR"
 
 log "RunMat installed successfully to $INSTALL_DIR/$BINARY_NAME"
 
+RELOAD_SHELL_REQUIRED=false
+
 # Ensure $INSTALL_DIR is in PATH (persistently and for current session)
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
     SHELL_NAME=$(basename "${SHELL:-sh}")
@@ -252,13 +254,13 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
     # Apply for current session (affects this subshell only)
     export PATH="$INSTALL_DIR:$PATH"
     warn "Added $INSTALL_DIR to your PATH."
-    # If interactive and not in CI, start a new login shell so PATH is live immediately
-    if [ -t 1 ] && [ -n "${SHELL:-}" ] && [ -z "${CI:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ] && [ -z "${RUNMAT_NO_SHELL_RELOAD:-}" ]; then
-        log "Refreshing your shell to pick up PATH changes (run 'exit' to return)."
-        exec "$SHELL" -l
+    if [ -t 1 ] && [ -t 0 ] && [ -n "${SHELL:-}" ] && [ -z "${CI:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ] && [ -z "${RUNMAT_NO_SHELL_RELOAD:-}" ]; then
+        warn "Open a new terminal or run 'exec $SHELL -l' to refresh your PATH."
     else
         warn "Restart your terminal or 'source' your shell profile to take effect."
     fi
+    log "To use now in this shell: export PATH=\"$INSTALL_DIR:\$PATH\""
+    RELOAD_SHELL_REQUIRED=true
 else
     log "RunMat is already in your PATH"
 fi
@@ -284,8 +286,11 @@ echo
 log "Installation complete! 🎉"
 echo
 echo "Next steps:"
+if [ "$RELOAD_SHELL_REQUIRED" = true ]; then
+    echo "  0. Open a new terminal or run 'exec $SHELL -l' to refresh your PATH."
+fi
 echo "  1. Start the interactive REPL: runmat"
-echo "  2. Run a script: runmat run script.m"
+echo "  2. Run a script: runmat script.m"
 echo "  3. Install Jupyter kernel: runmat --install-kernel"
 echo "  4. Get help: runmat --help"
 echo
