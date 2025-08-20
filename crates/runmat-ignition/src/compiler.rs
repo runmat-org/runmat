@@ -92,16 +92,17 @@ impl Compiler {
             K::Tensor(rows) | K::Cell(rows) => rows
                 .iter()
                 .flat_map(|r| r.iter())
-                .any(|e| Self::expr_contains_end(e)),
+                .any(Self::expr_contains_end),
             K::Index(base, idxs) | K::IndexCell(base, idxs) => {
                 if Self::expr_contains_end(base) {
                     return true;
                 }
-                idxs.iter().any(|e| Self::expr_contains_end(e))
+                idxs.iter().any(Self::expr_contains_end)
             }
             _ => false,
         }
     }
+    #[allow(clippy::only_used_in_recursion)]
     fn collect_free_vars(
         &self,
         expr: &runmat_hir::HirExpr,
@@ -291,11 +292,9 @@ impl Compiler {
                     }
                     HirStmt::AssignLValue(_, expr, _) => visit_expr(expr, max),
                     HirStmt::MultiAssign(vars, expr, _) => {
-                        for v in vars {
-                            if let Some(v) = v {
-                                if v.0 + 1 > *max {
-                                    *max = v.0 + 1;
-                                }
+                        for v in vars.iter().flatten() {
+                            if v.0 + 1 > *max {
+                                *max = v.0 + 1;
                             }
                         }
                         visit_expr(expr, max);
@@ -676,11 +675,9 @@ impl Compiler {
                         }
                         HirStmt::AssignLValue(_, expr, _) => visit_expr_for_vars(expr, max),
                         HirStmt::MultiAssign(vars, expr, _) => {
-                            for v in vars {
-                                if let Some(v) = v {
-                                    if v.0 + 1 > *max {
-                                        *max = v.0 + 1;
-                                    }
+                            for v in vars.iter().flatten() {
+                                if v.0 + 1 > *max {
+                                    *max = v.0 + 1;
                                 }
                             }
                             visit_expr_for_vars(expr, max);
@@ -1315,7 +1312,7 @@ impl Compiler {
                             // Encode dependent flag by prefixing name with "@dep:"; VM will strip and set flag.
                             for n in names {
                                 let enc = if is_dependent {
-                                    format!("@dep:{}", n)
+                                    format!("@dep:{n}")
                                 } else {
                                     n.clone()
                                 };
@@ -1827,7 +1824,7 @@ impl Compiler {
                                     cls.push_str(part);
                                 }
                                 if let Some((m, _owner)) =
-                                    runmat_builtins::lookup_method(&cls, &name)
+                                    runmat_builtins::lookup_method(&cls, name)
                                 {
                                     if m.is_static {
                                         static_candidates.push((cls.clone(), name.clone()));
@@ -1896,13 +1893,7 @@ impl Compiler {
                                         let outc = self
                                             .functions
                                             .get(inner)
-                                            .map(|f| {
-                                                if f.has_varargout {
-                                                    f.outputs.len().max(1)
-                                                } else {
-                                                    f.outputs.len().max(1)
-                                                }
-                                            })
+                                            .map(|f| f.outputs.len().max(1))
                                             .unwrap_or(1);
                                         self.emit(Instr::CallFunctionMulti(
                                             inner.clone(),
@@ -1962,13 +1953,7 @@ impl Compiler {
                                     let outc = self
                                         .functions
                                         .get(inner)
-                                        .map(|f| {
-                                            if f.has_varargout {
-                                                f.outputs.len().max(1)
-                                            } else {
-                                                f.outputs.len().max(1)
-                                            }
-                                        })
+                                        .map(|f| f.outputs.len().max(1))
                                         .unwrap_or(1);
                                     self.emit(Instr::CallFunctionMulti(
                                         inner.clone(),
@@ -2041,7 +2026,7 @@ impl Compiler {
                 // Lower "[C{:}]" into cat(2, C{:}) so downstream expansion works without colon compilation
                 if matches!(expr.kind, HirExprKind::Tensor(_))
                     && rows == 1
-                    && matrix_data.get(0).map(|r| r.len()).unwrap_or(0) == 1
+                    && matrix_data.first().map(|r| r.len()).unwrap_or(0) == 1
                 {
                     if let HirExprKind::IndexCell(base, indices) = &matrix_data[0][0].kind {
                         if indices.len() == 1 && matches!(indices[0].kind, HirExprKind::Colon) {

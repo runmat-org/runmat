@@ -23,6 +23,12 @@ impl InProcessProvider {
     }
 }
 
+impl Default for InProcessProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AccelProvider for InProcessProvider {
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -211,7 +217,7 @@ static INSTANCE: OnceCell<InProcessProvider> = OnceCell::new();
 /// Register the in-process provider as the global acceleration provider.
 /// Safe to call multiple times; only the first call installs the provider.
 pub fn register_inprocess_provider() {
-    let provider: &'static InProcessProvider = INSTANCE.get_or_init(|| InProcessProvider::new());
+    let provider: &'static InProcessProvider = INSTANCE.get_or_init(InProcessProvider::new);
     // Safety: we intentionally install a reference with 'static lifetime
     unsafe { runmat_accelerate_api::register_provider(provider) };
 }

@@ -1,8 +1,8 @@
 pub use inventory;
+use runmat_gc_api::GcPtr;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
-use std::collections::HashMap;
-use runmat_gc_api::GcPtr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -61,11 +61,21 @@ impl IntValue {
             IntValue::U8(v) => *v as i64,
             IntValue::U16(v) => *v as i64,
             IntValue::U32(v) => *v as i64,
-            IntValue::U64(v) => if *v > i64::MAX as u64 { i64::MAX } else { *v as i64 },
+            IntValue::U64(v) => {
+                if *v > i64::MAX as u64 {
+                    i64::MAX
+                } else {
+                    *v as i64
+                }
+            }
         }
     }
-    pub fn to_f64(&self) -> f64 { self.to_i64() as f64 }
-    pub fn is_zero(&self) -> bool { self.to_i64() == 0 }
+    pub fn to_f64(&self) -> f64 {
+        self.to_i64() as f64
+    }
+    pub fn is_zero(&self) -> bool {
+        self.to_i64() == 0
+    }
     pub fn class_name(&self) -> &'static str {
         match self {
             IntValue::I8(_) => "int8",
@@ -86,20 +96,25 @@ pub struct StructValue {
 }
 
 impl StructValue {
-    pub fn new() -> Self { Self { fields: HashMap::new() } }
+    pub fn new() -> Self {
+        Self {
+            fields: HashMap::new(),
+        }
+    }
 }
 
 impl Default for StructValue {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
     pub data: Vec<f64>,
     pub shape: Vec<usize>, // Column-major layout
-    pub rows: usize,        // Compatibility for 2D usage
-    pub cols: usize,        // Compatibility for 2D usage
+    pub rows: usize,       // Compatibility for 2D usage
+    pub cols: usize,       // Compatibility for 2D usage
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,20 +145,31 @@ impl LogicalArray {
         if data.len() != expected {
             return Err(format!(
                 "LogicalArray data length {} doesn't match shape {:?} ({} elements)",
-                data.len(), shape, expected
+                data.len(),
+                shape,
+                expected
             ));
         }
         // Normalize to 0/1
         let mut d = data;
-        for v in &mut d { *v = if *v != 0 { 1 } else { 0 }; }
+        for v in &mut d {
+            *v = if *v != 0 { 1 } else { 0 };
+        }
         Ok(LogicalArray { data: d, shape })
     }
     pub fn zeros(shape: Vec<usize>) -> Self {
         let expected: usize = shape.iter().product();
-        LogicalArray { data: vec![0u8; expected], shape }
+        LogicalArray {
+            data: vec![0u8; expected],
+            shape,
+        }
     }
-    pub fn len(&self) -> usize { self.data.len() }
-    pub fn is_empty(&self) -> bool { self.data.is_empty() }
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -154,9 +180,22 @@ pub struct CharArray {
 }
 
 impl CharArray {
-    pub fn new_row(s: &str) -> Self { CharArray { data: s.chars().collect(), rows: 1, cols: s.chars().count() } }
+    pub fn new_row(s: &str) -> Self {
+        CharArray {
+            data: s.chars().collect(),
+            rows: 1,
+            cols: s.chars().count(),
+        }
+    }
     pub fn new(data: Vec<char>, rows: usize, cols: usize) -> Result<Self, String> {
-        if rows * cols != data.len() { return Err(format!("Char data length {} doesn't match dimensions {}x{}", data.len(), rows, cols)); }
+        if rows * cols != data.len() {
+            return Err(format!(
+                "Char data length {} doesn't match dimensions {}x{}",
+                data.len(),
+                rows,
+                cols
+            ));
+        }
         Ok(CharArray { data, rows, cols })
     }
 }
@@ -167,19 +206,37 @@ impl StringArray {
         if data.len() != expected {
             return Err(format!(
                 "StringArray data length {} doesn't match shape {:?} ({} elements)",
-                data.len(), shape, expected
+                data.len(),
+                shape,
+                expected
             ));
         }
-        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
-        Ok(StringArray { data, shape, rows, cols })
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        Ok(StringArray {
+            data,
+            shape,
+            rows,
+            cols,
+        })
     }
-    pub fn new_2d(data: Vec<String>, rows: usize, cols: usize) -> Result<Self, String> { Self::new(data, vec![rows, cols]) }
-    pub fn rows(&self) -> usize { self.shape.first().copied().unwrap_or(1) }
-    pub fn cols(&self) -> usize { self.shape.get(1).copied().unwrap_or(1) }
+    pub fn new_2d(data: Vec<String>, rows: usize, cols: usize) -> Result<Self, String> {
+        Self::new(data, vec![rows, cols])
+    }
+    pub fn rows(&self) -> usize {
+        self.shape.first().copied().unwrap_or(1)
+    }
+    pub fn cols(&self) -> usize {
+        self.shape.get(1).copied().unwrap_or(1)
+    }
 }
 
 // GpuTensorHandle now lives in runmat-accel-api
-
 
 impl Tensor {
     pub fn new(data: Vec<f64>, shape: Vec<usize>) -> Result<Self, String> {
@@ -187,11 +244,24 @@ impl Tensor {
         if data.len() != expected {
             return Err(format!(
                 "Tensor data length {} doesn't match shape {:?} ({} elements)",
-                data.len(), shape, expected
+                data.len(),
+                shape,
+                expected
             ));
         }
-        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
-        Ok(Tensor { data, shape, rows, cols })
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        Ok(Tensor {
+            data,
+            shape,
+            rows,
+            cols,
+        })
     }
 
     pub fn new_2d(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
@@ -200,25 +270,56 @@ impl Tensor {
 
     pub fn zeros(shape: Vec<usize>) -> Self {
         let size: usize = shape.iter().product();
-        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
-        Tensor { data: vec![0.0; size], shape, rows, cols }
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        Tensor {
+            data: vec![0.0; size],
+            shape,
+            rows,
+            cols,
+        }
     }
 
     pub fn ones(shape: Vec<usize>) -> Self {
         let size: usize = shape.iter().product();
-        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
-        Tensor { data: vec![1.0; size], shape, rows, cols }
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        Tensor {
+            data: vec![1.0; size],
+            shape,
+            rows,
+            cols,
+        }
     }
 
     // 2D helpers for transitional call sites
-    pub fn zeros2(rows: usize, cols: usize) -> Self { Self::zeros(vec![rows, cols]) }
-    pub fn ones2(rows: usize, cols: usize) -> Self { Self::ones(vec![rows, cols]) }
+    pub fn zeros2(rows: usize, cols: usize) -> Self {
+        Self::zeros(vec![rows, cols])
+    }
+    pub fn ones2(rows: usize, cols: usize) -> Self {
+        Self::ones(vec![rows, cols])
+    }
 
-    pub fn rows(&self) -> usize { self.shape.first().copied().unwrap_or(1) }
-    pub fn cols(&self) -> usize { self.shape.get(1).copied().unwrap_or(1) }
+    pub fn rows(&self) -> usize {
+        self.shape.first().copied().unwrap_or(1)
+    }
+    pub fn cols(&self) -> usize {
+        self.shape.get(1).copied().unwrap_or(1)
+    }
 
     pub fn get2(&self, row: usize, col: usize) -> Result<f64, String> {
-        let rows = self.rows(); let cols = self.cols();
+        let rows = self.rows();
+        let cols = self.cols();
         if row >= rows || col >= cols {
             return Err(format!(
                 "Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"
@@ -229,7 +330,8 @@ impl Tensor {
     }
 
     pub fn set2(&mut self, row: usize, col: usize, value: f64) -> Result<(), String> {
-        let rows = self.rows(); let cols = self.cols();
+        let rows = self.rows();
+        let cols = self.cols();
         if row >= rows || col >= cols {
             return Err(format!(
                 "Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"
@@ -241,7 +343,12 @@ impl Tensor {
     }
 
     pub fn scalar_to_tensor2(scalar: f64, rows: usize, cols: usize) -> Tensor {
-        Tensor { data: vec![scalar; rows * cols], shape: vec![rows, cols], rows, cols }
+        Tensor {
+            data: vec![scalar; rows * cols],
+            shape: vec![rows, cols],
+            rows,
+            cols,
+        }
     }
     // No-compat constructors: prefer new/new_2d/zeros/zeros2/ones/ones2
 }
@@ -252,17 +359,43 @@ impl ComplexTensor {
         if data.len() != expected {
             return Err(format!(
                 "ComplexTensor data length {} doesn't match shape {:?} ({} elements)",
-                data.len(), shape, expected
+                data.len(),
+                shape,
+                expected
             ));
         }
-        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
-        Ok(ComplexTensor { data, shape, rows, cols })
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        Ok(ComplexTensor {
+            data,
+            shape,
+            rows,
+            cols,
+        })
     }
-    pub fn new_2d(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Result<Self, String> { Self::new(data, vec![rows, cols]) }
+    pub fn new_2d(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Result<Self, String> {
+        Self::new(data, vec![rows, cols])
+    }
     pub fn zeros(shape: Vec<usize>) -> Self {
         let size: usize = shape.iter().product();
-        let (rows, cols) = if shape.len() >= 2 { (shape[0], shape[1]) } else if shape.len() == 1 { (1, shape[0]) } else { (0, 0) };
-        ComplexTensor { data: vec![(0.0, 0.0); size], shape, rows, cols }
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        ComplexTensor {
+            data: vec![(0.0, 0.0); size],
+            shape,
+            rows,
+            cols,
+        }
     }
 }
 
@@ -273,21 +406,28 @@ impl fmt::Display for Tensor {
                 // Treat as row vector for display
                 write!(f, "[")?;
                 for (i, v) in self.data.iter().enumerate() {
-                    if i > 0 { write!(f, " ")?; }
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
                     write!(f, "{}", format_number_short_g(*v))?;
                 }
                 write!(f, "]")
             }
             2 => {
-                let rows = self.rows(); let cols = self.cols();
+                let rows = self.rows();
+                let cols = self.cols();
                 write!(f, "[")?;
                 for r in 0..rows {
                     for c in 0..cols {
-                        if c > 0 { write!(f, " ")?; }
+                        if c > 0 {
+                            write!(f, " ")?;
+                        }
                         let v = self.data[r + c * rows];
                         write!(f, "{}", format_number_short_g(v))?;
                     }
-                    if r + 1 < rows { write!(f, "; ")?; }
+                    if r + 1 < rows {
+                        write!(f, "; ")?;
+                    }
                 }
                 write!(f, "]")
             }
@@ -302,23 +442,30 @@ impl fmt::Display for StringArray {
             0 | 1 => {
                 write!(f, "[")?;
                 for (i, v) in self.data.iter().enumerate() {
-                    if i > 0 { write!(f, " ")?; }
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
                     let escaped = v.replace('"', "\\\"");
                     write!(f, "\"{escaped}\"")?;
                 }
                 write!(f, "]")
             }
             2 => {
-                let rows = self.rows(); let cols = self.cols();
+                let rows = self.rows();
+                let cols = self.cols();
                 write!(f, "[")?;
                 for r in 0..rows {
                     for c in 0..cols {
-                        if c > 0 { write!(f, " ")?; }
+                        if c > 0 {
+                            write!(f, " ")?;
+                        }
                         let v = &self.data[r + c * rows];
                         let escaped = v.replace('"', "\\\"");
                         write!(f, "\"{escaped}\"")?;
                     }
-                    if r + 1 < rows { write!(f, "; ")?; }
+                    if r + 1 < rows {
+                        write!(f, "; ")?;
+                    }
                 }
                 write!(f, "]")
             }
@@ -334,21 +481,28 @@ impl fmt::Display for LogicalArray {
             1 => {
                 write!(f, "[")?;
                 for (i, v) in self.data.iter().enumerate() {
-                    if i > 0 { write!(f, " ")?; }
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
                     write!(f, "{}", if *v != 0 { 1 } else { 0 })?;
                 }
                 write!(f, "]")
             }
             2 => {
-                let rows = self.shape[0]; let cols = self.shape[1];
+                let rows = self.shape[0];
+                let cols = self.shape[1];
                 write!(f, "[")?;
                 for r in 0..rows {
                     for c in 0..cols {
-                        if c > 0 { write!(f, " ")?; }
+                        if c > 0 {
+                            write!(f, " ")?;
+                        }
                         let idx = r + c * rows;
                         write!(f, "{}", if self.data[idx] != 0 { 1 } else { 0 })?;
                     }
-                    if r + 1 < rows { write!(f, "; ")?; }
+                    if r + 1 < rows {
+                        write!(f, "; ")?;
+                    }
                 }
                 write!(f, "]")
             }
@@ -362,9 +516,18 @@ impl fmt::Display for CharArray {
         // Display as single-quoted rows separated by ;
         write!(f, "[")?;
         for r in 0..self.rows {
-            if r > 0 { write!(f, "; ")?; }
+            if r > 0 {
+                write!(f, "; ")?;
+            }
             write!(f, "'")?;
-            for c in 0..self.cols { let ch = self.data[r * self.cols + c]; if ch == '\'' { write!(f, "''")?; } else { write!(f, "{ch}")?; } }
+            for c in 0..self.cols {
+                let ch = self.data[r * self.cols + c];
+                if ch == '\'' {
+                    write!(f, "''")?;
+                } else {
+                    write!(f, "{ch}")?;
+                }
+            }
             write!(f, "'")?;
         }
         write!(f, "]")
@@ -372,14 +535,46 @@ impl fmt::Display for CharArray {
 }
 
 // From implementations for Value
-impl From<i32> for Value { fn from(i: i32) -> Self { Value::Int(IntValue::I32(i)) } }
-impl From<i64> for Value { fn from(i: i64) -> Self { Value::Int(IntValue::I64(i)) } }
-impl From<u32> for Value { fn from(i: u32) -> Self { Value::Int(IntValue::U32(i)) } }
-impl From<u64> for Value { fn from(i: u64) -> Self { Value::Int(IntValue::U64(i)) } }
-impl From<i16> for Value { fn from(i: i16) -> Self { Value::Int(IntValue::I16(i)) } }
-impl From<i8> for Value { fn from(i: i8) -> Self { Value::Int(IntValue::I8(i)) } }
-impl From<u16> for Value { fn from(i: u16) -> Self { Value::Int(IntValue::U16(i)) } }
-impl From<u8> for Value { fn from(i: u8) -> Self { Value::Int(IntValue::U8(i)) } }
+impl From<i32> for Value {
+    fn from(i: i32) -> Self {
+        Value::Int(IntValue::I32(i))
+    }
+}
+impl From<i64> for Value {
+    fn from(i: i64) -> Self {
+        Value::Int(IntValue::I64(i))
+    }
+}
+impl From<u32> for Value {
+    fn from(i: u32) -> Self {
+        Value::Int(IntValue::U32(i))
+    }
+}
+impl From<u64> for Value {
+    fn from(i: u64) -> Self {
+        Value::Int(IntValue::U64(i))
+    }
+}
+impl From<i16> for Value {
+    fn from(i: i16) -> Self {
+        Value::Int(IntValue::I16(i))
+    }
+}
+impl From<i8> for Value {
+    fn from(i: i8) -> Self {
+        Value::Int(IntValue::I8(i))
+    }
+}
+impl From<u16> for Value {
+    fn from(i: u16) -> Self {
+        Value::Int(IntValue::U16(i))
+    }
+}
+impl From<u8> for Value {
+    fn from(i: u8) -> Self {
+        Value::Int(IntValue::U8(i))
+    }
+}
 
 impl From<f64> for Value {
     fn from(f: f64) -> Self {
@@ -454,11 +649,19 @@ impl TryFrom<&Value> for String {
         match v {
             Value::String(s) => Ok(s.clone()),
             Value::StringArray(sa) => {
-                if sa.data.len() == 1 { Ok(sa.data[0].clone()) } else { Err("cannot convert string array to scalar string".to_string()) }
+                if sa.data.len() == 1 {
+                    Ok(sa.data[0].clone())
+                } else {
+                    Err("cannot convert string array to scalar string".to_string())
+                }
             }
             Value::CharArray(ca) => {
                 // Convert full char array to one string if it is a single row; else error
-                if ca.rows == 1 { Ok(ca.data.iter().collect()) } else { Err("cannot convert multi-row char array to scalar string".to_string()) }
+                if ca.rows == 1 {
+                    Ok(ca.data.iter().collect())
+                } else {
+                    Err("cannot convert multi-row char array to scalar string".to_string())
+                }
             }
             Value::Int(i) => Ok(i.to_i64().to_string()),
             Value::Num(n) => Ok(n.to_string()),
@@ -545,11 +748,15 @@ pub enum Type {
 
 impl Type {
     /// Create a tensor type with unknown shape
-    pub fn tensor() -> Self { Type::Tensor { shape: None } }
+    pub fn tensor() -> Self {
+        Type::Tensor { shape: None }
+    }
 
     /// Create a tensor type with known shape
     pub fn tensor_with_shape(shape: Vec<usize>) -> Self {
-        Type::Tensor { shape: Some(shape.into_iter().map(Some).collect()) }
+        Type::Tensor {
+            shape: Some(shape.into_iter().map(Some).collect()),
+        }
     }
 
     /// Create a cell array type with unknown element type
@@ -584,17 +791,19 @@ impl Type {
             (Type::Unknown, t) | (t, Type::Unknown) => t.clone(),
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => Type::Num,
             (Type::Tensor { .. }, Type::Tensor { .. }) => Type::tensor(), // Lose shape info for now
-            (Type::Struct { known_fields: a }, Type::Struct { known_fields: b }) => {
-                match (a, b) {
-                    (None, None) => Type::Struct { known_fields: None },
-                    (Some(ka), None) | (None, Some(ka)) => Type::Struct { known_fields: Some(ka.clone()) },
-                    (Some(ka), Some(kb)) => {
-                        let mut set: std::collections::BTreeSet<String> = ka.iter().cloned().collect();
-                        set.extend(kb.iter().cloned());
-                        Type::Struct { known_fields: Some(set.into_iter().collect()) }
+            (Type::Struct { known_fields: a }, Type::Struct { known_fields: b }) => match (a, b) {
+                (None, None) => Type::Struct { known_fields: None },
+                (Some(ka), None) | (None, Some(ka)) => Type::Struct {
+                    known_fields: Some(ka.clone()),
+                },
+                (Some(ka), Some(kb)) => {
+                    let mut set: std::collections::BTreeSet<String> = ka.iter().cloned().collect();
+                    set.extend(kb.iter().cloned());
+                    Type::Struct {
+                        known_fields: Some(set.into_iter().collect()),
                     }
                 }
-            }
+            },
             (a, b) if a == b => a.clone(),
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
@@ -605,7 +814,7 @@ impl Type {
         match value {
             Value::Int(_) => Type::Int,
             Value::Num(_) => Type::Num,
-            Value::Complex(_,_) => Type::Num, // treat as numeric double (complex) in type system for now
+            Value::Complex(_, _) => Type::Num, // treat as numeric double (complex) in type system for now
             Value::Bool(_) => Type::Bool,
             Value::LogicalArray(_) => Type::Logical,
             Value::String(_) => Type::String,
@@ -613,11 +822,11 @@ impl Type {
                 // Model as Cell of String for type system for now
                 Type::cell_of(Type::String)
             }
-            Value::Tensor(t) => {
-                Type::Tensor { shape: Some(t.shape.iter().map(|&d| Some(d)).collect()) }
+            Value::Tensor(t) => Type::Tensor {
+                shape: Some(t.shape.iter().map(|&d| Some(d)).collect()),
             },
-            Value::ComplexTensor(t) => {
-                Type::Tensor { shape: Some(t.shape.iter().map(|&d| Some(d)).collect()) }
+            Value::ComplexTensor(t) => Type::Tensor {
+                shape: Some(t.shape.iter().map(|&d| Some(d)).collect()),
             },
             Value::Cell(cells) => {
                 if cells.data.is_empty() {
@@ -631,18 +840,29 @@ impl Type {
                     }
                 }
             }
-            Value::GpuTensor(h) => { Type::Tensor { shape: Some(h.shape.iter().map(|&d| Some(d)).collect()) } }
+            Value::GpuTensor(h) => Type::Tensor {
+                shape: Some(h.shape.iter().map(|&d| Some(d)).collect()),
+            },
             Value::Object(_) => Type::Unknown,
             Value::HandleObject(_) => Type::Unknown,
             Value::Listener(_) => Type::Unknown,
             Value::Struct(_) => Type::Struct { known_fields: None },
-            Value::FunctionHandle(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
-            Value::Closure(_) => Type::Function { params: vec![Type::Unknown], returns: Box::new(Type::Unknown) },
+            Value::FunctionHandle(_) => Type::Function {
+                params: vec![Type::Unknown],
+                returns: Box::new(Type::Unknown),
+            },
+            Value::Closure(_) => Type::Function {
+                params: vec![Type::Unknown],
+                returns: Box::new(Type::Unknown),
+            },
             Value::ClassRef(_) => Type::Unknown,
             Value::MException(_) => Type::Unknown,
             Value::CharArray(ca) => {
                 // Treat as cell of char for type purposes; or a 2-D char matrix conceptually
-                Type::Cell { element_type: Some(Box::new(Type::String)), length: Some(ca.rows * ca.cols) }
+                Type::Cell {
+                    element_type: Some(Box::new(Type::String)),
+                    length: Some(ca.rows * ca.cols),
+                }
             }
         }
     }
@@ -679,7 +899,16 @@ impl BuiltinFunction {
         return_type: Type,
         implementation: fn(&[Value]) -> Result<Value, String>,
     ) -> Self {
-        Self { name, description, category, doc, examples, param_types, return_type, implementation }
+        Self {
+            name,
+            description,
+            category,
+            doc,
+            examples,
+            param_types,
+            return_type,
+            implementation,
+        }
     }
 }
 
@@ -823,7 +1052,11 @@ pub struct MException {
 
 impl MException {
     pub fn new(identifier: String, message: String) -> Self {
-        Self { identifier, message, stack: Vec::new() }
+        Self {
+            identifier,
+            message,
+            stack: Vec::new(),
+        }
     }
 }
 
@@ -870,10 +1103,25 @@ impl fmt::Display for Value {
             Value::Int(i) => write!(f, "{}", i.to_i64()),
             Value::Num(n) => write!(f, "{}", format_number_short_g(*n)),
             Value::Complex(re, im) => {
-                if *im == 0.0 { write!(f, "{}", format_number_short_g(*re)) }
-                else if *re == 0.0 { write!(f, "{}i", format_number_short_g(*im)) }
-                else if *im < 0.0 { write!(f, "{}-{}i", format_number_short_g(*re), format_number_short_g(im.abs())) }
-                else { write!(f, "{}+{}i", format_number_short_g(*re), format_number_short_g(*im)) }
+                if *im == 0.0 {
+                    write!(f, "{}", format_number_short_g(*re))
+                } else if *re == 0.0 {
+                    write!(f, "{}i", format_number_short_g(*im))
+                } else if *im < 0.0 {
+                    write!(
+                        f,
+                        "{}-{}i",
+                        format_number_short_g(*re),
+                        format_number_short_g(im.abs())
+                    )
+                } else {
+                    write!(
+                        f,
+                        "{}+{}i",
+                        format_number_short_g(*re),
+                        format_number_short_g(*im)
+                    )
+                }
             }
             Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
             Value::LogicalArray(la) => write!(f, "{la}"),
@@ -883,22 +1131,48 @@ impl fmt::Display for Value {
             Value::Tensor(m) => write!(f, "{m}"),
             Value::ComplexTensor(m) => write!(f, "{m}"),
             Value::Cell(ca) => ca.fmt(f),
-            
-            Value::GpuTensor(h) => write!(f, "GpuTensor(shape={:?}, device={}, buffer={})", h.shape, h.device_id, h.buffer_id),
+
+            Value::GpuTensor(h) => write!(
+                f,
+                "GpuTensor(shape={:?}, device={}, buffer={})",
+                h.shape, h.device_id, h.buffer_id
+            ),
             Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
             Value::HandleObject(h) => {
                 let ptr = unsafe { h.target.as_raw() } as usize;
-                write!(f, "<handle {} @0x{:x} valid={}>", h.class_name, ptr, h.valid)
+                write!(
+                    f,
+                    "<handle {} @0x{:x} valid={}>",
+                    h.class_name, ptr, h.valid
+                )
             }
             Value::Listener(l) => {
                 let ptr = unsafe { l.target.as_raw() } as usize;
-                write!(f, "<listener id={} {}@0x{:x} '{}' enabled={} valid={}>", l.id, l.class_name(), ptr, l.event_name, l.enabled, l.valid)
+                write!(
+                    f,
+                    "<listener id={} {}@0x{:x} '{}' enabled={} valid={}>",
+                    l.id,
+                    l.class_name(),
+                    ptr,
+                    l.event_name,
+                    l.enabled,
+                    l.valid
+                )
             }
             Value::Struct(st) => write!(f, "struct(fields={})", st.fields.len()),
             Value::FunctionHandle(name) => write!(f, "@{name}"),
-            Value::Closure(c) => write!(f, "<closure {} captures={}>", c.function_name, c.captures.len()),
-            Value::ClassRef(name) => write!(f, "<class {name}>") ,
-            Value::MException(e) => write!(f, "MException(identifier='{}', message='{}')", e.identifier, e.message),
+            Value::Closure(c) => write!(
+                f,
+                "<closure {} captures={}>",
+                c.function_name,
+                c.captures.len()
+            ),
+            Value::ClassRef(name) => write!(f, "<class {name}>"),
+            Value::MException(e) => write!(
+                f,
+                "MException(identifier='{}', message='{}')",
+                e.identifier, e.message
+            ),
         }
     }
 }
@@ -909,23 +1183,30 @@ impl fmt::Display for ComplexTensor {
             0 | 1 => {
                 write!(f, "[")?;
                 for (i, (re, im)) in self.data.iter().enumerate() {
-                    if i > 0 { write!(f, " ")?; }
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
                     let s = Value::Complex(*re, *im).to_string();
                     write!(f, "{s}")?;
                 }
                 write!(f, "]")
             }
             2 => {
-                let rows = self.rows; let cols = self.cols;
+                let rows = self.rows;
+                let cols = self.cols;
                 write!(f, "[")?;
                 for r in 0..rows {
                     for c in 0..cols {
-                        if c > 0 { write!(f, " ")?; }
+                        if c > 0 {
+                            write!(f, " ")?;
+                        }
                         let (re, im) = self.data[r + c * rows];
                         let s = Value::Complex(re, im).to_string();
                         write!(f, "{s}")?;
                     }
-                    if r + 1 < rows { write!(f, "; ")?; }
+                    if r + 1 < rows {
+                        write!(f, "; ")?;
+                    }
                 }
                 write!(f, "]")
             }
@@ -942,24 +1223,52 @@ pub struct CellArray {
 }
 
 impl CellArray {
-    pub fn new_handles(handles: Vec<GcPtr<Value>>, rows: usize, cols: usize) -> Result<Self, String> {
+    pub fn new_handles(
+        handles: Vec<GcPtr<Value>>,
+        rows: usize,
+        cols: usize,
+    ) -> Result<Self, String> {
         if rows * cols != handles.len() {
-            return Err(format!("Cell data length {} doesn't match dimensions {}x{}", handles.len(), rows, cols));
+            return Err(format!(
+                "Cell data length {} doesn't match dimensions {}x{}",
+                handles.len(),
+                rows,
+                cols
+            ));
         }
-        Ok(CellArray { data: handles, rows, cols })
+        Ok(CellArray {
+            data: handles,
+            rows,
+            cols,
+        })
     }
     pub fn new(data: Vec<Value>, rows: usize, cols: usize) -> Result<Self, String> {
         if rows * cols != data.len() {
-            return Err(format!("Cell data length {} doesn't match dimensions {}x{}", data.len(), rows, cols));
+            return Err(format!(
+                "Cell data length {} doesn't match dimensions {}x{}",
+                data.len(),
+                rows,
+                cols
+            ));
         }
         // Note: data will be allocated into GC handles by callers (runtime/ignition) to avoid builtins↔gc cycles
-        let handles: Vec<GcPtr<Value>> = data.into_iter().map(|v| unsafe { GcPtr::from_raw(Box::into_raw(Box::new(v))) }).collect();
-        Ok(CellArray { data: handles, rows, cols })
+        let handles: Vec<GcPtr<Value>> = data
+            .into_iter()
+            .map(|v| unsafe { GcPtr::from_raw(Box::into_raw(Box::new(v))) })
+            .collect();
+        Ok(CellArray {
+            data: handles,
+            rows,
+            cols,
+        })
     }
 
     pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {
         if row >= self.rows || col >= self.cols {
-            return Err(format!("Cell index ({row}, {col}) out of bounds for {}x{} cell array", self.rows, self.cols));
+            return Err(format!(
+                "Cell index ({row}, {col}) out of bounds for {}x{} cell array",
+                self.rows, self.cols
+            ));
         }
         Ok((*self.data[row * self.cols + col]).clone())
     }
@@ -970,11 +1279,15 @@ impl fmt::Display for CellArray {
         write!(f, "{{")?;
         for r in 0..self.rows {
             for c in 0..self.cols {
-                if c > 0 { write!(f, ", ")?; }
+                if c > 0 {
+                    write!(f, ", ")?;
+                }
                 let v = &self.data[r * self.cols + c];
                 write!(f, "{}", **v)?;
             }
-            if r + 1 < self.rows { write!(f, "; ")?; }
+            if r + 1 < self.rows {
+                write!(f, "; ")?;
+            }
         }
         write!(f, "}}")
     }
@@ -987,12 +1300,20 @@ pub struct ObjectInstance {
 }
 
 impl ObjectInstance {
-    pub fn new(class_name: String) -> Self { Self { class_name, properties: HashMap::new() } }
+    pub fn new(class_name: String) -> Self {
+        Self {
+            class_name,
+            properties: HashMap::new(),
+        }
+    }
 }
 
 // -------- Class registry (scaffolding) --------
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Access { Public, Private }
+pub enum Access {
+    Public,
+    Private,
+}
 
 #[derive(Debug, Clone)]
 pub struct PropertyDef {
@@ -1014,7 +1335,7 @@ pub struct MethodDef {
 
 #[derive(Debug, Clone)]
 pub struct ClassDef {
-    pub name: String,                // namespaced e.g. pkg.Point
+    pub name: String, // namespaced e.g. pkg.Point
     pub parent: Option<String>,
     pub properties: HashMap<String, PropertyDef>,
     pub methods: HashMap<String, MethodDef>,
@@ -1043,7 +1364,8 @@ pub fn get_class(name: &str) -> Option<ClassDef> {
 pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, String)> {
     let reg = registry().lock().unwrap();
     let mut current = Some(class_name.to_string());
-    let guard: Option<std::sync::MutexGuard<'_, std::collections::HashMap<String, ClassDef>>> = None;
+    let guard: Option<std::sync::MutexGuard<'_, std::collections::HashMap<String, ClassDef>>> =
+        None;
     drop(guard);
     while let Some(name) = current {
         if let Some(cls) = reg.get(&name) {
@@ -1081,15 +1403,26 @@ fn static_values() -> &'static Mutex<HashMap<(String, String), Value>> {
 }
 
 pub fn get_static_property_value(class_name: &str, prop: &str) -> Option<Value> {
-    static_values().lock().unwrap().get(&(class_name.to_string(), prop.to_string())).cloned()
+    static_values()
+        .lock()
+        .unwrap()
+        .get(&(class_name.to_string(), prop.to_string()))
+        .cloned()
 }
 
 pub fn set_static_property_value(class_name: &str, prop: &str, value: Value) {
-    static_values().lock().unwrap().insert((class_name.to_string(), prop.to_string()), value);
+    static_values()
+        .lock()
+        .unwrap()
+        .insert((class_name.to_string(), prop.to_string()), value);
 }
 
 /// Set a static property, resolving the defining ancestor class for storage.
-pub fn set_static_property_value_in_owner(class_name: &str, prop: &str, value: Value) -> Result<(), String> {
+pub fn set_static_property_value_in_owner(
+    class_name: &str,
+    prop: &str,
+    value: Value,
+) -> Result<(), String> {
     if let Some((_p, owner)) = lookup_property(class_name, prop) {
         set_static_property_value(&owner, prop, value);
         Ok(())

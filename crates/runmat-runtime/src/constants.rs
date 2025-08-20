@@ -114,8 +114,8 @@ mod tests {
 
     #[test]
     fn test_true_false_builtins() {
-        assert_eq!(true_builtin().unwrap(), true);
-        assert_eq!(false_builtin().unwrap(), false);
+        assert!(true_builtin().unwrap());
+        assert!(!false_builtin().unwrap());
     }
 
     #[test]

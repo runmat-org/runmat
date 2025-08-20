@@ -40,6 +40,9 @@ pub struct DeviceInfo {
 /// Abstract buffer that may reside on device or be host-pinned.
 pub trait BufferHandle: Send + Sync {
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Abstract matrix allocated on a device backend.

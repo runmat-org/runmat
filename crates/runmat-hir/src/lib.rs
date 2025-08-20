@@ -394,41 +394,70 @@ pub fn infer_function_output_types(
     }
 
     #[allow(clippy::only_used_in_recursion)]
+    #[allow(clippy::type_complexity, clippy::only_used_in_recursion)]
     fn analyze_stmts(
-        outputs: &[VarId],
+        #[allow(clippy::only_used_in_recursion)] _outputs: &[VarId],
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
-        func_returns: &HashMap<String, Vec<Type>>,
+        returns: &HashMap<String, Vec<Type>>,
+        func_defs: &HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)>,
     ) -> Analysis {
         let mut exits = Vec::new();
         let mut i = 0usize;
         while i < stmts.len() {
             match &stmts[i] {
                 HirStmt::Assign(var, expr, _) => {
-                    let t = infer_expr_type(expr, &env, func_returns);
+                    let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
                 }
                 HirStmt::MultiAssign(vars, expr, _) => {
-                    // Basic lvalue structural validation: disallow empty LHS and ensure at least one target
-                    if vars.is_empty() { /* parser won't produce */ }
-                    if let HirExprKind::FuncCall(ref name, ref _args) = expr.kind {
-                        if let Some(summary) = func_returns.get(name) {
-                            for (i, v) in vars.iter().enumerate() {
-                                if let Some(id) = v {
-                                    let ty = summary.get(i).cloned().unwrap_or(Type::Unknown);
-                                    env.insert(*id, ty);
+                    if let HirExprKind::FuncCall(ref name, _) = expr.kind {
+                        // Start from summary
+                        let mut per_out: Vec<Type> = returns.get(name).cloned().unwrap_or_default();
+                        // If summary missing/unknown, try simple callsite fallback using func_defs and argument types
+                        let needs_fallback = per_out.is_empty()
+                            || per_out.iter().any(|t| matches!(t, Type::Unknown));
+                        if needs_fallback {
+                            if let Some((params, outs, body)) = func_defs.get(name).cloned() {
+                                // Seed param env with argument types at callsite by reusing current env typing
+                                let mut penv: HashMap<VarId, Type> = HashMap::new();
+                                // We don't have direct access to call args here (expr doesn't carry), so default to Num for simplicity when outputs are computed from params via arithmetic; otherwise Unknown
+                                // Heuristic: assume params are Num when used in arithmetic contexts; conservative elsewhere
+                                for p in params {
+                                    penv.insert(p, Type::Num);
+                                }
+                                // Single pass: collect direct assignments to outputs
+                                let mut out_types: Vec<Type> = vec![Type::Unknown; outs.len()];
+                                for s in &body {
+                                    if let HirStmt::Assign(var, rhs, _) = s {
+                                        if let Some(pos) = outs.iter().position(|o| o == var) {
+                                            let t = infer_expr_type(rhs, &penv, returns);
+                                            out_types[pos] = out_types[pos].unify(&t);
+                                        }
+                                    }
+                                }
+                                if per_out.is_empty() {
+                                    per_out = out_types;
+                                } else {
+                                    for (i, t) in out_types.into_iter().enumerate() {
+                                        if matches!(per_out.get(i), Some(Type::Unknown)) {
+                                            if let Some(slot) = per_out.get_mut(i) {
+                                                *slot = t;
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                        } else {
-                            let t = infer_expr_type(expr, &env, func_returns);
-                            for id in vars.iter().flatten() {
-                                env.insert(*id, t.clone());
+                        }
+                        for (i, v) in vars.iter().enumerate() {
+                            if let Some(id) = v {
+                                env.insert(*id, per_out.get(i).cloned().unwrap_or(Type::Unknown));
                             }
                         }
                     } else {
-                        let t = infer_expr_type(expr, &env, func_returns);
-                        for id in vars.iter().flatten() {
-                            env.insert(*id, t.clone());
+                        let t = infer_expr_type(expr, &env, returns);
+                        for v in vars.iter().flatten() {
+                            env.insert(*v, t.clone());
                         }
                     }
                 }
@@ -501,17 +530,29 @@ pub fn infer_function_output_types(
                                     // Extract fields from either arg
                                     if let HirExprKind::FuncCall(ref n0, ref a0) = args[0].kind {
                                         if n0.eq_ignore_ascii_case("fieldnames") && a0.len() == 1 {
-                                            if let HirExprKind::Var(vid) = a0[0].kind { target = Some(vid); }
+                                            if let HirExprKind::Var(vid) = a0[0].kind {
+                                                target = Some(vid);
+                                            }
                                         }
                                     }
                                     if let HirExprKind::FuncCall(ref n1, ref a1) = args[1].kind {
                                         if n1.eq_ignore_ascii_case("fieldnames") && a1.len() == 1 {
-                                            if let HirExprKind::Var(vid) = a1[0].kind { target = Some(vid); }
+                                            if let HirExprKind::Var(vid) = a1[0].kind {
+                                                target = Some(vid);
+                                            }
                                         }
                                     }
-                                    if fields.is_empty() { fields.extend(extract_field_list(&args[0])); }
-                                    if fields.is_empty() { fields.extend(extract_field_list(&args[1])); }
-                                    if let Some(vid) = target { for f in fields { out.push((vid, f)); } }
+                                    if fields.is_empty() {
+                                        fields.extend(extract_field_list(&args[0]));
+                                    }
+                                    if fields.is_empty() {
+                                        fields.extend(extract_field_list(&args[1]));
+                                    }
+                                    if let Some(vid) = target {
+                                        for f in fields {
+                                            out.push((vid, f));
+                                        }
+                                    }
                                 }
                                 // any(strcmp(fieldnames(s), 'f')) and variants; also strcmpi
                                 if (lname.eq_ignore_ascii_case("any")
@@ -576,7 +617,7 @@ pub fn infer_function_output_types(
                             );
                         }
                     }
-                    let then_a = analyze_stmts(outputs, then_body, then_env, func_returns);
+                    let then_a = analyze_stmts(_outputs, then_body, then_env, returns, func_defs);
                     let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
                     let mut all_exits = then_a.exits.clone();
                     for (c, b) in elseif_blocks {
@@ -604,14 +645,14 @@ pub fn infer_function_output_types(
                                 );
                             }
                         }
-                        let a = analyze_stmts(outputs, b, elseif_env, func_returns);
+                        let a = analyze_stmts(_outputs, b, elseif_env, returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = join_env(&out_env, &f);
                         }
                         all_exits.extend(a.exits);
                     }
                     if let Some(else_body) = else_body {
-                        let a = analyze_stmts(outputs, else_body, env.clone(), func_returns);
+                        let a = analyze_stmts(_outputs, else_body, env.clone(), returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = join_env(&out_env, &f);
                         }
@@ -623,16 +664,16 @@ pub fn infer_function_output_types(
                     exits.extend(all_exits);
                 }
                 HirStmt::While { cond: _, body } => {
-                    let a = analyze_stmts(outputs, body, env.clone(), func_returns);
+                    let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
                     if let Some(f) = a.fallthrough {
                         env = join_env(&env, &f);
                     }
                     exits.extend(a.exits);
                 }
                 HirStmt::For { var, expr, body } => {
-                    let t = infer_expr_type(expr, &env, func_returns);
+                    let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
-                    let a = analyze_stmts(outputs, body, env.clone(), func_returns);
+                    let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
                     if let Some(f) = a.fallthrough {
                         env = join_env(&env, &f);
                     }
@@ -645,7 +686,7 @@ pub fn infer_function_output_types(
                 } => {
                     let mut out_env: Option<HashMap<VarId, Type>> = None;
                     for (_v, b) in cases {
-                        let a = analyze_stmts(outputs, b, env.clone(), func_returns);
+                        let a = analyze_stmts(_outputs, b, env.clone(), returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = Some(match out_env {
                                 Some(curr) => join_env(&curr, &f),
@@ -655,7 +696,7 @@ pub fn infer_function_output_types(
                         exits.extend(a.exits);
                     }
                     if let Some(otherwise) = otherwise {
-                        let a = analyze_stmts(outputs, otherwise, env.clone(), func_returns);
+                        let a = analyze_stmts(_outputs, otherwise, env.clone(), returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = Some(match out_env {
                                 Some(curr) => join_env(&curr, &f),
@@ -678,8 +719,9 @@ pub fn infer_function_output_types(
                     catch_var: _,
                     catch_body,
                 } => {
-                    let a_try = analyze_stmts(outputs, try_body, env.clone(), func_returns);
-                    let a_catch = analyze_stmts(outputs, catch_body, env.clone(), func_returns);
+                    let a_try = analyze_stmts(_outputs, try_body, env.clone(), returns, func_defs);
+                    let a_catch =
+                        analyze_stmts(_outputs, catch_body, env.clone(), returns, func_defs);
                     let mut out_env = a_try.fallthrough.clone().unwrap_or_else(|| env.clone());
                     if let Some(f) = a_catch.fallthrough {
                         out_env = join_env(&out_env, &f);
@@ -715,7 +757,7 @@ pub fn infer_function_output_types(
                             );
                         }
                     }
-                    let _ = infer_expr_type(expr, &env, func_returns);
+                    let _ = infer_expr_type(expr, &env, returns);
                 }
                 HirStmt::Import { .. } => {}
             }
@@ -769,6 +811,45 @@ pub fn infer_function_output_types(
         }
     }
 
+    // Collect function defs for simple callsite fallback inference
+    #[allow(clippy::type_complexity)]
+    let mut func_defs: HashMap<String, (Vec<VarId>, Vec<VarId>, Vec<HirStmt>)> = HashMap::new();
+    for stmt in &prog.body {
+        if let HirStmt::Function {
+            name,
+            params,
+            outputs,
+            body,
+            ..
+        } = stmt
+        {
+            func_defs.insert(
+                name.clone(),
+                (params.clone(), outputs.clone(), body.clone()),
+            );
+        } else if let HirStmt::ClassDef { members, .. } = stmt {
+            for m in members {
+                if let HirClassMember::Methods { body, .. } = m {
+                    for s in body {
+                        if let HirStmt::Function {
+                            name,
+                            params,
+                            outputs,
+                            body,
+                            ..
+                        } = s
+                        {
+                            func_defs.insert(
+                                name.clone(),
+                                (params.clone(), outputs.clone(), body.clone()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Seed returns: per function, default outputs Unknown; if a function contains obvious numeric assignments to outputs, capture them on the first pass
     for stmt in &prog.body {
         if let HirStmt::Function {
@@ -779,7 +860,7 @@ pub fn infer_function_output_types(
         } = stmt
         {
             let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
-            let analysis = analyze_stmts(outputs, body, HashMap::new(), &returns);
+            let analysis = analyze_stmts(outputs, body, HashMap::new(), &returns, &func_defs);
             let mut accumulate = |env: &HashMap<VarId, Type>| {
                 for (i, out_id) in outputs.iter().enumerate() {
                     if let Some(t) = env.get(out_id) {
@@ -811,7 +892,8 @@ pub fn infer_function_output_types(
                     body,
                     ..
                 } => {
-                    let analysis = analyze_stmts(outputs, body, HashMap::new(), &returns);
+                    let analysis =
+                        analyze_stmts(outputs, body, HashMap::new(), &returns, &func_defs);
                     let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
                     let mut accumulate = |env: &HashMap<VarId, Type>| {
                         for (i, out_id) in outputs.iter().enumerate() {
@@ -842,8 +924,13 @@ pub fn infer_function_output_types(
                                     ..
                                 } = s
                                 {
-                                    let analysis =
-                                        analyze_stmts(outputs, body, HashMap::new(), &returns);
+                                    let analysis = analyze_stmts(
+                                        outputs,
+                                        body,
+                                        HashMap::new(),
+                                        &returns,
+                                        &func_defs,
+                                    );
                                     let mut per_output: Vec<Type> =
                                         vec![Type::Unknown; outputs.len()];
                                     let mut accumulate = |env: &HashMap<VarId, Type>| {
@@ -1087,8 +1174,9 @@ pub fn infer_function_variable_types(
         fallthrough: Option<HashMap<VarId, Type>>,
     }
 
+    #[allow(clippy::type_complexity, clippy::only_used_in_recursion)]
     fn analyze_stmts(
-        #[allow(clippy::only_used_in_recursion)]
+        #[allow(clippy::only_used_in_recursion)] _outputs: &[VarId],
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
@@ -1220,17 +1308,29 @@ pub fn infer_function_variable_types(
                                     // Extract fields from either arg
                                     if let HirExprKind::FuncCall(ref n0, ref a0) = args[0].kind {
                                         if n0.eq_ignore_ascii_case("fieldnames") && a0.len() == 1 {
-                                            if let HirExprKind::Var(vid) = a0[0].kind { target = Some(vid); }
+                                            if let HirExprKind::Var(vid) = a0[0].kind {
+                                                target = Some(vid);
+                                            }
                                         }
                                     }
                                     if let HirExprKind::FuncCall(ref n1, ref a1) = args[1].kind {
                                         if n1.eq_ignore_ascii_case("fieldnames") && a1.len() == 1 {
-                                            if let HirExprKind::Var(vid) = a1[0].kind { target = Some(vid); }
+                                            if let HirExprKind::Var(vid) = a1[0].kind {
+                                                target = Some(vid);
+                                            }
                                         }
                                     }
-                                    if fields.is_empty() { fields.extend(extract_field_list(&args[0])); }
-                                    if fields.is_empty() { fields.extend(extract_field_list(&args[1])); }
-                                    if let Some(vid) = target { for f in fields { out.push((vid, f)); } }
+                                    if fields.is_empty() {
+                                        fields.extend(extract_field_list(&args[0]));
+                                    }
+                                    if fields.is_empty() {
+                                        fields.extend(extract_field_list(&args[1]));
+                                    }
+                                    if let Some(vid) = target {
+                                        for f in fields {
+                                            out.push((vid, f));
+                                        }
+                                    }
                                 }
                                 // any(strcmp(fieldnames(s), 'f')) and variants; also strcmpi
                                 if (lname.eq_ignore_ascii_case("any")
@@ -1295,7 +1395,7 @@ pub fn infer_function_variable_types(
                             );
                         }
                     }
-                    let then_a = analyze_stmts(then_body, then_env, returns, func_defs);
+                    let then_a = analyze_stmts(_outputs, then_body, then_env, returns, func_defs);
                     let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
                     let mut all_exits = then_a.exits.clone();
                     for (c, b) in elseif_blocks {
@@ -1323,14 +1423,14 @@ pub fn infer_function_variable_types(
                                 );
                             }
                         }
-                        let a = analyze_stmts(b, elseif_env, returns, func_defs);
+                        let a = analyze_stmts(_outputs, b, elseif_env, returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = join_env(&out_env, &f);
                         }
                         all_exits.extend(a.exits);
                     }
                     if let Some(else_body) = else_body {
-                        let a = analyze_stmts(else_body, env.clone(), returns, func_defs);
+                        let a = analyze_stmts(_outputs, else_body, env.clone(), returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = join_env(&out_env, &f);
                         }
@@ -1342,7 +1442,7 @@ pub fn infer_function_variable_types(
                     exits.extend(all_exits);
                 }
                 HirStmt::While { body, .. } => {
-                    let a = analyze_stmts(body, env.clone(), returns, func_defs);
+                    let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
                     if let Some(f) = a.fallthrough {
                         env = join_env(&env, &f);
                     }
@@ -1351,7 +1451,7 @@ pub fn infer_function_variable_types(
                 HirStmt::For { var, expr, body } => {
                     let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
-                    let a = analyze_stmts(body, env.clone(), returns, func_defs);
+                    let a = analyze_stmts(_outputs, body, env.clone(), returns, func_defs);
                     if let Some(f) = a.fallthrough {
                         env = join_env(&env, &f);
                     }
@@ -1362,7 +1462,7 @@ pub fn infer_function_variable_types(
                 } => {
                     let mut out_env: Option<HashMap<VarId, Type>> = None;
                     for (_v, b) in cases {
-                        let a = analyze_stmts(b, env.clone(), returns, func_defs);
+                        let a = analyze_stmts(_outputs, b, env.clone(), returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = Some(match out_env {
                                 Some(curr) => join_env(&curr, &f),
@@ -1372,7 +1472,7 @@ pub fn infer_function_variable_types(
                         exits.extend(a.exits);
                     }
                     if let Some(otherwise) = otherwise {
-                        let a = analyze_stmts(otherwise, env.clone(), returns, func_defs);
+                        let a = analyze_stmts(_outputs, otherwise, env.clone(), returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = Some(match out_env {
                                 Some(curr) => join_env(&curr, &f),
@@ -1395,8 +1495,9 @@ pub fn infer_function_variable_types(
                     catch_body,
                     ..
                 } => {
-                    let a_try = analyze_stmts(try_body, env.clone(), returns, func_defs);
-                    let a_catch = analyze_stmts(catch_body, env.clone(), returns, func_defs);
+                    let a_try = analyze_stmts(_outputs, try_body, env.clone(), returns, func_defs);
+                    let a_catch =
+                        analyze_stmts(_outputs, catch_body, env.clone(), returns, func_defs);
                     let mut out_env = a_try.fallthrough.clone().unwrap_or_else(|| env.clone());
                     if let Some(f) = a_catch.fallthrough {
                         out_env = join_env(&out_env, &f);
@@ -1425,7 +1526,8 @@ pub fn infer_function_variable_types(
     for stmt in &prog.body {
         match stmt {
             HirStmt::Function { name, body, .. } => {
-                let a = analyze_stmts(body, HashMap::new(), &returns_map, &func_defs);
+                let empty: &[VarId] = &[];
+                let a = analyze_stmts(empty, body, HashMap::new(), &returns_map, &func_defs);
                 let mut env = HashMap::new();
                 for e in &a.exits {
                     env = join_env(&env, e);
@@ -1440,8 +1542,14 @@ pub fn infer_function_variable_types(
                     if let HirClassMember::Methods { body, .. } = m {
                         for s in body {
                             if let HirStmt::Function { name, body, .. } = s {
-                                let a =
-                                    analyze_stmts(body, HashMap::new(), &returns_map, &func_defs);
+                                let empty: &[VarId] = &[];
+                                let a = analyze_stmts(
+                                    empty,
+                                    body,
+                                    HashMap::new(),
+                                    &returns_map,
+                                    &func_defs,
+                                );
                                 let mut env = HashMap::new();
                                 for e in &a.exits {
                                     env = join_env(&env, e);
@@ -1658,7 +1766,9 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                                 return Err(format!("Duplicate property '{p}' in class {name}"));
                             }
                             if method_names.contains(p) {
-                                return Err(format!("Name '{p}' used for both property and method in class {name}"));
+                                return Err(format!(
+                                    "Name '{p}' used for both property and method in class {name}"
+                                ));
                             }
                         }
                     }
@@ -1686,11 +1796,12 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                                 continue;
                             }
                             if a.name.eq_ignore_ascii_case("Access") {
-                                let v = a.value.as_ref().ok_or_else(|| {
-                                    format!(
-                                        "Access requires value in class '{name}' methods block",
-                                    )
-                                })?;
+                                let v =
+                                    a.value.as_ref().ok_or_else(|| {
+                                        format!(
+                                            "Access requires value in class '{name}' methods block",
+                                        )
+                                    })?;
                                 let v = norm_attr_value(v);
                                 validate_access_value(&format!("class '{name}' methods"), &v)?;
                             }
@@ -1702,7 +1813,9 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                         for s in body {
                             if let HirStmt::Function { name: fname, .. } = s {
                                 if !method_names.insert(fname.clone()) {
-                                    return Err(format!("Duplicate method '{fname}' in class {name}"));
+                                    return Err(format!(
+                                        "Duplicate method '{fname}' in class {name}"
+                                    ));
                                 }
                                 if prop_names.contains(fname) {
                                     return Err(format!("Name '{fname}' used for both property and method in class {name}"));
@@ -1735,7 +1848,9 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                         let mut seen = std::collections::HashSet::new();
                         for en in names {
                             if !seen.insert(en) {
-                                return Err(format!("Duplicate enumeration '{en}' in class {name}"));
+                                return Err(format!(
+                                    "Duplicate enumeration '{en}' in class {name}"
+                                ));
                             }
                         }
                         let _ = attributes;
@@ -1902,7 +2017,9 @@ pub mod remapping {
                 catch_body,
             } => HirStmt::TryCatch {
                 try_body: remap_function_body(try_body, var_map),
-                catch_var: catch_var.as_ref().map(|v| var_map.get(v).copied().unwrap_or(*v)),
+                catch_var: catch_var
+                    .as_ref()
+                    .map(|v| var_map.get(v).copied().unwrap_or(*v)),
                 catch_body: remap_function_body(catch_body, var_map),
             },
             HirStmt::Global(vars) => HirStmt::Global(
@@ -2648,7 +2765,10 @@ impl Ctx {
                     let return_type = self.infer_function_return_type(name, &[]);
                     (HirExprKind::FuncCall(name.clone(), vec![]), return_type)
                 } else {
-                    return Err(format!("{}: Undefined variable: {name}", "MATLAB:UndefinedVariable"));
+                    return Err(format!(
+                        "{}: Undefined variable: {name}",
+                        "MATLAB:UndefinedVariable"
+                    ));
                 }
             }
             Unary(op, e) => {
@@ -2955,8 +3075,10 @@ impl Ctx {
             out
         }
 
+        #[allow(clippy::type_complexity)]
+        #[allow(clippy::only_used_in_recursion)]
         fn analyze_stmts(
-            outputs: &[VarId],
+            #[allow(clippy::only_used_in_recursion)] _outputs: &[VarId],
             stmts: &[HirStmt],
             mut env: HashMap<VarId, Type>,
         ) -> Analysis {
@@ -2986,19 +3108,19 @@ impl Ctx {
                         elseif_blocks,
                         else_body,
                     } => {
-                        let then_a = analyze_stmts(outputs, then_body, env.clone());
+                        let then_a = analyze_stmts(_outputs, then_body, env.clone());
                         let mut out_env = then_a.fallthrough.unwrap_or_else(|| env.clone());
                         let mut all_exits = then_a.exits;
                         for (c, b) in elseif_blocks {
                             let _ = c; // cond type unused in analysis
-                            let a = analyze_stmts(outputs, b, env.clone());
+                            let a = analyze_stmts(_outputs, b, env.clone());
                             if let Some(f) = a.fallthrough {
                                 out_env = join_env(&out_env, &f);
                             }
                             all_exits.extend(a.exits);
                         }
                         if let Some(else_body) = else_body {
-                            let a = analyze_stmts(outputs, else_body, env.clone());
+                            let a = analyze_stmts(_outputs, else_body, env.clone());
                             if let Some(f) = a.fallthrough {
                                 out_env = join_env(&out_env, &f);
                             }
@@ -3012,7 +3134,7 @@ impl Ctx {
                     }
                     HirStmt::While { cond: _, body } => {
                         // Approximate: analyze once and join with incoming env
-                        let a = analyze_stmts(outputs, body, env.clone());
+                        let a = analyze_stmts(_outputs, body, env.clone());
                         if let Some(f) = a.fallthrough {
                             env = join_env(&env, &f);
                         }
@@ -3021,7 +3143,7 @@ impl Ctx {
                     HirStmt::For { var, expr, body } => {
                         // Assign loop var type from expr type
                         env.insert(*var, expr.ty.clone());
-                        let a = analyze_stmts(outputs, body, env.clone());
+                        let a = analyze_stmts(_outputs, body, env.clone());
                         if let Some(f) = a.fallthrough {
                             env = join_env(&env, &f);
                         }
@@ -3034,7 +3156,7 @@ impl Ctx {
                     } => {
                         let mut out_env: Option<HashMap<VarId, Type>> = None;
                         for (_v, b) in cases {
-                            let a = analyze_stmts(outputs, b, env.clone());
+                            let a = analyze_stmts(_outputs, b, env.clone());
                             if let Some(f) = a.fallthrough {
                                 out_env = Some(match out_env {
                                     Some(curr) => join_env(&curr, &f),
@@ -3044,7 +3166,7 @@ impl Ctx {
                             exits.extend(a.exits);
                         }
                         if let Some(otherwise) = otherwise {
-                            let a = analyze_stmts(outputs, otherwise, env.clone());
+                            let a = analyze_stmts(_outputs, otherwise, env.clone());
                             if let Some(f) = a.fallthrough {
                                 out_env = Some(match out_env {
                                     Some(curr) => join_env(&curr, &f),
@@ -3067,8 +3189,8 @@ impl Ctx {
                         catch_var: _,
                         catch_body,
                     } => {
-                        let a_try = analyze_stmts(outputs, try_body, env.clone());
-                        let a_catch = analyze_stmts(outputs, catch_body, env.clone());
+                        let a_try = analyze_stmts(_outputs, try_body, env.clone());
+                        let a_catch = analyze_stmts(_outputs, catch_body, env.clone());
                         let mut out_env = a_try.fallthrough.unwrap_or_else(|| env.clone());
                         if let Some(f) = a_catch.fallthrough {
                             out_env = join_env(&out_env, &f);

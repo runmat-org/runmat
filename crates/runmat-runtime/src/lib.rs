@@ -355,7 +355,8 @@ fn string_conv(a: Value) -> Result<Value, String> {
                 out.push(s);
             }
             Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| e.to_string())?,
+                runmat_builtins::StringArray::new(out, vec![ca.rows, 1])
+                    .map_err(|e| e.to_string())?,
             ))
         }
         Value::Tensor(t) => {
@@ -412,7 +413,8 @@ fn string_conv(a: Value) -> Result<Value, String> {
                 }
             }
             Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(out, vec![ca.rows, ca.cols]).map_err(|e| e.to_string())?,
+                runmat_builtins::StringArray::new(out, vec![ca.rows, ca.cols])
+                    .map_err(|e| e.to_string())?,
             ))
         }
         Value::Num(n) => Ok(Value::StringArray(
@@ -1359,7 +1361,7 @@ fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<
             // Prepend receiver as first arg so methods can accept it
             let mut args = Vec::with_capacity(1 + rest.len());
             args.push(Value::Object(obj.clone()));
-            args.extend(rest.into_iter());
+            args.extend(rest);
             if let Ok(v) = crate::call_builtin(&qualified, &args) {
                 return Ok(v);
             }
@@ -2298,11 +2300,7 @@ fn max_vector_builtin(a: Value) -> Result<Value, String> {
                 Ok(Value::Tensor(out))
             } else {
                 // Reduce across all elements -> scalar
-                let max_val = t
-                    .data
-                    .iter()
-                    .cloned()
-                    .fold(f64::NEG_INFINITY, f64::max);
+                let max_val = t.data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                 Ok(Value::Num(max_val))
             }
         }
@@ -2607,12 +2605,12 @@ fn prod_all_or_cols(a: Value) -> Result<Value, String> {
             let cols = t.cols();
             if rows > 1 && cols > 1 {
                 let mut out = vec![1.0f64; cols];
-                for c in 0..cols {
+                for (c, oc) in out.iter_mut().enumerate().take(cols) {
                     let mut p = 1.0;
                     for r in 0..rows {
                         p *= t.data[r + c * rows];
                     }
-                    out[c] = p;
+                    *oc = p;
                 }
                 Ok(Value::Tensor(
                     runmat_builtins::Tensor::new(out, vec![1, cols])
@@ -2685,12 +2683,12 @@ fn mean_all_or_cols(a: Value) -> Result<Value, String> {
             let cols = t.cols();
             if rows > 1 && cols > 1 {
                 let mut out = vec![0.0f64; cols];
-                for c in 0..cols {
+                for (c, oc) in out.iter_mut().enumerate().take(cols) {
                     let mut s = 0.0;
                     for r in 0..rows {
                         s += t.data[r + c * rows];
                     }
-                    out[c] = s / (rows as f64);
+                    *oc = s / (rows as f64);
                 }
                 Ok(Value::Tensor(
                     runmat_builtins::Tensor::new(out, vec![1, cols])
@@ -2763,7 +2761,7 @@ fn any_all_or_cols(a: Value) -> Result<Value, String> {
             let cols = t.cols();
             if rows > 1 && cols > 1 {
                 let mut out = vec![0.0f64; cols];
-                for c in 0..cols {
+                for (c, oc) in out.iter_mut().enumerate().take(cols) {
                     let mut v = 0.0;
                     for r in 0..rows {
                         if t.data[r + c * rows] != 0.0 {
@@ -2771,7 +2769,7 @@ fn any_all_or_cols(a: Value) -> Result<Value, String> {
                             break;
                         }
                     }
-                    out[c] = v;
+                    *oc = v;
                 }
                 Ok(Value::Tensor(
                     runmat_builtins::Tensor::new(out, vec![1, cols])
@@ -2799,7 +2797,7 @@ fn any_dim(a: Value, dim: f64) -> Result<Value, String> {
     let cols = t.cols();
     if dim == 1 {
         let mut out = vec![0.0f64; cols];
-        for c in 0..cols {
+        for (c, oc) in out.iter_mut().enumerate().take(cols) {
             let mut v = 0.0;
             for r in 0..rows {
                 if t.data[r + c * rows] != 0.0 {
@@ -2807,14 +2805,14 @@ fn any_dim(a: Value, dim: f64) -> Result<Value, String> {
                     break;
                 }
             }
-            out[c] = v;
+            *oc = v;
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![1, cols]).map_err(|e| format!("any: {e}"))?,
         ))
     } else if dim == 2 {
         let mut out = vec![0.0f64; rows];
-        for r in 0..rows {
+        for (r, orow) in out.iter_mut().enumerate().take(rows) {
             let mut v = 0.0;
             for c in 0..cols {
                 if t.data[r + c * rows] != 0.0 {
@@ -2822,7 +2820,7 @@ fn any_dim(a: Value, dim: f64) -> Result<Value, String> {
                     break;
                 }
             }
-            out[r] = v;
+            *orow = v;
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![rows, 1]).map_err(|e| format!("any: {e}"))?,
@@ -2854,7 +2852,7 @@ fn all_all_or_cols(a: Value) -> Result<Value, String> {
             let cols = t.cols();
             if rows > 1 && cols > 1 {
                 let mut out = vec![0.0f64; cols];
-                for c in 0..cols {
+                for (c, oc) in out.iter_mut().enumerate().take(cols) {
                     let mut v = 1.0;
                     for r in 0..rows {
                         if t.data[r + c * rows] == 0.0 {
@@ -2862,7 +2860,7 @@ fn all_all_or_cols(a: Value) -> Result<Value, String> {
                             break;
                         }
                     }
-                    out[c] = v;
+                    *oc = v;
                 }
                 Ok(Value::Tensor(
                     runmat_builtins::Tensor::new(out, vec![1, cols])
@@ -2890,7 +2888,7 @@ fn all_dim(a: Value, dim: f64) -> Result<Value, String> {
     let cols = t.cols();
     if dim == 1 {
         let mut out = vec![0.0f64; cols];
-        for c in 0..cols {
+        for (c, oc) in out.iter_mut().enumerate().take(cols) {
             let mut v = 1.0;
             for r in 0..rows {
                 if t.data[r + c * rows] == 0.0 {
@@ -2898,14 +2896,14 @@ fn all_dim(a: Value, dim: f64) -> Result<Value, String> {
                     break;
                 }
             }
-            out[c] = v;
+            *oc = v;
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![1, cols]).map_err(|e| format!("all: {e}"))?,
         ))
     } else if dim == 2 {
         let mut out = vec![0.0f64; rows];
-        for r in 0..rows {
+        for (r, orow) in out.iter_mut().enumerate().take(rows) {
             let mut v = 1.0;
             for c in 0..cols {
                 if t.data[r + c * rows] == 0.0 {
@@ -2913,7 +2911,7 @@ fn all_dim(a: Value, dim: f64) -> Result<Value, String> {
                     break;
                 }
             }
-            out[r] = v;
+            *orow = v;
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![rows, 1]).map_err(|e| format!("all: {e}"))?,
@@ -3046,9 +3044,11 @@ fn diag_builtin(a: Value) -> Result<Value, String> {
                 // Vector -> diagonal matrix
                 let n = rows.max(cols);
                 let mut data = vec![0.0; n * n];
-                for i in 0..n {
-                    let val = if rows == 1 { t.data[i] } else { t.data[i] };
-                    data[i + i * n] = val;
+                for (i, slot) in data.iter_mut().enumerate().step_by(n + 1).take(n) {
+                    // Map linear i on diagonal to source index
+                    let idx = i / (n + 1);
+                    let val = t.data[idx];
+                    *slot = val;
                 }
                 Ok(Value::Tensor(
                     runmat_builtins::Tensor::new(data, vec![n, n])
@@ -3058,8 +3058,8 @@ fn diag_builtin(a: Value) -> Result<Value, String> {
                 // Matrix -> main diagonal as column vector
                 let n = rows.min(cols);
                 let mut data = vec![0.0; n];
-                for i in 0..n {
-                    data[i] = t.data[i + i * rows];
+                for (i, slot) in data.iter_mut().enumerate().take(n) {
+                    *slot = t.data[i + i * rows];
                 }
                 Ok(Value::Tensor(
                     runmat_builtins::Tensor::new(data, vec![n, 1])
@@ -3389,7 +3389,7 @@ fn repmat_nd_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     let src_str = strides(&base);
     // Iterate over all dest coords and map back to source via modulo
     let total: usize = out_shape.iter().product();
-    for d_lin in 0..total {
+    for (d_lin, item) in out.iter_mut().enumerate().take(total) {
         // convert to multi
         let mut rem = d_lin;
         let mut multi = vec![0usize; rank];
@@ -3404,7 +3404,7 @@ fn repmat_nd_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
             let coord = multi[i] % base[i];
             src_lin += coord * src_str[i];
         }
-        out[d_lin] = t.data[src_lin];
+        *item = t.data[src_lin];
     }
     Ok(Value::Tensor(
         runmat_builtins::Tensor::new(out, out_shape).map_err(|e| format!("repmat: {e}"))?,
@@ -3531,9 +3531,9 @@ fn format_variadic(fmt: &str, args: &[Value]) -> Result<String, String> {
             'f' => {
                 let v: f64 = (&val).try_into()?;
                 if let Some(p) = precision {
-                    out.push_str(&format!("{:.*}", p, v));
+                    out.push_str(&format!("{v:.p$}"));
                 } else {
-                    out.push_str(&format!("{}", v));
+                    out.push_str(&format!("{v}"));
                 }
             }
             's' => match val {
@@ -3541,9 +3541,9 @@ fn format_variadic(fmt: &str, args: &[Value]) -> Result<String, String> {
                 Value::Num(n) => out.push_str(&n.to_string()),
                 Value::Int(i) => out.push_str(&i.to_i64().to_string()),
                 Value::Tensor(t) => out.push_str(&format!("{:?}", t.data)),
-                other => out.push_str(&format!("{:?}", other)),
+                other => out.push_str(&format!("{other:?}")),
             },
-            other => return Err(format!("sprintf: unsupported format %{}", other)),
+            other => return Err(format!("sprintf: unsupported format %{other}")),
         }
     }
     Ok(out)
@@ -3559,7 +3559,7 @@ fn getmethod_builtin(obj: Value, name: String) -> Result<Value, String> {
                 captures: vec![Value::Object(o), Value::String(name)],
             }))
         }
-        Value::ClassRef(cls) => Ok(Value::String(format!("@{}.{}", cls, name))),
+        Value::ClassRef(cls) => Ok(Value::String(format!("@{cls}.{name}"))),
         other => Err(format!("getmethod unsupported on {other:?}")),
     }
 }

@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Main RunMat configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RunMatConfig {
     /// Runtime configuration
     pub runtime: RuntimeConfig,
@@ -601,20 +601,6 @@ impl Default for JupyterPerformanceConfig {
             progressive_rendering: true,
             lod_threshold: default_lod_threshold(),
             texture_compression: true,
-        }
-    }
-}
-
-impl Default for RunMatConfig {
-    fn default() -> Self {
-        Self {
-            runtime: RuntimeConfig::default(),
-            jit: JitConfig::default(),
-            gc: GcConfig::default(),
-            plotting: PlottingConfig::default(),
-            kernel: KernelConfig::default(),
-            logging: LoggingConfig::default(),
-            packages: PackagesConfig::default(),
         }
     }
 }

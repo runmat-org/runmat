@@ -160,7 +160,11 @@ impl HighPerformanceGC {
         let mut combined_roots: Vec<GcPtr<Value>> = Vec::new();
         {
             let roots = self.root_ptrs.lock();
-            combined_roots.extend(roots.iter().map(|&addr| unsafe { GcPtr::from_raw(addr as *const Value) }));
+            combined_roots.extend(
+                roots
+                    .iter()
+                    .map(|&addr| unsafe { GcPtr::from_raw(addr as *const Value) }),
+            );
         }
         // External roots
         if let Ok(mut ext) = ROOT_SCANNER.scan_roots() {
@@ -213,7 +217,11 @@ impl HighPerformanceGC {
         let mut combined_roots: Vec<GcPtr<Value>> = Vec::new();
         {
             let roots = self.root_ptrs.lock();
-            combined_roots.extend(roots.iter().map(|&addr| unsafe { GcPtr::from_raw(addr as *const Value) }));
+            combined_roots.extend(
+                roots
+                    .iter()
+                    .map(|&addr| unsafe { GcPtr::from_raw(addr as *const Value) }),
+            );
         }
         if let Ok(mut ext) = ROOT_SCANNER.scan_roots() {
             combined_roots.append(&mut ext);

@@ -1,5 +1,3 @@
-#![cfg(feature = "wgpu")]
-
 use crate::{AccelerateBackend, BufferHandle, DeviceInfo, DeviceKind, DeviceMatrix};
 use anyhow::Result;
 use once_cell::sync::OnceCell;

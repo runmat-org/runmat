@@ -17,7 +17,7 @@ fn test_massive_allocation_cycle() {
         for i in 0..1000 {
             let value = match i % 4 {
                 0 => Value::Num(i as f64),
-                1 => Value::Int(runmat_builtins::IntValue::I32(i as i32)),
+                1 => Value::Int(runmat_builtins::IntValue::I32(i)),
                 2 => Value::Bool(i % 2 == 0),
                 _ => Value::String(format!("string_{i}")),
             };
@@ -211,7 +211,7 @@ fn test_gc_under_memory_pressure() {
                 let ca = runmat_builtins::CellArray::new(
                     vec![
                         Value::Num(i as f64),
-                        Value::Int(runmat_builtins::IntValue::I32(i as i32)),
+                        Value::Int(runmat_builtins::IntValue::I32(i)),
                     ],
                     1,
                     2,

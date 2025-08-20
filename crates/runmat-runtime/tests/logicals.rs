@@ -4,7 +4,7 @@ use runmat_builtins::{LogicalArray, Tensor, Value};
 fn logical_array_construction_and_display() {
     let la = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).unwrap();
     let v = Value::LogicalArray(la.clone());
-    let s = format!("{}", v);
+    let s = format!("{v}");
     assert!(s.contains("["));
 }
 

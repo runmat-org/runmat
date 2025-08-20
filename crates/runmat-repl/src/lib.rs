@@ -96,9 +96,9 @@ fn format_type_info(value: &Value) -> String {
                 if r == 1 && c == 1 {
                     "scalar (gpu)".to_string()
                 } else if r == 1 || c == 1 {
-                    format!("{}x{} vector (gpu)", r, c)
+                    format!("{r}x{c} vector (gpu)")
                 } else {
-                    format!("{}x{} matrix (gpu)", r, c)
+                    format!("{r}x{c} matrix (gpu)")
                 }
             } else {
                 format!("Tensor{:?} (gpu)", h.shape)

@@ -74,7 +74,7 @@ fn format_type(t: &Type) -> String {
                     .map(|d| d.map(|n| n.to_string()).unwrap_or_else(|| "?".to_string()))
                     .collect::<Vec<_>>()
                     .join(",");
-                format!("Tensor[{}]", dims_str)
+                format!("Tensor[{dims_str}]")
             } else {
                 "Tensor".to_string()
             }
@@ -115,7 +115,7 @@ fn to_signature_out(b: &BuiltinFunction) -> BuiltinSignatureOut {
     } else {
         vec!["out".to_string()]
     };
-    let in_types: Vec<String> = b.param_types.iter().map(|t| format_type(t)).collect();
+    let in_types: Vec<String> = b.param_types.iter().map(format_type).collect();
     let out_types: Vec<String> = if matches!(b.return_type, Type::Void) {
         vec![]
     } else {
@@ -131,11 +131,7 @@ fn to_signature_out(b: &BuiltinFunction) -> BuiltinSignatureOut {
             max: b.param_types.len(),
         },
         nargout: Range {
-            min: if matches!(b.return_type, Type::Void) {
-                0
-            } else {
-                0
-            },
+            min: 0,
             max: if matches!(b.return_type, Type::Void) {
                 0
             } else {

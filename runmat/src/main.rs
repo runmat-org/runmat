@@ -611,8 +611,16 @@ fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
         let is_from_env = config_from_env.as_ref() == Some(config_file);
 
         if config_file.exists() {
-            info!("Loading configuration from: {}", config_file.display());
-            return ConfigLoader::load_from_file(config_file);
+            if config_file.is_dir() {
+                // Ignore directories per policy; fall back to standard loader
+                info!(
+                    "Config path is a directory, ignoring: {}",
+                    config_file.display()
+                );
+            } else {
+                info!("Loading configuration from: {}", config_file.display());
+                return ConfigLoader::load_from_file(config_file);
+            }
         } else if !is_from_env {
             // Only exit if explicitly specified via CLI, not env var
             error!(
@@ -625,7 +633,35 @@ fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
     }
 
     // Use the standard loader (which will also check RUSTMAT_CONFIG but gracefully)
-    ConfigLoader::load()
+    match ConfigLoader::load() {
+        Ok(c) => Ok(c),
+        Err(e) => {
+            // Ignore directory config paths and fall back to defaults
+            if let Ok(conf_env) = std::env::var("RUSTMAT_CONFIG") {
+                let p = PathBuf::from(conf_env);
+                if p.is_dir() {
+                    info!(
+                        "Config path from env is a directory, ignoring: {}",
+                        p.display()
+                    );
+                    return Ok(RunMatConfig::default());
+                }
+            }
+
+            if let Some(home) = dirs::home_dir() {
+                let dir = home.join(".runmat");
+                if dir.is_dir() {
+                    info!(
+                        "Home config path is a directory, ignoring: {}",
+                        dir.display()
+                    );
+                    return Ok(RunMatConfig::default());
+                }
+            }
+
+            Err(e)
+        }
+    }
 }
 
 /// Apply CLI argument overrides to configuration

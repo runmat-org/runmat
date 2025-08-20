@@ -156,7 +156,7 @@ fn slice_non_tensor_mex() {
     let src = "x = 5; y = x(1,1);";
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    eprintln!("slice_non_tensor_mex err: {}", err);
+    eprintln!("slice_non_tensor_mex err: {err}");
     assert!(err.contains("MATLAB:SliceNonTensor"));
 }
 

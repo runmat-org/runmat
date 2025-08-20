@@ -139,36 +139,24 @@ pub fn value_matmul(
         (Value::Num(s), Value::Complex(br, bi)) => Ok(Value::Complex(s * br, s * bi)),
         (Value::Tensor(t), Value::Complex(cr, ci)) => {
             // real matrix times complex scalar
-            Ok(Value::ComplexTensor(matrix_scalar_mul_complex(
-                t, *cr, *ci,
-            )))
+            Ok(Value::ComplexTensor(matrix_scalar_mul_complex(t, *cr, *ci)))
         }
         (Value::Complex(cr, ci), Value::Tensor(t)) => {
             // complex scalar times real matrix
-            Ok(Value::ComplexTensor(matrix_scalar_mul_complex(
-                t, *cr, *ci,
-            )))
+            Ok(Value::ComplexTensor(matrix_scalar_mul_complex(t, *cr, *ci)))
         }
-        (Value::ComplexTensor(ct), Value::Num(s)) => {
-            Ok(Value::ComplexTensor(matrix_scalar_mul_complex_tensor(
-                ct, *s, 0.0,
-            )))
-        }
-        (Value::Num(s), Value::ComplexTensor(ct)) => {
-            Ok(Value::ComplexTensor(matrix_scalar_mul_complex_tensor(
-                ct, *s, 0.0,
-            )))
-        }
-        (Value::ComplexTensor(ct), Value::Complex(cr, ci)) => {
-            Ok(Value::ComplexTensor(matrix_scalar_mul_complex_tensor(
-                ct, *cr, *ci,
-            )))
-        }
-        (Value::Complex(cr, ci), Value::ComplexTensor(ct)) => {
-            Ok(Value::ComplexTensor(matrix_scalar_mul_complex_tensor(
-                ct, *cr, *ci,
-            )))
-        }
+        (Value::ComplexTensor(ct), Value::Num(s)) => Ok(Value::ComplexTensor(
+            matrix_scalar_mul_complex_tensor(ct, *s, 0.0),
+        )),
+        (Value::Num(s), Value::ComplexTensor(ct)) => Ok(Value::ComplexTensor(
+            matrix_scalar_mul_complex_tensor(ct, *s, 0.0),
+        )),
+        (Value::ComplexTensor(ct), Value::Complex(cr, ci)) => Ok(Value::ComplexTensor(
+            matrix_scalar_mul_complex_tensor(ct, *cr, *ci),
+        )),
+        (Value::Complex(cr, ci), Value::ComplexTensor(ct)) => Ok(Value::ComplexTensor(
+            matrix_scalar_mul_complex_tensor(ct, *cr, *ci),
+        )),
         (Value::Tensor(ta), Value::Tensor(tb)) => Ok(Value::Tensor(matrix_mul(ta, tb)?)),
         (Value::ComplexTensor(ta), Value::ComplexTensor(tb)) => {
             Ok(Value::ComplexTensor(complex_matrix_mul(ta, tb)?))

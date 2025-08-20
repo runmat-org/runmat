@@ -18,8 +18,8 @@ fn mex(id: &str, msg: &str) -> String {
         Some(pos) => &id[pos + 1..],
         None => id,
     };
-    let ident = format!("{}:{}", ERROR_NAMESPACE, suffix);
-    format!("{}: {}", ident, msg)
+    let ident = format!("{ERROR_NAMESPACE}:{suffix}");
+    format!("{ident}: {msg}")
 }
 
 thread_local! {
@@ -36,7 +36,7 @@ thread_local! {
 
 thread_local! {
     // (nargin, nargout) for current call
-    static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = RefCell::new(Vec::new());
+    static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
 }
 
 macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
@@ -161,7 +161,7 @@ pub fn interpret_with_vars(
                 vars[i] = val;
                 // If this var is declared global, update the global table entry
                 // We optimistically write-through whenever StoreVar happens and a global exists for this name
-                let key = format!("var_{}", i);
+                let key = format!("var_{i}");
                 GLOBALS.with(|g| {
                     let mut m = g.borrow_mut();
                     if m.contains_key(&key) {
@@ -181,12 +181,10 @@ pub fn interpret_with_vars(
                         vm_bail!("Local variable index out of bounds".to_string());
                     }
                     stack.push(context.locals[local_index].clone());
+                } else if offset < vars.len() {
+                    stack.push(vars[offset].clone());
                 } else {
-                    if offset < vars.len() {
-                        stack.push(vars[offset].clone());
-                    } else {
-                        stack.push(Value::Num(0.0));
-                    }
+                    stack.push(Value::Num(0.0));
                 }
             }
             Instr::StoreLocal(offset) => {
@@ -235,7 +233,7 @@ pub fn interpret_with_vars(
             Instr::DeclareGlobal(indices) => {
                 // Bind local var slots to global table entries by name (var_N)
                 for i in indices.into_iter() {
-                    let key = format!("var_{}", i);
+                    let key = format!("var_{i}");
                     let val_opt = GLOBALS.with(|g| g.borrow().get(&key).cloned());
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
@@ -250,7 +248,7 @@ pub fn interpret_with_vars(
                     let name = names
                         .get(pos)
                         .cloned()
-                        .unwrap_or_else(|| format!("var_{}", i));
+                        .unwrap_or_else(|| format!("var_{i}"));
                     let val_opt = GLOBALS.with(|g| g.borrow().get(&name).cloned());
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
@@ -261,7 +259,7 @@ pub fn interpret_with_vars(
                     GLOBALS.with(|g| {
                         let mut m = g.borrow_mut();
                         if let Some(v) = m.get(&name).cloned() {
-                            m.insert(format!("var_{}", i), v);
+                            m.insert(format!("var_{i}"), v);
                         }
                     });
                     global_aliases.insert(i, name);
@@ -287,7 +285,7 @@ pub fn interpret_with_vars(
                     let name = names
                         .get(pos)
                         .cloned()
-                        .unwrap_or_else(|| format!("var_{}", i));
+                        .unwrap_or_else(|| format!("var_{i}"));
                     let key = (func_name.clone(), i);
                     let val_opt = PERSISTENTS_BY_NAME
                         .with(|p| p.borrow().get(&(func_name.clone(), name.clone())).cloned())
@@ -1215,7 +1213,7 @@ pub fn interpret_with_vars(
                                 specific_matches.join(", ")
                             ));
                         }
-                        if let Some(qual) = specific_matches.get(0) {
+                        if let Some(qual) = specific_matches.first() {
                             match call_builtin(qual, &args) {
                                 Ok(v) => {
                                     stack.push(v);
@@ -1252,7 +1250,7 @@ pub fn interpret_with_vars(
                                     wildcard_matches.join(", ")
                                 ));
                             }
-                            if let Some(qual) = wildcard_matches.get(0) {
+                            if let Some(qual) = wildcard_matches.first() {
                                 match call_builtin(qual, &args) {
                                     Ok(v) => {
                                         stack.push(v);
@@ -1845,7 +1843,7 @@ pub fn interpret_with_vars(
                     Some(f) => f.clone(),
                     None => vm_bail!(mex(
                         "UndefinedFunction",
-                        &format!("Undefined function: {}", name)
+                        &format!("Undefined function: {name}")
                     )),
                 };
                 let var_map = runmat_hir::remapping::create_complete_function_var_map(
@@ -1901,7 +1899,7 @@ pub fn interpret_with_vars(
                     Some(f) => f.clone(),
                     None => vm_bail!(mex(
                         "UndefinedFunction",
-                        &format!("Undefined function: {}", name)
+                        &format!("Undefined function: {name}")
                     )),
                 };
                 let mut args = Vec::new();
@@ -1918,10 +1916,8 @@ pub fn interpret_with_vars(
                         vm_bail!(mex(
                             "NotEnoughInputs",
                             &format!(
-                                "Function '{}' expects {} inputs, got {}",
-                                name,
-                                func.params.len(),
-                                arg_count
+                                "Function '{name}' expects {} inputs, got {arg_count}",
+                                func.params.len()
                             )
                         ));
                     }
@@ -1929,10 +1925,8 @@ pub fn interpret_with_vars(
                         vm_bail!(mex(
                             "TooManyInputs",
                             &format!(
-                                "Function '{}' expects {} inputs, got {}",
-                                name,
-                                func.params.len(),
-                                arg_count
+                                "Function '{name}' expects {} inputs, got {arg_count}",
+                                func.params.len()
                             )
                         ));
                     }
@@ -1941,10 +1935,7 @@ pub fn interpret_with_vars(
                     if arg_count < min_args {
                         vm_bail!(mex(
                             "NotEnoughInputs",
-                            &format!(
-                                "Function '{}' expects at least {} inputs, got {}",
-                                name, min_args, arg_count
-                            )
+                            &format!("Function '{name}' expects at least {min_args} inputs, got {arg_count}")
                         ));
                     }
                 }
@@ -1973,7 +1964,7 @@ pub fn interpret_with_vars(
                     };
                     // Create row cell for varargin
                     let cell = runmat_builtins::CellArray::new(
-                        rest.drain(..).collect(),
+                        std::mem::take(&mut rest),
                         1,
                         if args.len() > fixed {
                             args.len() - fixed
@@ -2078,7 +2069,7 @@ pub fn interpret_with_vars(
                 } else {
                     vm_bail!(mex(
                         "TooManyOutputs",
-                        &format!("Function '{}' does not return outputs", name)
+                        &format!("Function '{name}' does not return outputs")
                     ));
                 }
             }
@@ -2199,7 +2190,6 @@ pub fn interpret_with_vars(
                     Err(e) => vm_bail!(e),
                 }
             }
-
             Instr::CallFunctionMulti(name, arg_count, out_count) => {
                 let func: UserFunction = match bytecode.functions.get(&name) {
                     Some(f) => f.clone(),
@@ -2219,10 +2209,8 @@ pub fn interpret_with_vars(
                         vm_bail!(mex(
                             "NotEnoughInputs",
                             &format!(
-                                "Function '{}' expects {} inputs, got {}",
-                                name,
-                                func.params.len(),
-                                arg_count
+                                "Function '{name}' expects {} inputs, got {arg_count}",
+                                func.params.len()
                             )
                         ));
                     }
@@ -2230,10 +2218,8 @@ pub fn interpret_with_vars(
                         vm_bail!(mex(
                             "TooManyInputs",
                             &format!(
-                                "Function '{}' expects {} inputs, got {}",
-                                name,
-                                func.params.len(),
-                                arg_count
+                                "Function '{name}' expects {} inputs, got {arg_count}",
+                                func.params.len()
                             )
                         ));
                     }
@@ -2241,10 +2227,8 @@ pub fn interpret_with_vars(
                     vm_bail!(mex(
                         "NotEnoughInputs",
                         &format!(
-                            "Function '{}' expects at least {} inputs, got {}",
-                            name,
-                            func.params.len() - 1,
-                            arg_count
+                            "Function '{name}' expects at least {} inputs, got {arg_count}",
+                            func.params.len() - 1
                         )
                     ));
                 }
@@ -2271,7 +2255,7 @@ pub fn interpret_with_vars(
                         Vec::new()
                     };
                     let cell = runmat_builtins::CellArray::new(
-                        rest.drain(..).collect(),
+                        std::mem::take(&mut rest),
                         1,
                         if args.len() > fixed {
                             args.len() - fixed
@@ -2371,7 +2355,7 @@ pub fn interpret_with_vars(
                                     let available = ca.data.len();
                                     let need = out_count - pushed;
                                     if need > available {
-                                        vm_bail!(mex("VarargoutMismatch", &format!("Function '{}' returned {} varargout values, {} requested", name, available, need)));
+                                        vm_bail!(mex("VarargoutMismatch", &format!("Function '{name}' returned {available} varargout values, {need} requested")));
                                     }
                                     for vi in 0..need {
                                         stack.push((*ca.data[vi]).clone());
@@ -2388,10 +2372,7 @@ pub fn interpret_with_vars(
                     if out_count > defined {
                         vm_bail!(mex(
                             "TooManyOutputs",
-                            &format!(
-                                "Function '{}' defines {} outputs, {} requested",
-                                name, defined, out_count
-                            )
+                            &format!("Function '{name}' defines {defined} outputs, {out_count} requested")
                         ));
                     }
                     for i in 0..out_count {
@@ -2422,7 +2403,7 @@ pub fn interpret_with_vars(
                 if name == "find" && !args.is_empty() {
                     match &args[0] {
                         Value::Tensor(t) => {
-                            let rows = *t.shape.get(0).unwrap_or(&1);
+                            let rows = *t.shape.first().unwrap_or(&1);
                             let _cols = *t.shape.get(1).unwrap_or(&1);
                             let mut lin_idx: Vec<usize> = Vec::new();
                             for (k, &v) in t.data.iter().enumerate() {
@@ -2723,12 +2704,9 @@ pub fn interpret_with_vars(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
-                        let cell = runmat_builtins::CellArray::new(
-                            numeric.iter().cloned().collect(),
-                            1,
-                            numeric.len(),
-                        )
-                        .map_err(|e| format!("subsref build error: {e}"))?;
+                        let cell =
+                            runmat_builtins::CellArray::new(numeric.to_vec(), 1, numeric.len())
+                                .map_err(|e| format!("subsref build error: {e}"))?;
                         match runmat_runtime::call_builtin(
                             "call_method",
                             &[
@@ -2762,7 +2740,7 @@ pub fn interpret_with_vars(
                                 idxs = (1..=total).collect();
                             } else if is_end {
                                 idxs = vec![total];
-                            } else if let Some(v) = numeric.get(0) {
+                            } else if let Some(v) = numeric.first() {
                                 match v {
                                     Value::Num(n) => {
                                         let i = *n as isize;
@@ -3029,9 +3007,9 @@ pub fn interpret_with_vars(
                                 // Compute output shape and gather
                                 let mut out_dims: Vec<usize> = Vec::new();
                                 let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                                for d in 0..dims {
+                                for (d, sel) in selectors.iter().enumerate().take(dims) {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                    let idxs = match &selectors[d] {
+                                    let idxs = match sel {
                                         Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
                                         Sel::Scalar(i) => vec![*i],
                                         Sel::Indices(v) => v.clone(),
@@ -3080,14 +3058,14 @@ pub fn interpret_with_vars(
                                     t.shape.clone()
                                 };
                                 let mut acc = 1usize;
-                                for d in 0..dims {
-                                    strides[d] = acc;
+                                for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+                                    *stride = acc;
                                     acc *= full_shape[d];
                                 }
                                 // Cartesian product gather
                                 let total_out: usize = out_dims.iter().product();
                                 let mut out_data: Vec<f64> = Vec::with_capacity(total_out);
-                                if out_dims.iter().any(|&d| d == 0)
+                                if out_dims.contains(&0)
                                     || per_dim_indices.iter().any(|v| v.is_empty())
                                 {
                                     // Empty selection on some dimension -> empty tensor
@@ -3160,7 +3138,7 @@ pub fn interpret_with_vars(
                                 idxs = (1..=total).collect();
                             } else if is_end {
                                 idxs = vec![total];
-                            } else if let Some(v) = numeric.get(0) {
+                            } else if let Some(v) = numeric.first() {
                                 match v {
                                     Value::Num(n) => {
                                         let i = *n as isize;
@@ -3280,9 +3258,9 @@ pub fn interpret_with_vars(
                             }
                             let mut out_dims: Vec<usize> = Vec::new();
                             let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                            for d in 0..dims {
+                            for (d, sel) in selectors.iter().enumerate().take(dims) {
                                 let dim_len = *sa.shape.get(d).unwrap_or(&1);
-                                let idxs = match &selectors[d] {
+                                let idxs = match sel {
                                     Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
                                     Sel::Scalar(i) => vec![*i],
                                     Sel::Indices(v) => v.clone(),
@@ -3320,8 +3298,8 @@ pub fn interpret_with_vars(
                                 sa.shape.clone()
                             };
                             let mut acc = 1usize;
-                            for d in 0..dims {
-                                strides[d] = acc;
+                            for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+                                *stride = acc;
                                 acc *= full_shape[d];
                             }
                             let total_out: usize = out_dims.iter().product();
@@ -3386,7 +3364,7 @@ pub fn interpret_with_vars(
                             let idx_val: f64 = if is_end {
                                 1.0
                             } else {
-                                match numeric.get(0) {
+                                match numeric.first() {
                                     Some(Value::Num(n)) => *n,
                                     Some(Value::Int(i)) => i.to_f64(),
                                     _ => 1.0,
@@ -3548,9 +3526,9 @@ pub fn interpret_with_vars(
                         } else {
                             t.shape.clone()
                         };
-                        for d in 0..dims {
+                        for (d, sel) in selectors.iter().enumerate().take(dims) {
                             let dim_len = full_shape[d] as i64;
-                            let idxs: Vec<usize> = match &selectors[d] {
+                            let idxs: Vec<usize> = match sel {
                                 Sel::Colon => (1..=full_shape[d]).collect(),
                                 Sel::Scalar(i) => vec![*i],
                                 Sel::Indices(v) => v.clone(),
@@ -3567,7 +3545,7 @@ pub fn interpret_with_vars(
                                         vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
                                     }
                                     if stp > 0 {
-                                        while (cur as i64) <= end_i {
+                                        while cur <= end_i {
                                             if cur < 1 || cur > dim_len {
                                                 break;
                                             }
@@ -3575,7 +3553,7 @@ pub fn interpret_with_vars(
                                             cur += stp;
                                         }
                                     } else {
-                                        while (cur as i64) >= end_i {
+                                        while cur >= end_i {
                                             if cur < 1 || cur > dim_len {
                                                 break;
                                             }
@@ -3594,8 +3572,8 @@ pub fn interpret_with_vars(
                         // Strides and gather
                         let mut strides: Vec<usize> = vec![0; dims];
                         let mut acc = 1usize;
-                        for d in 0..dims {
-                            strides[d] = acc;
+                        for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+                            *stride = acc;
                             acc *= full_shape[d];
                         }
                         let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
@@ -3754,7 +3732,7 @@ pub fn interpret_with_vars(
                                         vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
                                     }
                                     if stp > 0 {
-                                        while (cur as i64) <= end_i {
+                                        while cur <= end_i {
                                             if cur < 1 || cur > dim_len {
                                                 break;
                                             }
@@ -3762,7 +3740,7 @@ pub fn interpret_with_vars(
                                             cur += stp;
                                         }
                                     } else {
-                                        while (cur as i64) >= end_i {
+                                        while cur >= end_i {
                                             if cur < 1 || cur > dim_len {
                                                 break;
                                             }
@@ -3860,7 +3838,7 @@ pub fn interpret_with_vars(
                                 // Map numeric positions to dims by skipping colons and 'end' markers
                                 let mut seen_numeric = 0usize;
                                 let mut dim_for_pos = 0usize;
-                                for d in 0..dims {
+                                for (d, _) in (0..dims).enumerate().take(dims) {
                                     let is_colon = (colon_mask & (1u32 << d)) != 0;
                                     let is_end = (end_mask & (1u32 << d)) != 0;
                                     if is_colon || is_end {
@@ -3888,13 +3866,9 @@ pub fn interpret_with_vars(
                         let mut numeric_vals: Vec<Value> = Vec::new();
                         let count = numeric_count;
                         let mut idx_iter = tmp_stack.into_iter();
-                        let base = match idx_iter
+                        let base = idx_iter
                             .next()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?
-                        {
-                            Value::Tensor(t) => Value::Tensor(t),
-                            other => other,
-                        };
+                            .ok_or(mex("StackUnderflow", "stack underflow"))?;
                         for _ in 0..count {
                             match idx_iter.next() {
                                 Some(v) => numeric_vals.push(v),
@@ -3922,7 +3896,7 @@ pub fn interpret_with_vars(
                                         idxs = (1..=total).collect();
                                     } else if is_end {
                                         idxs = vec![total];
-                                    } else if let Some(v) = numeric_vals.get(0) {
+                                    } else if let Some(v) = numeric_vals.first() {
                                         match v {
                                             Value::Num(n) => {
                                                 let i = *n as isize;
@@ -4064,9 +4038,9 @@ pub fn interpret_with_vars(
                                     let mut out_dims: Vec<usize> = Vec::new();
                                     let mut per_dim_indices: Vec<Vec<usize>> =
                                         Vec::with_capacity(dims);
-                                    for d in 0..dims {
+                                    for (d, sel) in selectors.iter().enumerate().take(dims) {
                                         let dim_len = *t2.shape.get(d).unwrap_or(&1);
-                                        let idxs = match &selectors[d] {
+                                        let idxs = match sel {
                                             Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
                                             Sel::Scalar(i) => vec![*i],
                                             Sel::Indices(v) => v.clone(),
@@ -4117,7 +4091,7 @@ pub fn interpret_with_vars(
                                     }
                                     let total_out: usize = out_dims.iter().product();
                                     let mut out_data: Vec<f64> = Vec::with_capacity(total_out);
-                                    if out_dims.iter().any(|&d| d == 0) {
+                                    if out_dims.contains(&0) {
                                         let out_tensor =
                                             runmat_builtins::Tensor::new(out_data, out_dims)
                                                 .map_err(|e| format!("Slice error: {e}"))?;
@@ -4309,7 +4283,7 @@ pub fn interpret_with_vars(
                                 lin_indices = vec![total];
                             } else {
                                 let v = numeric
-                                    .get(0)
+                                    .first()
                                     .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                                 match v {
                                     Value::Num(n) => {
@@ -4667,7 +4641,7 @@ pub fn interpret_with_vars(
                                 lin_indices = vec![total];
                             } else {
                                 let v = numeric
-                                    .get(0)
+                                    .first()
                                     .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                                 match v {
                                     Value::Num(n) => {
@@ -5102,9 +5076,9 @@ pub fn interpret_with_vars(
                                 }
                                 // Compute per-dim indices and strides
                                 let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                                for d in 0..dims {
+                                for (d, sel) in selectors.iter().enumerate().take(dims) {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                    let idxs = match &selectors[d] {
+                                    let idxs = match sel {
                                         Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
                                         Sel::Scalar(i) => vec![*i],
                                         Sel::Indices(v) => v.clone(),
@@ -5113,8 +5087,8 @@ pub fn interpret_with_vars(
                                 }
                                 let mut strides: Vec<usize> = vec![0; dims];
                                 let mut acc = 1usize;
-                                for d in 0..dims {
-                                    strides[d] = acc;
+                                for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+                                    *stride = acc;
                                     acc *= *t.shape.get(d).unwrap_or(&1);
                                 }
                                 // Build RHS view with broadcasting like StoreSlice
@@ -5164,9 +5138,10 @@ pub fn interpret_with_vars(
                                 use std::collections::HashMap;
                                 let mut pos_maps: Vec<HashMap<usize, usize>> =
                                     Vec::with_capacity(dims);
-                                for d in 0..dims {
+                                for (_d, dim_idxs) in per_dim_indices.iter().enumerate().take(dims)
+                                {
                                     let mut m = HashMap::new();
-                                    for (p, &idx) in per_dim_indices[d].iter().enumerate() {
+                                    for (p, &idx) in dim_idxs.iter().enumerate() {
                                         m.insert(idx, p);
                                     }
                                     pos_maps.push(m);
@@ -5360,9 +5335,9 @@ pub fn interpret_with_vars(
                         // Build index lists and scatter rhs with broadcasting
                         // debug removed
                         let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                        for d in 0..dims {
+                        for (d, sel) in selectors.iter().enumerate().take(dims) {
                             let dim_len = *t.shape.get(d).unwrap_or(&1);
-                            let idxs = match &selectors[d] {
+                            let idxs = match sel {
                                 Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
                                 Sel::Scalar(i) => vec![*i],
                                 Sel::Indices(v) => v.clone(),
@@ -5405,8 +5380,8 @@ pub fn interpret_with_vars(
                         }
                         let mut strides: Vec<usize> = vec![0; dims];
                         let mut acc = 1usize;
-                        for d in 0..dims {
-                            strides[d] = acc;
+                        for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+                            *stride = acc;
                             acc *= *t.shape.get(d).unwrap_or(&1);
                         }
                         let selection_empty = per_dim_indices.iter().any(|v| v.is_empty());
@@ -5468,9 +5443,9 @@ pub fn interpret_with_vars(
                             // Precompute mapping from absolute index to position-in-selection per dimension to ensure column-major consistent mapping
                             use std::collections::HashMap;
                             let mut pos_maps: Vec<HashMap<usize, usize>> = Vec::with_capacity(dims);
-                            for d in 0..dims {
+                            for dim_idxs in per_dim_indices.iter().take(dims) {
                                 let mut m: HashMap<usize, usize> = HashMap::new();
-                                for (p, &idx) in per_dim_indices[d].iter().enumerate() {
+                                for (p, &idx) in dim_idxs.iter().enumerate() {
                                     m.insert(idx, p);
                                 }
                                 pos_maps.push(m);
@@ -5535,7 +5510,7 @@ pub fn interpret_with_vars(
                                     }
                                 }
                             });
-                            let _ = (t.data.get(0), t.data.len());
+                            let _ = (t.data.first(), t.data.len());
                             if let Some(e) = err_opt {
                                 vm_bail!(e);
                             }
@@ -5564,7 +5539,7 @@ pub fn interpret_with_vars(
                                 let off = end_offsets[pos];
                                 let cell = runmat_builtins::CellArray::new(
                                     vec![
-                                        Value::Num(st as f64),
+                                        Value::Num(st),
                                         Value::Num(sp),
                                         Value::String("end".to_string()),
                                         Value::Num(off as f64),
@@ -5814,8 +5789,8 @@ pub fn interpret_with_vars(
                         }
                         // Pad or truncate to out_count
                         if values.len() >= out_count {
-                            for i in 0..out_count {
-                                stack.push(values[i].clone());
+                            for v in values.iter().take(out_count) {
+                                stack.push(v.clone());
                             }
                         } else {
                             for v in &values {
@@ -6033,15 +6008,12 @@ pub fn interpret_with_vars(
                                     field, obj.class_name, field
                                 ));
                             }
-                            match p.get_access {
-                                runmat_builtins::Access::Private => {
-                                    vm_bail!(format!("Property '{}' is private", field))
-                                }
-                                _ => {}
+                            if p.get_access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Property '{}' is private", field))
                             }
                             if p.is_dependent {
                                 // Call get.<field>(obj)
-                                let getter = format!("get.{}", field);
+                                let getter = format!("get.{field}");
                                 match runmat_runtime::call_builtin(
                                     &getter,
                                     &[Value::Object(obj.clone())],
@@ -6060,7 +6032,7 @@ pub fn interpret_with_vars(
                             runmat_builtins::lookup_property(&obj.class_name, &field)
                         {
                             if p2.is_dependent {
-                                let backing = format!("{}_backing", field);
+                                let backing = format!("{field}_backing");
                                 if let Some(vb) = obj.properties.get(&backing) {
                                     stack.push(vb.clone());
                                     continue;
@@ -6140,11 +6112,8 @@ pub fn interpret_with_vars(
                                     name, obj.class_name, name
                                 ));
                             }
-                            match p.get_access {
-                                runmat_builtins::Access::Private => {
-                                    vm_bail!(format!("Property '{}' is private", name))
-                                }
-                                _ => {}
+                            if p.get_access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Property '{}' is private", name))
                             }
                         }
                         if let Some(v) = obj.properties.get(&name) {
@@ -6202,15 +6171,12 @@ pub fn interpret_with_vars(
                                     field, obj.class_name, field
                                 ));
                             }
-                            match p.set_access {
-                                runmat_builtins::Access::Private => {
-                                    vm_bail!(format!("Property '{}' is private", field))
-                                }
-                                _ => {}
+                            if p.set_access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Property '{}' is private", field))
                             }
                             if p.is_dependent {
                                 // Call set.<field>(obj, rhs)
-                                let setter = format!("set.{}", field);
+                                let setter = format!("set.{field}");
                                 match runmat_runtime::call_builtin(
                                     &setter,
                                     &[Value::Object(obj.clone()), rhs.clone()],
@@ -6257,16 +6223,12 @@ pub fn interpret_with_vars(
                             if !p.is_static {
                                 vm_bail!(format!("Property '{}' is not static", field));
                             }
-                            match p.set_access {
-                                runmat_builtins::Access::Private => {
-                                    vm_bail!(format!("Property '{}' is private", field))
-                                }
-                                _ => {}
+                            if p.set_access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Property '{}' is private", field))
                             }
                             runmat_builtins::set_static_property_value_in_owner(
                                 &owner, &field, rhs,
-                            )
-                            .map_err(|e| e)?;
+                            )?;
                             stack.push(Value::ClassRef(cls));
                         } else {
                             vm_bail!(format!("Unknown property '{}' on class {}", field, cls));
@@ -6345,11 +6307,8 @@ pub fn interpret_with_vars(
                                     name, obj.class_name, name
                                 ));
                             }
-                            match p.set_access {
-                                runmat_builtins::Access::Private => {
-                                    vm_bail!(format!("Property '{}' is private", name))
-                                }
-                                _ => {}
+                            if p.set_access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Property '{}' is private", name))
                             }
                         }
                         if let Some(oldv) = obj.properties.get(&name) {
@@ -6432,11 +6391,8 @@ pub fn interpret_with_vars(
                                     name, obj.class_name, name
                                 ));
                             }
-                            match m.access {
-                                runmat_builtins::Access::Private => {
-                                    vm_bail!(format!("Method '{}' is private", name))
-                                }
-                                _ => {}
+                            if m.access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Method '{}' is private", name))
                             }
                             let mut full_args = Vec::with_capacity(1 + args.len());
                             full_args.push(Value::Object(obj));
@@ -6516,11 +6472,8 @@ pub fn interpret_with_vars(
                     if !p.is_static {
                         vm_bail!(format!("Property '{}' is not static", prop));
                     }
-                    match p.get_access {
-                        runmat_builtins::Access::Private => {
-                            vm_bail!(format!("Property '{}' is private", prop))
-                        }
-                        _ => {}
+                    if p.get_access == runmat_builtins::Access::Private {
+                        vm_bail!(format!("Property '{}' is private", prop))
                     }
                     if let Some(v) = runmat_builtins::get_static_property_value(&owner, &prop) {
                         stack.push(v);
@@ -6550,11 +6503,8 @@ pub fn interpret_with_vars(
                     if !m.is_static {
                         vm_bail!(format!("Method '{}' is not static", method));
                     }
-                    match m.access {
-                        runmat_builtins::Access::Private => {
-                            vm_bail!(format!("Method '{}' is private", method))
-                        }
-                        _ => {}
+                    if m.access == runmat_builtins::Access::Private {
+                        vm_bail!(format!("Method '{}' is private", method))
                     }
                     let v = match runmat_runtime::call_builtin(&m.function_name, &args) {
                         Ok(v) => v,
@@ -6749,7 +6699,7 @@ pub fn interpret_with_vars(
                                                 vm_bail!(format!("Function '{}' expects {} arguments, got {} - Not enough input arguments", name, func.params.len(), argc));
                                             }
                                         } else if argc + 1 < func.params.len() {
-                                            vm_bail!(format!("Function '{}' expects at least {} arguments, got {}", name, func.params.len()-1, argc));
+                                            vm_bail!(format!("Function '{name}' expects at least {} arguments, got {argc}", func.params.len()-1));
                                         }
                                         let var_map =
                                             runmat_hir::remapping::create_complete_function_var_map(
@@ -6778,7 +6728,7 @@ pub fn interpret_with_vars(
                                                 Vec::new()
                                             };
                                             let cell = runmat_builtins::CellArray::new(
-                                                rest.drain(..).collect(),
+                                                std::mem::take(&mut rest),
                                                 1,
                                                 if args.len() > fixed {
                                                     args.len() - fixed
@@ -6917,7 +6867,7 @@ pub fn interpret_with_vars(
                                                 vm_bail!(format!("Function '{}' expects {} arguments, got {} - Not enough input arguments", name, func.params.len(), argc));
                                             }
                                         } else if argc + 1 < func.params.len() {
-                                            vm_bail!(format!("Function '{}' expects at least {} arguments, got {}", name, func.params.len()-1, argc));
+                                            vm_bail!(format!("Function '{name}' expects at least {} arguments, got {argc}", func.params.len()-1));
                                         }
                                         let var_map =
                                             runmat_hir::remapping::create_complete_function_var_map(
@@ -7163,7 +7113,7 @@ pub fn interpret_with_vars(
                                                 vm_bail!(format!("Function '{}' expects {} arguments, got {} - Not enough input arguments", name, func.params.len(), argc));
                                             }
                                         } else if argc + 1 < func.params.len() {
-                                            vm_bail!(format!("Function '{}' expects at least {} arguments, got {}", name, func.params.len()-1, argc));
+                                            vm_bail!(format!("Function '{name}' expects at least {} arguments, got {argc}", func.params.len()-1));
                                         }
                                         let var_map =
                                             runmat_hir::remapping::create_complete_function_var_map(
@@ -7192,7 +7142,7 @@ pub fn interpret_with_vars(
                                                 Vec::new()
                                             };
                                             let cell = runmat_builtins::CellArray::new(
-                                                rest.drain(..).collect(),
+                                                std::mem::take(&mut rest),
                                                 1,
                                                 if temp.len() > fixed {
                                                     temp.len() - fixed
@@ -7365,7 +7315,7 @@ fn parse_exception(err: &str) -> runmat_builtins::MException {
         let (id, msg) = err.split_at(idx);
         let message = msg.trim_start_matches(':').trim().to_string();
         let ident = if id.trim().is_empty() {
-            format!("{}:error", ERROR_NAMESPACE)
+            format!("{ERROR_NAMESPACE}:error")
         } else {
             id.trim().to_string()
         };
@@ -7376,13 +7326,13 @@ fn parse_exception(err: &str) -> runmat_builtins::MException {
         let (id, msg) = err.split_at(idx);
         let message = msg.trim_start_matches(':').trim().to_string();
         let ident = if id.trim().is_empty() {
-            format!("{}:error", ERROR_NAMESPACE)
+            format!("{ERROR_NAMESPACE}:error")
         } else {
             id.trim().to_string()
         };
         runmat_builtins::MException::new(ident, message)
     } else {
-        runmat_builtins::MException::new(format!("{}:error", ERROR_NAMESPACE), err.to_string())
+        runmat_builtins::MException::new(format!("{ERROR_NAMESPACE}:error"), err.to_string())
     }
 }
 
@@ -7434,7 +7384,7 @@ fn interpret_function_with_counts(
                             names
                                 .get(pos)
                                 .cloned()
-                                .unwrap_or_else(|| format!("var_{}", i)),
+                                .unwrap_or_else(|| format!("var_{i}")),
                         );
                         let val = vars[i].clone();
                         PERSISTENTS.with(|p| {

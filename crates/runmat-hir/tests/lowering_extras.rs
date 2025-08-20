@@ -2,7 +2,7 @@ use runmat_hir::{lower, HirExprKind, HirProgram, HirStmt};
 use runmat_parser::parse_simple as parse;
 
 fn lower_src(src: &str) -> HirProgram {
-    let ast = parse(src).unwrap_or_else(|e| panic!("parse: {:?} src: {}", e, src));
+    let ast = parse(src).unwrap_or_else(|e| panic!("parse: {e:?} src: {src}"));
     lower(&ast).unwrap()
 }
 

@@ -550,7 +550,7 @@ fn import_ambiguity_wildcard_conflict_errors() {
     let program = "import PkgA.*; import PkgB.*; x = 1;";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
-    assert!(vars.len() > 0);
+    assert!(!vars.is_empty());
 }
 
 #[test]
@@ -917,8 +917,7 @@ fn operator_overloading_plus_times_lt_eq() {
     let setup = "__register_test_classes();";
     // Try plus with mixed object/scalar; OverIdx has no plus, so fallback should not crash
     let program = format!(
-        "{} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); r1 = o + 3;",
-        setup
+        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); r1 = o + 3;"
     );
     let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
     let _ = execute(&hir).unwrap();
@@ -928,10 +927,8 @@ fn operator_overloading_plus_times_lt_eq() {
 fn operator_overloading_elementwise_vs_mtimes_and_mixed() {
     let setup = "__register_test_classes();";
     // Exercise times and mtimes overload paths (will fallback if not implemented)
-    let program = format!(
-        "{} o = new_object('OverIdx'); a = o .* 2; b = o * 2; c = 2 .* o; d = 2 * o;",
-        setup
-    );
+    let program =
+        format!("{setup} o = new_object('OverIdx'); a = o .* 2; b = o * 2; c = 2 .* o; d = 2 * o;");
     let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
     let _ = execute(&hir).unwrap();
 }
@@ -941,8 +938,7 @@ fn operator_overloading_relational_lt_eq() {
     let setup = "__register_test_classes();";
     // lt and eq with mixed object/scalar on both sides
     let program = format!(
-        "{} o = new_object('OverIdx'); t1 = (o < 10); t2 = (10 < o); t3 = (o == 0); t4 = (0 == o);",
-        setup
+        "{setup} o = new_object('OverIdx'); t1 = (o < 10); t2 = (10 < o); t3 = (o == 0); t4 = (0 == o);"
     );
     let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
     let _ = execute(&hir).unwrap();
@@ -953,7 +949,7 @@ fn operator_overloading_full_grid_basic() {
     let setup = "__register_test_classes();";
     // Cover ne, ge, le, power (as elementwise on numeric), left-div, elementwise div/left-div, and logical &|
     let program = format!(
-        "{} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); \
+        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); \
         a1 = (o ~= 10); a2 = (10 ~= o); \
         b1 = (o >= 5); b2 = (o <= 5); \
         % use numeric power to avoid object exponent when not provided
@@ -961,7 +957,6 @@ fn operator_overloading_full_grid_basic() {
         d1 = (o ./ 2); d2 = (2 ./ o); \
         e1 = (o .\\ 2); e2 = (2 .\\ o); \
         f1 = ([1 0 1] & [1 1 0]); f2 = ([1 0 1] | [0 1 1]);",
-        setup
     );
     let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
     let _ = execute(&hir).unwrap();
@@ -1215,7 +1210,7 @@ fn struct_isfield_string_array_placeholder() {
     "#;
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
-    println!("vars: {:?}", vars);
+    println!("vars: {vars:?}");
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-12)));
@@ -1304,7 +1299,7 @@ fn string_array_literal_concat_index_and_compare() {
                 }
             }
             runmat_builtins::Value::String(s) => {
-                println!("S {}", s);
+                println!("S {s}");
                 if s == "ccc" {
                     saw_x = true;
                 }
