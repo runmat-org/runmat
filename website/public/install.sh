@@ -59,12 +59,16 @@ PY
 
 # Send anonymous telemetry event (non-blocking)
 _send_telemetry() {
+    # honor opt-out via environment variables
+    if [ "${RUNMAT_NO_TELEMETRY:-}" = "1" ] || [ "${RUNMAT_TELEMETRY:-1}" = "0" ]; then
+        return 0
+    fi
     # usage: _send_telemetry event_name
     local EVENT_NAME="$1"
     local CID
     CID="$(_telemetry_client_id)"
     curl -s -m 3 -o /dev/null -X POST -H "Content-Type: application/json" \
-      --data "{\"event\":\"$EVENT_NAME\",\"os\":\"$OS\",\"arch\":\"$ARCH\",\"platform\":\"$PLATFORM\",\"release\":\"${LATEST_RELEASE:-unknown}\",\"method\":\"shell\",\"cid\":\"$CID\"}" \
+      --data "{\"event_label\":\"$EVENT_NAME\",\"os\":\"$OS\",\"arch\":\"$ARCH\",\"platform\":\"$PLATFORM\",\"release\":\"${LATEST_RELEASE:-unknown}\",\"method\":\"shell\",\"cid\":\"$CID\"}" \
       "$TELEMETRY_ENDPOINT" >/dev/null 2>&1 || true
 }
 
@@ -286,6 +290,6 @@ echo "  3. Install Jupyter kernel: runmat --install-kernel"
 echo "  4. Get help: runmat --help"
 echo
 echo "Documentation: $WEBSITE_URL/docs"
-echo "Examples: $WEBSITE_URL/docs/examples"
+echo "Getting Started: $WEBSITE_URL/docs/getting-started"
 echo
 log "Happy computing with RunMat!"

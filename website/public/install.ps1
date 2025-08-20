@@ -35,10 +35,12 @@ function Send-Telemetry {
         [string]$PLATFORM,
         [string]$Release
     )
+    # Honor opt-out via environment variables
+    if ($env:RUNMAT_NO_TELEMETRY -or $env:RUNMAT_TELEMETRY -eq '0') { return }
     try {
         $cid = New-AnonymousClientId
         $payload = @{ 
-            event = $EventName
+            event_label = $EventName
             os = $OS
             arch = $ARCH
             platform = $PLATFORM
@@ -142,7 +144,7 @@ foreach ($url in $candidates) {
         $downloaded = $true
         break
     } catch {
-        Write-Warn "Download failed from $url: $($_.Exception.Message)"
+        Write-Warn "Download failed from $($url): $($_.Exception.Message)"
     }
 }
 if (-not $downloaded) { Write-ErrorMsg "Failed to download RunMat; tried: $($candidates -join ', ')" }
@@ -231,6 +233,6 @@ Write-Host "  3. Install Jupyter kernel: runmat --install-kernel"
 Write-Host "  4. Get help: runmat --help"
 Write-Host ""
 Write-Host "Documentation: $WEBSITE_URL/docs" -ForegroundColor Blue
-Write-Host "Examples: $WEBSITE_URL/docs/examples" -ForegroundColor Blue
+Write-Host "Getting Started: $WEBSITE_URL/docs/getting-started" -ForegroundColor Blue
 Write-Host ""
 Write-Info "Happy computing with RunMat!"

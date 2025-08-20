@@ -81,6 +81,7 @@ interface OSInstallCommandProps {
 export function OSInstallCommand({ variant = 'full', className = '' }: OSInstallCommandProps) {
   const [selectedOS, setSelectedOS] = useState<OS>('unknown');
   const [mounted, setMounted] = useState(false);
+  const [winFlavor, setWinFlavor] = useState<'ps7' | 'ps5'>('ps7');
 
   useEffect(() => {
     setSelectedOS(detectOS());
@@ -127,10 +128,12 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         return {
           title: 'Windows',
           icon: Monitor,
-          command: 'iwr https://runmat.org/install.ps1 | iex',
+          command: winFlavor === 'ps7'
+            ? 'iwr https://runmat.org/install.ps1 | iex'
+            : 'iwr https://runmat.org/install.ps1 -UseBasicParsing | iex',
           bgColor: 'bg-blue-900',
           iconColor: 'text-blue-600',
-          description: 'PowerShell 3.0+ required'
+          description: null,
         };
       case 'mac':
         return {
@@ -174,10 +177,20 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
             Install for {osInfo.title}
           </h3>
         </div>
-        <CopyableCommand 
-          command={osInfo.command}
-          bgColor={osInfo.bgColor}
-        />
+        <CopyableCommand command={osInfo.command} bgColor={osInfo.bgColor} />
+        {selectedOS === 'windows' && (
+          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <span>Need a different PowerShell?</span>
+            <button
+              className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              onClick={() => setWinFlavor('ps7')}
+            >PS 7+</button>
+            <button
+              className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              onClick={() => setWinFlavor('ps5')}
+            >PS 5.x</button>
+          </div>
+        )}
         {osInfo.description && (
           <p className="text-sm text-gray-600 dark:text-gray-300 text-center mt-2">
             {osInfo.description}
@@ -195,15 +208,22 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
       </CardHeader>
       <CardContent>
         <div className={osInfo.description ? 'mb-4' : ''}>
-          <CopyableCommand 
-            command={osInfo.command}
-            bgColor={osInfo.bgColor}
-          />
+          <CopyableCommand command={osInfo.command} bgColor={osInfo.bgColor} />
         </div>
-        {osInfo.description && (
-          <p className="text-sm text-gray-600 dark:text-gray-300 text-center">
-            {osInfo.description}
-          </p>
+        {/* Intentionally no descriptive line above for Windows; keep UI simple */}
+
+        {selectedOS === 'windows' && (
+          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <span>Need a different PowerShell?</span>
+            <button
+              className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              onClick={() => setWinFlavor('ps7')}
+            >PS 7+</button>
+            <button
+              className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              onClick={() => setWinFlavor('ps5')}
+            >PS 5.x</button>
+          </div>
         )}
         
         {selectedOS !== 'unknown' && (
