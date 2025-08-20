@@ -1,8 +1,8 @@
 # RunMat Architecture
 
-This document provides a comprehensive overview of the RunMat architecture. It is intended for current and future contributors who wish to understand the internal workings of the system, its design principles, and how its various components fit together.
-
 RunMat is a high-performance, MATLAB-compatible runtime built in Rust. Its design is heavily inspired by modern high-performance language runtimes like the V8 JavaScript engine, adapting concepts like tiered execution and snapshotting to the specific needs of a numerical computing environment.
+
+This document provides a comprehensive overview of the RunMat architecture. It is intended for current and future contributors who wish to understand the internal workings of the system, its design principles, and how its various components fit together.
 
 ## Core Philosophy
 
