@@ -108,7 +108,7 @@ fn complex_matmul_and_transpose() {
 #[test]
 fn complex_string_and_logical() {
     let a = Value::Complex(0.0, -2.5);
-    let s = runmat_runtime::call_builtin("string", &[a.clone()]).unwrap();
+    let s = runmat_runtime::call_builtin("string", std::slice::from_ref(&a)).unwrap();
     if let Value::StringArray(sa) = s {
         assert_eq!(sa.data[0], "-2.5i");
     } else {

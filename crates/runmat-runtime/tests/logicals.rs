@@ -25,13 +25,13 @@ fn logical_mask_index_read_write() {
 fn logical_size_numel_ndims() {
     let la = LogicalArray::new(vec![1, 0, 1, 1, 0, 0], vec![3, 2]).unwrap();
     let v = Value::LogicalArray(la);
-    let sz = runmat_runtime::call_builtin("size", &[v.clone()]).unwrap();
+    let sz = runmat_runtime::call_builtin("size", std::slice::from_ref(&v)).unwrap();
     if let Value::Tensor(t) = sz {
         // Verify row vector and product equals numel
         let dims = t.data.clone();
         assert!(t.rows() == 1 || t.cols() == 1);
         let prod: usize = dims.iter().map(|x| *x as usize).product();
-        let ne = runmat_runtime::call_builtin("numel", &[v.clone()]).unwrap();
+        let ne = runmat_runtime::call_builtin("numel", std::slice::from_ref(&v)).unwrap();
         if let Value::Num(n) = ne {
             assert_eq!(prod as f64, n);
         } else {
@@ -40,7 +40,7 @@ fn logical_size_numel_ndims() {
     } else {
         panic!();
     }
-    let nd = runmat_runtime::call_builtin("ndims", &[v.clone()]).unwrap();
+    let nd = runmat_runtime::call_builtin("ndims", std::slice::from_ref(&v)).unwrap();
     if let Value::Num(n) = nd {
         assert_eq!(n, 2.0);
     } else {

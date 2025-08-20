@@ -20,13 +20,13 @@ fn handle_identity_and_delete() {
     } else {
         panic!();
     }
-    let v = runmat_runtime::call_builtin("isvalid", &[h1.clone()]).unwrap();
+    let v = runmat_runtime::call_builtin("isvalid", std::slice::from_ref(&h1)).unwrap();
     if let Value::Bool(b) = v {
         assert!(b);
     } else {
         panic!();
     }
-    let d = runmat_runtime::call_builtin("delete", &[h1.clone()]).unwrap();
+    let d = runmat_runtime::call_builtin("delete", std::slice::from_ref(&h1)).unwrap();
     let v2 = runmat_runtime::call_builtin("isvalid", &[d]).unwrap();
     if let Value::Bool(b) = v2 {
         assert!(!b);
