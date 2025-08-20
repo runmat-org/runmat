@@ -108,47 +108,47 @@ export default function HomePage() {
         </div>
           <div className="mx-auto grid justify-center gap-4 sm:grid-cols-2 lg:grid-cols-4 md:max-w-[80rem]">
             <Card>
-              <CardHeader>
-                <div className="mb-2 text-3xl">✅</div>
+              <CardHeader className="items-center text-center">
+                <div className="mb-3 text-3xl">✅</div>
                 <CardTitle>Full Language Semantics</CardTitle>
               </CardHeader>
               <CardContent>
-                <CardDescription>
+                <CardDescription className="text-center">
                   Run the whole language, not a subset: proper indexing (<code>end</code>/colon/masks), multiple returns,
                   classdef OOP, events/handles. What you already write just works. See <Link className="underline" href="/docs/language-coverage">coverage</Link>.
                 </CardDescription>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader>
-                <div className="mb-2 text-3xl">⚡</div>
+              <CardHeader className="items-center text-center">
+                <div className="mb-3 text-3xl">⚡</div>
                 <CardTitle>150x-180x Faster Than Octave</CardTitle>
               </CardHeader>
               <CardContent>
-                <CardDescription>
+                <CardDescription className="text-center">
                   Instant startup and triple-digit speedups vs Octave across startup,
                   matrix ops, math, and control flow. Read the <Link className="underline" href="/blog/introducing-runmat">results</Link>.
                 </CardDescription>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader>
-                <div className="mb-2 text-3xl">📦</div>
+              <CardHeader className="items-center text-center">
+                <div className="mb-3 text-3xl">📦</div>
                 <CardTitle>Slim Core + Packages</CardTitle>
               </CardHeader>
               <CardContent>
-                <CardDescription>
-                  Small, predictable core, to which you can add what you need. Install native Rust or source MATLAB packages. See the <Link className="underline" href="/docs/package-manager">package manager</Link>.
+                <CardDescription className="text-center">
+                  Best practices borrowed from the Python/Rust/JavaScript ecosystems. Install native Rust or source MATLAB packages. See the <Link className="underline" href="/docs/package-manager">package manager</Link>.
                 </CardDescription>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader>
-                <div className="mb-2 text-3xl">🧱</div>
+              <CardHeader className="items-center text-center">
+                <div className="mb-3 text-3xl">🧱</div>
                 <CardTitle>Portable & Lightweight</CardTitle>
               </CardHeader>
               <CardContent>
-                <CardDescription>
+                <CardDescription className="text-center">
                   Same code, everywhere: small static binaries with consistent performance on Linux/macOS/Windows and embedded devices.
                   Great for laptops, clusters, and CI.
                 </CardDescription>
@@ -163,10 +163,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
           <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-6xl">
-              Same Language, Better Engine
+              Modern Compiler and Executor of MATLAB Code
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              Boots in 5ms, GPU optimizes by default, single compact cross-platform binary. A modern compiler for MATLAB code.
+              Boots in 5ms, GPU optimizes by default, single compact cross-platform binary.
           </p>
           </div>
 
@@ -369,10 +369,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center">
           <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-            Install in Seconds
+              Free and Open Source, Forever
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              Copy and paste one command to get started with RunMat.
+              Copy and paste the command below to get started with RunMat.
           </p>
           
           <OSInstallCommand className="w-full max-w-4xl" />
