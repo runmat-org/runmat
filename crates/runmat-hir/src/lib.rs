@@ -393,8 +393,8 @@ pub fn infer_function_output_types(
         fallthrough: Option<HashMap<VarId, Type>>,
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn analyze_stmts(
-        #[allow(clippy::only_used_in_recursion)]
         outputs: &[VarId],
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
@@ -1613,33 +1613,33 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                             if a.name.eq_ignore_ascii_case("Access") {
                                 let v = a.value.as_ref().ok_or_else(|| {
                                     format!(
-                                        "Access requires value in class '{}' properties block",
+                                        "Access requires value in class '{name}' properties block",
                                     )
                                 })?;
                                 let v = norm_attr_value(v);
-                                validate_access_value(&format!("class '{}' properties"), &v)?;
+                                validate_access_value(&format!("class '{name}' properties"), &v)?;
                                 access_default = Some(v);
                                 continue;
                             }
                             if a.name.eq_ignore_ascii_case("GetAccess") {
                                 let v = a.value.as_ref().ok_or_else(|| {
                                     format!(
-                                        "GetAccess requires value in class '{}' properties block",
+                                        "GetAccess requires value in class '{name}' properties block",
                                     )
                                 })?;
                                 let v = norm_attr_value(v);
-                                validate_access_value(&format!("class '{}' properties"), &v)?;
+                                validate_access_value(&format!("class '{name}' properties"), &v)?;
                                 get_access = Some(v);
                                 continue;
                             }
                             if a.name.eq_ignore_ascii_case("SetAccess") {
                                 let v = a.value.as_ref().ok_or_else(|| {
                                     format!(
-                                        "SetAccess requires value in class '{}' properties block",
+                                        "SetAccess requires value in class '{name}' properties block",
                                     )
                                 })?;
                                 let v = norm_attr_value(v);
-                                validate_access_value(&format!("class '{}' properties"), &v)?;
+                                validate_access_value(&format!("class '{name}' properties"), &v)?;
                                 set_access = Some(v);
                                 continue;
                             }
@@ -1688,8 +1688,7 @@ pub fn validate_classdefs(prog: &HirProgram) -> Result<(), String> {
                             if a.name.eq_ignore_ascii_case("Access") {
                                 let v = a.value.as_ref().ok_or_else(|| {
                                     format!(
-                                        "Access requires value in class '{}' methods block",
-                                        name
+                                        "Access requires value in class '{name}' methods block",
                                     )
                                 })?;
                                 let v = norm_attr_value(v);
@@ -1903,7 +1902,7 @@ pub mod remapping {
                 catch_body,
             } => HirStmt::TryCatch {
                 try_body: remap_function_body(try_body, var_map),
-                catch_var: catch_var.as_ref().map(|v| var_map.get(&v).copied().unwrap_or(*v)),
+                catch_var: catch_var.as_ref().map(|v| var_map.get(v).copied().unwrap_or(*v)),
                 catch_body: remap_function_body(catch_body, var_map),
             },
             HirStmt::Global(vars) => HirStmt::Global(
@@ -2969,10 +2968,8 @@ impl Ctx {
                         env.insert(*var, expr.ty.clone());
                     }
                     HirStmt::MultiAssign(vars, expr, _) => {
-                        for v in vars {
-                            if let Some(v) = v {
-                                env.insert(*v, expr.ty.clone());
-                            }
+                        for v in vars.iter().flatten() {
+                            env.insert(*v, expr.ty.clone());
                         }
                     }
                     HirStmt::ExprStmt(_, _) | HirStmt::Break | HirStmt::Continue => {}

@@ -150,7 +150,7 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription>
-                  Same code, everywhere: small static binaries with consistent performance on Linux/macOS/Windows.
+                  Same code, everywhere: small static binaries with consistent performance on Linux/macOS/Windows and embedded devices.
                   Great for laptops, clusters, and CI.
                 </CardDescription>
               </CardContent>

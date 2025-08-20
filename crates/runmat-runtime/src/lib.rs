@@ -271,7 +271,7 @@ fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> Result<Value, String> {
     let subs: Vec<usize> = rest
         .iter()
         .map(|v| match v {
-            Value::Num(n) => (*n as isize) as isize,
+            Value::Num(n) => *n as isize,
             Value::Int(i) => i.to_i64() as isize,
             _ => 1isize,
         })
@@ -645,7 +645,7 @@ fn strrep_builtin(a: Value, old: Value, newv: Value) -> Result<Value, String> {
 fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
     match v {
         Value::String(s) => runmat_builtins::StringArray::new(vec![s.clone()], vec![1, 1])
-            .map_err(|e| format!("{e}")),
+            .map_err(|e| e.to_string()),
         Value::StringArray(sa) => Ok(sa.clone()),
         Value::CharArray(ca) => {
             // Convert each row to a string; treat as column vector
@@ -657,7 +657,7 @@ fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
                 }
                 out.push(s);
             }
-            runmat_builtins::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| format!("{e}"))
+            runmat_builtins::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| e.to_string())
         }
         other => Err(format!("cannot convert to string array: {other:?}")),
     }
@@ -1078,7 +1078,7 @@ fn getfield_builtin(base: Value, field: String) -> Result<Value, String> {
             .fields
             .get(&field)
             .cloned()
-            .ok_or_else(|| format!("getfield: unknown field '{}'", field)),
+            .ok_or_else(|| format!("getfield: unknown field '{field}'")),
         other => Err(format!(
             "getfield unsupported on this value for field '{field}': {other:?}"
         )),
@@ -1102,7 +1102,7 @@ fn error_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let id = if ident.contains(":") {
         ident
     } else {
-        format!("{ident}")
+        ident.to_string()
     };
     Err(format!("{id}: {msg}"))
 }
@@ -1112,7 +1112,7 @@ fn rethrow_builtin(e: Value) -> Result<Value, String> {
     match e {
         Value::MException(me) => Err(format!("{}: {}", me.identifier, me.message)),
         Value::String(s) => Err(s),
-        other => Err(format!("MATLAB:error: {:?}", other)),
+        other => Err(format!("MATLAB:error: {other:?}")),
     }
 }
 
@@ -1317,11 +1317,8 @@ fn setfield_builtin(base: Value, field: String, rhs: Value) -> Result<Value, Str
                         field, obj.class_name, field
                     ));
                 }
-                match p.set_access {
-                    runmat_builtins::Access::Private => {
-                        return Err(format!("Property '{field}' is private"))
-                    }
-                    _ => {}
+                if p.set_access == runmat_builtins::Access::Private {
+                    return Err(format!("Property '{field}' is private"));
                 }
                 if p.is_dependent {
                     let setter = format!("set.{field}");
@@ -1377,10 +1374,10 @@ fn call_method_builtin(base: Value, method: String, rest: Vec<Value>) -> Result<
                 Value::Struct(_) => h.class_name.clone(),
                 _ => h.class_name.clone(),
             };
-            let qualified = format!("{}.{}", class_name, method);
+            let qualified = format!("{class_name}.{method}");
             let mut args = Vec::with_capacity(1 + rest.len());
             args.push(Value::HandleObject(h.clone()));
-            args.extend(rest.into_iter());
+            args.extend(rest);
             if let Ok(v) = crate::call_builtin(&qualified, &args) {
                 return Ok(v);
             }
@@ -1411,7 +1408,7 @@ fn subsasgn_dispatch(
                 Value::Object(o) => o.class_name.clone(),
                 _ => h.class_name.clone(),
             };
-            let qualified = format!("{}.subsasgn", class_name);
+            let qualified = format!("{class_name}.subsasgn");
             crate::call_builtin(&qualified, &[obj, Value::String(kind), payload, rhs])
         }
         other => Err(format!("subsasgn: receiver must be object, got {other:?}")),
@@ -1431,7 +1428,7 @@ fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> Result<Value, S
                 Value::Object(o) => o.class_name.clone(),
                 _ => h.class_name.clone(),
             };
-            let qualified = format!("{}.subsref", class_name);
+            let qualified = format!("{class_name}.subsref");
             crate::call_builtin(&qualified, &[obj, Value::String(kind), payload])
         }
         other => Err(format!("subsref: receiver must be object, got {other:?}")),
@@ -2188,7 +2185,7 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
         }
         Value::Closure(c) => {
             let mut args = c.captures.clone();
-            args.extend(rest.into_iter());
+            args.extend(rest);
             crate::call_builtin(&c.function_name, &args)
         }
         // Future: support Value::Function variants
@@ -2287,7 +2284,7 @@ fn max_vector_builtin(a: Value) -> Result<Value, String> {
     match a {
         Value::Tensor(t) => {
             if t.shape.len() == 2 && t.shape[1] == 1 {
-                let mut max_val = std::f64::NEG_INFINITY;
+                let mut max_val = f64::NEG_INFINITY;
                 let mut idx = 1usize;
                 for (i, &v) in t.data.iter().enumerate() {
                     if v > max_val {
@@ -2305,7 +2302,7 @@ fn max_vector_builtin(a: Value) -> Result<Value, String> {
                     .data
                     .iter()
                     .cloned()
-                    .fold(std::f64::NEG_INFINITY, f64::max);
+                    .fold(f64::NEG_INFINITY, f64::max);
                 Ok(Value::Num(max_val))
             }
         }
@@ -2318,7 +2315,7 @@ fn min_vector_builtin(a: Value) -> Result<Value, String> {
     match a {
         Value::Tensor(t) => {
             if t.shape.len() == 2 && t.shape[1] == 1 {
-                let mut min_val = std::f64::INFINITY;
+                let mut min_val = f64::INFINITY;
                 let mut idx = 1usize;
                 for (i, &v) in t.data.iter().enumerate() {
                     if v < min_val {
@@ -2330,7 +2327,7 @@ fn min_vector_builtin(a: Value) -> Result<Value, String> {
                     .map_err(|e| format!("min: {e}"))?;
                 Ok(Value::Tensor(out))
             } else {
-                let min_val = t.data.iter().cloned().fold(std::f64::INFINITY, f64::min);
+                let min_val = t.data.iter().cloned().fold(f64::INFINITY, f64::min);
                 Ok(Value::Num(min_val))
             }
         }
@@ -2352,7 +2349,7 @@ fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
     let cols = t.shape[1];
     if dim == 1 {
         // column-wise maxima: return {M_row, I_row}
-        let mut m: Vec<f64> = vec![std::f64::NEG_INFINITY; cols];
+        let mut m: Vec<f64> = vec![f64::NEG_INFINITY; cols];
         let mut idx: Vec<f64> = vec![1.0; cols];
         for c in 0..cols {
             for r in 0..rows {
@@ -2370,7 +2367,7 @@ fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
         make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
     } else if dim == 2 {
         // row-wise maxima: return {M_col, I_col}
-        let mut m: Vec<f64> = vec![std::f64::NEG_INFINITY; rows];
+        let mut m: Vec<f64> = vec![f64::NEG_INFINITY; rows];
         let mut idx: Vec<f64> = vec![1.0; rows];
         for r in 0..rows {
             for c in 0..cols {
@@ -2403,7 +2400,7 @@ fn min_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
     let rows = t.shape[0];
     let cols = t.shape[1];
     if dim == 1 {
-        let mut m: Vec<f64> = vec![std::f64::INFINITY; cols];
+        let mut m: Vec<f64> = vec![f64::INFINITY; cols];
         let mut idx: Vec<f64> = vec![1.0; cols];
         for c in 0..cols {
             for r in 0..rows {
@@ -2420,7 +2417,7 @@ fn min_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
             runmat_builtins::Tensor::new(idx, vec![1, cols]).map_err(|e| format!("min: {e}"))?;
         make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
     } else if dim == 2 {
-        let mut m: Vec<f64> = vec![std::f64::INFINITY; rows];
+        let mut m: Vec<f64> = vec![f64::INFINITY; rows];
         let mut idx: Vec<f64> = vec![1.0; rows];
         for r in 0..rows {
             for c in 0..cols {
@@ -2561,24 +2558,24 @@ fn sum_dim(a: Value, dim: f64) -> Result<Value, String> {
     let cols = t.cols();
     if dim == 1 {
         let mut out = vec![0.0f64; cols];
-        for c in 0..cols {
+        for (c, oc) in out.iter_mut().enumerate().take(cols) {
             let mut s = 0.0;
             for r in 0..rows {
                 s += t.data[r + c * rows];
             }
-            out[c] = s;
+            *oc = s;
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![1, cols]).map_err(|e| format!("sum: {e}"))?,
         ))
     } else if dim == 2 {
         let mut out = vec![0.0f64; rows];
-        for r in 0..rows {
+        for (r, orow) in out.iter_mut().enumerate().take(rows) {
             let mut s = 0.0;
             for c in 0..cols {
                 s += t.data[r + c * rows];
             }
-            out[r] = s;
+            *orow = s;
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![rows, 1]).map_err(|e| format!("sum: {e}"))?,
@@ -2639,24 +2636,24 @@ fn prod_dim(a: Value, dim: f64) -> Result<Value, String> {
     let cols = t.cols();
     if dim == 1 {
         let mut out = vec![1.0f64; cols];
-        for c in 0..cols {
+        for (c, oc) in out.iter_mut().enumerate().take(cols) {
             let mut p = 1.0;
             for r in 0..rows {
                 p *= t.data[r + c * rows];
             }
-            out[c] = p;
+            *oc = p;
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![1, cols]).map_err(|e| format!("prod: {e}"))?,
         ))
     } else if dim == 2 {
         let mut out = vec![1.0f64; rows];
-        for r in 0..rows {
+        for (r, orow) in out.iter_mut().enumerate().take(rows) {
             let mut p = 1.0;
             for c in 0..cols {
                 p *= t.data[r + c * rows];
             }
-            out[r] = p;
+            *orow = p;
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![rows, 1]).map_err(|e| format!("prod: {e}"))?,
@@ -2717,24 +2714,24 @@ fn mean_dim(a: Value, dim: f64) -> Result<Value, String> {
     let cols = t.cols();
     if dim == 1 {
         let mut out = vec![0.0f64; cols];
-        for c in 0..cols {
+        for (c, oc) in out.iter_mut().enumerate().take(cols) {
             let mut s = 0.0;
             for r in 0..rows {
                 s += t.data[r + c * rows];
             }
-            out[c] = s / (rows as f64);
+            *oc = s / (rows as f64);
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![1, cols]).map_err(|e| format!("mean: {e}"))?,
         ))
     } else if dim == 2 {
         let mut out = vec![0.0f64; rows];
-        for r in 0..rows {
+        for (r, orow) in out.iter_mut().enumerate().take(rows) {
             let mut s = 0.0;
             for c in 0..cols {
                 s += t.data[r + c * rows];
             }
-            out[r] = s / (cols as f64);
+            *orow = s / (cols as f64);
         }
         Ok(Value::Tensor(
             runmat_builtins::Tensor::new(out, vec![rows, 1]).map_err(|e| format!("mean: {e}"))?,
@@ -2983,7 +2980,7 @@ fn permute_builtin(a: Value, order: Value) -> Result<Value, String> {
         Value::Num(n) => vec![n as usize],
         _ => return Err("permute: expected index vector".to_string()),
     };
-    if ord.iter().any(|&k| k == 0) {
+    if ord.contains(&0) {
         return Err("permute: indices are 1-based".to_string());
     }
     let ord0: Vec<usize> = ord.into_iter().map(|k| k - 1).collect();
@@ -2998,14 +2995,14 @@ fn permute_builtin(a: Value, order: Value) -> Result<Value, String> {
     // Precompute strides
     let mut src_strides = vec![0usize; rank];
     let mut acc = 1usize;
-    for d in 0..rank {
-        src_strides[d] = acc;
+    for (d, stride) in src_strides.iter_mut().enumerate().take(rank) {
+        *stride = acc;
         acc *= t.shape[d];
     }
     let mut dst_strides = vec![0usize; rank];
     let mut acc2 = 1usize;
-    for d in 0..rank {
-        dst_strides[d] = acc2;
+    for (d, stride) in dst_strides.iter_mut().enumerate().take(rank) {
+        *stride = acc2;
         acc2 *= new_shape[d];
     }
     let total = t.data.len();
@@ -3019,7 +3016,7 @@ fn permute_builtin(a: Value, order: Value) -> Result<Value, String> {
         }
         idx
     }
-    for dst_lin in 0..total {
+    for (dst_lin, item) in out.iter_mut().enumerate().take(total) {
         let dst_multi = unrank(dst_lin, &new_shape);
         // Map dst dims -> src dims by inverse order mapping
         let mut src_multi = vec![0usize; rank];
@@ -3030,7 +3027,7 @@ fn permute_builtin(a: Value, order: Value) -> Result<Value, String> {
         for d in 0..rank {
             src_lin += src_multi[d] * src_strides[d];
         }
-        out[dst_lin] = t.data[src_lin];
+        *item = t.data[src_lin];
     }
     Ok(Value::Tensor(
         runmat_builtins::Tensor::new(out, new_shape).map_err(|e| format!("permute: {e}"))?,
@@ -3443,25 +3440,25 @@ fn fprintf_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
         other => return Err(format!("fprintf: unsupported first argument {other:?}")),
     };
     let s = format_variadic(&fmt, &args)?;
-    println!("{}", s);
+    println!("{s}");
     Ok(Value::Num(s.len() as f64))
 }
 
 #[runmat_macros::runtime_builtin(name = "warning")]
 fn warning_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
     let s = format_variadic(&fmt, &rest)?;
-    eprintln!("Warning: {}", s);
+    eprintln!("Warning: {s}");
     Ok(Value::Num(0.0))
 }
 
 #[runmat_macros::runtime_builtin(name = "disp")]
 fn disp_builtin(x: Value) -> Result<Value, String> {
     match x {
-        Value::String(s) => println!("{}", s),
-        Value::Num(n) => println!("{}", n),
+        Value::String(s) => println!("{s}"),
+        Value::Num(n) => println!("{n}"),
         Value::Int(i) => println!("{}", i.to_i64()),
         Value::Tensor(t) => println!("{:?}", t.data),
-        other => println!("{:?}", other),
+        other => println!("{other:?}"),
     }
     Ok(Value::Num(0.0))
 }

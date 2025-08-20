@@ -1,31 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import Logo from "@/components/Logo";
 import SubscribeForm from "@/components/SubscribeForm";
 
 export default function Footer() {
-  const searchParams = useSearchParams();
-  const dystrHref = useMemo(() => {
-    const baseUrl = "https://dystr.com";
+  // Default to plain Dystr URL during SSR; hydrate with UTM params on client
+  const [dystrHref, setDystrHref] = useState("https://dystr.com");
+  useEffect(() => {
     try {
+      const baseUrl = "https://dystr.com";
       const url = new URL(baseUrl);
-      if (searchParams) {
-        searchParams.forEach((value, key) => {
-          if (key.toLowerCase().startsWith("utm_") && value) {
-            url.searchParams.append(key, value);
-          }
-        });
-      }
-      return url.toString();
+      const params = new URLSearchParams(window.location.search);
+      params.forEach((value, key) => {
+        if (key.toLowerCase().startsWith("utm_") && value) {
+          url.searchParams.append(key, value);
+        }
+      });
+      setDystrHref(url.toString());
     } catch {
-      return baseUrl;
+      // ignore; keep base URL
     }
-  }, [searchParams]);
+  }, []);
 
   return (
     <footer className="border-t bg-background">
