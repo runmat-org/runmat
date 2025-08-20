@@ -1,12 +1,32 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { Heart } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import Logo from "@/components/Logo";
 import SubscribeForm from "@/components/SubscribeForm";
 
 export default function Footer() {
+  const searchParams = useSearchParams();
+  const dystrHref = useMemo(() => {
+    const baseUrl = "https://dystr.com";
+    try {
+      const url = new URL(baseUrl);
+      if (searchParams) {
+        searchParams.forEach((value, key) => {
+          if (key.toLowerCase().startsWith("utm_") && value) {
+            url.searchParams.append(key, value);
+          }
+        });
+      }
+      return url.toString();
+    } catch {
+      return baseUrl;
+    }
+  }, [searchParams]);
+
   return (
     <footer className="border-t bg-background">
       <div className="container relative mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-8 py-8 px-4 md:px-6">
@@ -49,13 +69,13 @@ export default function Footer() {
             <p>
               RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc. or the Free Software Foundation.
             </p>
-          </ div>
+          </div>
           <p className="flex items-center text-center text-sm text-muted-foreground md:text-left">
             Made with
             <Heart className="mx-1 h-4 w-4 fill-red-500 text-red-500" />
             for the scientific community by{" "}
             <Link
-              href="https://dystr.com"
+              href={dystrHref}
               target="_blank"
               rel="noopener noreferrer"
               className="ml-1 font-medium underline underline-offset-4"

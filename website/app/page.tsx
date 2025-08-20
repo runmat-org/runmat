@@ -402,10 +402,10 @@ export default function HomePage() {
           </p>
           <div className="flex gap-4">
               <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
-              <Link href="/blog/introducing-runmat">Read the Story</Link>
+                <Link href="/blog/introducing-runmat">Read The Story</Link>
             </Button>
               <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
-              <Link href="https://github.com/runmat-org/runmat">View on GitHub</Link>
+                <Link href="https://github.com/runmat-org/runmat">View On GitHub</Link>
             </Button>
           </div>
         </div>
