@@ -9,8 +9,6 @@ The core language and runtime are complete. The major remaining items are:
 - The JIT currently optimizes a subset of the language, with an interpreter fallback for operations that are currently not implemented in the JIT. Full JIT coverage will be implemented before the 1.0 release.
 - Some of the built-in functions have partial implementations. We will take a full pass through the built-in functions to ensure they're a good minimal set, with full canonical behavior.
 
-The following is a list of milestones that we will be working on in the future. The milestones are not necessarily in order, and we will be working on multiple milestones at the same time.
-
 The below tracks the progress of the project towards the 1.0 release to date.
 
 ### Milestone P0 - Bootstrapping
@@ -42,9 +40,9 @@ The below tracks the progress of the project towards the 1.0 release to date.
 
 - [x] Full language coverage (`docs/LANGUAGE_COVERAGE.md`).
 - [x] v0.2 release.
+- [ ] Finish plotting library integration.
 - [ ] Full standard library pass for canonical built-ins.
-- [ ] Package manager.
-- [ ] GUI plotting via WGPU.
-- [ ] LSP server.
+- [ ] Implement package manager.
+- [ ] Implement LSP server.
 - [ ] Complete Accelerate (GPU) support.
 - [ ] MEX/C API (`runmat-ffi`).
