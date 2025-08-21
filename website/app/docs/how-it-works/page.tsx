@@ -138,7 +138,7 @@ export default function HowItWorksPage() {
               <CardHeader><CardTitle>Slim builtins</CardTitle></CardHeader>
               <CardContent>
                 The core ships a curated standard library. Everything else comes from packages — native (Rust)
-                or source (MATLAB).
+                or source (MATLAB code) packages.
               </CardContent>
             </Card>
           </div>
@@ -157,7 +157,8 @@ export default function HowItWorksPage() {
                 <h4 className="text-lg font-semibold mb-3">Seamless Accelerate</h4>
                 <p className="text-muted-foreground">
                   Tensor/Matrix ops are explicit in HIR, so the planner can route work to CPU or GPU, fuse common
-                  elementwise chains, and support reverse-mode autograd by default — without changing user code.
+                  elementwise chains, and support reverse-mode autograd by default. This lets the planner
+                  dispatch and manage memory and operations across GPU/CPU/TPU/etc without needing any user code changes.
                 </p>
               </CardContent>
             </Card>
@@ -340,7 +341,7 @@ export default function HowItWorksPage() {
                 The Turbine JIT: When Performance Really Matters
               </h3>
               <p className="text-lg text-muted-foreground mb-4">
-                Once a function gets called enough times (our threshold is carefully tuned), Turbine kicks in:
+                Once a function gets called enough times (the JIT is configurable, with good defaults), Turbine kicks in:
               </p>
               <div className="bg-muted dark:bg-slate-900 rounded-lg p-6 border border-border dark:border-slate-800">
                 <ul className="space-y-3 text-foreground dark:text-muted-foreground">
@@ -366,7 +367,7 @@ export default function HowItWorksPage() {
             Memory: The Foundation of Speed
           </h2>
           <p className="text-lg text-muted-foreground mb-6">
-            MATLAB&apos;s strength has always been matrices, so we designed our memory system from the ground up for numerical computing:
+            MATLAB&apos;s strength has always been matrices (and tensors), so we designed our memory system from the ground up for numerical computing:
           </p>
           
           <div className="grid md:grid-cols-2 gap-6">
@@ -375,7 +376,7 @@ export default function HowItWorksPage() {
                 <h4 className="text-lg font-semibold mb-3">Zero-Copy Arrays</h4>
                 <p className="text-muted-foreground">
                   Arrays use column-major layout (just like MATLAB) and pass directly to BLAS/LAPACK libraries 
-                  without any data copying. Large matrix operations can work directly with the underlying memory 
+                  without any data copying. Large matrix/tensor operations can work directly with the underlying memory 
                   without unnecessary data movement.
                 </p>
               </CardContent>
@@ -384,7 +385,7 @@ export default function HowItWorksPage() {
               <CardContent className="p-6">
                 <h4 className="text-lg font-semibold mb-3">Copy-on-Write Semantics</h4>
                 <p className="text-muted-foreground">
-                  When you write <code>B = A</code>, we don&apos;t copy the entire matrix. Instead, B shares A&apos;s memory 
+                  When you write <code>B = A</code>, we don&apos;t copy the entire matrix/tensor. Instead, B shares A&apos;s memory 
                   until you modify one of them. This preserves MATLAB semantics while dramatically reducing memory usage.
                 </p>
             </CardContent>
