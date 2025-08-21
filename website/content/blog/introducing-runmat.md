@@ -26,7 +26,7 @@ canonical: "https://runmat.org/blog/introducing-runmat"
 - The core stays **small and fast**; everything else grows via a **package system** (native Rust or source MATLAB).
 - Core built-ins are **canonical** (e.g., `sin`, `cos`, `sum`, and `printf`-style formatting like `fprintf`/`sprintf`) and match the expected, documented behavior. When semantics are domain-specific or ambiguous, they live in packages.
 - Built in **Rust**, with **tiered execution** (interpreter first, JIT for hot code) and a **generational GC** tuned for numerics.
-- Benchmarks show **150×–180× speedups** vs GNU Octave on representative workloads; see Performance below.
+- Benchmarks show **150x–180x speedups** vs GNU Octave on representative workloads; see Performance below.
 
 ---
 
@@ -38,7 +38,7 @@ If you've written MATLAB code, you know the trade-offs:
 - GNU Octave is free and compatible with lots of code, but startup and hot-path performance can be limiting.
 - Moving to a new language means rewriting and - perhaps most importantly - **retraining**.
 
-RunMat aims for a third path: keep the MATLAB language you know, but put it on a modern engine with a smaller core, clean semantics, and open extensibility.
+RunMat aims for a fourth path: keep the MATLAB language you know, but put it on a modern engine with a smaller core, clean semantics, and open extensibility.
 
 ---
 
