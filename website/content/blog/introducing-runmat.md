@@ -136,6 +136,8 @@ Documentation is generated from runtime metadata, so everything you add shows up
 
 If your code relies on many niche built-ins, the recommended path is to move those pieces into packages. The docs call out differences and migration notes where they exist.
 
+A note about about plotting: RunMat's plot package is a work in progress. It's near-complete, but not yet ready for production use. We're working on it, and will have a complete plotting system in the next few releases.
+
 ---
 
 ## MATLAB, Octave, RunMat — a quick contrast
