@@ -121,7 +121,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     ),
     table: ({ children, ...props }: { children: React.ReactNode }) => (
       <div className="my-8 overflow-x-auto">
-        <table className="w-full border-collapse border border-border rounded-lg" {...props}>{children}</table>
+        <table className="w-full border-collapse border border-border rounded-lg table-mobile-wrap" {...props}>{children}</table>
       </div>
     ),
     thead: ({ children, ...props }: { children: React.ReactNode }) => (

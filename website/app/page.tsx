@@ -85,7 +85,7 @@ export default function HomePage() {
               Run your existing MATLAB/Octave code with full language grammar and core semantics. No license fees, no lock-in.
           </p>
             <div className="flex flex-col sm:flex-row gap-4">
-              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
+              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200">
                 <Link href="/download">
                   Download RunMat
                 </Link>
@@ -310,7 +310,7 @@ export default function HomePage() {
             </p>
           </div>
           <div className="overflow-x-auto mx-auto max-w-[48rem]">
-            <table className="w-full text-base md:text-lg">
+            <table className="w-full text-base md:text-lg table-mobile-wrap">
               <thead>
                 <tr className="text-left border-b border-border">
                   <th className="py-3 px-4">Feature Category</th>
@@ -344,7 +344,7 @@ export default function HomePage() {
             </p>
           </div>
           <div className="overflow-x-auto mx-auto max-w-[48rem]">
-            <table className="w-full text-base md:text-lg">
+            <table className="w-full text-base md:text-lg table-mobile-wrap">
               <thead>
                 <tr className="text-left border-b border-border">
                   <th className="py-3 px-4">Benchmark</th>
@@ -378,7 +378,7 @@ export default function HomePage() {
           <OSInstallCommand className="w-full max-w-4xl" />
           
             <div className="flex flex-col sm:flex-row gap-4">
-              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
+              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200">
                 <Link href="/download">More Install Options</Link>
             </Button>
               <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
@@ -400,7 +400,7 @@ export default function HomePage() {
               Join researchers and engineers who&rsquo;ve made the switch to RunMat.
           </p>
           <div className="flex gap-4">
-              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-xl border-0 transition-all duration-200 hover:scale-105 hover:shadow-2xl">
+              <Button size="lg" asChild className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200">
                 <Link href="/blog/introducing-runmat">Read The Story</Link>
             </Button>
               <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">

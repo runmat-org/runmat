@@ -193,4 +193,42 @@
       animation: none;
     }
   }
+
+  /* Tables: wrap header row and first column, keep table width */
+  .table-mobile-wrap {
+    table-layout: auto;
+    width: 100%;
+  }
+  /* First column: allow aggressive wrapping to avoid overflow */
+  .table-mobile-wrap td:first-child {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  /* Body cells: allow wrapping to keep table within container */
+  .table-mobile-wrap td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  /* Header cells: avoid mid-word breaks; size by longest word */
+  .table-mobile-wrap th {
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
+  }
+  .table-mobile-wrap th:not(:first-child) {
+    width: min-content;
+  }
+  /* Ensure table shrinks to container without forcing equal columns */
+  .table-mobile-wrap {
+    border-collapse: separate; /* allow cell widths to adapt naturally */
+    max-width: 100%;
+  }
+  /* Allow first column to take remaining space */
+  .table-mobile-wrap td:first-child,
+  .table-mobile-wrap th:first-child {
+    width: auto;
+  }
 }
