@@ -5,18 +5,23 @@
 
 use crate::{
     execution::{ExecutionStats, ExecutionStatus},
-    protocol::{ExecuteReply, ExecuteRequest, ExecutionState, JupyterMessage, MessageType},
+    protocol::{
+        ErrorContent, ExecuteReply, ExecuteRequest, ExecuteResult, ExecutionState, JupyterMessage,
+        MessageType, Status,
+    },
+    transport::{recv_jupyter_message, send_jupyter_message},
     ConnectionInfo, ExecutionEngine, KernelConfig, KernelError, KernelInfo, Result,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
-use tokio::task::JoinHandle;
 
 /// Main kernel server managing all communication channels
 pub struct KernelServer {
     /// Kernel configuration
     config: KernelConfig,
+    /// ZMQ context (must outlive all sockets)
+    ctx: Option<zmq::Context>,
     /// Execution engine
     engine: Arc<tokio::sync::Mutex<ExecutionEngine>>,
     /// Broadcast channel for status updates
@@ -24,7 +29,7 @@ pub struct KernelServer {
     /// Shutdown signal
     shutdown_tx: mpsc::Sender<()>,
     /// Server task handles
-    tasks: Vec<JoinHandle<Result<()>>>,
+    tasks: Vec<std::thread::JoinHandle<Result<()>>>,
     /// Message router for handling Jupyter protocol messages
     router: Option<Arc<MessageRouter>>,
 }
@@ -45,6 +50,7 @@ impl KernelServer {
 
         Self {
             config,
+            ctx: None,
             engine,
             status_tx,
             shutdown_tx,
@@ -60,24 +66,16 @@ impl KernelServer {
         // Validate connection info
         self.config.connection.validate()?;
 
-        // Create ZMQ context
+        // Create ZMQ context and keep it alive on self
         let ctx = zmq::Context::new();
+        self.ctx = Some(ctx.clone());
 
-        // Create and bind sockets
-        let shell_socket = ctx.socket(zmq::ROUTER)?;
-        shell_socket.bind(&self.config.connection.shell_url())?;
-
-        let iopub_socket = ctx.socket(zmq::PUB)?;
-        iopub_socket.bind(&self.config.connection.iopub_url())?;
-
-        let stdin_socket = ctx.socket(zmq::ROUTER)?;
-        stdin_socket.bind(&self.config.connection.stdin_url())?;
-
-        let control_socket = ctx.socket(zmq::ROUTER)?;
-        control_socket.bind(&self.config.connection.control_url())?;
-
-        let heartbeat_socket = ctx.socket(zmq::REP)?;
-        heartbeat_socket.bind(&self.config.connection.heartbeat_url())?;
+        // Precompute URLs; sockets will be opened/bound in their own threads
+        let shell_url = self.config.connection.shell_url();
+        let iopub_url = self.config.connection.iopub_url();
+        let stdin_url = self.config.connection.stdin_url();
+        let control_url = self.config.connection.control_url();
+        let heartbeat_url = self.config.connection.heartbeat_url();
 
         log::info!(
             "Kernel bound to ports: shell={}, iopub={}, stdin={}, control={}, hb={}",
@@ -104,11 +102,341 @@ impl KernelServer {
         // Store router for the server to use
         self.router = Some(Arc::clone(&router));
 
-        // Send initial status
-        let _ = self.status_tx.send(ExecutionState::Starting);
+        // Channel to serialize IOPub publishing onto a single ZMQ socket/thread
+        let (iopub_tx, mut iopub_rx) = tokio::sync::mpsc::unbounded_channel::<JupyterMessage>();
 
-        // Kernel is now idle and ready
-        let _ = self.status_tx.send(ExecutionState::Idle);
+        // Spawn IOPub publisher task
+        let session_for_iopub = self.config.session_id.clone();
+        let key_for_iopub = self.config.connection.key.clone();
+        let scheme_for_iopub = self.config.connection.signature_scheme.clone();
+        let ctx_iopub = ctx.clone();
+        let iopub_task = std::thread::spawn(move || -> Result<()> {
+            let socket = ctx_iopub.socket(zmq::PUB).map_err(KernelError::Zmq)?;
+            socket.bind(&iopub_url).map_err(KernelError::Zmq)?;
+            while let Some(mut msg) = iopub_rx.blocking_recv() {
+                msg.header.session = session_for_iopub.clone();
+                if msg.parent_header.is_none() {
+                    msg.parent_header = Some(crate::protocol::MessageHeader::new(
+                        MessageType::Status,
+                        &session_for_iopub,
+                    ));
+                }
+                if let Err(e) =
+                    send_jupyter_message(&socket, &[], &key_for_iopub, &scheme_for_iopub, &msg)
+                {
+                    log::error!("Failed to publish IOPub message: {e}");
+                }
+            }
+            Ok(())
+        });
+        self.tasks.push(iopub_task);
+
+        // Spawn Heartbeat echo task (REP -> echo request)
+        let ctx_hb = ctx.clone();
+        let hb_task = std::thread::spawn(move || -> Result<()> {
+            let socket = ctx_hb.socket(zmq::REP).map_err(KernelError::Zmq)?;
+            socket.bind(&heartbeat_url).map_err(KernelError::Zmq)?;
+            loop {
+                let msg = socket.recv_multipart(0).map_err(KernelError::Zmq)?;
+                socket.send_multipart(msg, 0).map_err(KernelError::Zmq)?;
+            }
+        });
+        self.tasks.push(hb_task);
+
+        // Spawn Shell loop
+        let engine_shell = Arc::clone(&self.engine);
+        let router_shell = Arc::clone(&router);
+        let session_id_shell = self.config.session_id.clone();
+        let key_shell = self.config.connection.key.clone();
+        let scheme_shell = self.config.connection.signature_scheme.clone();
+        let iopub_tx_shell = iopub_tx.clone();
+        let ctx_shell = ctx.clone();
+        let shell_task = std::thread::spawn(move || -> Result<()> {
+            let shell_socket = ctx_shell.socket(zmq::ROUTER).map_err(KernelError::Zmq)?;
+            shell_socket.bind(&shell_url).map_err(KernelError::Zmq)?;
+            loop {
+                let (ids, msg) = recv_jupyter_message(&shell_socket, &key_shell, &scheme_shell)?;
+
+                match msg.header.msg_type.clone() {
+                    MessageType::KernelInfoRequest => {
+                        // IOPub busy
+                        let status_busy = Status {
+                            execution_state: ExecutionState::Busy,
+                        };
+                        let mut status_msg = JupyterMessage::reply(
+                            &msg,
+                            MessageType::Status,
+                            serde_json::to_value(status_busy)?,
+                        );
+                        status_msg.header.session = session_id_shell.clone();
+                        let _ = iopub_tx_shell.send(status_msg);
+
+                        let mut reply = futures::executor::block_on(
+                            router_shell.handle_kernel_info_request(&msg),
+                        )?;
+                        reply.header.session = session_id_shell.clone();
+                        send_jupyter_message(
+                            &shell_socket,
+                            &ids,
+                            &key_shell,
+                            &scheme_shell,
+                            &reply,
+                        )?;
+
+                        // IOPub idle
+                        let status_idle = Status {
+                            execution_state: ExecutionState::Idle,
+                        };
+                        let mut status_msg = JupyterMessage::reply(
+                            &msg,
+                            MessageType::Status,
+                            serde_json::to_value(status_idle)?,
+                        );
+                        status_msg.header.session = session_id_shell.clone();
+                        let _ = iopub_tx_shell.send(status_msg);
+                    }
+                    MessageType::ExecuteRequest => {
+                        let exec_req: ExecuteRequest = serde_json::from_value(msg.content.clone())?;
+
+                        // IOPub busy
+                        let mut status_msg = JupyterMessage::reply(
+                            &msg,
+                            MessageType::Status,
+                            serde_json::to_value(Status {
+                                execution_state: ExecutionState::Busy,
+                            })?,
+                        );
+                        status_msg.header.session = session_id_shell.clone();
+                        let _ = iopub_tx_shell.send(status_msg);
+
+                        // Predict next count and publish execute_input
+                        let predicted = {
+                            let eng = futures::executor::block_on(engine_shell.lock());
+                            eng.execution_count() + 1
+                        };
+                        let mut input_msg = JupyterMessage::reply(
+                            &msg,
+                            MessageType::ExecuteInput,
+                            serde_json::json!({"code": exec_req.code, "execution_count": predicted}),
+                        );
+                        input_msg.header.session = session_id_shell.clone();
+                        let _ = iopub_tx_shell.send(input_msg);
+
+                        let exec_result = {
+                            let mut eng = futures::executor::block_on(engine_shell.lock());
+                            let req_again: ExecuteRequest =
+                                serde_json::from_value(msg.content.clone())?;
+                            eng.execute(&req_again.code)
+                                .map_err(|e| KernelError::Execution(e.to_string()))?
+                        };
+
+                        let status = match exec_result.status {
+                            ExecutionStatus::Success => crate::protocol::ExecutionStatus::Ok,
+                            ExecutionStatus::Error => crate::protocol::ExecutionStatus::Error,
+                            ExecutionStatus::Interrupted | ExecutionStatus::Timeout => {
+                                crate::protocol::ExecutionStatus::Abort
+                            }
+                        };
+
+                        let exec_count = {
+                            let eng = futures::executor::block_on(engine_shell.lock());
+                            eng.execution_count()
+                        };
+
+                        match exec_result.status {
+                            ExecutionStatus::Success => {
+                                if let Some(val) = exec_result.result {
+                                    let mut data = std::collections::HashMap::new();
+                                    data.insert(
+                                        "text/plain".to_string(),
+                                        serde_json::json!(val.to_string()),
+                                    );
+                                    let res = ExecuteResult {
+                                        execution_count: exec_count,
+                                        data,
+                                        metadata: std::collections::HashMap::new(),
+                                    };
+                                    let mut res_msg = JupyterMessage::reply(
+                                        &msg,
+                                        MessageType::ExecuteResult,
+                                        serde_json::to_value(res)?,
+                                    );
+                                    res_msg.header.session = session_id_shell.clone();
+                                    let _ = iopub_tx_shell.send(res_msg);
+                                }
+                            }
+                            ExecutionStatus::Error => {
+                                if let Some(err) = exec_result.error {
+                                    let ec = ErrorContent {
+                                        ename: err.error_type,
+                                        evalue: err.message,
+                                        traceback: err.traceback,
+                                    };
+                                    let mut err_msg = JupyterMessage::reply(
+                                        &msg,
+                                        MessageType::Error,
+                                        serde_json::to_value(ec)?,
+                                    );
+                                    err_msg.header.session = session_id_shell.clone();
+                                    let _ = iopub_tx_shell.send(err_msg);
+                                }
+                            }
+                            _ => {}
+                        }
+
+                        let reply = ExecuteReply {
+                            status,
+                            execution_count: exec_count,
+                            user_expressions: HashMap::new(),
+                            payload: Vec::new(),
+                        };
+                        let mut reply_msg = JupyterMessage::reply(
+                            &msg,
+                            MessageType::ExecuteReply,
+                            serde_json::to_value(reply)?,
+                        );
+                        reply_msg.header.session = session_id_shell.clone();
+                        send_jupyter_message(
+                            &shell_socket,
+                            &ids,
+                            &key_shell,
+                            &scheme_shell,
+                            &reply_msg,
+                        )?;
+
+                        // IOPub idle
+                        let mut status_msg = JupyterMessage::reply(
+                            &msg,
+                            MessageType::Status,
+                            serde_json::to_value(Status {
+                                execution_state: ExecutionState::Idle,
+                            })?,
+                        );
+                        status_msg.header.session = session_id_shell.clone();
+                        let _ = iopub_tx_shell.send(status_msg);
+                    }
+                    other => {
+                        log::warn!("Unhandled shell message: {:?}", other);
+                        if let Ok(Some(reply)) = futures::executor::block_on(async {
+                            router_shell.route_message(&msg).await
+                        }) {
+                            send_jupyter_message(
+                                &shell_socket,
+                                &ids,
+                                &key_shell,
+                                &scheme_shell,
+                                &reply,
+                            )?;
+                        }
+                    }
+                }
+            }
+        });
+        self.tasks.push(shell_task);
+
+        // Control loop
+        let router_ctrl = Arc::clone(&router);
+        let key_ctrl = self.config.connection.key.clone();
+        let scheme_ctrl = self.config.connection.signature_scheme.clone();
+        let session_ctrl = self.config.session_id.clone();
+        let iopub_tx_ctrl = iopub_tx.clone();
+        let ctx_ctrl = ctx.clone();
+        let control_task = std::thread::spawn(move || -> Result<()> {
+            let control_socket = ctx_ctrl.socket(zmq::ROUTER).map_err(KernelError::Zmq)?;
+            control_socket
+                .bind(&control_url)
+                .map_err(KernelError::Zmq)?;
+            loop {
+                let (ids, msg) = recv_jupyter_message(&control_socket, &key_ctrl, &scheme_ctrl)?;
+                match msg.header.msg_type.clone() {
+                    MessageType::ShutdownRequest | MessageType::InterruptRequest => {
+                        let mut status_msg = JupyterMessage::reply(
+                            &msg,
+                            MessageType::Status,
+                            serde_json::to_value(Status {
+                                execution_state: ExecutionState::Busy,
+                            })?,
+                        );
+                        status_msg.header.session = session_ctrl.clone();
+                        let _ = iopub_tx_ctrl.send(status_msg);
+
+                        let mut reply =
+                            futures::executor::block_on(router_ctrl.route_message(&msg))?
+                                .unwrap_or_else(|| {
+                                    JupyterMessage::reply(
+                                        &msg,
+                                        MessageType::InterruptReply,
+                                        serde_json::json!({"status":"ok"}),
+                                    )
+                                });
+                        reply.header.session = session_ctrl.clone();
+                        send_jupyter_message(
+                            &control_socket,
+                            &ids,
+                            &key_ctrl,
+                            &scheme_ctrl,
+                            &reply,
+                        )?;
+
+                        let mut status_msg = JupyterMessage::reply(
+                            &msg,
+                            MessageType::Status,
+                            serde_json::to_value(Status {
+                                execution_state: ExecutionState::Idle,
+                            })?,
+                        );
+                        status_msg.header.session = session_ctrl.clone();
+                        let _ = iopub_tx_ctrl.send(status_msg);
+                    }
+                    _ => {}
+                }
+            }
+        });
+        self.tasks.push(control_task);
+
+        // Stdin loop
+        let key_stdin = self.config.connection.key.clone();
+        let scheme_stdin = self.config.connection.signature_scheme.clone();
+        let session_stdin = self.config.session_id.clone();
+        let ctx_stdin = ctx.clone();
+        let stdin_task = std::thread::spawn(move || -> Result<()> {
+            let stdin_socket = ctx_stdin.socket(zmq::ROUTER).map_err(KernelError::Zmq)?;
+            stdin_socket.bind(&stdin_url).map_err(KernelError::Zmq)?;
+            loop {
+                let (ids, msg) = recv_jupyter_message(&stdin_socket, &key_stdin, &scheme_stdin)?;
+                if matches!(msg.header.msg_type, MessageType::InputRequest) {
+                    let mut reply = JupyterMessage::reply(
+                        &msg,
+                        MessageType::InputReply,
+                        serde_json::json!({"value": ""}),
+                    );
+                    reply.header.session = session_stdin.clone();
+                    send_jupyter_message(&stdin_socket, &ids, &key_stdin, &scheme_stdin, &reply)?;
+                }
+            }
+        });
+        self.tasks.push(stdin_task);
+
+        // Initial status via IOPub: starting -> idle
+        let mut start_msg = JupyterMessage::new(
+            MessageType::Status,
+            &self.config.session_id,
+            serde_json::to_value(Status {
+                execution_state: ExecutionState::Starting,
+            })?,
+        );
+        start_msg.parent_header = None;
+        let _ = iopub_tx.send(start_msg);
+
+        let mut idle_msg = JupyterMessage::new(
+            MessageType::Status,
+            &self.config.session_id,
+            serde_json::to_value(Status {
+                execution_state: ExecutionState::Idle,
+            })?,
+        );
+        idle_msg.parent_header = None;
+        let _ = iopub_tx.send(idle_msg);
 
         log::info!("RunMat kernel is ready for connections");
 
@@ -126,8 +454,10 @@ impl KernelServer {
 
         // Wait for all tasks to complete
         for task in self.tasks.drain(..) {
-            if let Err(e) = task.await {
-                log::error!("Task failed during shutdown: {e:?}");
+            match task.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => log::error!("Task failed during shutdown: {e:?}"),
+                Err(e) => log::error!("Task panicked: {e:?}"),
             }
         }
 

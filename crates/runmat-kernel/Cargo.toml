@@ -1,6 +1,6 @@
 [package]
 name = "runmat-kernel"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -22,6 +22,10 @@ runmat-runtime = { workspace = true }
 runmat-repl = { workspace = true }
 runmat-snapshot = { workspace = true }
 runmat-plot = { workspace = true }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+futures = "0.3"
 
 [features]
 default = ["jupyter"]

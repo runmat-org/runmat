@@ -1,6 +1,6 @@
 [package]
 name = "runmat-turbine"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "Cranelift-based JIT compiler for RunMat - the optimizing tier of our V8-inspired execution model"
 authors = ["Dystr Team"]
