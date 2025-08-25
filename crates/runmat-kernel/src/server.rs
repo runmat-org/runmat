@@ -15,8 +15,6 @@ use crate::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
-#[allow(unused_imports)]
-use tokio::task::JoinHandle;
 
 /// Main kernel server managing all communication channels
 pub struct KernelServer {
