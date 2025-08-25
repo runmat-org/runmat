@@ -197,9 +197,7 @@ pub fn send_jupyter_message(
     frames.push(content);
     frames.extend_from_slice(&msg.buffers);
 
-    socket
-        .send_multipart(frames, 0)
-        .map_err(KernelError::Zmq)?;
+    socket.send_multipart(frames, 0).map_err(KernelError::Zmq)?;
 
     if trace {
         eprintln!(
