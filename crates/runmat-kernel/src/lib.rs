@@ -12,6 +12,7 @@ pub mod execution;
 pub mod jupyter_plotting;
 pub mod protocol;
 pub mod server;
+pub mod transport;
 
 pub use connection::ConnectionInfo;
 pub use execution::ExecutionEngine;
