@@ -72,7 +72,7 @@ export default function HomePage() {
       </div>
 
       {/* Hero Section */}
-      <section className="w-full py-16 md:py-24 lg:py-32">
+      <section className="w-full py-16 md:py-24 lg:py-18">
         <div className="container mx-auto px-4 md:px-6">
           <div className="flex flex-col items-center space-y-6 text-center">
           <Badge variant="secondary" className="rounded-lg px-3 py-1 text-sm">
@@ -99,7 +99,7 @@ export default function HomePage() {
       </section>
 
       {/* Features Section */}
-      <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
+      <section className="w-full py-16 md:py-24 lg:py-18 bg-muted/50">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl lg:text-6xl">
@@ -340,7 +340,7 @@ export default function HomePage() {
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">Blazing Fast Performance</h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              Summary from our public benchmarks (Apple M2 Max, 32GB). Reproduce with <code>benchmarks</code> in the repo.
+              Benchmarked on an Apple M2 Max, 32GB.<br />Reproduce with <code>benchmarks</code> in the repo.
             </p>
           </div>
           <div className="overflow-x-auto mx-auto max-w-[48rem]">

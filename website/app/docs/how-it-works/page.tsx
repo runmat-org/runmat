@@ -35,8 +35,7 @@ export default function HowItWorksPage() {
             classdef OOP — with a fast, V8-inspired engine.
           </p>
           <p className="text-lg text-muted-foreground leading-relaxed mt-8">
-            We keep the core slim and blazing fast, then grow the ecosystem with packages. This isn&apos;t an attempt
-            to replicate every historical builtin; it&apos;s a clean, fast runtime for the MATLAB language with an
+            We keep the core slim and blazing fast, then grow the ecosystem with packages. RunMat is a clean, fast runtime for the MATLAB language with an
             open extension model.
           </p>
         </div>
