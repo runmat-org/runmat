@@ -19,7 +19,7 @@ twitterDescription: "Rust narrows the training distribution and provides strong 
 canonical: "https://runmat.org/blog/rust-llm-training-distribution"
 ---
 
-![Why Rust](/website/public/rust-blog-image.png)
+![Why Rust](/rust-blog-image.png)
 
 
 
@@ -99,7 +99,7 @@ What may be even more significant than the performance is how quickly the system
 
 By traditional estimates, achieving 100% MATLAB language grammar and semantics coverage would have required three to five senior engineers working for two or more years, or five years of work for a single developer. RunMat reached that milestone in weeks. 
 
-![Runmat vs GNU Octave](/website/public/runmat-octave-benchmark-data.png)
+![Runmat vs GNU Octave](/runmat-octave-benchmark-data.png)
 
 
 ---
