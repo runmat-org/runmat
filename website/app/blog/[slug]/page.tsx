@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { BlogLayout } from '@/components/BlogLayout';
+import NewsletterCta from '@/components/NewsletterCta';
 
 interface BlogPost {
   slug: string;
@@ -94,6 +95,15 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
     >
       <MarkdownRenderer source={post.content} />
       
+      {/* Newsletter CTA specific to blog posts */}
+      <div className="mt-16">
+        <NewsletterCta
+          title="Enjoyed this post? Join the newsletter"
+          description="Monthly updates on RunMat, Rust internals, and performance tips."
+          align="center"
+        />
+      </div>
+
       <div className="mt-16 not-prose">
         <Card>
           <CardContent className="p-6 text-center">
