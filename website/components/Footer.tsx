@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import Logo from "@/components/Logo";
-import SubscribeForm from "@/components/SubscribeForm";
+import NewsletterCta from "@/components/NewsletterCta";
 
 export default function Footer() {
   // Default to plain Dystr URL during SSR; hydrate with UTM params on client
@@ -39,7 +39,12 @@ export default function Footer() {
           <p className="text-left text-sm leading-loose text-muted-foreground">
             A modern, high-performance runtime for MATLAB and GNU Octave code.
           </p>
-          <div className="w-full"><SubscribeForm /></div>
+          <NewsletterCta
+            title="Subscribe to our newsletter"
+            description="Get updates on releases, benchmarks, and deep dives."
+            align="left"
+            className="w-full"
+          />
         </div>
         <div className="flex items-center gap-4 md:flex-[0_0_auto] absolute right-4 top-4 md:static">
           <Link
