@@ -19,8 +19,6 @@ twitterDescription: "Rust narrows the training distribution and provides strong 
 canonical: "https://runmat.org/blog/rust-llm-training-distribution"
 ---
 
-# 🦀 Choosing Rust for LLM-generated code
-
 
 
 ## 📚 Training Distribution: Why the Corpus Matters
