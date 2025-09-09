@@ -8,8 +8,8 @@ slug: "rust-llm-training-distribution"
 tags: ["Rust", "LLM", "MATLAB", "RunMat", "Programming Languages"]
 keywords: "Rust LLM code generation, training distribution, programming languages, RunMat, scientific computing"
 excerpt: "Training data quality shapes LLM outputs. Rust’s tight distribution and strong compiler feedback make it uniquely suited for reliable model-assisted coding."
-image: "/images/blog/runmat-hero.png"
-imageAlt: "Rust logo with neural network background"
+image: "/website/public/rust-blog-image.png"
+imageAlt: "Why Rust for LLM code gen"
 ogType: "article"
 ogTitle: "Why Rust Improves LLM-Written Code"
 ogDescription: "Rust offers tighter training distribution, stronger compiler checks, and better linting feedback — making it ideal for LLM-assisted development."
@@ -18,6 +18,8 @@ twitterTitle: "Rust + LLMs: Why Distribution Matters"
 twitterDescription: "Rust narrows the training distribution and provides strong compiler feedback, enabling more reliable model-written code."
 canonical: "https://runmat.org/blog/rust-llm-training-distribution"
 ---
+
+![Why Rust](/website/public/rust-blog-image.png)
 
 
 
@@ -96,6 +98,9 @@ These benchmarks highlight both the efficiency of the runtime and the advantage 
 What may be even more significant than the performance is how quickly the system came together. In three weeks, I conducted over 20,000 inference requests, supervised roughly 250 hours of LLM output, and assembled a codebase of more than three million characters, with over one million characters of tests and 250,000 characters of documentation. 
 
 By traditional estimates, achieving 100% MATLAB language grammar and semantics coverage would have required three to five senior engineers working for two or more years, or five years of work for a single developer. RunMat reached that milestone in weeks. 
+
+![Runmat vs GNU Octave](/website/public/runmat-octave-benchmark-data.png)
+
 
 ---
 
