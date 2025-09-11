@@ -112,6 +112,6 @@ Language choice is no longer solely about runtime speed or the availability of d
 
 We have a few more updates coming for RunMat over the next few months, including a world-class plotting system, a clean core standard library, and a modern package system and builder. Each is an opportunity to continue experimenting with the edge of what model-driven development can achieve. 
 
-**Subscribe to our newsletter in the footer to receive updates on RunMat's progress**
+**Subscribe to our newsletter to receive updates on RunMat's progress**
 
 
