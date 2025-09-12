@@ -1,7 +1,7 @@
 ---
 title: "Choosing Rust for LLM-Generated Code"
 description: "Why the training distribution of programming languages matters for LLMs, and how Rust improves reliability in model-written code."
-date: "2025-09-05"
+date: "2025-09-12"
 author: "Nabeel Allana"
 readTime: "8 min read"
 slug: "rust-llm-training-distribution"
