@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { BlogLayout } from '@/components/BlogLayout';
 import NewsletterCta from '@/components/NewsletterCta';
+import { PageToc } from '@/components/PageToc';
 
 interface BlogPost {
   slug: string;
@@ -93,7 +94,11 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       author={post.frontmatter.author}
       tags={post.frontmatter.tags}
     >
-      <MarkdownRenderer source={post.content} />
+      <div className="relative">
+        {/* Position the TOC to the right of the content without shrinking copy width */}
+        <PageToc source={post.content} className="absolute left-full ml-12 w-[260px]" />
+        <MarkdownRenderer source={post.content} />
+      </div>
       
       {/* Newsletter CTA specific to blog posts */}
       <div className="mt-16">
