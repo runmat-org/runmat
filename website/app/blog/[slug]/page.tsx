@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import matter from 'gray-matter';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+import { TableOfContents } from '@/components/TableOfContents';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 
@@ -93,36 +94,43 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       author={post.frontmatter.author}
       tags={post.frontmatter.tags}
     >
-      <MarkdownRenderer source={post.content} />
-      
-      {/* Newsletter CTA specific to blog posts */}
-      <div className="mt-16">
-        <NewsletterCta
-          title="Enjoyed this post? Join the newsletter"
-          description="Monthly updates on RunMat, Rust internals, and performance tips."
-          align="center"
-        />
-      </div>
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_260px] gap-8">
+        <article className="prose dark:prose-invert max-w-none scroll-smooth">
+          <MarkdownRenderer source={post.content} />
+          
+          {/* Newsletter CTA specific to blog posts */}
+          <div className="mt-16">
+            <NewsletterCta
+              title="Enjoyed this post? Join the newsletter"
+              description="Monthly updates on RunMat, Rust internals, and performance tips."
+              align="center"
+            />
+          </div>
 
-      <div className="mt-16 not-prose">
-        <Card>
-          <CardContent className="p-6 text-center">
-            <h3 className="text-lg font-semibold mb-3">
-              Ready to try RunMat?
-            </h3>
-            <p className="text-muted-foreground mb-4">
-              Get started with the modern MATLAB runtime today.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Button asChild>
-                <Link href="/download">Download RunMat</Link>
-              </Button>
-              <Button variant="outline" asChild>
-                <Link href="/docs/getting-started">Get Started</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+          <div className="mt-16 not-prose">
+            <Card>
+              <CardContent className="p-6 text-center">
+                <h3 className="text-lg font-semibold mb-3">
+                  Ready to try RunMat?
+                </h3>
+                <p className="text-muted-foreground mb-4">
+                  Get started with the modern MATLAB runtime today.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  <Button asChild>
+                    <Link href="/download">Download RunMat</Link>
+                  </Button>
+                  <Button variant="outline" asChild>
+                    <Link href="/docs/getting-started">Get Started</Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </article>
+        <aside className="hidden lg:block">
+          <TableOfContents source={post.content} />
+        </aside>
       </div>
     </BlogLayout>
   );
