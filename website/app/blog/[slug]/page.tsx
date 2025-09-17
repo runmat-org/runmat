@@ -92,6 +92,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       readTime={post.frontmatter.readTime}
       author={post.frontmatter.author}
       tags={post.frontmatter.tags}
+      tocSource={post.content}
     >
       <MarkdownRenderer source={post.content} />
       

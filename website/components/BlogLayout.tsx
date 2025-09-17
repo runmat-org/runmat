@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ArrowLeft, Calendar, Clock, User } from "lucide-react";
+import { OnThisPage } from "@/components/OnThisPage";
 
 interface BlogLayoutProps {
   children: React.ReactNode;
@@ -11,6 +12,7 @@ interface BlogLayoutProps {
   readTime: string;
   author: string;
   tags: string[];
+  tocSource?: string;
 }
 
 export function BlogLayout({
@@ -20,7 +22,8 @@ export function BlogLayout({
   date,
   readTime,
   author,
-  tags
+  tags,
+  tocSource
 }: BlogLayoutProps) {
   return (
     <div className="min-h-screen bg-background">
@@ -69,8 +72,11 @@ export function BlogLayout({
 
         {/* Article Content */}
         <article className="max-w-none">
-          <div className="blog-content">
+          <div className="blog-content relative">
             {children}
+            {tocSource ? (
+              <OnThisPage source={tocSource} variant="outside" />
+            ) : null}
           </div>
         </article>
       </div>
