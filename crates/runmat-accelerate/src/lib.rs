@@ -18,7 +18,148 @@ pub use native_auto::{
     is_sink, prepare_builtin_args, promote_binary, promote_reduction_args, promote_unary, BinaryOp,
     ReductionOp, UnaryOp,
 };
+#[cfg(feature = "wgpu")]
+use runmat_accelerate_api::AccelProvider;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "wgpu")]
+use wgpu::PowerPreference;
+
+/// Preferred acceleration provider selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccelerateProviderPreference {
+    Auto,
+    Wgpu,
+    InProcess,
+}
+
+impl Default for AccelerateProviderPreference {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+/// Power preference used when initializing a WGPU backend
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccelPowerPreference {
+    Auto,
+    HighPerformance,
+    LowPower,
+}
+
+impl Default for AccelPowerPreference {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+/// Initialization options for selecting and configuring the acceleration provider.
+#[derive(Debug, Clone)]
+pub struct AccelerateInitOptions {
+    pub enabled: bool,
+    pub provider: AccelerateProviderPreference,
+    pub allow_inprocess_fallback: bool,
+    pub wgpu_power_preference: AccelPowerPreference,
+    pub wgpu_force_fallback_adapter: bool,
+}
+
+impl Default for AccelerateInitOptions {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            provider: AccelerateProviderPreference::Auto,
+            allow_inprocess_fallback: true,
+            wgpu_power_preference: AccelPowerPreference::Auto,
+            wgpu_force_fallback_adapter: false,
+        }
+    }
+}
+
+/// Initialize the global acceleration provider using the supplied options.
+pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
+    if runmat_accelerate_api::provider().is_some() {
+        return;
+    }
+
+    if !options.enabled {
+        if options.allow_inprocess_fallback {
+            simple_provider::register_inprocess_provider();
+            log::info!(
+                "RunMat Accelerate: acceleration disabled; using in-process provider for compatibility"
+            );
+        } else {
+            log::info!("RunMat Accelerate: acceleration disabled; no provider registered");
+        }
+        return;
+    }
+
+    #[allow(unused_mut)]
+    let mut registered = false;
+
+    #[cfg(feature = "wgpu")]
+    {
+        if !registered
+            && matches!(
+                options.provider,
+                AccelerateProviderPreference::Auto | AccelerateProviderPreference::Wgpu
+            )
+        {
+            let wgpu_options = wgpu_backend::WgpuProviderOptions {
+                power_preference: match options.wgpu_power_preference {
+                    AccelPowerPreference::Auto => PowerPreference::HighPerformance,
+                    AccelPowerPreference::HighPerformance => PowerPreference::HighPerformance,
+                    AccelPowerPreference::LowPower => PowerPreference::LowPower,
+                },
+                force_fallback_adapter: options.wgpu_force_fallback_adapter,
+            };
+
+            match wgpu_backend::register_wgpu_provider(wgpu_options) {
+                Ok(provider) => {
+                    registered = true;
+                    let info = provider.device_info_struct();
+                    let backend = info.backend.as_deref().unwrap_or("unknown");
+                    log::info!(
+                        "RunMat Accelerate: using WGPU provider {} (vendor: {}, backend: {})",
+                        info.name,
+                        info.vendor,
+                        backend
+                    );
+                }
+                Err(err) => {
+                    log::warn!(
+                        "RunMat Accelerate: failed to initialize WGPU provider, falling back: {err}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    {
+        if matches!(options.provider, AccelerateProviderPreference::Wgpu) {
+            log::warn!(
+                "RunMat Accelerate: WGPU provider requested but crate built without 'wgpu' feature"
+            );
+        }
+    }
+
+    if !registered {
+        if options.allow_inprocess_fallback
+            || matches!(options.provider, AccelerateProviderPreference::InProcess)
+        {
+            simple_provider::register_inprocess_provider();
+            log::info!("RunMat Accelerate: using in-process acceleration provider");
+        } else {
+            log::warn!("RunMat Accelerate: no acceleration provider registered");
+        }
+    }
+}
+
+/// Initialize the acceleration provider using default options.
+pub fn initialize_acceleration_provider() {
+    initialize_acceleration_provider_with(&AccelerateInitOptions::default());
+}
 
 /// High-level device kind. Concrete selection is provided by backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,6 +336,3 @@ impl Accelerator {
         }
     }
 }
-
-// NOTE: No concrete backend is provided in this crate yet. Future crates (or modules enabled via
-// features) will implement `AccelerateBackend` for CUDA/ROCm/Metal/Vulkan/OpenCL/etc.

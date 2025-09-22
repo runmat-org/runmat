@@ -4137,6 +4137,8 @@ name = "runmat-accelerate"
 version = "0.0.3"
 dependencies = [
  "anyhow",
+ "bytemuck",
+ "log",
  "once_cell",
  "pollster",
  "runmat-accelerate-api",
@@ -4208,6 +4210,7 @@ dependencies = [
 name = "runmat-ignition"
 version = "0.0.3"
 dependencies = [
+ "runmat-accelerate",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",
@@ -4395,6 +4398,7 @@ dependencies = [
  "env_logger 0.11.8",
  "libm",
  "log",
+ "runmat-accelerate",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",

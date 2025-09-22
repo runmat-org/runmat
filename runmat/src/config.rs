@@ -9,6 +9,9 @@
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 use log::{debug, info};
+use runmat_accelerate::{
+    AccelPowerPreference, AccelerateInitOptions, AccelerateProviderPreference,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -20,6 +23,9 @@ use std::path::{Path, PathBuf};
 pub struct RunMatConfig {
     /// Runtime configuration
     pub runtime: RuntimeConfig,
+    /// Acceleration configuration
+    #[serde(default)]
+    pub accelerate: AccelerateConfig,
     /// JIT compiler configuration
     pub jit: JitConfig,
     /// Garbage collector configuration
@@ -46,6 +52,50 @@ pub struct RuntimeConfig {
     pub verbose: bool,
     /// Snapshot file to preload
     pub snapshot_path: Option<PathBuf>,
+}
+
+/// Acceleration (GPU) configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccelerateConfig {
+    /// Enable acceleration subsystem
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Preferred provider (auto, wgpu, inprocess)
+    #[serde(default)]
+    pub provider: AccelerateProviderPreference,
+    /// Allow automatic fallback to the in-process provider when hardware backend fails
+    #[serde(default = "default_true")]
+    pub allow_inprocess_fallback: bool,
+    /// Preferred WGPU power profile
+    #[serde(default)]
+    pub wgpu_power_preference: AccelPowerPreference,
+    /// Force use of WGPU fallback adapter even if a high-performance adapter exists
+    #[serde(default)]
+    pub wgpu_force_fallback_adapter: bool,
+}
+
+impl Default for AccelerateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            provider: AccelerateProviderPreference::Auto,
+            allow_inprocess_fallback: true,
+            wgpu_power_preference: AccelPowerPreference::Auto,
+            wgpu_force_fallback_adapter: false,
+        }
+    }
+}
+
+impl AccelerateConfig {
+    pub fn to_init_options(&self) -> AccelerateInitOptions {
+        AccelerateInitOptions {
+            enabled: self.enabled,
+            provider: self.provider,
+            allow_inprocess_fallback: self.allow_inprocess_fallback,
+            wgpu_power_preference: self.wgpu_power_preference,
+            wgpu_force_fallback_adapter: self.wgpu_force_fallback_adapter,
+        }
+    }
 }
 
 /// JIT compiler configuration
@@ -740,6 +790,61 @@ impl ConfigLoader {
             config.runtime.snapshot_path = Some(PathBuf::from(snapshot));
         }
 
+        // Acceleration settings
+        if let Ok(accel) =
+            env::var("RUSTMAT_ACCEL_ENABLE").or_else(|_| env::var("RUNMAT_ACCEL_ENABLE"))
+        {
+            if let Some(flag) = parse_bool(&accel) {
+                config.accelerate.enabled = flag;
+            }
+        }
+
+        if let Ok(provider) =
+            env::var("RUSTMAT_ACCEL_PROVIDER").or_else(|_| env::var("RUNMAT_ACCEL_PROVIDER"))
+        {
+            if let Some(pref) = parse_provider_preference(&provider) {
+                config.accelerate.provider = pref;
+            }
+        }
+
+        if let Ok(force_inprocess) = env::var("RUNMAT_ACCEL_FORCE_INPROCESS") {
+            if parse_bool(&force_inprocess).unwrap_or(false) {
+                config.accelerate.provider = AccelerateProviderPreference::InProcess;
+            }
+        }
+
+        if let Ok(wgpu_toggle) = env::var("RUNMAT_ACCEL_WGPU") {
+            if let Some(enabled) = parse_bool(&wgpu_toggle) {
+                config.accelerate.provider = if enabled {
+                    AccelerateProviderPreference::Wgpu
+                } else {
+                    AccelerateProviderPreference::InProcess
+                };
+            }
+        }
+
+        if let Ok(fallback) = env::var("RUSTMAT_ACCEL_DISABLE_FALLBACK") {
+            if let Some(disable) = parse_bool(&fallback) {
+                config.accelerate.allow_inprocess_fallback = !disable;
+            }
+        }
+
+        if let Ok(force_fallback) = env::var("RUSTMAT_ACCEL_WGPU_FORCE_FALLBACK")
+            .or_else(|_| env::var("RUNMAT_ACCEL_WGPU_FORCE_FALLBACK"))
+        {
+            if let Some(flag) = parse_bool(&force_fallback) {
+                config.accelerate.wgpu_force_fallback_adapter = flag;
+            }
+        }
+
+        if let Ok(power) =
+            env::var("RUSTMAT_ACCEL_WGPU_POWER").or_else(|_| env::var("RUNMAT_ACCEL_WGPU_POWER"))
+        {
+            if let Some(pref) = parse_power_preference(&power) {
+                config.accelerate.wgpu_power_preference = pref;
+            }
+        }
+
         // JIT settings
         if let Ok(jit_enabled) = env::var("RUSTMAT_JIT_ENABLE") {
             config.jit.enabled = parse_bool(&jit_enabled).unwrap_or(true);
@@ -888,6 +993,24 @@ fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
+fn parse_provider_preference(value: &str) -> Option<AccelerateProviderPreference> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(AccelerateProviderPreference::Auto),
+        "wgpu" => Some(AccelerateProviderPreference::Wgpu),
+        "inprocess" | "cpu" | "host" => Some(AccelerateProviderPreference::InProcess),
+        _ => None,
+    }
+}
+
+fn parse_power_preference(value: &str) -> Option<AccelPowerPreference> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(AccelPowerPreference::Auto),
+        "high" | "highperformance" | "performance" => Some(AccelPowerPreference::HighPerformance),
+        "low" | "lowpower" | "battery" => Some(AccelPowerPreference::LowPower),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -910,6 +1033,7 @@ mod tests {
 
         assert_eq!(parsed.runtime.timeout, config.runtime.timeout);
         assert_eq!(parsed.jit.enabled, config.jit.enabled);
+        assert_eq!(parsed.accelerate.provider, config.accelerate.provider);
     }
 
     #[test]
@@ -920,6 +1044,15 @@ mod tests {
 
         assert_eq!(parsed.runtime.timeout, config.runtime.timeout);
         assert_eq!(parsed.plotting.mode, config.plotting.mode);
+        assert_eq!(parsed.accelerate.enabled, config.accelerate.enabled);
+    }
+
+    #[test]
+    fn accelerate_to_options() {
+        let accel = AccelerateConfig::default();
+        let opts = accel.to_init_options();
+        assert!(opts.enabled);
+        assert_eq!(opts.provider, AccelerateProviderPreference::Auto);
     }
 
     #[test]
