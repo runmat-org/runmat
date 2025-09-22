@@ -1,10 +1,12 @@
 use regex::Regex;
-use runmat_builtins::{builtin_functions, Value};
+use runmat_builtins::Value;
 use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
 
-pub mod arrays;
+pub mod dispatcher;
+
 pub mod accel;
+pub mod arrays;
 pub mod comparison;
 pub mod concatenation;
 pub mod constants;
@@ -30,6 +32,8 @@ extern "C" {}
 #[cfg(all(feature = "blas-lapack", not(target_os = "macos")))]
 extern crate openblas_src;
 
+pub use dispatcher::{call_builtin, gather_if_needed, is_gpu_value, value_contains_gpu};
+
 pub use arrays::*;
 pub use comparison::*;
 pub use concatenation::*;
@@ -46,7 +50,7 @@ pub use blas::*;
 #[cfg(feature = "blas-lapack")]
 pub use lapack::*;
 
-fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, String> {
+pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, String> {
     let handles: Vec<GcPtr<Value>> = values
         .into_iter()
         .map(|v| runmat_gc::gc_allocate(v).expect("gc alloc"))
@@ -62,55 +66,6 @@ fn make_cell_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let rows = 1usize;
     let cols = rest.len();
     make_cell(rest, rows, cols)
-}
-
-/// Call a registered language builtin by name.
-/// Supports function overloading by trying different argument patterns.
-/// Returns an error if no builtin with that name and compatible arguments is found.
-pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
-    let mut matching_builtins = Vec::new();
-
-    // Collect all builtins with the matching name
-    for b in builtin_functions() {
-        if b.name == name {
-            matching_builtins.push(b);
-        }
-    }
-
-    if matching_builtins.is_empty() {
-        // Fallback: treat as class constructor if class is registered
-        if let Some(cls) = runmat_builtins::get_class(name) {
-            // Prefer explicit constructor method with the same name as class (static)
-            if let Some(ctor) = cls.methods.get(name) {
-                // Dispatch to constructor builtin; pass args through
-                return call_builtin(&ctor.function_name, args);
-            }
-            // Otherwise default-construct object
-            return new_object_builtin(name.to_string());
-        }
-        return Err(format!(
-            "{}: Undefined function: {name}",
-            "MATLAB:UndefinedFunction"
-        ));
-    }
-
-    // Try each builtin until one succeeds
-    let mut last_error = String::new();
-    for builtin in matching_builtins {
-        let f = builtin.implementation;
-        match (f)(args) {
-            Ok(result) => return Ok(result),
-            Err(e) => last_error = e,
-        }
-    }
-
-    // If none succeeded, return the last error
-    Err(format!(
-        "No matching overload for `{}` with {} args: {}",
-        name,
-        args.len(),
-        last_error
-    ))
 }
 
 #[runmat_macros::runtime_builtin(name = "cellstr")]
@@ -1614,7 +1569,7 @@ fn make_anon_builtin(params: String, body: String) -> Result<Value, String> {
 }
 
 #[runmat_macros::runtime_builtin(name = "new_object")]
-fn new_object_builtin(class_name: String) -> Result<Value, String> {
+pub(crate) fn new_object_builtin(class_name: String) -> Result<Value, String> {
     if let Some(def) = runmat_builtins::get_class(&class_name) {
         // Collect class hierarchy from root to leaf for default initialization
         let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
@@ -2610,7 +2565,7 @@ fn sum_scalar_all(a: Value) -> Result<Value, String> {
 fn sum_dim(a: Value, dim: f64) -> Result<Value, String> {
     if let Value::GpuTensor(h) = &a {
         if let Some(p) = runmat_accelerate_api::provider() {
-            if let Ok(hc) = p.reduce_sum_dim(h, if dim < 1.0 {1} else { dim as usize }) {
+            if let Ok(hc) = p.reduce_sum_dim(h, if dim < 1.0 { 1 } else { dim as usize }) {
                 return Ok(Value::GpuTensor(hc));
             }
         }
