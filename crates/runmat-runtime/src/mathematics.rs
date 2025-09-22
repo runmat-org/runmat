@@ -34,6 +34,14 @@ fn div_complex(a_re: f64, a_im: f64, b_re: f64, b_im: f64) -> (f64, f64) {
 )]
 fn sin_builtin(x: Value) -> Result<Value, String> {
     match x {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                if let Ok(hc) = p.unary_sin(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("sin: unsupported for gpuArray".to_string())
+        }
         Value::Num(n) => Ok(Value::Num(n.sin())),
         Value::Int(i) => Ok(Value::Num(i.to_f64().sin())),
         Value::Tensor(t) => {
@@ -68,7 +76,6 @@ fn sin_builtin(x: Value) -> Result<Value, String> {
             Ok(Value::Tensor(Tensor::new(data, vec![ca.rows, ca.cols])?))
         }
         Value::String(_) | Value::StringArray(_) => Err("sin: expected numeric input".to_string()),
-        Value::GpuTensor(_) => Err("sin: unsupported for gpuArray".to_string()),
         other => Err(format!("sin: unsupported input {other:?}")),
     }
 }
@@ -83,6 +90,14 @@ fn sin_builtin(x: Value) -> Result<Value, String> {
 )]
 fn cos_builtin(x: Value) -> Result<Value, String> {
     match x {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                if let Ok(hc) = p.unary_cos(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("cos: unsupported for gpuArray".to_string())
+        }
         Value::Num(n) => Ok(Value::Num(n.cos())),
         Value::Int(i) => Ok(Value::Num(i.to_f64().cos())),
         Value::Tensor(t) => {
@@ -117,7 +132,6 @@ fn cos_builtin(x: Value) -> Result<Value, String> {
             Ok(Value::Tensor(Tensor::new(data, vec![ca.rows, ca.cols])?))
         }
         Value::String(_) | Value::StringArray(_) => Err("cos: expected numeric input".to_string()),
-        Value::GpuTensor(_) => Err("cos: unsupported for gpuArray".to_string()),
         other => Err(format!("cos: unsupported input {other:?}")),
     }
 }
@@ -256,6 +270,27 @@ fn ln_builtin(x: f64) -> Result<f64, String> {
     }
 }
 
+#[runtime_builtin(name = "exp")]
+fn exp_builtin(x: Value) -> Result<Value, String> {
+    match x {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                if let Ok(hc) = p.unary_exp(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("exp: unsupported for gpuArray".to_string())
+        }
+        Value::Num(n) => Ok(Value::Num(n.exp())),
+        Value::Int(i) => Ok(Value::Num(i.to_f64().exp())),
+        Value::Tensor(t) => {
+            let data: Vec<f64> = t.data.iter().map(|&v| v.exp()).collect();
+            Ok(Value::Tensor(Tensor::new_2d(data, t.rows(), t.cols())?))
+        }
+        other => Err(format!("exp: unsupported input {other:?}")),
+    }
+}
+
 #[runtime_builtin(name = "log2")]
 fn log2_builtin(x: f64) -> Result<f64, String> {
     if x <= 0.0 {
@@ -293,6 +328,14 @@ fn pow_builtin(base: f64, exponent: f64) -> Result<f64, String> {
 #[runtime_builtin(name = "abs")]
 fn abs_runtime_builtin(x: Value) -> Result<Value, String> {
     match x {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                if let Ok(hc) = p.unary_abs(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("abs: unsupported for gpuArray".to_string())
+        }
         Value::Num(n) => Ok(Value::Num(n.abs())),
         Value::Int(i) => Ok(Value::Num(i.to_f64().abs())),
         Value::Tensor(t) => {
@@ -474,6 +517,27 @@ fn var_builtin(matrix: Tensor) -> Result<f64, String> {
         / (matrix.data.len() - 1) as f64;
 
     Ok(variance)
+}
+
+#[runtime_builtin(name = "sqrt")]
+fn sqrt_builtin(x: Value) -> Result<Value, String> {
+    match x {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                if let Ok(hc) = p.unary_sqrt(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("sqrt: unsupported for gpuArray".to_string())
+        }
+        Value::Num(n) => Ok(Value::Num(n.sqrt())),
+        Value::Int(i) => Ok(Value::Num(i.to_f64().sqrt())),
+        Value::Tensor(t) => {
+            let data: Vec<f64> = t.data.iter().map(|&v| v.sqrt()).collect();
+            Ok(Value::Tensor(Tensor::new_2d(data, t.rows(), t.cols())?))
+        }
+        other => Err(format!("sqrt: unsupported input {other:?}")),
+    }
 }
 
 // Unit tests for mathematics live under crates/runmat-runtime/tests/mathematics.rs

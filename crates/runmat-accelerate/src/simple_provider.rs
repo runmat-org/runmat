@@ -63,6 +63,16 @@ impl AccelProvider for InProcessProvider {
         "in-process provider (host registry)".to_string()
     }
 
+    fn device_info_struct(&self) -> runmat_accelerate_api::ApiDeviceInfo {
+        runmat_accelerate_api::ApiDeviceInfo {
+            device_id: 0,
+            name: "InProcess".to_string(),
+            vendor: "RunMat".to_string(),
+            memory_bytes: None,
+            backend: Some("inprocess".to_string()),
+        }
+    }
+
     fn elem_add(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let guard = registry().lock().unwrap();
         let abuf = guard
@@ -169,6 +179,366 @@ impl AccelProvider for InProcessProvider {
             shape: a.shape.clone(),
             device_id: 0,
             buffer_id: id,
+        })
+    }
+
+    fn unary_sin(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.sin()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_cos(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.cos()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_abs(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.abs()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_exp(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.exp()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_log(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.ln()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_sqrt(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.sqrt()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn scalar_add(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x + scalar).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn scalar_sub(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x - scalar).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn scalar_mul(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x * scalar).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn scalar_div(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = if scalar == 0.0 {
+            abuf.iter().map(|&x| f64::INFINITY * x.signum()).collect()
+        } else {
+            abuf.iter().map(|&x| x / scalar).collect()
+        };
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn scalar_rsub(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        // compute scalar - a
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| scalar - x).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn scalar_rdiv(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        // compute scalar ./ a
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf
+            .iter()
+            .map(|&x| if x == 0.0 { f64::INFINITY * scalar.signum() } else { scalar / x })
+            .collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: a.shape.clone(), device_id: 0, buffer_id: id })
+    }
+
+    fn transpose(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if a.shape.len() != 2 { return Err(anyhow::anyhow!("transpose: only 2D supported")); }
+        let rows = a.shape[0];
+        let cols = a.shape[1];
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let mut out = vec![0.0; abuf.len()];
+        for i in 0..rows { for j in 0..cols { out[j * rows + i] = abuf[i + j * rows]; } }
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle { shape: vec![cols, rows], device_id: 0, buffer_id: id })
+    }
+
+    fn reduce_sum(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let s: f64 = abuf.iter().sum();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, vec![s]);
+        Ok(GpuTensorHandle { shape: vec![1,1], device_id: 0, buffer_id: id })
+    }
+
+    fn reduce_sum_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
+        if a.shape.len() != 2 { return Err(anyhow::anyhow!("reduce_sum_dim: only 2D supported")); }
+        let rows = a.shape[0];
+        let cols = a.shape[1];
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out = if dim <= 1 {
+            // sum over rows -> 1 x cols
+            let mut v = vec![0.0f64; cols];
+            for c in 0..cols { let mut s = 0.0; for r in 0..rows { s += abuf[r + c * rows]; } v[c] = s; }
+            v
+        } else {
+            // sum over cols -> rows x 1
+            let mut v = vec![0.0f64; rows];
+            for r in 0..rows { let mut s = 0.0; for c in 0..cols { s += abuf[r + c * rows]; } v[r] = s; }
+            v
+        };
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        let shape = if dim <= 1 { vec![1, cols] } else { vec![rows, 1] };
+        Ok(GpuTensorHandle { shape, device_id: 0, buffer_id: id })
+    }
+
+    fn reduce_mean(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let mean = if abuf.is_empty() { 0.0 } else { abuf.iter().sum::<f64>() / (abuf.len() as f64) };
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, vec![mean]);
+        Ok(GpuTensorHandle { shape: vec![1,1], device_id: 0, buffer_id: id })
+    }
+
+    fn reduce_mean_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
+        if a.shape.len() != 2 { return Err(anyhow::anyhow!("reduce_mean_dim: only 2D supported")); }
+        let rows = a.shape[0];
+        let cols = a.shape[1];
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out = if dim <= 1 {
+            let mut v = vec![0.0f64; cols];
+            for c in 0..cols { let mut s = 0.0; for r in 0..rows { s += abuf[r + c * rows]; } v[c] = s / (rows as f64); }
+            v
+        } else {
+            let mut v = vec![0.0f64; rows];
+            for r in 0..rows { let mut s = 0.0; for c in 0..cols { s += abuf[r + c * rows]; } v[r] = s / (cols as f64); }
+            v
+        };
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, out);
+        let shape = if dim <= 1 { vec![1, cols] } else { vec![rows, 1] };
+        Ok(GpuTensorHandle { shape, device_id: 0, buffer_id: id })
+    }
+
+    fn reduce_min(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let m = abuf.iter().cloned().fold(f64::INFINITY, f64::min);
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, vec![m]);
+        Ok(GpuTensorHandle { shape: vec![1,1], device_id: 0, buffer_id: id })
+    }
+
+    fn reduce_min_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<runmat_accelerate_api::ReduceDimResult> {
+        if a.shape.len() != 2 { return Err(anyhow::anyhow!("reduce_min_dim: only 2D supported")); }
+        let rows = a.shape[0];
+        let cols = a.shape[1];
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let (vals, inds, vshape) = if dim <= 1 {
+            let mut m: Vec<f64> = vec![f64::INFINITY; cols];
+            let mut idx: Vec<f64> = vec![1.0; cols];
+            for c in 0..cols { for r in 0..rows { let v = abuf[r + c * rows]; if v < m[c] { m[c]=v; idx[c]=(r+1) as f64; } } }
+            (m, idx, vec![1, cols])
+        } else {
+            let mut m: Vec<f64> = vec![f64::INFINITY; rows];
+            let mut idx: Vec<f64> = vec![1.0; rows];
+            for r in 0..rows { for c in 0..cols { let v = abuf[r + c * rows]; if v < m[r] { m[r]=v; idx[r]=(c+1) as f64; } } }
+            (m, idx, vec![rows, 1])
+        };
+        drop(guard);
+        let idv = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let idi = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut g = registry().lock().unwrap();
+        g.insert(idv, vals);
+        g.insert(idi, inds);
+        let shape_vals = vshape.clone();
+        let shape_inds = vshape;
+        Ok(runmat_accelerate_api::ReduceDimResult {
+            values: GpuTensorHandle { shape: shape_vals, device_id: 0, buffer_id: idv },
+            indices: GpuTensorHandle { shape: shape_inds, device_id: 0, buffer_id: idi },
+        })
+    }
+
+    fn reduce_max(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let m = abuf.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, vec![m]);
+        Ok(GpuTensorHandle { shape: vec![1,1], device_id: 0, buffer_id: id })
+    }
+
+    fn reduce_max_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<runmat_accelerate_api::ReduceDimResult> {
+        if a.shape.len() != 2 { return Err(anyhow::anyhow!("reduce_max_dim: only 2D supported")); }
+        let rows = a.shape[0];
+        let cols = a.shape[1];
+        let guard = registry().lock().unwrap();
+        let abuf = guard.get(&a.buffer_id).ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let (vals, inds, vshape) = if dim <= 1 {
+            let mut m: Vec<f64> = vec![f64::NEG_INFINITY; cols];
+            let mut idx: Vec<f64> = vec![1.0; cols];
+            for c in 0..cols { for r in 0..rows { let v = abuf[r + c * rows]; if v > m[c] { m[c]=v; idx[c]=(r+1) as f64; } } }
+            (m, idx, vec![1, cols])
+        } else {
+            let mut m: Vec<f64> = vec![f64::NEG_INFINITY; rows];
+            let mut idx: Vec<f64> = vec![1.0; rows];
+            for r in 0..rows { for c in 0..cols { let v = abuf[r + c * rows]; if v > m[r] { m[r]=v; idx[r]=(c+1) as f64; } } }
+            (m, idx, vec![rows, 1])
+        };
+        drop(guard);
+        let idv = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let idi = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut g = registry().lock().unwrap();
+        g.insert(idv, vals);
+        g.insert(idi, inds);
+        let shape_vals = vshape.clone();
+        let shape_inds = vshape;
+        Ok(runmat_accelerate_api::ReduceDimResult {
+            values: GpuTensorHandle { shape: shape_vals, device_id: 0, buffer_id: idv },
+            indices: GpuTensorHandle { shape: shape_inds, device_id: 0, buffer_id: idi },
         })
     }
 

@@ -4,6 +4,7 @@ use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
 
 pub mod arrays;
+pub mod accel;
 pub mod comparison;
 pub mod concatenation;
 pub mod constants;
@@ -2200,6 +2201,14 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
 /// Transpose operation for Values
 pub fn transpose(value: Value) -> Result<Value, String> {
     match value {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                if let Ok(hc) = p.transpose(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("transpose: unsupported for gpuArray".to_string())
+        }
         Value::Tensor(ref m) => Ok(Value::Tensor(matrix_transpose(m))),
         // For complex scalars, transpose is conjugate transpose => scalar transpose is conjugate
         Value::Complex(re, im) => Ok(Value::Complex(re, -im)),
@@ -2284,6 +2293,15 @@ fn max_scalar(a: f64, b: f64) -> f64 {
 
 fn max_vector_builtin(a: Value) -> Result<Value, String> {
     match a {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                // Reduce across all elements -> 1x1 handle
+                if let Ok(hc) = p.reduce_max(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("max: unsupported for gpuArray".to_string())
+        }
         Value::Tensor(t) => {
             if t.shape.len() == 2 && t.shape[1] == 1 {
                 let mut max_val = f64::NEG_INFINITY;
@@ -2311,6 +2329,14 @@ fn max_vector_builtin(a: Value) -> Result<Value, String> {
 
 fn min_vector_builtin(a: Value) -> Result<Value, String> {
     match a {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                if let Ok(hc) = p.reduce_min(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("min: unsupported for gpuArray".to_string())
+        }
         Value::Tensor(t) => {
             if t.shape.len() == 2 && t.shape[1] == 1 {
                 let mut min_val = f64::INFINITY;
@@ -2335,6 +2361,20 @@ fn min_vector_builtin(a: Value) -> Result<Value, String> {
 }
 
 fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
+    if let Value::GpuTensor(h) = a {
+        if let Some(p) = runmat_accelerate_api::provider() {
+            let d = if dim < 1.0 { 1 } else { dim as usize };
+            if let Ok(res) = p.reduce_max_dim(&h, d) {
+                // Return cell {values, indices} with GPU handles
+                return make_cell(
+                    vec![Value::GpuTensor(res.values), Value::GpuTensor(res.indices)],
+                    1,
+                    2,
+                );
+            }
+        }
+        return Err("max: unsupported for gpuArray".to_string());
+    }
     let t = match a {
         Value::Tensor(t) => t,
         _ => return Err("max: expected tensor for dim variant".to_string()),
@@ -2387,6 +2427,19 @@ fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
 }
 
 fn min_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
+    if let Value::GpuTensor(h) = a {
+        if let Some(p) = runmat_accelerate_api::provider() {
+            let d = if dim < 1.0 { 1 } else { dim as usize };
+            if let Ok(res) = p.reduce_min_dim(&h, d) {
+                return make_cell(
+                    vec![Value::GpuTensor(res.values), Value::GpuTensor(res.indices)],
+                    1,
+                    2,
+                );
+            }
+        }
+        return Err("min: unsupported for gpuArray".to_string());
+    }
     let t = match a {
         Value::Tensor(t) => t,
         _ => return Err("min: expected tensor for dim variant".to_string()),
@@ -2541,12 +2594,28 @@ fn tensor_prod_all(t: &runmat_builtins::Tensor) -> f64 {
 
 fn sum_scalar_all(a: Value) -> Result<Value, String> {
     match a {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                if let Ok(hc) = p.reduce_sum(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("sum: unsupported for gpuArray".to_string())
+        }
         Value::Tensor(t) => Ok(Value::Num(tensor_sum_all(&t))),
         _ => Err("sum: expected tensor".to_string()),
     }
 }
 
 fn sum_dim(a: Value, dim: f64) -> Result<Value, String> {
+    if let Value::GpuTensor(h) = &a {
+        if let Some(p) = runmat_accelerate_api::provider() {
+            if let Ok(hc) = p.reduce_sum_dim(h, if dim < 1.0 {1} else { dim as usize }) {
+                return Ok(Value::GpuTensor(hc));
+            }
+        }
+        return Err("sum: unsupported for gpuArray".to_string());
+    }
     let t = match a {
         Value::Tensor(t) => t,
         _ => return Err("sum: expected tensor".to_string()),
@@ -2678,6 +2747,14 @@ fn prod_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
 
 fn mean_all_or_cols(a: Value) -> Result<Value, String> {
     match a {
+        Value::GpuTensor(h) => {
+            if let Some(p) = runmat_accelerate_api::provider() {
+                if let Ok(hc) = p.reduce_mean(&h) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            Err("mean: unsupported for gpuArray".to_string())
+        }
         Value::Tensor(t) => {
             let rows = t.rows();
             let cols = t.cols();
@@ -2703,6 +2780,15 @@ fn mean_all_or_cols(a: Value) -> Result<Value, String> {
 }
 
 fn mean_dim(a: Value, dim: f64) -> Result<Value, String> {
+    if let Value::GpuTensor(h) = a {
+        if let Some(p) = runmat_accelerate_api::provider() {
+            let d = if dim < 1.0 { 1 } else { dim as usize };
+            if let Ok(hc) = p.reduce_mean_dim(&h, d) {
+                return Ok(Value::GpuTensor(hc));
+            }
+        }
+        return Err("mean: unsupported for gpuArray".to_string());
+    }
     let t = match a {
         Value::Tensor(t) => t,
         _ => return Err("mean: expected tensor".to_string()),

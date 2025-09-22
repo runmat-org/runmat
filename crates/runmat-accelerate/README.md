@@ -1,7 +1,7 @@
 ## RunMat Accelerate
 
 ### Purpose
-`runmat-accelerate` provides the high-level acceleration layer that integrates GPU backends with the language runtime. It implements provider(s) for `runmat-accelerate-api` so that `gpuArray`, `gather`, and (later) accelerated math and linear algebra can execute on devices transparently where appropriate.
+`runmat-accelerate` provides the high-level acceleration layer that integrates GPU backends with the language runtime. It implements provider(s) for `runmat-accelerate-api` so that `gpuArray`, `gather`, and (todo) accelerated math and linear algebra can execute on devices transparently where appropriate.
 
 ### Architecture
 - Depends on `runmat-accelerate-api` to register an `AccelProvider` implementation at startup.
@@ -46,4 +46,42 @@ H = G + 2;            % elementwise add (planner may choose GPU path)
 R = gather(H);        % bring results back to host
 ```
 
+### Native acceleration
 
+RunMat will power native acceleration for RunMat. It lets users avoid needing to use the gpuArray/gather builtins and instead use the native acceleration API:
+
+```matlab
+% Example: Large matrix multiplication and elementwise operations
+A = randn(10000, 10000);   % Large matrix
+B = randn(10000, 10000);
+
+% Normally, in MATLAB you'd need to explicitly use gpuArray:
+%   G = gpuArray(A);
+%   H = G .* B;           % Elementwise multiply on GPU
+%   S = sum(H, 2);
+%   R = gather(S);
+
+% With RunMat accelerate, the planner can transparently move data to the GPU
+% and back as needed, so you can just write:
+H = A .* B;           % Planner may choose GPU for large ops
+S = sum(H, 2);        % Fused and executed on device if beneficial
+
+% Results are automatically brought back to host as needed
+disp(S(1:10));        % Print first 10 results
+
+% The planner/JIT will optimize transfers and fuse operations for best performance.
+
+```
+
+### Device info (gpuDevice)
+- `gpuDevice()` returns a structured value with details about the active provider/device when available. Fields include `device_id`, `name`, `vendor`, optional `memory_bytes`, and optional `backend`.
+
+```matlab
+info = gpuDevice();
+% Example output (in-process provider):
+%   struct with fields:
+%       device_id: 0
+%            name: 'InProcess'
+%          vendor: 'RunMat'
+%      backend: 'inprocess'
+```

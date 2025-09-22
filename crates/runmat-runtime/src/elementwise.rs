@@ -71,7 +71,25 @@ pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
 /// Element-wise multiplication: A .* B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
-    // If exactly one is GPU, gather to host and recurse
+    // GPU+scalar: keep on device if provider supports scalar mul
+    if let Some(p) = runmat_accelerate_api::provider() {
+        match (a, b) {
+            (Value::GpuTensor(ga), Value::Num(s)) => {
+                if let Ok(hc) = p.scalar_mul(ga, *s) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::Num(s), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_mul(gb, *s) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::GpuTensor(ga), Value::Int(i)) => {
+                if let Ok(hc) = p.scalar_mul(ga, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::Int(i), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_mul(gb, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+            }
+            _ => {}
+        }
+    }
+    // If exactly one is GPU and no scalar fast-path, gather to host and recurse
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
         let ah = to_host_value(a)?;
         let bh = to_host_value(b)?;
@@ -80,10 +98,7 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
             if let Ok(hc) = p.elem_mul(ha, hb) {
-                let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(
-                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
-                ));
+                return Ok(Value::GpuTensor(hc));
             }
         }
     }
@@ -181,6 +196,24 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
 /// Element-wise addition: A + B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
+    // GPU+scalar: use scalar add to keep device residency
+    if let Some(p) = runmat_accelerate_api::provider() {
+        match (a, b) {
+            (Value::GpuTensor(ga), Value::Num(s)) => {
+                if let Ok(hc) = p.scalar_add(ga, *s) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::Num(s), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_add(gb, *s) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::GpuTensor(ga), Value::Int(i)) => {
+                if let Ok(hc) = p.scalar_add(ga, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::Int(i), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_add(gb, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+            }
+            _ => {}
+        }
+    }
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
         let ah = to_host_value(a)?;
         let bh = to_host_value(b)?;
@@ -189,10 +222,7 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
             if let Ok(hc) = p.elem_add(ha, hb) {
-                let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(
-                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
-                ));
+                return Ok(Value::GpuTensor(hc));
             }
         }
     }
@@ -285,6 +315,24 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
 /// Element-wise subtraction: A - B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
+    // GPU+scalar: use scalar sub when form is G - s or left-scalar s - G
+    if let Some(p) = runmat_accelerate_api::provider() {
+        match (a, b) {
+            (Value::GpuTensor(ga), Value::Num(s)) => {
+                if let Ok(hc) = p.scalar_sub(ga, *s) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::GpuTensor(ga), Value::Int(i)) => {
+                if let Ok(hc) = p.scalar_sub(ga, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::Num(s), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_rsub(gb, *s) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::Int(i), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_rsub(gb, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+            }
+            _ => {}
+        }
+    }
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
         let ah = to_host_value(a)?;
         let bh = to_host_value(b)?;
@@ -293,10 +341,7 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
             if let Ok(hc) = p.elem_sub(ha, hb) {
-                let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(
-                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
-                ));
+                return Ok(Value::GpuTensor(hc));
             }
         }
     }
@@ -391,6 +436,24 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
 /// Element-wise division: A ./ B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
+    // GPU+scalar: use scalar div when form is G ./ s or left-scalar s ./ G
+    if let Some(p) = runmat_accelerate_api::provider() {
+        match (a, b) {
+            (Value::GpuTensor(ga), Value::Num(s)) => {
+                if let Ok(hc) = p.scalar_div(ga, *s) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::GpuTensor(ga), Value::Int(i)) => {
+                if let Ok(hc) = p.scalar_div(ga, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::Num(s), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_rdiv(gb, *s) { return Ok(Value::GpuTensor(hc)); }
+            }
+            (Value::Int(i), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_rdiv(gb, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+            }
+            _ => {}
+        }
+    }
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
         let ah = to_host_value(a)?;
         let bh = to_host_value(b)?;
@@ -399,10 +462,7 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
             if let Ok(hc) = p.elem_div(ha, hb) {
-                let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(
-                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
-                ));
+                return Ok(Value::GpuTensor(hc));
             }
         }
     }

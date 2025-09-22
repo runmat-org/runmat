@@ -7,12 +7,38 @@ pub struct GpuTensorHandle {
     pub buffer_id: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApiDeviceInfo {
+    pub device_id: u32,
+    pub name: String,
+    pub vendor: String,
+    pub memory_bytes: Option<u64>,
+    pub backend: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReduceDimResult {
+    pub values: GpuTensorHandle,
+    pub indices: GpuTensorHandle,
+}
+
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: Send + Sync {
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
     fn download(&self, h: &GpuTensorHandle) -> anyhow::Result<crate::HostTensorOwned>;
     fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
     fn device_info(&self) -> String;
+
+    /// Structured device information (optional to override). Default adapts from `device_info()`.
+    fn device_info_struct(&self) -> ApiDeviceInfo {
+        ApiDeviceInfo {
+            device_id: 0,
+            name: self.device_info(),
+            vendor: String::new(),
+            memory_bytes: None,
+            backend: None,
+        }
+    }
 
     // Optional operator hooks (default to unsupported)
     fn elem_add(
@@ -43,12 +69,78 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_div not supported by provider"))
     }
+    // Unary elementwise operations (optional)
+    fn unary_sin(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_sin not supported by provider"))
+    }
+    fn unary_cos(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_cos not supported by provider"))
+    }
+    fn unary_abs(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_abs not supported by provider"))
+    }
+    fn unary_exp(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_exp not supported by provider"))
+    }
+    fn unary_log(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_log not supported by provider"))
+    }
+    fn unary_sqrt(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_sqrt not supported by provider"))
+    }
+    // Left-scalar operations (broadcast with scalar on the left)
+    fn scalar_rsub(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_rsub not supported by provider"))
+    }
+    fn scalar_rdiv(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_rdiv not supported by provider"))
+    }
+    // Scalar operations: apply op with scalar right-hand side (broadcast over a)
+    fn scalar_add(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_add not supported by provider"))
+    }
+    fn scalar_sub(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_sub not supported by provider"))
+    }
+    fn scalar_mul(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_mul not supported by provider"))
+    }
+    fn scalar_div(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_div not supported by provider"))
+    }
     fn matmul(
         &self,
         _a: &GpuTensorHandle,
         _b: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("matmul not supported by provider"))
+    }
+    fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("transpose not supported by provider"))
+    }
+    fn reduce_sum(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_sum not supported by provider"))
+    }
+    fn reduce_sum_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_sum_dim not supported by provider"))
+    }
+    fn reduce_mean(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_mean not supported by provider"))
+    }
+    fn reduce_mean_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_mean_dim not supported by provider"))
+    }
+    fn reduce_min(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_min not supported by provider"))
+    }
+    fn reduce_min_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<ReduceDimResult> {
+        Err(anyhow::anyhow!("reduce_min_dim not supported by provider"))
+    }
+    fn reduce_max(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_max not supported by provider"))
+    }
+    fn reduce_max_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<ReduceDimResult> {
+        Err(anyhow::anyhow!("reduce_max_dim not supported by provider"))
     }
 }
 
