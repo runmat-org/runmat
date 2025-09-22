@@ -25,6 +25,8 @@ runmat-accelerate-api = { path = "../runmat-accelerate-api" }
 once_cell = "1"
 bytemuck = { version = "1.14", features = ["derive"] }
 log = { workspace = true }
+env_logger = { workspace = true }
+serde_json = { workspace = true }
 
 # Optional backend deps
 wgpu = { version = "0.19", optional = true }
