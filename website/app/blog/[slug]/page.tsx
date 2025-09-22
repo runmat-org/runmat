@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import matter from 'gray-matter';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+import { HeadingsNav } from '@/components/HeadingsNav';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 
@@ -92,6 +93,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       readTime={post.frontmatter.readTime}
       author={post.frontmatter.author}
       tags={post.frontmatter.tags}
+      rightAside={<HeadingsNav source={post.content} />}
     >
       <MarkdownRenderer source={post.content} />
       
