@@ -874,6 +874,16 @@ pub struct Closure {
     pub captures: Vec<Value>,
 }
 
+/// Acceleration metadata describing GPU-friendly characteristics of a builtin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccelTag {
+    Unary,
+    Elementwise,
+    Reduction,
+    MatMul,
+    Transpose,
+}
+
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -885,6 +895,8 @@ pub struct BuiltinFunction {
     pub param_types: Vec<Type>,
     pub return_type: Type,
     pub implementation: fn(&[Value]) -> Result<Value, String>,
+    pub accel_tags: &'static [AccelTag],
+    pub is_sink: bool,
 }
 
 impl BuiltinFunction {
@@ -898,6 +910,8 @@ impl BuiltinFunction {
         param_types: Vec<Type>,
         return_type: Type,
         implementation: fn(&[Value]) -> Result<Value, String>,
+        accel_tags: &'static [AccelTag],
+        is_sink: bool,
     ) -> Self {
         Self {
             name,
@@ -908,6 +922,8 @@ impl BuiltinFunction {
             param_types,
             return_type,
             implementation,
+            accel_tags,
+            is_sink,
         }
     }
 }

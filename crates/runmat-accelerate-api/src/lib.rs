@@ -127,7 +127,11 @@ pub trait AccelProvider: Send + Sync {
     fn reduce_mean(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_mean not supported by provider"))
     }
-    fn reduce_mean_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<GpuTensorHandle> {
+    fn reduce_mean_dim(
+        &self,
+        _a: &GpuTensorHandle,
+        _dim: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_mean_dim not supported by provider"))
     }
     fn reduce_min(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {

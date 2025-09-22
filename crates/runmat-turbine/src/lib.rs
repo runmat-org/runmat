@@ -18,6 +18,16 @@ use runmat_ignition::{Bytecode, Instr};
 use target_lexicon::Triple;
 use thiserror::Error;
 
+#[cfg(feature = "native-accel")]
+fn accel_prepare_args(name: &str, args: &[Value]) -> std::result::Result<Vec<Value>, String> {
+    runmat_accelerate::prepare_builtin_args(name, args).map_err(|e| e.to_string())
+}
+
+#[cfg(not(feature = "native-accel"))]
+fn accel_prepare_args(_name: &str, args: &[Value]) -> std::result::Result<Vec<Value>, String> {
+    Ok(args.to_vec())
+}
+
 pub mod cache;
 pub mod compiler;
 pub mod jit_memory;
@@ -412,8 +422,17 @@ pub extern "C" fn runmat_call_builtin(
             args.push((*arg_ptr).clone());
         }
 
+        // Prepare arguments with native acceleration when available
+        let prepared_args = match accel_prepare_args(name, &args) {
+            Ok(v) => v,
+            Err(err) => {
+                error!("Auto-offload prepare failed: {err}");
+                return std::ptr::null_mut();
+            }
+        };
+
         // Call the builtin
-        match runmat_runtime::call_builtin(name, &args) {
+        match runmat_runtime::call_builtin(name, &prepared_args) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),

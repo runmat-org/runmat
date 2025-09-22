@@ -10,9 +10,14 @@
 
 use runmat_builtins::{Tensor, Value};
 
+pub mod native_auto;
 pub mod simple_provider;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_backend;
+pub use native_auto::{
+    is_sink, prepare_builtin_args, promote_binary, promote_reduction_args, promote_unary, BinaryOp,
+    ReductionOp, UnaryOp,
+};
 use serde::{Deserialize, Serialize};
 
 /// High-level device kind. Concrete selection is provided by backend.

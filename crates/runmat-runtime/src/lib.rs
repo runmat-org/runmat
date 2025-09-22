@@ -2448,7 +2448,7 @@ fn min_scalar(a: f64, b: f64) -> f64 {
     a.min(b)
 }
 
-#[runmat_macros::runtime_builtin(name = "max")]
+#[runmat_macros::runtime_builtin(name = "max", accel = "reduction")]
 fn max_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
         return max_vector_builtin(a);
@@ -2474,7 +2474,7 @@ fn max_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     Err("max: unsupported arguments".to_string())
 }
 
-#[runmat_macros::runtime_builtin(name = "min")]
+#[runmat_macros::runtime_builtin(name = "min", accel = "reduction")]
 fn min_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
         return min_vector_builtin(a);
@@ -2607,7 +2607,7 @@ fn sum_dim(a: Value, dim: f64) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "sum")]
+#[runmat_macros::runtime_builtin(name = "sum", accel = "reduction")]
 fn sum_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
         return sum_scalar_all(a);
@@ -2780,7 +2780,7 @@ fn mean_dim(a: Value, dim: f64) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "mean")]
+#[runmat_macros::runtime_builtin(name = "mean", accel = "reduction")]
 fn mean_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
         return mean_all_or_cols(a);
@@ -3456,13 +3456,13 @@ fn repmat_nd_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
 
 // -------- Vararg string/IO builtins: sprintf, fprintf, disp, warning --------
 
-#[runmat_macros::runtime_builtin(name = "sprintf")]
+#[runmat_macros::runtime_builtin(name = "sprintf", sink = true)]
 fn sprintf_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
     let s = format_variadic(&fmt, &rest)?;
     Ok(Value::String(s))
 }
 
-#[runmat_macros::runtime_builtin(name = "fprintf")]
+#[runmat_macros::runtime_builtin(name = "fprintf", sink = true)]
 fn fprintf_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
     // MATLAB: fprintf(fid, fmt, ...) or fprintf(fmt, ...)
     let (fmt, args) = match first {
@@ -3485,14 +3485,14 @@ fn fprintf_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
     Ok(Value::Num(s.len() as f64))
 }
 
-#[runmat_macros::runtime_builtin(name = "warning")]
+#[runmat_macros::runtime_builtin(name = "warning", sink = true)]
 fn warning_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
     let s = format_variadic(&fmt, &rest)?;
     eprintln!("Warning: {s}");
     Ok(Value::Num(0.0))
 }
 
-#[runmat_macros::runtime_builtin(name = "disp")]
+#[runmat_macros::runtime_builtin(name = "disp", sink = true)]
 fn disp_builtin(x: Value) -> Result<Value, String> {
     match x {
         Value::String(s) => println!("{s}"),

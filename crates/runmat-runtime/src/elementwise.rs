@@ -75,16 +75,24 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         match (a, b) {
             (Value::GpuTensor(ga), Value::Num(s)) => {
-                if let Ok(hc) = p.scalar_mul(ga, *s) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_mul(ga, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::Num(s), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_mul(gb, *s) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_mul(gb, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::GpuTensor(ga), Value::Int(i)) => {
-                if let Ok(hc) = p.scalar_mul(ga, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_mul(ga, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::Int(i), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_mul(gb, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_mul(gb, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             _ => {}
         }
@@ -200,16 +208,24 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         match (a, b) {
             (Value::GpuTensor(ga), Value::Num(s)) => {
-                if let Ok(hc) = p.scalar_add(ga, *s) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_add(ga, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::Num(s), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_add(gb, *s) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_add(gb, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::GpuTensor(ga), Value::Int(i)) => {
-                if let Ok(hc) = p.scalar_add(ga, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_add(ga, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::Int(i), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_add(gb, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_add(gb, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             _ => {}
         }
@@ -319,16 +335,24 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         match (a, b) {
             (Value::GpuTensor(ga), Value::Num(s)) => {
-                if let Ok(hc) = p.scalar_sub(ga, *s) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_sub(ga, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::GpuTensor(ga), Value::Int(i)) => {
-                if let Ok(hc) = p.scalar_sub(ga, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_sub(ga, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::Num(s), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_rsub(gb, *s) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_rsub(gb, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::Int(i), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_rsub(gb, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_rsub(gb, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             _ => {}
         }
@@ -440,16 +464,24 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         match (a, b) {
             (Value::GpuTensor(ga), Value::Num(s)) => {
-                if let Ok(hc) = p.scalar_div(ga, *s) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_div(ga, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::GpuTensor(ga), Value::Int(i)) => {
-                if let Ok(hc) = p.scalar_div(ga, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_div(ga, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::Num(s), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_rdiv(gb, *s) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_rdiv(gb, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             (Value::Int(i), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_rdiv(gb, i.to_f64()) { return Ok(Value::GpuTensor(hc)); }
+                if let Ok(hc) = p.scalar_rdiv(gb, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
             }
             _ => {}
         }

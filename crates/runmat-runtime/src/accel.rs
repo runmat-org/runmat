@@ -46,7 +46,11 @@ fn gpu_array_builtin(x: Value) -> Result<Value, String> {
         }
         Value::LogicalArray(la) => {
             // Convert logical to numeric tensor (0/1) then upload
-            let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }).collect();
+            let data: Vec<f64> = la
+                .data
+                .iter()
+                .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                .collect();
             let t = Tensor::new(data, la.shape.clone()).map_err(|e| format!("gpuArray: {e}"))?;
             let view = runmat_accelerate_api::HostTensorView {
                 data: &t.data,
@@ -94,11 +98,17 @@ fn gpu_device_builtin() -> Result<Value, String> {
         // Prefer structured info when available
         let info = p.device_info_struct();
         let mut fields = std::collections::HashMap::new();
-        fields.insert("device_id".to_string(), Value::Int(runmat_builtins::IntValue::U32(info.device_id)));
+        fields.insert(
+            "device_id".to_string(),
+            Value::Int(runmat_builtins::IntValue::U32(info.device_id)),
+        );
         fields.insert("name".to_string(), Value::String(info.name));
         fields.insert("vendor".to_string(), Value::String(info.vendor));
         if let Some(bytes) = info.memory_bytes {
-            fields.insert("memory_bytes".to_string(), Value::Int(runmat_builtins::IntValue::U64(bytes)));
+            fields.insert(
+                "memory_bytes".to_string(),
+                Value::Int(runmat_builtins::IntValue::U64(bytes)),
+            );
         }
         if let Some(backend) = info.backend {
             fields.insert("backend".to_string(), Value::String(backend));
@@ -138,5 +148,3 @@ fn gpu_info_builtin() -> Result<Value, String> {
         Ok(Value::String("GPU[no provider]".to_string()))
     }
 }
-
-

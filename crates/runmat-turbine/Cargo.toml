@@ -21,7 +21,12 @@ runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-gc = { workspace = true }
 runmat-hir = { workspace = true }
+runmat-accelerate = { workspace = true, optional = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }
-runmat-parser = { workspace = true } 
+runmat-parser = { workspace = true }
+
+[features]
+default = ["native-accel"]
+native-accel = ["runmat-ignition/native-accel", "runmat-accelerate"]

@@ -7,6 +7,61 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
+#[derive(Clone, Copy)]
+enum AutoBinaryOp {
+    Elementwise,
+    MatMul,
+}
+
+#[derive(Clone, Copy)]
+enum AutoUnaryOp {
+    Transpose,
+}
+
+#[cfg(feature = "native-accel")]
+fn accel_promote_binary(op: AutoBinaryOp, a: &Value, b: &Value) -> Result<(Value, Value), String> {
+    use runmat_accelerate::{promote_binary, BinaryOp};
+    let mapped = match op {
+        AutoBinaryOp::Elementwise => BinaryOp::Elementwise,
+        AutoBinaryOp::MatMul => BinaryOp::MatMul,
+    };
+    promote_binary(mapped, a, b).map_err(|e| e.to_string())
+}
+
+#[cfg(not(feature = "native-accel"))]
+fn accel_promote_binary(_op: AutoBinaryOp, a: &Value, b: &Value) -> Result<(Value, Value), String> {
+    Ok((a.clone(), b.clone()))
+}
+
+#[cfg(feature = "native-accel")]
+fn accel_promote_unary(op: AutoUnaryOp, value: &Value) -> Result<Value, String> {
+    use runmat_accelerate::{promote_unary, UnaryOp};
+    let mapped = match op {
+        AutoUnaryOp::Transpose => UnaryOp::Transpose,
+    };
+    promote_unary(mapped, value).map_err(|e| e.to_string())
+}
+
+#[cfg(not(feature = "native-accel"))]
+fn accel_promote_unary(_op: AutoUnaryOp, value: &Value) -> Result<Value, String> {
+    Ok(value.clone())
+}
+
+#[cfg(feature = "native-accel")]
+fn accel_prepare_args(name: &str, args: &[Value]) -> Result<Vec<Value>, String> {
+    runmat_accelerate::prepare_builtin_args(name, args).map_err(|e| e.to_string())
+}
+
+#[cfg(not(feature = "native-accel"))]
+fn accel_prepare_args(_name: &str, args: &[Value]) -> Result<Vec<Value>, String> {
+    Ok(args.to_vec())
+}
+
+fn call_builtin_auto(name: &str, args: &[Value]) -> Result<Value, String> {
+    let prepared = accel_prepare_args(name, args)?;
+    runmat_runtime::call_builtin(name, &prepared)
+}
+
 // Namespace used for error identifiers (e.g., "MATLAB:..." or "RunMat:...")
 const ERROR_NAMESPACE: &str = "MATLAB";
 
@@ -337,7 +392,9 @@ pub fn interpret_with_vars(
                         }
                     }
                     _ => {
-                        let v = runmat_runtime::elementwise_add(&a, &b)?;
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        let v = runmat_runtime::elementwise_add(&a_acc, &b_acc)?;
                         stack.push(v)
                     }
                 }
@@ -371,7 +428,9 @@ pub fn interpret_with_vars(
                         }
                     }
                     _ => {
-                        let v = runmat_runtime::elementwise_sub(&a, &b)?;
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        let v = runmat_runtime::elementwise_sub(&a_acc, &b_acc)?;
                         stack.push(v)
                     }
                 }
@@ -413,7 +472,8 @@ pub fn interpret_with_vars(
                         }
                     }
                     _ => {
-                        let v = runmat_runtime::matrix::value_matmul(&a, &b)?;
+                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b)?;
+                        let v = runmat_runtime::matrix::value_matmul(&a_acc, &b_acc)?;
                         stack.push(v)
                     }
                 }
@@ -435,7 +495,9 @@ pub fn interpret_with_vars(
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = runmat_runtime::elementwise_div(&a, &b)?;
+                                let (a_acc, b_acc) =
+                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                                let v = runmat_runtime::elementwise_div(&a_acc, &b_acc)?;
                                 stack.push(v)
                             }
                         }
@@ -449,13 +511,17 @@ pub fn interpret_with_vars(
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = runmat_runtime::elementwise_div(&a, &b)?;
+                                let (a_acc, b_acc) =
+                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                                let v = runmat_runtime::elementwise_div(&a_acc, &b_acc)?;
                                 stack.push(v)
                             }
                         }
                     }
                     _ => {
-                        let v = runmat_runtime::elementwise_div(&a, &b)?;
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        let v = runmat_runtime::elementwise_div(&a_acc, &b_acc)?;
                         stack.push(v)
                     }
                 }
@@ -488,7 +554,9 @@ pub fn interpret_with_vars(
                         }
                     }
                     _ => {
-                        let v = runmat_runtime::power(&a, &b)?;
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        let v = runmat_runtime::power(&a_acc, &b_acc)?;
                         stack.push(v)
                     }
                 }
@@ -533,7 +601,8 @@ pub fn interpret_with_vars(
                 let value = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let result = runmat_runtime::transpose(value)?;
+                let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value)?;
+                let result = runmat_runtime::transpose(promoted)?;
                 stack.push(result);
             }
             Instr::ElemMul => {
@@ -552,7 +621,11 @@ pub fn interpret_with_vars(
                         ];
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
-                            Err(_) => stack.push(runmat_runtime::elementwise_mul(&a, &b)?),
+                            Err(_) => {
+                                let (a_acc, b_acc) =
+                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                                stack.push(runmat_runtime::elementwise_mul(&a_acc, &b_acc)?)
+                            }
                         }
                     }
                     (_, Value::Object(obj)) => {
@@ -563,10 +636,18 @@ pub fn interpret_with_vars(
                         ];
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
-                            Err(_) => stack.push(runmat_runtime::elementwise_mul(&a, &b)?),
+                            Err(_) => {
+                                let (a_acc, b_acc) =
+                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                                stack.push(runmat_runtime::elementwise_mul(&a_acc, &b_acc)?)
+                            }
                         }
                     }
-                    _ => stack.push(runmat_runtime::elementwise_mul(&a, &b)?),
+                    _ => {
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        stack.push(runmat_runtime::elementwise_mul(&a_acc, &b_acc)?)
+                    }
                 }
             }
             Instr::ElemDiv => {
@@ -585,7 +666,11 @@ pub fn interpret_with_vars(
                         ];
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
-                            Err(_) => stack.push(runmat_runtime::elementwise_div(&a, &b)?),
+                            Err(_) => {
+                                let (a_acc, b_acc) =
+                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                                stack.push(runmat_runtime::elementwise_div(&a_acc, &b_acc)?)
+                            }
                         }
                     }
                     (_, Value::Object(obj)) => {
@@ -596,10 +681,18 @@ pub fn interpret_with_vars(
                         ];
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
-                            Err(_) => stack.push(runmat_runtime::elementwise_div(&a, &b)?),
+                            Err(_) => {
+                                let (a_acc, b_acc) =
+                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                                stack.push(runmat_runtime::elementwise_div(&a_acc, &b_acc)?)
+                            }
                         }
                     }
-                    _ => stack.push(runmat_runtime::elementwise_div(&a, &b)?),
+                    _ => {
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        stack.push(runmat_runtime::elementwise_div(&a_acc, &b_acc)?)
+                    }
                 }
             }
             Instr::ElemPow => {
@@ -621,10 +714,18 @@ pub fn interpret_with_vars(
                         ];
                         match call_builtin("power", &args) {
                             Ok(v) => stack.push(v),
-                            Err(_) => stack.push(runmat_runtime::elementwise_pow(&a, &b)?),
+                            Err(_) => {
+                                let (a_acc, b_acc) =
+                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                                stack.push(runmat_runtime::elementwise_pow(&a_acc, &b_acc)?)
+                            }
                         }
                     }
-                    _ => stack.push(runmat_runtime::elementwise_pow(&a, &b)?),
+                    _ => {
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        stack.push(runmat_runtime::elementwise_pow(&a_acc, &b_acc)?)
+                    }
                 }
             }
             Instr::ElemLeftDiv => {
@@ -643,7 +744,11 @@ pub fn interpret_with_vars(
                         ];
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
-                            Err(_) => stack.push(runmat_runtime::elementwise_div(&b, &a)?),
+                            Err(_) => {
+                                let (b_acc, a_acc) =
+                                    accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
+                                stack.push(runmat_runtime::elementwise_div(&b_acc, &a_acc)?)
+                            }
                         }
                     }
                     (_, Value::Object(obj)) => {
@@ -654,10 +759,18 @@ pub fn interpret_with_vars(
                         ];
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
-                            Err(_) => stack.push(runmat_runtime::elementwise_div(&b, &a)?),
+                            Err(_) => {
+                                let (b_acc, a_acc) =
+                                    accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
+                                stack.push(runmat_runtime::elementwise_div(&b_acc, &a_acc)?)
+                            }
                         }
                     }
-                    _ => stack.push(runmat_runtime::elementwise_div(&b, &a)?),
+                    _ => {
+                        let (b_acc, a_acc) =
+                            accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
+                        stack.push(runmat_runtime::elementwise_div(&b_acc, &a_acc)?)
+                    }
                 }
             }
             Instr::LessEqual => {
@@ -1190,39 +1303,38 @@ pub fn interpret_with_vars(
                     );
                 }
                 args.reverse();
-                match call_builtin(&name, &args) {
+                let prepared_primary = accel_prepare_args(&name, &args)?;
+                match runmat_runtime::call_builtin(&name, &prepared_primary) {
                     Ok(result) => stack.push(result),
                     Err(e) => {
                         // Specific-import matches: import pkg.foo; name == foo
-                        let mut specific_matches: Vec<String> = Vec::new();
+                        let mut specific_matches: Vec<(String, Vec<Value>, Value)> = Vec::new();
                         for (path, wildcard) in &imports {
                             if *wildcard {
                                 continue;
                             }
                             if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
                                 let qual = path.join(".");
-                                if call_builtin(&qual, &args).is_ok() {
-                                    specific_matches.push(qual);
+                                let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
+                                match runmat_runtime::call_builtin(&qual, &qual_args) {
+                                    Ok(value) => specific_matches.push((qual, qual_args, value)),
+                                    Err(_) => {}
                                 }
                             }
                         }
                         if specific_matches.len() > 1 {
-                            vm_bail!(format!(
-                                "ambiguous builtin '{}' via imports: {}",
-                                name,
-                                specific_matches.join(", ")
-                            ));
+                            let msg = specific_matches
+                                .iter()
+                                .map(|(q, _, _)| q.clone())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            vm_bail!(format!("ambiguous builtin '{}' via imports: {}", name, msg));
                         }
-                        if let Some(qual) = specific_matches.first() {
-                            match call_builtin(qual, &args) {
-                                Ok(v) => {
-                                    stack.push(v);
-                                }
-                                Err(e2) => vm_bail!(e2),
-                            }
+                        if let Some((_, _, value)) = specific_matches.pop() {
+                            stack.push(value);
                         } else {
                             // Wildcard-import matches: import pkg.*; try pkg.name
-                            let mut wildcard_matches: Vec<String> = Vec::new();
+                            let mut wildcard_matches: Vec<(String, Vec<Value>, Value)> = Vec::new();
                             for (path, wildcard) in &imports {
                                 if !*wildcard {
                                     continue;
@@ -1239,24 +1351,25 @@ pub fn interpret_with_vars(
                                 }
                                 qual.push('.');
                                 qual.push_str(&name);
-                                if call_builtin(&qual, &args).is_ok() {
-                                    wildcard_matches.push(qual);
+                                let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
+                                match runmat_runtime::call_builtin(&qual, &qual_args) {
+                                    Ok(value) => wildcard_matches.push((qual, qual_args, value)),
+                                    Err(_) => {}
                                 }
                             }
                             if wildcard_matches.len() > 1 {
+                                let msg = wildcard_matches
+                                    .iter()
+                                    .map(|(q, _, _)| q.clone())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
                                 vm_bail!(format!(
                                     "ambiguous builtin '{}' via wildcard imports: {}",
-                                    name,
-                                    wildcard_matches.join(", ")
+                                    name, msg
                                 ));
                             }
-                            if let Some(qual) = wildcard_matches.first() {
-                                match call_builtin(qual, &args) {
-                                    Ok(v) => {
-                                        stack.push(v);
-                                    }
-                                    Err(e2) => vm_bail!(e2),
-                                }
+                            if let Some((_, _, value)) = wildcard_matches.pop() {
+                                stack.push(value);
                             } else {
                                 // Special-case: rethrow() without explicit e uses last caught
                                 if name == "rethrow" && args.is_empty() {
@@ -1397,7 +1510,7 @@ pub fn interpret_with_vars(
                 };
                 let mut args = fixed;
                 args.extend(expanded.into_iter());
-                match call_builtin(&name, &args) {
+                match call_builtin_auto(&name, &args) {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
                 }
@@ -1514,7 +1627,7 @@ pub fn interpret_with_vars(
                 let mut args = before;
                 args.extend(expanded.into_iter());
                 args.extend(after.into_iter());
-                match call_builtin(&name, &args) {
+                match call_builtin_auto(&name, &args) {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
                 }
@@ -1667,7 +1780,7 @@ pub fn interpret_with_vars(
                 }
                 temp.reverse();
                 args.extend(temp.into_iter());
-                match call_builtin(&name, &args) {
+                match call_builtin_auto(&name, &args) {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
                 }

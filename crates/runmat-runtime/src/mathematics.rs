@@ -30,7 +30,8 @@ fn div_complex(a_re: f64, a_im: f64, b_re: f64, b_im: f64) -> (f64, f64) {
     summary = "Sine of input in radians (element-wise).",
     examples = "y = sin(pi/2)",
     keywords = "sine,trig,angle",
-    related = "cos,tan"
+    related = "cos,tan",
+    accel = "unary"
 )]
 fn sin_builtin(x: Value) -> Result<Value, String> {
     match x {
@@ -86,7 +87,8 @@ fn sin_builtin(x: Value) -> Result<Value, String> {
     summary = "Cosine of input in radians (element-wise).",
     examples = "y = cos(0)",
     keywords = "cosine,trig,angle",
-    related = "sin,tan"
+    related = "sin,tan",
+    accel = "unary"
 )]
 fn cos_builtin(x: Value) -> Result<Value, String> {
     match x {
@@ -270,7 +272,7 @@ fn ln_builtin(x: f64) -> Result<f64, String> {
     }
 }
 
-#[runtime_builtin(name = "exp")]
+#[runtime_builtin(name = "exp", accel = "unary")]
 fn exp_builtin(x: Value) -> Result<Value, String> {
     match x {
         Value::GpuTensor(h) => {
@@ -325,7 +327,7 @@ fn pow_builtin(base: f64, exponent: f64) -> Result<f64, String> {
 }
 
 // Basic math functions
-#[runtime_builtin(name = "abs")]
+#[runtime_builtin(name = "abs", accel = "unary")]
 fn abs_runtime_builtin(x: Value) -> Result<Value, String> {
     match x {
         Value::GpuTensor(h) => {
@@ -519,7 +521,7 @@ fn var_builtin(matrix: Tensor) -> Result<f64, String> {
     Ok(variance)
 }
 
-#[runtime_builtin(name = "sqrt")]
+#[runtime_builtin(name = "sqrt", accel = "unary")]
 fn sqrt_builtin(x: Value) -> Result<Value, String> {
     match x {
         Value::GpuTensor(h) => {

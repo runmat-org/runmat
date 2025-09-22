@@ -293,7 +293,7 @@ fn matrix_scalar_mul_complex_tensor(
     runmat_builtins::ComplexTensor::new_2d(data, a.rows, a.cols).unwrap()
 }
 
-#[runtime_builtin(name = "mtimes")]
+#[runtime_builtin(name = "mtimes", accel = "matmul")]
 fn mtimes_builtin(
     a: runmat_builtins::Value,
     b: runmat_builtins::Value,

@@ -97,22 +97,31 @@ fn unary_ops_on_gpu_handles() {
     // sin
     let s = runmat_runtime::call_builtin("sin", &[g.clone()]).unwrap();
     let s = runmat_runtime::call_builtin("gather", &[s]).unwrap();
-    if let Value::Tensor(ts) = s { assert_eq!(ts.rows(), 2); assert_eq!(ts.cols(), 2); }
+    if let Value::Tensor(ts) = s {
+        assert_eq!(ts.rows(), 2);
+        assert_eq!(ts.cols(), 2);
+    }
 
     // abs
     let a = runmat_runtime::call_builtin("abs", &[g.clone()]).unwrap();
     let a = runmat_runtime::call_builtin("gather", &[a]).unwrap();
-    if let Value::Tensor(ta) = a { assert_eq!(ta.data, vec![0.0, 1.0, 4.0, 9.0]); }
+    if let Value::Tensor(ta) = a {
+        assert_eq!(ta.data, vec![0.0, 1.0, 4.0, 9.0]);
+    }
 
     // exp
     let e = runmat_runtime::call_builtin("exp", &[g.clone()]).unwrap();
     let e = runmat_runtime::call_builtin("gather", &[e]).unwrap();
-    if let Value::Tensor(te) = e { assert!((te.data[1] - std::f64::consts::E).abs() < 1e-12); }
+    if let Value::Tensor(te) = e {
+        assert!((te.data[1] - std::f64::consts::E).abs() < 1e-12);
+    }
 
     // sqrt
     let q = runmat_runtime::call_builtin("sqrt", &[g]).unwrap();
     let q = runmat_runtime::call_builtin("gather", &[q]).unwrap();
-    if let Value::Tensor(tq) = q { assert_eq!(tq.data, vec![0.0, 1.0, 2.0, 3.0]); }
+    if let Value::Tensor(tq) = q {
+        assert_eq!(tq.data, vec![0.0, 1.0, 2.0, 3.0]);
+    }
 }
 
 #[test]
@@ -123,20 +132,32 @@ fn gpu_scalar_elementwise_and_sum_remain_on_device() {
 
     // G + 2 stays on device
     let g2 = runmat_runtime::elementwise::elementwise_add(&g, &Value::Num(2.0)).unwrap();
-    if let Value::GpuTensor(_) = g2 { } else { panic!("expected gpu result"); }
+    if let Value::GpuTensor(_) = g2 {
+    } else {
+        panic!("expected gpu result");
+    }
 
     // sum(G) returns gpu handle per our provider implementation
     let s = runmat_runtime::call_builtin("sum", &[g2.clone()]).unwrap();
-    if let Value::GpuTensor(_) = s { } else { panic!("expected gpu sum result"); }
+    if let Value::GpuTensor(_) = s {
+    } else {
+        panic!("expected gpu sum result");
+    }
 
     // Gather and verify values: original + 2 then sum -> (3+4+5+6)=18
     let gsum = runmat_runtime::call_builtin("gather", &[s]).unwrap();
-    if let Value::Tensor(ts) = gsum { assert_eq!(ts.data, vec![18.0]); } else { panic!("expected tensor"); }
+    if let Value::Tensor(ts) = gsum {
+        assert_eq!(ts.data, vec![18.0]);
+    } else {
+        panic!("expected tensor");
+    }
 
     // sum(G,1) shape 1x2
     let sdim = runmat_runtime::call_builtin("sum", &[g2, Value::Num(1.0)]).unwrap();
     let sdim = runmat_runtime::call_builtin("gather", &[sdim]).unwrap();
-    if let Value::Tensor(t1) = sdim { assert_eq!(t1.shape, vec![1,2]); }
+    if let Value::Tensor(t1) = sdim {
+        assert_eq!(t1.shape, vec![1, 2]);
+    }
 }
 
 #[test]
@@ -147,19 +168,32 @@ fn left_scalar_and_transpose_on_device() {
 
     // s - G
     let r = runmat_runtime::elementwise::elementwise_sub(&Value::Num(10.0), &g).unwrap();
-    if let Value::GpuTensor(_) = r { } else { panic!("expected gpu result"); }
+    if let Value::GpuTensor(_) = r {
+    } else {
+        panic!("expected gpu result");
+    }
     let r_host = runmat_runtime::call_builtin("gather", &[r]).unwrap();
-    if let Value::Tensor(tr) = r_host { assert_eq!(tr.data, vec![9.0, 8.0, 7.0, 6.0]); }
+    if let Value::Tensor(tr) = r_host {
+        assert_eq!(tr.data, vec![9.0, 8.0, 7.0, 6.0]);
+    }
 
     // s ./ G
     let q = runmat_runtime::elementwise::elementwise_div(&Value::Num(8.0), &g).unwrap();
-    if let Value::GpuTensor(_) = q { } else { panic!("expected gpu result"); }
+    if let Value::GpuTensor(_) = q {
+    } else {
+        panic!("expected gpu result");
+    }
 
     // transpose(G)
     let gt = runmat_runtime::transpose(g).unwrap();
-    if let Value::GpuTensor(_) = gt { } else { panic!("expected gpu result"); }
+    if let Value::GpuTensor(_) = gt {
+    } else {
+        panic!("expected gpu result");
+    }
     let gt_host = runmat_runtime::call_builtin("gather", &[gt]).unwrap();
-    if let Value::Tensor(tt) = gt_host { assert_eq!(tt.shape, vec![2,2]); }
+    if let Value::Tensor(tt) = gt_host {
+        assert_eq!(tt.shape, vec![2, 2]);
+    }
 }
 
 #[test]
@@ -170,9 +204,14 @@ fn reductions_mean_min_max_on_device() {
 
     // mean(G) -> gpu handle, then gather ~ average of all elements = (3+1+4+2)/4 = 2.5
     let m = runmat_runtime::call_builtin("mean", &[g.clone()]).unwrap();
-    if let Value::GpuTensor(_) = m { } else { panic!("expected gpu handle"); }
+    if let Value::GpuTensor(_) = m {
+    } else {
+        panic!("expected gpu handle");
+    }
     let m_host = runmat_runtime::call_builtin("gather", &[m]).unwrap();
-    if let Value::Tensor(tm) = m_host { assert_eq!(tm.data, vec![2.5]); }
+    if let Value::Tensor(tm) = m_host {
+        assert_eq!(tm.data, vec![2.5]);
+    }
 
     // max(G) and min(G)
     let mx = runmat_runtime::call_builtin("max", &[g.clone()]).unwrap();
@@ -185,7 +224,8 @@ fn reductions_mean_min_max_on_device() {
     let mn_dim = runmat_runtime::call_builtin("min", &[g.clone(), Value::Num(2.0)]).unwrap();
     // Gather each cell element by unpacking via internal helper: we re-use gather on each element after converting to cell.
     // Since tests rely on correctness after gather of the whole cell, we simply ensure call does not crash and shapes are sensible.
-    let _ = mx_dim; let _ = mn_dim;
+    let _ = mx_dim;
+    let _ = mn_dim;
 }
 
 #[test]

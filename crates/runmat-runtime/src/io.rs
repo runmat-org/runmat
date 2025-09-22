@@ -7,7 +7,7 @@ use runmat_macros::runtime_builtin;
 use std::sync::{Mutex, OnceLock};
 
 /// Display a string to the console (language fprintf with single string argument)
-#[runtime_builtin(name = "fprintf")]
+#[runtime_builtin(name = "fprintf", sink = true)]
 pub fn fprintf_string_builtin(format_str: String) -> Result<f64, String> {
     print!("{format_str}");
     use std::io::{self, Write};
@@ -79,7 +79,7 @@ pub fn fprintf_format2_builtin(
 }
 
 /// Display a string with automatic newline (language disp)
-#[runtime_builtin(name = "disp")]
+#[runtime_builtin(name = "disp", sink = true)]
 pub fn disp_string_builtin(s: String) -> Result<f64, String> {
     println!("{s}");
     Ok(0.0)

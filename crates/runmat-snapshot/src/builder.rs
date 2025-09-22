@@ -1192,6 +1192,8 @@ mod tests {
             vec![],
             runmat_builtins::Type::Num,
             |_| Ok(runmat_builtins::Value::Num(0.0)),
+            &[],
+            false,
         );
 
         let metadata = builder.analyze_builtin_function(&builtin).unwrap();
