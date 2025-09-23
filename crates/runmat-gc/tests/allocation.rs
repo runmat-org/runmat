@@ -177,8 +177,7 @@ fn test_nested_cell_allocation() {
 
         // Create nested cell arrays
         let inner_cell = Value::Cell(
-            runmat_builtins::CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2)
-                .unwrap(),
+            runmat_builtins::CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap(),
         );
 
         let outer_cell = Value::Cell(

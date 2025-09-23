@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, Weak};
 
 use once_cell::sync::Lazy;
+use runmat_builtins::Value;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::{
@@ -183,6 +184,8 @@ pub struct FusionGroupPlan {
     pub group: FusionGroup,
     pub operations: Vec<FusionOp>,
     pub inputs: Vec<ValueId>,
+    pub stack_pattern: Vec<usize>,
+    pub constants: HashMap<usize, Value>,
     pub output: Option<ValueId>,
     pub kernel: FusionKernelSpec,
 }
@@ -337,8 +340,10 @@ impl From<Vec<FusionGroupPlan>> for FusionPlan {
 impl FusionGroupPlan {
     fn new(index: usize, group: FusionGroup, graph: &AccelGraph) -> Self {
         let node_set: HashSet<NodeId> = group.nodes.iter().copied().collect();
-        let mut seen_inputs: HashSet<ValueId> = HashSet::new();
+        let mut seen_inputs: HashMap<ValueId, usize> = HashMap::new();
         let mut inputs: Vec<ValueId> = Vec::new();
+        let mut stack_pattern: Vec<usize> = Vec::new();
+        let mut constants: HashMap<usize, Value> = HashMap::new();
         let mut operations = Vec::new();
         let mut output: Option<ValueId> = None;
 
@@ -347,19 +352,34 @@ impl FusionGroupPlan {
                 continue;
             };
             for input in &node.inputs {
-                let external = match graph.value(*input) {
-                    Some(info) => match info.origin {
+                let (external, is_variable, maybe_constant) = match graph.value(*input) {
+                    Some(info) => match &info.origin {
                         ValueOrigin::NodeOutput { node: origin, .. }
-                            if node_set.contains(&origin) =>
+                            if node_set.contains(origin) =>
                         {
-                            false
+                            (false, false, None)
                         }
-                        _ => true,
+                        ValueOrigin::Variable { .. } => (true, true, None),
+                        ValueOrigin::Constant => (true, false, info.constant.clone()),
+                        _ => (true, false, None),
                     },
-                    None => true,
+                    None => (true, false, None),
                 };
-                if external && seen_inputs.insert(*input) {
-                    inputs.push(*input);
+                if external {
+                    let input_idx = if let Some(idx) = seen_inputs.get(input) {
+                        *idx
+                    } else {
+                        let idx = inputs.len();
+                        inputs.push(*input);
+                        seen_inputs.insert(*input, idx);
+                        idx
+                    };
+
+                    if let Some(constant) = maybe_constant.clone() {
+                        constants.insert(input_idx, constant);
+                    } else if !is_variable {
+                        stack_pattern.push(input_idx);
+                    }
                 }
             }
 
@@ -392,6 +412,8 @@ impl FusionGroupPlan {
             index,
             group,
             operations,
+            stack_pattern,
+            constants,
             inputs,
             output,
             kernel: FusionKernelSpec::new(kind, true),
@@ -404,6 +426,15 @@ impl FusionGroupPlan {
 
     pub fn element_count(&self) -> Option<usize> {
         self.group.element_count()
+    }
+
+    pub fn constant_shape(&self, len: usize) -> Vec<usize> {
+        match &self.group.shape {
+            ShapeInfo::Tensor(dims) if !dims.is_empty() && dims.iter().all(|dim| dim.is_some()) => {
+                dims.iter().map(|dim| dim.unwrap()).collect()
+            }
+            _ => vec![len],
+        }
     }
 
     pub fn generate_wgsl(&self, scalar_ty: &str) -> Option<String> {
@@ -435,7 +466,7 @@ impl FusionGroupPlan {
                     inputs,
                     output,
                 } => {
-                    let expr = builtin_expr(name, inputs, &exprs)?;
+                    let expr = builtin_expr(name, inputs, &exprs, scalar_ty)?;
                     body.push_str(&format!("    let {tmp_name}: {scalar_ty} = {expr};\n"));
                     if let Some(out) = output {
                         exprs.insert(*out, tmp_name.clone());
@@ -542,6 +573,7 @@ fn builtin_expr(
     name: &str,
     inputs: &[ValueId],
     exprs: &HashMap<ValueId, String>,
+    scalar_ty: &str,
 ) -> Option<String> {
     let func = match name.to_ascii_lowercase().as_str() {
         "sin" => "sin",
@@ -550,17 +582,61 @@ fn builtin_expr(
         "asin" => "asin",
         "acos" => "acos",
         "atan" => "atan",
+        "atan2" => return builtin_binary("atan2", inputs, exprs),
         "sinh" => "sinh",
         "cosh" => "cosh",
         "tanh" => "tanh",
         "exp" => "exp",
         "log" => "log",
+        "log2" => "log2",
         "sqrt" => "sqrt",
         "abs" => "abs",
-        _ => return None,
+        "exp2" => "exp2",
+        "floor" => "floor",
+        "ceil" => "ceil",
+        "round" => "round",
+        "trunc" => "trunc",
+        _ => {
+            return match name.to_ascii_lowercase().as_str() {
+                "log10" => {
+                    let arg = exprs.get(inputs.get(0)?).cloned()?;
+                    let constant = cast_literal(scalar_ty, "0.4342944819032518");
+                    Some(format!("(log({arg}) * {constant})"))
+                }
+                "log1p" => {
+                    let arg = exprs.get(inputs.get(0)?).cloned()?;
+                    let one = cast_literal(scalar_ty, "1.0");
+                    Some(format!("log({arg} + {one})"))
+                }
+                "expm1" => {
+                    let arg = exprs.get(inputs.get(0)?).cloned()?;
+                    let one = cast_literal(scalar_ty, "1.0");
+                    Some(format!("(exp({arg}) - {one})"))
+                }
+                _ => None,
+            }
+        }
     };
     let arg = exprs.get(inputs.get(0)?).cloned()?;
     Some(format!("{func}({arg})"))
+}
+
+fn builtin_binary(
+    func: &str,
+    inputs: &[ValueId],
+    exprs: &HashMap<ValueId, String>,
+) -> Option<String> {
+    let lhs = exprs.get(inputs.get(0)?).cloned()?;
+    let rhs = exprs.get(inputs.get(1)?).cloned()?;
+    Some(format!("{func}({lhs}, {rhs})"))
+}
+
+fn cast_literal(scalar_ty: &str, literal: &str) -> String {
+    if scalar_ty == "f64" {
+        format!("{scalar_ty}({literal})")
+    } else {
+        literal.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -568,9 +644,10 @@ mod tests {
     use super::*;
     use crate::graph::{
         AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan,
-        PrimitiveOp, ValueInfo, ValueOrigin, VarKind,
+        PrimitiveOp, ValueId, ValueInfo, ValueOrigin, VarKind,
     };
     use runmat_builtins::Type;
+    use std::collections::HashMap as StdHashMap;
 
     fn simple_elementwise_graph() -> AccelGraph {
         let mut values = Vec::new();
@@ -583,6 +660,7 @@ mod tests {
             },
             ty: Type::tensor(),
             shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            constant: None,
         });
         // Node 0 output value (value id 1)
         values.push(ValueInfo {
@@ -590,6 +668,7 @@ mod tests {
             origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
             ty: Type::tensor(),
             shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            constant: None,
         });
         // Node 1 output value (value id 2)
         values.push(ValueInfo {
@@ -597,6 +676,7 @@ mod tests {
             origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
             ty: Type::tensor(),
             shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            constant: None,
         });
 
         let node0 = AccelNode {
@@ -645,5 +725,95 @@ mod tests {
         let wgsl = group_plan.generate_wgsl("f32").expect("wgsl");
         assert!(wgsl.contains("@compute"));
         assert!(group_plan.group.element_count().is_some());
+    }
+
+    #[test]
+    fn stack_pattern_tracks_repeated_constants() {
+        let mut values = Vec::new();
+        values.push(ValueInfo {
+            id: 0,
+            origin: ValueOrigin::Variable {
+                kind: VarKind::Global,
+                index: 0,
+            },
+            ty: Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(4)]),
+            constant: None,
+        });
+        values.push(ValueInfo {
+            id: 1,
+            origin: ValueOrigin::Constant,
+            ty: Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(4)]),
+            constant: None,
+        });
+        values.push(ValueInfo {
+            id: 2,
+            origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+            ty: Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(4)]),
+            constant: None,
+        });
+        values.push(ValueInfo {
+            id: 3,
+            origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
+            ty: Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(4)]),
+            constant: None,
+        });
+
+        let node0 = AccelNode {
+            id: 0,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::Add),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![0, 1],
+            outputs: vec![2],
+            span: InstrSpan { start: 5, end: 5 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        let node1 = AccelNode {
+            id: 1,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::Add),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![2, 1],
+            outputs: vec![3],
+            span: InstrSpan { start: 6, end: 6 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+
+        let graph = AccelGraph {
+            nodes: vec![node0, node1],
+            values,
+        };
+
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        let group_plan = &plan.groups[0];
+        assert_eq!(group_plan.inputs.len(), 2);
+        assert_eq!(group_plan.stack_pattern.len(), 2);
+        assert!(group_plan.stack_pattern.iter().all(|idx| *idx == 1));
+    }
+
+    #[test]
+    fn builtin_expr_supports_extended_set() {
+        let mut exprs: StdHashMap<ValueId, String> = StdHashMap::new();
+        exprs.insert(0, "v0".to_string());
+        exprs.insert(1, "v1".to_string());
+
+        let log1p = super::builtin_expr("log1p", &[0], &exprs, "f32");
+        assert!(log1p.is_some());
+
+        let log10 = super::builtin_expr("log10", &[0], &exprs, "f64");
+        assert!(log10.unwrap().contains("log"));
+
+        let expm1 = super::builtin_expr("expm1", &[0], &exprs, "f32");
+        assert!(expm1.unwrap().contains("exp"));
+
+        let floor = super::builtin_expr("floor", &[0], &exprs, "f32");
+        assert_eq!(floor.unwrap(), "floor(v0)");
+
+        let atan2 = super::builtin_expr("atan2", &[0, 1], &exprs, "f32");
+        assert_eq!(atan2.unwrap(), "atan2(v0, v1)");
     }
 }

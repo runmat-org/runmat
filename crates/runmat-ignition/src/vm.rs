@@ -7540,7 +7540,14 @@ fn try_execute_fusion_group(
     context: &ExecutionContext,
 ) -> Result<Value, String> {
     let mut inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
-    let mut stack_entries: Vec<(usize, bool)> = Vec::new();
+
+    for (idx, value) in &plan.constants {
+        if let Some(slot) = inputs.get_mut(*idx) {
+            if slot.is_none() {
+                *slot = Some(value.clone());
+            }
+        }
+    }
 
     let describe_value = |value: &Value| -> &'static str {
         match value {
@@ -7600,14 +7607,12 @@ fn try_execute_fusion_group(
                 );
                 inputs[idx] = Some(value);
             }
-            ValueOrigin::Constant | ValueOrigin::NodeOutput { .. } | ValueOrigin::Unknown => {
-                stack_entries.push((idx, true));
-            }
+            ValueOrigin::Constant | ValueOrigin::NodeOutput { .. } | ValueOrigin::Unknown => {}
         }
     }
 
     if log::log_enabled!(log::Level::Debug) {
-        let stack_needed_preview = stack_entries.len();
+        let stack_needed_preview = plan.stack_pattern.len();
         let stack_snapshot: Vec<&Value> = stack
             .iter()
             .rev()
@@ -7632,17 +7637,17 @@ fn try_execute_fusion_group(
             })
             .collect();
         log::debug!(
-            "fusion group {} gather: stack_depth={} stack_needed={} stack_kinds={:?} entries={:?} inputs={:?}",
+            "fusion group {} gather: stack_depth={} stack_needed={} stack_kinds={:?} pattern={:?} inputs={:?}",
             plan.index,
             stack.len(),
             stack_needed_preview,
             stack_kinds,
-            stack_entries,
+            &plan.stack_pattern,
             input_meta
         );
     }
 
-    let stack_needed = stack_entries.len();
+    let stack_needed = plan.stack_pattern.len();
     if stack.len() < stack_needed {
         return Err("fusion: stack underflow gathering inputs".to_string());
     }
@@ -7654,21 +7659,15 @@ fn try_execute_fusion_group(
     debug_assert_eq!(slice.len(), stack_needed);
 
     let mut consumed: Vec<Value> = Vec::new();
-    for (offset, (input_idx, should_consume)) in stack_entries.into_iter().enumerate() {
+    for (offset, input_idx) in plan.stack_pattern.iter().enumerate() {
         let val = slice
             .get(offset)
             .cloned()
             .ok_or_else(|| "fusion: unable to read stack segment".to_string())?;
-        if should_consume {
-            consumed.push(val.clone());
+        consumed.push(val.clone());
+        if inputs[*input_idx].is_none() {
+            inputs[*input_idx] = Some(val);
         }
-        debug_assert!(
-            inputs[input_idx].is_none(),
-            "fusion: duplicate stack input slot {} for plan {}",
-            input_idx,
-            plan.index
-        );
-        inputs[input_idx] = Some(val);
     }
 
     let inputs: Vec<Value> = inputs

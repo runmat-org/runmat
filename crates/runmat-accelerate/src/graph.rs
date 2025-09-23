@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use runmat_builtins::Type;
+use runmat_builtins::{Type, Value as BuiltinValue};
 
 pub type NodeId = u32;
 pub type ValueId = u32;
@@ -136,6 +136,8 @@ pub struct ValueInfo {
     pub origin: ValueOrigin,
     pub ty: Type,
     pub shape: ShapeInfo,
+    #[serde(skip)]
+    pub constant: Option<BuiltinValue>,
 }
 
 impl ValueInfo {

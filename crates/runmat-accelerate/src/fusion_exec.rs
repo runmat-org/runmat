@@ -32,6 +32,14 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
             request.inputs.len()
         ));
     }
+    let len = request
+        .plan
+        .element_count()
+        .ok_or_else(|| anyhow!("fusion: unknown element count"))?;
+    if len == 0 {
+        return Err(anyhow!("fusion: zero-length execution not supported"));
+    }
+    let constant_shape = request.plan.constant_shape(len);
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
     for value in &request.inputs {
@@ -52,12 +60,11 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 });
             }
             Value::Num(n) => {
-                temp_scalars.push(vec![*n]);
+                temp_scalars.push(vec![*n; len]);
                 let data = temp_scalars.last().unwrap();
-                let shape = [1usize];
                 let view = HostTensorView {
                     data,
-                    shape: &shape,
+                    shape: &constant_shape,
                 };
                 let handle = provider.upload(&view)?;
                 prepared.push(PreparedInput {
@@ -66,12 +73,11 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 });
             }
             Value::Int(i) => {
-                temp_scalars.push(vec![i.to_f64()]);
+                temp_scalars.push(vec![i.to_f64(); len]);
                 let data = temp_scalars.last().unwrap();
-                let shape = [1usize];
                 let view = HostTensorView {
                     data,
-                    shape: &shape,
+                    shape: &constant_shape,
                 };
                 let handle = provider.upload(&view)?;
                 prepared.push(PreparedInput {
@@ -83,14 +89,6 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 return Err(anyhow!("fusion: unsupported value type"));
             }
         }
-    }
-
-    let len = request
-        .plan
-        .element_count()
-        .ok_or_else(|| anyhow!("fusion: unknown element count"))?;
-    if len == 0 {
-        return Err(anyhow!("fusion: zero-length execution not supported"));
     }
 
     let scalar_ty = match provider.precision() {

@@ -6,7 +6,7 @@ use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId,
     PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarKind,
 };
-use runmat_builtins::{builtin_functions, AccelTag, Type};
+use runmat_builtins::{builtin_functions, AccelTag, Type, Value};
 
 use crate::instr::Instr;
 
@@ -82,9 +82,9 @@ impl<'a> GraphBuilder<'a> {
 
     fn process_instr(&mut self, pc: usize, instr: &Instr) {
         match instr {
-            Instr::LoadConst(_) => self.push_constant(Type::Num),
-            Instr::LoadBool(_) => self.push_constant(Type::Bool),
-            Instr::LoadString(_) | Instr::LoadCharRow(_) => self.push_constant(Type::String),
+            Instr::LoadConst(value) => self.push_constant(Type::Num, Some(Value::Num(*value))),
+            Instr::LoadBool(value) => self.push_constant(Type::Bool, Some(Value::Bool(*value))),
+            Instr::LoadString(_) | Instr::LoadCharRow(_) => self.push_constant(Type::String, None),
             Instr::LoadVar(idx) => self.handle_load_var(*idx),
             Instr::StoreVar(idx) => self.handle_store_var(*idx),
             Instr::LoadLocal(idx) => self.handle_load_local(*idx),
@@ -139,6 +139,7 @@ impl<'a> GraphBuilder<'a> {
                 index: idx,
             },
             ty,
+            None,
         );
         self.var_values.insert(key, id);
         self.stack.push(id);
@@ -169,6 +170,7 @@ impl<'a> GraphBuilder<'a> {
                 index: idx,
             },
             ty,
+            None,
         );
         self.var_values.insert(key, id);
         self.stack.push(id);
@@ -335,8 +337,8 @@ impl<'a> GraphBuilder<'a> {
         self.stack.push(out_value);
     }
 
-    fn push_constant(&mut self, ty: Type) {
-        let id = self.new_value(ValueOrigin::Constant, ty);
+    fn push_constant(&mut self, ty: Type, constant: Option<Value>) {
+        let id = self.new_value(ValueOrigin::Constant, ty, constant);
         self.stack.push(id);
     }
 
@@ -344,7 +346,7 @@ impl<'a> GraphBuilder<'a> {
         self.stack.pop()
     }
 
-    fn new_value(&mut self, origin: ValueOrigin, ty: Type) -> ValueId {
+    fn new_value(&mut self, origin: ValueOrigin, ty: Type, constant: Option<Value>) -> ValueId {
         let id = self.values.len() as ValueId;
         let shape = ShapeInfo::from_type(&ty);
         self.values.push(ValueInfo {
@@ -352,12 +354,13 @@ impl<'a> GraphBuilder<'a> {
             origin,
             ty,
             shape,
+            constant,
         });
         id
     }
 
     fn new_node_output(&mut self, node: NodeId, output: usize, ty: Type) -> ValueId {
-        self.new_value(ValueOrigin::NodeOutput { node, output }, ty)
+        self.new_value(ValueOrigin::NodeOutput { node, output }, ty, None)
     }
 
     fn apply_type(&mut self, value_id: ValueId, ty: &Type) {
