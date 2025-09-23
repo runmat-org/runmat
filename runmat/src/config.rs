@@ -10,7 +10,8 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use log::{debug, info};
 use runmat_accelerate::{
-    AccelPowerPreference, AccelerateInitOptions, AccelerateProviderPreference,
+    AccelPowerPreference, AccelerateInitOptions, AccelerateProviderPreference, AutoOffloadLogLevel,
+    AutoOffloadOptions,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -72,6 +73,9 @@ pub struct AccelerateConfig {
     /// Force use of WGPU fallback adapter even if a high-performance adapter exists
     #[serde(default)]
     pub wgpu_force_fallback_adapter: bool,
+    /// Auto-offload planner configuration
+    #[serde(default)]
+    pub auto_offload: AutoOffloadConfig,
 }
 
 impl Default for AccelerateConfig {
@@ -82,6 +86,7 @@ impl Default for AccelerateConfig {
             allow_inprocess_fallback: true,
             wgpu_power_preference: AccelPowerPreference::Auto,
             wgpu_force_fallback_adapter: false,
+            auto_offload: AutoOffloadConfig::default(),
         }
     }
 }
@@ -94,6 +99,41 @@ impl AccelerateConfig {
             allow_inprocess_fallback: self.allow_inprocess_fallback,
             wgpu_power_preference: self.wgpu_power_preference,
             wgpu_force_fallback_adapter: self.wgpu_force_fallback_adapter,
+            auto_offload: self.auto_offload.to_options(),
+        }
+    }
+}
+
+/// Auto-offload planner configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoOffloadConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub calibrate: bool,
+    pub profile_path: Option<PathBuf>,
+    #[serde(default)]
+    pub log_level: AutoOffloadLogLevel,
+}
+
+impl Default for AutoOffloadConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            calibrate: true,
+            profile_path: None,
+            log_level: AutoOffloadLogLevel::Trace,
+        }
+    }
+}
+
+impl AutoOffloadConfig {
+    fn to_options(&self) -> AutoOffloadOptions {
+        AutoOffloadOptions {
+            enabled: self.enabled,
+            calibrate: self.calibrate,
+            profile_path: self.profile_path.clone(),
+            log_level: self.log_level,
         }
     }
 }
@@ -845,6 +885,28 @@ impl ConfigLoader {
             }
         }
 
+        if let Ok(auto_enabled) = env::var("RUNMAT_ACCEL_AUTO_OFFLOAD") {
+            if let Some(flag) = parse_bool(&auto_enabled) {
+                config.accelerate.auto_offload.enabled = flag;
+            }
+        }
+
+        if let Ok(auto_calibrate) = env::var("RUNMAT_ACCEL_CALIBRATE") {
+            if let Some(flag) = parse_bool(&auto_calibrate) {
+                config.accelerate.auto_offload.calibrate = flag;
+            }
+        }
+
+        if let Ok(profile_path) = env::var("RUNMAT_ACCEL_PROFILE") {
+            config.accelerate.auto_offload.profile_path = Some(PathBuf::from(profile_path));
+        }
+
+        if let Ok(auto_log) = env::var("RUNMAT_ACCEL_AUTO_LOG") {
+            if let Some(level) = parse_auto_offload_log_level(&auto_log) {
+                config.accelerate.auto_offload.log_level = level;
+            }
+        }
+
         // JIT settings
         if let Ok(jit_enabled) = env::var("RUSTMAT_JIT_ENABLE") {
             config.jit.enabled = parse_bool(&jit_enabled).unwrap_or(true);
@@ -993,6 +1055,15 @@ fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
+fn parse_auto_offload_log_level(value: &str) -> Option<AutoOffloadLogLevel> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" => Some(AutoOffloadLogLevel::Off),
+        "info" => Some(AutoOffloadLogLevel::Info),
+        "trace" => Some(AutoOffloadLogLevel::Trace),
+        _ => None,
+    }
+}
+
 fn parse_provider_preference(value: &str) -> Option<AccelerateProviderPreference> {
     match value.trim().to_ascii_lowercase().as_str() {
         "auto" => Some(AccelerateProviderPreference::Auto),
@@ -1045,6 +1116,23 @@ mod tests {
         assert_eq!(parsed.runtime.timeout, config.runtime.timeout);
         assert_eq!(parsed.plotting.mode, config.plotting.mode);
         assert_eq!(parsed.accelerate.enabled, config.accelerate.enabled);
+    }
+
+    #[test]
+    fn test_parse_auto_offload_log_level_cases() {
+        assert_eq!(
+            parse_auto_offload_log_level("off"),
+            Some(AutoOffloadLogLevel::Off)
+        );
+        assert_eq!(
+            parse_auto_offload_log_level("INFO"),
+            Some(AutoOffloadLogLevel::Info)
+        );
+        assert_eq!(
+            parse_auto_offload_log_level("trace"),
+            Some(AutoOffloadLogLevel::Trace)
+        );
+        assert_eq!(parse_auto_offload_log_level("unknown"), None);
     }
 
     #[test]

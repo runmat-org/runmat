@@ -8,7 +8,10 @@
 //!
 //! This is scaffolding only; implementations will land after interpreter/JIT semantics are complete.
 
+use once_cell::sync::Lazy;
 use runmat_builtins::{Tensor, Value};
+use std::path::PathBuf;
+use std::sync::RwLock;
 
 pub mod native_auto;
 pub mod simple_provider;
@@ -54,6 +57,59 @@ impl Default for AccelPowerPreference {
     }
 }
 
+/// Logging verbosity for auto-offload promotion decisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoOffloadLogLevel {
+    Off,
+    Info,
+    Trace,
+}
+
+impl Default for AutoOffloadLogLevel {
+    fn default() -> Self {
+        AutoOffloadLogLevel::Trace
+    }
+}
+
+/// Configuration passed to the native auto-offload planner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoOffloadOptions {
+    pub enabled: bool,
+    pub calibrate: bool,
+    #[serde(default)]
+    pub profile_path: Option<PathBuf>,
+    #[serde(default)]
+    pub log_level: AutoOffloadLogLevel,
+}
+
+impl Default for AutoOffloadOptions {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            calibrate: true,
+            profile_path: None,
+            log_level: AutoOffloadLogLevel::Trace,
+        }
+    }
+}
+
+static AUTO_OFFLOAD_OPTIONS: Lazy<RwLock<AutoOffloadOptions>> =
+    Lazy::new(|| RwLock::new(AutoOffloadOptions::default()));
+
+pub fn configure_auto_offload(options: AutoOffloadOptions) {
+    if let Ok(mut guard) = AUTO_OFFLOAD_OPTIONS.write() {
+        *guard = options;
+    }
+}
+
+pub(crate) fn auto_offload_options() -> AutoOffloadOptions {
+    AUTO_OFFLOAD_OPTIONS
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
 /// Initialization options for selecting and configuring the acceleration provider.
 #[derive(Debug, Clone)]
 pub struct AccelerateInitOptions {
@@ -62,6 +118,7 @@ pub struct AccelerateInitOptions {
     pub allow_inprocess_fallback: bool,
     pub wgpu_power_preference: AccelPowerPreference,
     pub wgpu_force_fallback_adapter: bool,
+    pub auto_offload: AutoOffloadOptions,
 }
 
 impl Default for AccelerateInitOptions {
@@ -72,12 +129,15 @@ impl Default for AccelerateInitOptions {
             allow_inprocess_fallback: true,
             wgpu_power_preference: AccelPowerPreference::Auto,
             wgpu_force_fallback_adapter: false,
+            auto_offload: AutoOffloadOptions::default(),
         }
     }
 }
 
 /// Initialize the global acceleration provider using the supplied options.
 pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
+    configure_auto_offload(options.auto_offload.clone());
+
     if runmat_accelerate_api::provider().is_some() {
         return;
     }

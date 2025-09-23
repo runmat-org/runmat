@@ -1,0 +1,502 @@
+[
+  {
+    "name": "elementwise_add_256",
+    "category": "elementwise",
+    "detail": "Add 256x256",
+    "input_shapes": [
+      [
+        256,
+        256
+      ],
+      [
+        256,
+        256
+      ]
+    ],
+    "iterations": 5,
+    "upload_ms": {
+      "avg_ms": 0.9159,
+      "min_ms": 0.799875,
+      "max_ms": 1.026792
+    },
+    "compute_ms": {
+      "avg_ms": 1.7903086,
+      "min_ms": 1.399583,
+      "max_ms": 3.089417
+    },
+    "download_ms": {
+      "avg_ms": 1.6798088,
+      "min_ms": 1.5731670000000002,
+      "max_ms": 1.881209
+    },
+    "total_ms": {
+      "avg_ms": 4.3860174,
+      "min_ms": 0.799875,
+      "max_ms": 5.997418
+    },
+    "notes": []
+  },
+  {
+    "name": "elementwise_add_4096",
+    "category": "elementwise",
+    "detail": "Add 4096x4096",
+    "input_shapes": [
+      [
+        4096,
+        4096
+      ],
+      [
+        4096,
+        4096
+      ]
+    ],
+    "iterations": 3,
+    "upload_ms": {
+      "avg_ms": 236.41612533333333,
+      "min_ms": 232.996667,
+      "max_ms": 239.56566700000002
+    },
+    "compute_ms": {
+      "avg_ms": 14.965680999999998,
+      "min_ms": 13.914584000000001,
+      "max_ms": 16.32675
+    },
+    "download_ms": {
+      "avg_ms": 95.59484733333333,
+      "min_ms": 94.37762500000001,
+      "max_ms": 97.019792
+    },
+    "total_ms": {
+      "avg_ms": 346.97665366666666,
+      "min_ms": 13.914584000000001,
+      "max_ms": 352.91220899999996
+    },
+    "notes": []
+  },
+  {
+    "name": "elementwise_mul_engineering",
+    "category": "elementwise",
+    "detail": "Mul 2048x128",
+    "input_shapes": [
+      [
+        2048,
+        128
+      ],
+      [
+        2048,
+        128
+      ]
+    ],
+    "iterations": 5,
+    "upload_ms": {
+      "avg_ms": 3.2322332000000005,
+      "min_ms": 3.165625,
+      "max_ms": 3.315792
+    },
+    "compute_ms": {
+      "avg_ms": 1.4718168,
+      "min_ms": 1.43825,
+      "max_ms": 1.508375
+    },
+    "download_ms": {
+      "avg_ms": 2.6956750000000005,
+      "min_ms": 2.62925,
+      "max_ms": 2.8162909999999997
+    },
+    "total_ms": {
+      "avg_ms": 7.399724999999999,
+      "min_ms": 1.43825,
+      "max_ms": 7.640458
+    },
+    "notes": []
+  },
+  {
+    "name": "matmul_256",
+    "category": "matmul",
+    "detail": "256x256 * 256x256",
+    "input_shapes": [
+      [
+        256,
+        256
+      ],
+      [
+        256,
+        256
+      ]
+    ],
+    "iterations": 5,
+    "upload_ms": {
+      "avg_ms": 0.8707917999999999,
+      "min_ms": 0.808375,
+      "max_ms": 0.938708
+    },
+    "compute_ms": {
+      "avg_ms": 1.4151086,
+      "min_ms": 1.351292,
+      "max_ms": 1.448625
+    },
+    "download_ms": {
+      "avg_ms": 1.6677834,
+      "min_ms": 1.643083,
+      "max_ms": 1.706334
+    },
+    "total_ms": {
+      "avg_ms": 3.9536837999999994,
+      "min_ms": 0.808375,
+      "max_ms": 4.093667
+    },
+    "notes": []
+  },
+  {
+    "name": "matmul_1024",
+    "category": "matmul",
+    "detail": "1024x1024 * 1024x1024",
+    "input_shapes": [
+      [
+        1024,
+        1024
+      ],
+      [
+        1024,
+        1024
+      ]
+    ],
+    "iterations": 4,
+    "upload_ms": {
+      "avg_ms": 14.403780999999999,
+      "min_ms": 13.944374,
+      "max_ms": 15.495834
+    },
+    "compute_ms": {
+      "avg_ms": 14.75617725,
+      "min_ms": 14.084125,
+      "max_ms": 15.457084
+    },
+    "download_ms": {
+      "avg_ms": 7.3133125,
+      "min_ms": 7.258625,
+      "max_ms": 7.406708
+    },
+    "total_ms": {
+      "avg_ms": 36.473270750000005,
+      "min_ms": 7.258625,
+      "max_ms": 38.359626
+    },
+    "notes": []
+  },
+  {
+    "name": "matmul_tall_skinny",
+    "category": "matmul",
+    "detail": "2048x64 * 64x256",
+    "input_shapes": [
+      [
+        2048,
+        64
+      ],
+      [
+        64,
+        256
+      ]
+    ],
+    "iterations": 4,
+    "upload_ms": {
+      "avg_ms": 1.316146,
+      "min_ms": 0.9974999999999999,
+      "max_ms": 1.731458
+    },
+    "compute_ms": {
+      "avg_ms": 1.67693725,
+      "min_ms": 1.634833,
+      "max_ms": 1.728041
+    },
+    "download_ms": {
+      "avg_ms": 4.29021875,
+      "min_ms": 4.236208,
+      "max_ms": 4.424291
+    },
+    "total_ms": {
+      "avg_ms": 7.283302,
+      "min_ms": 0.9974999999999999,
+      "max_ms": 7.88379
+    },
+    "notes": []
+  },
+  {
+    "name": "matmul_wide_short",
+    "category": "matmul",
+    "detail": "128x2048 * 2048x128",
+    "input_shapes": [
+      [
+        128,
+        2048
+      ],
+      [
+        2048,
+        128
+      ]
+    ],
+    "iterations": 4,
+    "upload_ms": {
+      "avg_ms": 3.69204175,
+      "min_ms": 3.347334,
+      "max_ms": 4.14
+    },
+    "compute_ms": {
+      "avg_ms": 2.824177,
+      "min_ms": 2.740208,
+      "max_ms": 2.927333
+    },
+    "download_ms": {
+      "avg_ms": 1.50626,
+      "min_ms": 1.4736250000000002,
+      "max_ms": 1.529208
+    },
+    "total_ms": {
+      "avg_ms": 8.02247875,
+      "min_ms": 1.4736250000000002,
+      "max_ms": 8.596540999999998
+    },
+    "notes": []
+  },
+  {
+    "name": "transpose_4096",
+    "category": "transpose",
+    "detail": "4096x4096",
+    "input_shapes": [
+      [
+        4096,
+        4096
+      ]
+    ],
+    "iterations": 4,
+    "upload_ms": {
+      "avg_ms": 114.16317725,
+      "min_ms": 113.24900000000001,
+      "max_ms": 115.72512499999999
+    },
+    "compute_ms": {
+      "avg_ms": 12.60995825,
+      "min_ms": 12.097415999999999,
+      "max_ms": 13.63425
+    },
+    "download_ms": {
+      "avg_ms": 95.4253855,
+      "min_ms": 93.141083,
+      "max_ms": 97.627959
+    },
+    "total_ms": {
+      "avg_ms": 222.198521,
+      "min_ms": 12.097415999999999,
+      "max_ms": 226.987334
+    },
+    "notes": []
+  },
+  {
+    "name": "reduction_sum_all",
+    "category": "reduction",
+    "detail": "SumAll 1048576x1",
+    "input_shapes": [
+      [
+        1048576,
+        1
+      ]
+    ],
+    "iterations": 5,
+    "upload_ms": {
+      "avg_ms": 6.7490334,
+      "min_ms": 6.631749999999999,
+      "max_ms": 6.834874999999999
+    },
+    "compute_ms": {
+      "avg_ms": 4.7217,
+      "min_ms": 4.509291999999999,
+      "max_ms": 4.816875
+    },
+    "download_ms": {
+      "avg_ms": 1.3915332,
+      "min_ms": 1.368875,
+      "max_ms": 1.433416
+    },
+    "total_ms": {
+      "avg_ms": 12.862266600000002,
+      "min_ms": 1.368875,
+      "max_ms": 13.085166000000001
+    },
+    "notes": []
+  },
+  {
+    "name": "reduction_sum_row",
+    "category": "reduction",
+    "detail": "SumDim(1) 1024x256",
+    "input_shapes": [
+      [
+        1024,
+        256
+      ]
+    ],
+    "iterations": 5,
+    "upload_ms": {
+      "avg_ms": 1.6934336,
+      "min_ms": 1.617375,
+      "max_ms": 1.9406670000000001
+    },
+    "compute_ms": {
+      "avg_ms": 1.6932831999999998,
+      "min_ms": 1.4058329999999999,
+      "max_ms": 2.6559169999999996
+    },
+    "download_ms": {
+      "avg_ms": 1.350258,
+      "min_ms": 1.335166,
+      "max_ms": 1.373625
+    },
+    "total_ms": {
+      "avg_ms": 4.7369748000000005,
+      "min_ms": 1.335166,
+      "max_ms": 5.970209
+    },
+    "notes": []
+  },
+  {
+    "name": "reduction_mean_col",
+    "category": "reduction",
+    "detail": "MeanDim(2) 1024x256",
+    "input_shapes": [
+      [
+        1024,
+        256
+      ]
+    ],
+    "iterations": 5,
+    "upload_ms": {
+      "avg_ms": 1.6802083999999997,
+      "min_ms": 1.63725,
+      "max_ms": 1.700125
+    },
+    "compute_ms": {
+      "avg_ms": 1.4267248000000001,
+      "min_ms": 1.4057080000000002,
+      "max_ms": 1.4645409999999999
+    },
+    "download_ms": {
+      "avg_ms": 1.3464082000000002,
+      "min_ms": 1.333875,
+      "max_ms": 1.383208
+    },
+    "total_ms": {
+      "avg_ms": 4.4533414,
+      "min_ms": 1.333875,
+      "max_ms": 4.547874
+    },
+    "notes": []
+  },
+  {
+    "name": "min_indices_dim1",
+    "category": "minmax",
+    "detail": "Min 1024x256 dim 1",
+    "input_shapes": [
+      [
+        1024,
+        256
+      ]
+    ],
+    "iterations": 5,
+    "upload_ms": {
+      "avg_ms": 1.7384415999999998,
+      "min_ms": 1.6515,
+      "max_ms": 1.840417
+    },
+    "compute_ms": {
+      "avg_ms": 2.2444914000000002,
+      "min_ms": 1.455166,
+      "max_ms": 2.822083
+    },
+    "download_ms": {
+      "avg_ms": 2.6961332000000002,
+      "min_ms": 2.544083,
+      "max_ms": 2.7752499999999998
+    },
+    "total_ms": {
+      "avg_ms": 6.679066199999999,
+      "min_ms": 1.455166,
+      "max_ms": 7.43775
+    },
+    "notes": [
+      "Indices verified against CPU reference"
+    ]
+  },
+  {
+    "name": "max_indices_dim2",
+    "category": "minmax",
+    "detail": "Max 1024x256 dim 2",
+    "input_shapes": [
+      [
+        1024,
+        256
+      ]
+    ],
+    "iterations": 5,
+    "upload_ms": {
+      "avg_ms": 1.7138331999999998,
+      "min_ms": 1.638916,
+      "max_ms": 1.792667
+    },
+    "compute_ms": {
+      "avg_ms": 1.4613416000000001,
+      "min_ms": 1.42775,
+      "max_ms": 1.493417
+    },
+    "download_ms": {
+      "avg_ms": 2.7310666,
+      "min_ms": 2.707291,
+      "max_ms": 2.7619160000000003
+    },
+    "total_ms": {
+      "avg_ms": 5.906241400000001,
+      "min_ms": 1.42775,
+      "max_ms": 6.048
+    },
+    "notes": [
+      "Indices verified against CPU reference"
+    ]
+  },
+  {
+    "name": "composite_atda",
+    "category": "composite",
+    "detail": "At^T * diag(D) * A 1536x256",
+    "input_shapes": [
+      [
+        1536,
+        256
+      ],
+      [
+        256,
+        256
+      ]
+    ],
+    "iterations": 3,
+    "upload_ms": {
+      "avg_ms": 4.9349446666666665,
+      "min_ms": 4.925543,
+      "max_ms": 4.9454579999999995
+    },
+    "compute_ms": {
+      "avg_ms": 6.902291666666667,
+      "min_ms": 6.804209,
+      "max_ms": 7.059291
+    },
+    "download_ms": {
+      "avg_ms": 1.6703056666666667,
+      "min_ms": 1.6308749999999999,
+      "max_ms": 1.706625
+    },
+    "total_ms": {
+      "avg_ms": 13.507542,
+      "min_ms": 1.6308749999999999,
+      "max_ms": 13.711374
+    },
+    "notes": [
+      "Composite engineering-style workload"
+    ]
+  }
+]

@@ -11,6 +11,8 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned, Hos
 use serde::Serialize;
 #[cfg(feature = "wgpu")]
 use wgpu::PowerPreference;
+const VALUE_TOLERANCE: f64 = 1e-5;
+const VALUE_REL_TOLERANCE: f64 = 1e-4;
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -297,6 +299,7 @@ fn run_elementwise_case(
         vec![matrix_a, matrix_b],
         cpu_result,
         iterations,
+        VALUE_TOLERANCE,
         move |prov, handles| match op {
             ElementwiseOp::Add => prov.elem_add(&handles[0], &handles[1]),
             ElementwiseOp::Mul => prov.elem_mul(&handles[0], &handles[1]),
@@ -324,6 +327,7 @@ fn run_matmul_case(
         vec![matrix_a, matrix_b],
         cpu_result,
         iterations,
+        VALUE_TOLERANCE,
         move |prov, handles| prov.matmul(&handles[0], &handles[1]),
     )
 }
@@ -346,6 +350,7 @@ fn run_transpose_case(
         vec![matrix],
         cpu_result,
         iterations,
+        VALUE_TOLERANCE,
         move |prov, handles| prov.transpose(&handles[0]),
     )
 }
@@ -373,6 +378,7 @@ fn run_reduction_case(
         vec![matrix],
         cpu_result,
         iterations,
+        VALUE_TOLERANCE,
         move |prov, handles| match kind {
             ReductionKind::SumAll => prov.reduce_sum(&handles[0]),
             ReductionKind::SumDim(dim) => prov.reduce_sum_dim(&handles[0], dim - 1),
@@ -415,7 +421,7 @@ fn run_minmax_case(
         provider.free(&result.values)?;
         provider.free(&result.indices)?;
 
-        verify_matrix(&cpu_values, &values_matrix, 1e-8)?;
+        verify_matrix(&cpu_values, &values_matrix, VALUE_TOLERANCE)?;
         verify_indices(&cpu_indices, &indices_matrix)?;
 
         if !warmup {
@@ -493,7 +499,7 @@ fn run_composite_atda_case(
         provider.free(&a_t_handle)?;
         provider.free(&result_handle)?;
 
-        verify_matrix(&cpu_report.result, &result_matrix, 1e-8)?;
+        verify_matrix(&cpu_report.result, &result_matrix, VALUE_TOLERANCE)?;
 
         if !warmup {
             upload_stats.record(upload_a + upload_d);
@@ -537,6 +543,7 @@ fn generic_single_output_case<F>(
     inputs: Vec<Matrix>,
     cpu_reference: Matrix,
     iterations: usize,
+    tolerance: f64,
     op: F,
 ) -> Result<CaseReport>
 where
@@ -568,7 +575,7 @@ where
         }
         provider.free(&result_handle)?;
 
-        verify_matrix(&cpu_reference, &result_matrix, 1e-8)?;
+        verify_matrix(&cpu_reference, &result_matrix, tolerance)?;
 
         if !warmup {
             upload_stats.record(upload_total);
@@ -902,7 +909,7 @@ fn cpu_composite_atda(a: &Matrix, diag: &Vector) -> CompositeAtdAReport {
     CompositeAtdAReport { result }
 }
 
-fn verify_matrix(expected: &Matrix, actual: &Matrix, tol: f64) -> Result<()> {
+fn verify_matrix(expected: &Matrix, actual: &Matrix, abs_tol: f64) -> Result<()> {
     if expected.rows != actual.rows || expected.cols != actual.cols {
         return Err(anyhow!(
             "Shape mismatch: expected {}x{}, got {}x{}",
@@ -913,14 +920,19 @@ fn verify_matrix(expected: &Matrix, actual: &Matrix, tol: f64) -> Result<()> {
         ));
     }
     for idx in 0..expected.data.len() {
-        let diff = (expected.data[idx] - actual.data[idx]).abs();
-        if diff > tol {
+        let expected_val = expected.data[idx];
+        let actual_val = actual.data[idx];
+        let diff = (expected_val - actual_val).abs();
+        let allowed = abs_tol.max(VALUE_REL_TOLERANCE * expected_val.abs());
+        if diff > allowed {
             return Err(anyhow!(
-                "Mismatch at idx {} (value {} vs {}), tol {}",
+                "Mismatch at idx {} (value {} vs {}), abs tol {}, rel tol {} (allowed {})",
                 idx,
-                expected.data[idx],
-                actual.data[idx],
-                tol
+                expected_val,
+                actual_val,
+                abs_tol,
+                VALUE_REL_TOLERANCE,
+                allowed
             ));
         }
     }

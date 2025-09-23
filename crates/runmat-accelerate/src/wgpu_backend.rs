@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Result};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
+use log::info;
 use once_cell::sync::OnceCell;
 use pollster::block_on;
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned, HostTensorView, ReduceDimResult,
 };
-use log::info;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +15,7 @@ use wgpu::util::DeviceExt;
 const WORKGROUP_SIZE: u32 = 256;
 const REDUCE_WORKGROUP_SIZE: u32 = 256;
 const MATMUL_TILE: u32 = 16;
+const MAX_DISPATCH_WORKGROUPS: u32 = 65_535;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NumericPrecision {
@@ -42,8 +43,8 @@ impl Default for WgpuProviderOptions {
 struct LenOpParams {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
 }
 
 #[repr(C)]
@@ -51,8 +52,8 @@ struct LenOpParams {
 struct ScalarParamsF64 {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
     scalar: f64,
     _pad_scalar: f64,
 }
@@ -62,8 +63,8 @@ struct ScalarParamsF64 {
 struct ScalarParamsF32 {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
     scalar: f32,
     _pad_scalar: [f32; 3],
 }
@@ -74,7 +75,7 @@ struct TransposeParams {
     rows: u32,
     cols: u32,
     len: u32,
-    _pad: u32,
+    offset: u32,
 }
 
 #[repr(C)]
@@ -482,56 +483,69 @@ impl WgpuProvider {
             return Err(anyhow!("shape mismatch for binary op"));
         }
         let len = entry_a.len;
-        let out_buffer = self.create_storage_buffer(len, "runmat-binary-out");
         if len == 0 {
+            let out_buffer = self.create_storage_buffer(0, "runmat-binary-out");
             return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
         }
-        let params = LenOpParams {
-            len: len as u32,
-            op: op as u32,
-            _pad0: 0,
-            _pad1: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-binary-params");
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runmat-binary-bind"),
-            layout: &self.pipelines.binary.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: entry_a.buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: entry_b.buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: out_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-binary-encoder"),
-            });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-binary-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.binary.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            let groups = dispatch_size(len as u32, WORKGROUP_SIZE);
-            pass.dispatch_workgroups(groups, 1, 1);
+        if len > (u32::MAX as usize) {
+            return Err(anyhow!("tensor too large for GPU buffer"));
         }
-        self.submit(encoder);
+
+        let out_buffer = self.create_storage_buffer(len, "runmat-binary-out");
+        let chunk_capacity = (MAX_DISPATCH_WORKGROUPS as usize) * WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+        while offset < len {
+            let remaining = len - offset;
+            let chunk_len = remaining.min(chunk_capacity);
+            let params = LenOpParams {
+                len: chunk_len as u32,
+                op: op as u32,
+                offset: offset as u32,
+                total: len as u32,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-binary-params");
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-binary-bind"),
+                layout: &self.pipelines.binary.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry_a.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: entry_b.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-binary-encoder"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-binary-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.binary.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                let groups = dispatch_size(chunk_len as u32, WORKGROUP_SIZE);
+                pass.dispatch_workgroups(groups, 1, 1);
+            }
+            self.submit(encoder);
+            offset += chunk_len;
+        }
+
         Ok(self.register_existing_buffer(out_buffer, entry_a.shape, len))
     }
 
@@ -542,47 +556,59 @@ impl WgpuProvider {
         if len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
         }
-        let params = LenOpParams {
-            len: len as u32,
-            op: op as u32,
-            _pad0: 0,
-            _pad1: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-unary-params");
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runmat-unary-bind"),
-            layout: &self.pipelines.unary.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: entry_a.buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: out_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-unary-encoder"),
-            });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-unary-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.unary.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            let groups = dispatch_size(len as u32, WORKGROUP_SIZE);
-            pass.dispatch_workgroups(groups, 1, 1);
+        if len > (u32::MAX as usize) {
+            return Err(anyhow!("tensor too large for GPU buffer"));
         }
-        self.submit(encoder);
+
+        let chunk_capacity = (MAX_DISPATCH_WORKGROUPS as usize) * WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+        while offset < len {
+            let remaining = len - offset;
+            let chunk_len = remaining.min(chunk_capacity);
+            let params = LenOpParams {
+                len: chunk_len as u32,
+                op: op as u32,
+                offset: offset as u32,
+                total: len as u32,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-unary-params");
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-unary-bind"),
+                layout: &self.pipelines.unary.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry_a.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-unary-encoder"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-unary-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.unary.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                let groups = dispatch_size(chunk_len as u32, WORKGROUP_SIZE);
+                pass.dispatch_workgroups(groups, 1, 1);
+            }
+            self.submit(encoder);
+            offset += chunk_len;
+        }
+
         Ok(self.register_existing_buffer(out_buffer, entry_a.shape, len))
     }
 
@@ -598,64 +624,76 @@ impl WgpuProvider {
         if len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
         }
-        let params_buffer = match self.precision {
-            NumericPrecision::F64 => {
-                let params = ScalarParamsF64 {
-                    len: len as u32,
-                    op: op as u32,
-                    _pad0: 0,
-                    _pad1: 0,
-                    scalar,
-                    _pad_scalar: 0.0,
-                };
-                self.uniform_buffer(&params, "runmat-scalar-params")
-            }
-            NumericPrecision::F32 => {
-                let params = ScalarParamsF32 {
-                    len: len as u32,
-                    op: op as u32,
-                    _pad0: 0,
-                    _pad1: 0,
-                    scalar: scalar as f32,
-                    _pad_scalar: [0.0; 3],
-                };
-                self.uniform_buffer(&params, "runmat-scalar-params")
-            }
-        };
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runmat-scalar-bind"),
-            layout: &self.pipelines.scalar.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: entry_a.buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: out_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-scalar-encoder"),
-            });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-scalar-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.scalar.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            let groups = dispatch_size(len as u32, WORKGROUP_SIZE);
-            pass.dispatch_workgroups(groups, 1, 1);
+        if len > (u32::MAX as usize) {
+            return Err(anyhow!("tensor too large for GPU buffer"));
         }
-        self.submit(encoder);
+
+        let chunk_capacity = (MAX_DISPATCH_WORKGROUPS as usize) * WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+        while offset < len {
+            let remaining = len - offset;
+            let chunk_len = remaining.min(chunk_capacity);
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = ScalarParamsF64 {
+                        len: chunk_len as u32,
+                        op: op as u32,
+                        offset: offset as u32,
+                        total: len as u32,
+                        scalar,
+                        _pad_scalar: 0.0,
+                    };
+                    self.uniform_buffer(&params, "runmat-scalar-params")
+                }
+                NumericPrecision::F32 => {
+                    let params = ScalarParamsF32 {
+                        len: chunk_len as u32,
+                        op: op as u32,
+                        offset: offset as u32,
+                        total: len as u32,
+                        scalar: scalar as f32,
+                        _pad_scalar: [0.0; 3],
+                    };
+                    self.uniform_buffer(&params, "runmat-scalar-params")
+                }
+            };
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-scalar-bind"),
+                layout: &self.pipelines.scalar.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry_a.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-scalar-encoder"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-scalar-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.scalar.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                let groups = dispatch_size(chunk_len as u32, WORKGROUP_SIZE);
+                pass.dispatch_workgroups(groups, 1, 1);
+            }
+            self.submit(encoder);
+            offset += chunk_len;
+        }
+
         Ok(self.register_existing_buffer(out_buffer, entry_a.shape, len))
     }
 
@@ -672,47 +710,59 @@ impl WgpuProvider {
         if len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
         }
-        let params = TransposeParams {
-            rows: rows as u32,
-            cols: cols as u32,
-            len: len as u32,
-            _pad: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-transpose-params");
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runmat-transpose-bind"),
-            layout: &self.pipelines.transpose.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: entry.buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: out_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-transpose-encoder"),
-            });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-transpose-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.transpose.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            let groups = dispatch_size(len as u32, WORKGROUP_SIZE);
-            pass.dispatch_workgroups(groups, 1, 1);
+        if len > (u32::MAX as usize) {
+            return Err(anyhow!("tensor too large for GPU buffer"));
         }
-        self.submit(encoder);
+
+        let chunk_capacity = (MAX_DISPATCH_WORKGROUPS as usize) * WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+        while offset < len {
+            let remaining = len - offset;
+            let chunk_len = remaining.min(chunk_capacity);
+            let params = TransposeParams {
+                rows: rows as u32,
+                cols: cols as u32,
+                len: chunk_len as u32,
+                offset: offset as u32,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-transpose-params");
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-transpose-bind"),
+                layout: &self.pipelines.transpose.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-transpose-encoder"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-transpose-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.transpose.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                let groups = dispatch_size(chunk_len as u32, WORKGROUP_SIZE);
+                pass.dispatch_workgroups(groups, 1, 1);
+            }
+            self.submit(encoder);
+            offset += chunk_len;
+        }
+
         Ok(self.register_existing_buffer(out_buffer, out_shape, len))
     }
 
@@ -867,7 +917,11 @@ impl WgpuProvider {
         }
         let rows = entry.shape[0];
         let cols = entry.shape[1];
-        let reduce_dim = if dim <= 1 { 1 } else { 2 };
+        let reduce_dim = match dim {
+            0 => 1,
+            1 => 2,
+            _ => return Err(anyhow!("reduce_dim: only dims 0 or 1 supported")),
+        };
         let out_len = if reduce_dim == 1 { cols } else { rows };
         let out_shape = if reduce_dim == 1 {
             vec![1, cols]
@@ -934,7 +988,11 @@ impl WgpuProvider {
         }
         let rows = entry.shape[0];
         let cols = entry.shape[1];
-        let reduce_dim = if dim <= 1 { 1 } else { 2 };
+        let reduce_dim = match dim {
+            0 => 1,
+            1 => 2,
+            _ => return Err(anyhow!("reduce_dim: only dims 0 or 1 supported")),
+        };
         let out_len = if reduce_dim == 1 { cols } else { rows };
         let out_shape = if reduce_dim == 1 {
             vec![1, cols]
@@ -1011,39 +1069,38 @@ impl AccelProvider for WgpuProvider {
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         let len = host.data.len();
         let shape = host.shape.to_vec();
-        let buffer = if len == 0 {
-            self.create_storage_buffer(0, "runmat-upload-empty")
-        } else {
-            match self.precision {
-                NumericPrecision::F64 => {
-                    let contents = cast_slice(host.data);
-                    Arc::new(
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let buffer =
+            if len == 0 {
+                self.create_storage_buffer(0, "runmat-upload-empty")
+            } else {
+                match self.precision {
+                    NumericPrecision::F64 => {
+                        let contents = cast_slice(host.data);
+                        Arc::new(self.device.create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-upload-buffer"),
                                 contents,
                                 usage: wgpu::BufferUsages::STORAGE
                                     | wgpu::BufferUsages::COPY_DST
                                     | wgpu::BufferUsages::COPY_SRC,
-                            }),
-                    )
-                }
-                NumericPrecision::F32 => {
-                    let data_f32: Vec<f32> = host.data.iter().map(|v| *v as f32).collect();
-                    let contents = cast_slice(&data_f32);
-                    Arc::new(
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            },
+                        ))
+                    }
+                    NumericPrecision::F32 => {
+                        let data_f32: Vec<f32> = host.data.iter().map(|v| *v as f32).collect();
+                        let contents = cast_slice(&data_f32);
+                        Arc::new(self.device.create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-upload-buffer"),
                                 contents,
                                 usage: wgpu::BufferUsages::STORAGE
                                     | wgpu::BufferUsages::COPY_DST
                                     | wgpu::BufferUsages::COPY_SRC,
-                            }),
-                    )
+                            },
+                        ))
+                    }
                 }
-            }
-        };
+            };
         Ok(self.register_existing_buffer(buffer, shape, len))
     }
 
@@ -1353,8 +1410,8 @@ struct Tensor {
 struct Params {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -1374,8 +1431,12 @@ fn apply(a: f64, b: f64) -> f64 {
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if idx >= params.len {
+    let local = gid.x;
+    if local >= params.len {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
         return;
     }
     Out.data[idx] = apply(A.data[idx], B.data[idx]);
@@ -1390,8 +1451,8 @@ struct Tensor {
 struct Params {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -1411,8 +1472,12 @@ fn apply(a: f32, b: f32) -> f32 {
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if idx >= params.len {
+    let local = gid.x;
+    if local >= params.len {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
         return;
     }
     Out.data[idx] = apply(A.data[idx], B.data[idx]);
@@ -1427,8 +1492,8 @@ struct Tensor {
 struct Params {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -1449,8 +1514,12 @@ fn apply(a: f64) -> f64 {
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if idx >= params.len {
+    let local = gid.x;
+    if local >= params.len {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
         return;
     }
     Out.data[idx] = apply(A.data[idx]);
@@ -1465,8 +1534,8 @@ struct Tensor {
 struct Params {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -1487,8 +1556,12 @@ fn apply(a: f32) -> f32 {
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if idx >= params.len {
+    let local = gid.x;
+    if local >= params.len {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
         return;
     }
     Out.data[idx] = apply(A.data[idx]);
@@ -1543,8 +1616,8 @@ struct Tensor {
 struct Params {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
     scalar: f32,
     scalar_pad: vec3<f32>,
 };
@@ -1555,8 +1628,12 @@ struct Params {
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if idx >= params.len {
+    let local = gid.x;
+    if local >= params.len {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
         return;
     }
     let a = A.data[idx];
@@ -1584,7 +1661,7 @@ struct Params {
     rows: u32,
     cols: u32,
     len: u32,
-    _pad: u32,
+    offset: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -1593,12 +1670,13 @@ struct Params {
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if idx >= params.len {
+    let local = gid.x;
+    if local >= params.len {
         return;
     }
     let rows = params.rows;
     let cols = params.cols;
+    let idx = params.offset + local;
     let row = idx % rows;
     let col = idx / rows;
     let out_rows = cols;
@@ -1616,7 +1694,7 @@ struct Params {
     rows: u32,
     cols: u32,
     len: u32,
-    _pad: u32,
+    offset: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -1625,12 +1703,13 @@ struct Params {
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if idx >= params.len {
+    let local = gid.x;
+    if local >= params.len {
         return;
     }
     let rows = params.rows;
     let cols = params.cols;
+    let idx = params.offset + local;
     let row = idx % rows;
     let col = idx / rows;
     let out_rows = cols;
@@ -1735,15 +1814,15 @@ struct Tensor {
 struct Params {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
 };
 
 @group(0) @binding(0) var<storage, read> InBuf: Tensor;
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-var<workgroup> shared: array<f64, 256>;
+var<workgroup> tile: array<f64, 256>;
 
 fn combine(a: f64, b: f64, op: u32) -> f64 {
     switch op {
@@ -1767,8 +1846,8 @@ fn combine(a: f64, b: f64, op: u32) -> f64 {
 fn identity(op: u32) -> f64 {
     switch op {
         case 0u: { return 0.0; }
-        case 1u: { return 1.0 / 0.0; }
-        case 2u: { return -1.0 / 0.0; }
+        case 1u: { return f64(1.0) / f64(0.0); }
+        case 2u: { return -f64(1.0) / f64(0.0); }
         default: { return 0.0; }
     }
 }
@@ -1787,7 +1866,7 @@ fn main(
     if idx + 256u < params.len {
         acc = combine(acc, InBuf.data[idx + 256u], params.op);
     }
-    shared[lid.x] = acc;
+    tile[lid.x] = acc;
     workgroupBarrier();
 
     var stride = 128u;
@@ -1796,13 +1875,13 @@ fn main(
             break;
         }
         if lid.x < stride {
-            shared[lid.x] = combine(shared[lid.x], shared[lid.x + stride], params.op);
+            tile[lid.x] = combine(tile[lid.x], tile[lid.x + stride], params.op);
         }
         stride = stride / 2u;
         workgroupBarrier();
     }
     if lid.x == 0u {
-        OutBuf.data[wid.x] = shared[0u];
+        OutBuf.data[wid.x] = tile[0u];
     }
 }
 "#;
@@ -1815,15 +1894,15 @@ struct Tensor {
 struct Params {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
 };
 
 @group(0) @binding(0) var<storage, read> InBuf: Tensor;
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-var<workgroup> shared: array<f32, 256>;
+var<workgroup> tile: array<f32, 256>;
 
 fn combine(a: f32, b: f32, op: u32) -> f32 {
     switch op {
@@ -1836,10 +1915,10 @@ fn combine(a: f32, b: f32, op: u32) -> f32 {
 
 fn identity(op: u32) -> f32 {
     switch op {
-        case 0u: { return 0.0; }
-        case 1u: { return 1.0 / 0.0; }
-        case 2u: { return -1.0 / 0.0; }
-        default: { return 0.0; }
+        case 0u: { return 0.0f; }
+        case 1u: { return 1.0f / 0.0f; }
+        case 2u: { return -1.0f / 0.0f; }
+        default: { return 0.0f; }
     }
 }
 
@@ -1857,7 +1936,7 @@ fn main(
     if idx + 256u < params.len {
         acc = combine(acc, InBuf.data[idx + 256u], params.op);
     }
-    shared[lid.x] = acc;
+    tile[lid.x] = acc;
     workgroupBarrier();
 
     var stride = 128u;
@@ -1866,13 +1945,13 @@ fn main(
             break;
         }
         if lid.x < stride {
-            shared[lid.x] = combine(shared[lid.x], shared[lid.x + stride], params.op);
+            tile[lid.x] = combine(tile[lid.x], tile[lid.x + stride], params.op);
         }
         stride = stride / 2u;
         workgroupBarrier();
     }
     if lid.x == 0u {
-        OutBuf.data[wid.x] = shared[0u];
+        OutBuf.data[wid.x] = tile[0u];
     }
 }
 "#;
@@ -2008,9 +2087,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         var best: f64;
         if params.op == 0u {
-            best = 1.0 / 0.0;
+            best = f64(1.0) / f64(0.0);
         } else {
-            best = -1.0 / 0.0;
+            best = -f64(1.0) / f64(0.0);
         }
         var best_idx: u32 = 1u;
         for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
@@ -2029,9 +2108,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         var best: f64;
         if params.op == 0u {
-            best = 1.0 / 0.0;
+            best = f64(1.0) / f64(0.0);
         } else {
-            best = -1.0 / 0.0;
+            best = -f64(1.0) / f64(0.0);
         }
         var best_idx: u32 = 1u;
         for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
@@ -2079,7 +2158,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if idx >= params.cols {
             return;
         }
-        var best: f32 = if params.op == 0u { 1.0 / 0.0 } else { -1.0 / 0.0 };
+        var best: f32;
+        if params.op == 0u {
+            best = 1.0f / 0.0f;
+        } else {
+            best = -1.0f / 0.0f;
+        }
         var best_idx: u32 = 1u;
         for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
             let linear = r + idx * params.rows;
@@ -2095,7 +2179,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if idx >= params.rows {
             return;
         }
-        var best: f32 = if params.op == 0u { 1.0 / 0.0 } else { -1.0 / 0.0 };
+        var best: f32;
+        if params.op == 0u {
+            best = 1.0f / 0.0f;
+        } else {
+            best = -1.0f / 0.0f;
+        }
         var best_idx: u32 = 1u;
         for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
             let linear = idx + c * params.rows;

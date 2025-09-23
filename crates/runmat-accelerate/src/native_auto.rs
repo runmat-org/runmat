@@ -1,12 +1,17 @@
 use std::collections::HashMap;
 use std::env;
+use std::fs;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::{auto_offload_options, AutoOffloadLogLevel};
 use anyhow::{anyhow, Result};
+use log::{debug, info, trace};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{AccelProvider, HostTensorView};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
 use runmat_runtime::gather_if_needed;
+use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinaryOp {
@@ -54,6 +59,30 @@ pub struct NativeAutoOffload {
 }
 
 static GLOBAL: OnceCell<Option<NativeAutoOffload>> = OnceCell::new();
+static PROFILE_MODEL: OnceCell<Option<ProfileCostModel>> = OnceCell::new();
+
+fn env_bool(key: &str) -> Option<bool> {
+    env::var(key).ok().and_then(|v| parse_bool(&v))
+}
+
+fn parse_bool(s: &str) -> Option<bool> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn log_promotion<F>(builder: F)
+where
+    F: FnOnce() -> String,
+{
+    match auto_offload_options().log_level {
+        AutoOffloadLogLevel::Off => {}
+        AutoOffloadLogLevel::Info => info!("{}", builder()),
+        AutoOffloadLogLevel::Trace => trace!("{}", builder()),
+    }
+}
 
 pub fn global() -> Option<&'static NativeAutoOffload> {
     GLOBAL.get_or_init(|| initialize()).as_ref()
@@ -68,8 +97,7 @@ fn initialize() -> Option<NativeAutoOffload> {
     apply_env_overrides(&mut config);
     if calibrate_enabled() {
         if let Err(err) = auto_calibrate(provider, &mut config) {
-            // Best-effort: fallback to env/default thresholds
-            let _ = err; // suppress unused warning without logging
+            debug!("Native auto-offload calibration failed: {err}");
         }
     }
     Some(NativeAutoOffload::new(provider, config))
@@ -90,6 +118,13 @@ impl NativeAutoOffload {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
                 if t.data.len() >= threshold && threshold > 0 {
+                    log_promotion(|| {
+                        format!(
+                            "Promoting tensor to GPU (len={}, threshold={})",
+                            t.data.len(),
+                            threshold
+                        )
+                    });
                     self.tensor_to_gpu(t)
                 } else {
                     Ok(value.clone())
@@ -130,6 +165,12 @@ impl NativeAutoOffload {
                     }
                     let flops = ra * ca * cb;
                     if flops >= self.thresholds.matmul_min_flops {
+                        log_promotion(|| {
+                            format!(
+                                "Promoting matmul operands (flops={}, threshold={})",
+                                flops, self.thresholds.matmul_min_flops
+                            )
+                        });
                         let a_p = self.promote_tensor_if_large(a, 1)?;
                         let b_p = self.promote_tensor_if_large(b, 1)?;
                         return Ok((a_p, b_p));
@@ -179,6 +220,7 @@ impl NativeAutoOffload {
                 .iter()
                 .any(|tag| matches!(tag, AccelTag::Reduction))
             {
+                log_promotion(|| format!("Promoting builtin '{}' as reduction", name));
                 return self.promote_reduction(ReductionOp::Sum, args);
             }
 
@@ -188,6 +230,7 @@ impl NativeAutoOffload {
                 .any(|tag| matches!(tag, AccelTag::MatMul))
                 && processed.len() >= 2
             {
+                log_promotion(|| format!("Promoting builtin '{}' as matmul", name));
                 let (a_p, b_p) =
                     self.promote_binary(BinaryOp::MatMul, &processed[0], &processed[1])?;
                 processed[0] = a_p;
@@ -201,6 +244,7 @@ impl NativeAutoOffload {
                 .any(|tag| matches!(tag, AccelTag::Elementwise))
                 && processed.len() >= 2
             {
+                log_promotion(|| format!("Promoting builtin '{}' as elementwise", name));
                 let (a_p, b_p) =
                     self.promote_binary(BinaryOp::Elementwise, &processed[0], &processed[1])?;
                 processed[0] = a_p;
@@ -214,6 +258,7 @@ impl NativeAutoOffload {
                     .iter()
                     .any(|tag| matches!(tag, AccelTag::Transpose))
                 {
+                    log_promotion(|| format!("Promoting builtin '{}' as transpose", name));
                     *first = self.promote_unary(UnaryOp::Transpose, first)?;
                     return Ok(processed);
                 }
@@ -223,6 +268,7 @@ impl NativeAutoOffload {
                     .iter()
                     .any(|tag| matches!(tag, AccelTag::Unary))
                 {
+                    log_promotion(|| format!("Promoting builtin '{}' as unary", name));
                     *first = self.promote_unary(UnaryOp::Generic, first)?;
                     return Ok(processed);
                 }
@@ -278,21 +324,17 @@ fn builtin_policy(name: &str) -> Option<BuiltinPolicy> {
 }
 
 fn auto_enabled() -> bool {
-    env::var("RUNMAT_ACCEL_AUTO_OFFLOAD")
-        .map(|v| {
-            let v = v.to_ascii_lowercase();
-            !(v == "0" || v == "false" || v == "off")
-        })
-        .unwrap_or(true)
+    if let Some(flag) = env_bool("RUNMAT_ACCEL_AUTO_OFFLOAD") {
+        return flag;
+    }
+    auto_offload_options().enabled
 }
 
 fn calibrate_enabled() -> bool {
-    env::var("RUNMAT_ACCEL_CALIBRATE")
-        .map(|v| {
-            let v = v.to_ascii_lowercase();
-            !(v == "0" || v == "false" || v == "off")
-        })
-        .unwrap_or(true)
+    if let Some(flag) = env_bool("RUNMAT_ACCEL_CALIBRATE") {
+        return flag;
+    }
+    auto_offload_options().calibrate
 }
 
 fn apply_env_overrides(cfg: &mut ThresholdConfig) {
@@ -355,6 +397,17 @@ fn compare_elemwise(provider: &'static dyn AccelProvider, elements: usize) -> Re
     let a = Value::Tensor(tensor.clone());
     let b = Value::Tensor(tensor.clone());
     let cpu_time = time(|| runmat_runtime::elementwise_add(&a, &b))?;
+    if let Some(model) = profile_cost_model() {
+        if let Some(gpu_time) = model.estimate_elemwise(elements) {
+            trace!(
+                "Elemwise calibration ({} elems): cpu={:?}, gpu_est={:?}",
+                elements,
+                cpu_time,
+                gpu_time
+            );
+            return Ok(Some(gpu_time < cpu_time));
+        }
+    }
     let view = HostTensorView {
         data: &data,
         shape: &[elements, 1],
@@ -398,6 +451,17 @@ fn compare_reduction(
     let tensor = Tensor::new(data.clone(), vec![elements, 1]).map_err(|e| anyhow!(e))?;
     let value = Value::Tensor(tensor.clone());
     let cpu_time = time(|| runmat_runtime::call_builtin("sum", &[value.clone()]))?;
+    if let Some(model) = profile_cost_model() {
+        if let Some(gpu_time) = model.estimate_reduction(elements) {
+            trace!(
+                "Reduction calibration ({} elems): cpu={:?}, gpu_est={:?}",
+                elements,
+                cpu_time,
+                gpu_time
+            );
+            return Ok(Some(gpu_time < cpu_time));
+        }
+    }
     let view = HostTensorView {
         data: &data,
         shape: &[elements, 1],
@@ -445,6 +509,17 @@ fn compare_matmul(provider: &'static dyn AccelProvider, n: usize) -> Result<Opti
     let a = Value::Tensor(ta.clone());
     let b = Value::Tensor(tb.clone());
     let cpu_time = time(|| runmat_runtime::matrix::value_matmul(&a, &b))?;
+    if let Some(model) = profile_cost_model() {
+        if let Some(gpu_time) = model.estimate_matmul(n, n, n) {
+            trace!(
+                "Matmul calibration ({}^3 flops): cpu={:?}, gpu_est={:?}",
+                n,
+                cpu_time,
+                gpu_time
+            );
+            return Ok(Some(gpu_time < cpu_time));
+        }
+    }
     let view_a = HostTensorView {
         data: &data_a,
         shape: &[n, n],
@@ -482,6 +557,217 @@ where
     let start = Instant::now();
     let _ = f().map_err(|e| anyhow!(e))?;
     Ok(start.elapsed())
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Deserialize, Debug)]
+struct ProfileDurationSummary {
+    #[serde(default)]
+    avg_ms: f64,
+    #[serde(default)]
+    min_ms: f64,
+    #[serde(default)]
+    max_ms: f64,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Deserialize, Debug)]
+struct ProfileReport {
+    name: String,
+    category: String,
+    #[serde(default)]
+    detail: String,
+    #[serde(default)]
+    input_shapes: Vec<Vec<usize>>,
+    #[serde(default)]
+    iterations: usize,
+    upload_ms: ProfileDurationSummary,
+    compute_ms: ProfileDurationSummary,
+    download_ms: ProfileDurationSummary,
+    total_ms: ProfileDurationSummary,
+    #[serde(default)]
+    notes: Vec<String>,
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+struct LinearModel {
+    slope: f64,
+    intercept: f64,
+}
+
+impl LinearModel {
+    fn estimate(&self, x: f64) -> Option<Duration> {
+        if !self.slope.is_finite() || self.slope <= 0.0 {
+            return None;
+        }
+        let total = self.intercept + self.slope * x;
+        if total.is_finite() && total > 0.0 {
+            Some(Duration::from_secs_f64(total))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Default)]
+struct ProfileCostModel {
+    elem: Option<LinearModel>,
+    reduction: Option<LinearModel>,
+    transpose: Option<LinearModel>,
+    matmul: Option<LinearModel>,
+}
+
+impl ProfileCostModel {
+    fn from_reports(reports: &[ProfileReport]) -> Self {
+        let mut elem_samples = Vec::<(f64, f64)>::new();
+        let mut reduction_samples = Vec::<(f64, f64)>::new();
+        let mut transpose_samples = Vec::<(f64, f64)>::new();
+        let mut matmul_samples = Vec::<(f64, f64)>::new();
+
+        for report in reports {
+            let total_secs = report.total_ms.avg_ms / 1_000.0;
+            match report.category.as_str() {
+                "elementwise" | "reduction" | "transpose" => {
+                    if let Some(shape) = report.input_shapes.first() {
+                        let elems: usize = shape.iter().copied().product();
+                        if elems == 0 {
+                            continue;
+                        }
+                        let sample = (elems as f64, total_secs);
+                        match report.category.as_str() {
+                            "elementwise" => elem_samples.push(sample),
+                            "reduction" => reduction_samples.push(sample),
+                            "transpose" => transpose_samples.push(sample),
+                            _ => {}
+                        }
+                    }
+                }
+                "matmul" => {
+                    if report.input_shapes.len() >= 2 {
+                        let a = &report.input_shapes[0];
+                        let b = &report.input_shapes[1];
+                        if a.len() == 2 && b.len() == 2 {
+                            let m = a[0];
+                            let k = a[1];
+                            let n = b[1];
+                            let flops = m.checked_mul(k).and_then(|val| val.checked_mul(n));
+                            if let Some(flops) = flops {
+                                matmul_samples.push((flops as f64, total_secs));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        ProfileCostModel {
+            elem: fit_linear_model(&elem_samples),
+            reduction: fit_linear_model(&reduction_samples),
+            transpose: fit_linear_model(&transpose_samples),
+            matmul: fit_linear_model(&matmul_samples),
+        }
+    }
+
+    fn estimate_elemwise(&self, elements: usize) -> Option<Duration> {
+        self.elem.and_then(|model| model.estimate(elements as f64))
+    }
+
+    fn estimate_reduction(&self, elements: usize) -> Option<Duration> {
+        self.reduction
+            .and_then(|model| model.estimate(elements as f64))
+    }
+
+    fn estimate_matmul(&self, m: usize, k: usize, n: usize) -> Option<Duration> {
+        let flops = m.checked_mul(k)?.checked_mul(n)?;
+        self.matmul.and_then(|model| model.estimate(flops as f64))
+    }
+
+    #[allow(dead_code)]
+    fn estimate_transpose(&self, elements: usize) -> Option<Duration> {
+        self.transpose
+            .and_then(|model| model.estimate(elements as f64))
+    }
+}
+
+fn fit_linear_model(samples: &[(f64, f64)]) -> Option<LinearModel> {
+    if samples.is_empty() {
+        return None;
+    }
+    if samples.len() == 1 {
+        let (x, y) = samples[0];
+        if x > 0.0 {
+            return Some(LinearModel {
+                slope: (y / x).max(0.0),
+                intercept: 0.0,
+            });
+        }
+        return None;
+    }
+
+    let sum_x: f64 = samples.iter().map(|(x, _)| *x).sum();
+    let sum_y: f64 = samples.iter().map(|(_, y)| *y).sum();
+    let sum_xx: f64 = samples.iter().map(|(x, _)| x * x).sum();
+    let sum_xy: f64 = samples.iter().map(|(x, y)| x * y).sum();
+    let n = samples.len() as f64;
+    let denom = (n * sum_xx) - (sum_x * sum_x);
+    if denom.abs() < f64::EPSILON {
+        return None;
+    }
+    let slope = ((n * sum_xy) - (sum_x * sum_y)) / denom;
+    let mean_x = sum_x / n;
+    let mean_y = sum_y / n;
+    let mut intercept = mean_y - slope * mean_x;
+    if intercept < 0.0 {
+        intercept = 0.0;
+    }
+    if !slope.is_finite() || slope <= 0.0 {
+        return None;
+    }
+    Some(LinearModel { slope, intercept })
+}
+
+fn profile_cost_model() -> Option<&'static ProfileCostModel> {
+    PROFILE_MODEL
+        .get_or_init(|| load_profile_cost_model())
+        .as_ref()
+}
+
+fn load_profile_cost_model() -> Option<ProfileCostModel> {
+    let mut candidates = Vec::new();
+    if let Ok(path) = env::var("RUNMAT_ACCEL_PROFILE") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Some(path) = auto_offload_options().profile_path.clone() {
+        candidates.push(path);
+    }
+    candidates.push(PathBuf::from("benchmarks/wgpu_profile/mac_m2.json"));
+    candidates.push(PathBuf::from("wgpu_profile.json"));
+
+    for path in candidates {
+        if !path.exists() {
+            continue;
+        }
+        match fs::read_to_string(&path) {
+            Ok(contents) => match serde_json::from_str::<Vec<ProfileReport>>(&contents) {
+                Ok(reports) => {
+                    debug!(
+                        "Loaded {} GPU profile reports from {}",
+                        reports.len(),
+                        path.display()
+                    );
+                    return Some(ProfileCostModel::from_reports(&reports));
+                }
+                Err(err) => {
+                    debug!("Failed to parse GPU profile {}: {err}", path.display());
+                }
+            },
+            Err(err) => {
+                debug!("Failed to read GPU profile {}: {err}", path.display());
+            }
+        }
+    }
+    None
 }
 
 pub fn promote_binary(op: BinaryOp, a: &Value, b: &Value) -> Result<(Value, Value)> {
