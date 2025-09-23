@@ -1,8 +1,14 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock, Weak};
 
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-use crate::graph::{AccelGraph, AccelNode, InstrSpan, NodeId, ShapeInfo, ValueId};
+use crate::graph::{
+    AccelGraph, AccelNode, AccelNodeLabel, InstrSpan, NodeId, PrimitiveOp, ShapeInfo, ValueId,
+    ValueOrigin,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FusionKind {
@@ -166,6 +172,397 @@ fn group_span(graph: &AccelGraph, nodes: &[NodeId]) -> InstrSpan {
     InstrSpan { start, end }
 }
 
+#[derive(Debug, Clone)]
+pub struct FusionPlan {
+    pub groups: Vec<FusionGroupPlan>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FusionGroupPlan {
+    pub index: usize,
+    pub group: FusionGroup,
+    pub operations: Vec<FusionOp>,
+    pub inputs: Vec<ValueId>,
+    pub output: Option<ValueId>,
+    pub kernel: FusionKernelSpec,
+}
+
+#[derive(Debug, Clone)]
+pub enum FusionOp {
+    Primitive {
+        op: PrimitiveOp,
+        inputs: Vec<ValueId>,
+        output: Option<ValueId>,
+    },
+    Builtin {
+        name: String,
+        inputs: Vec<ValueId>,
+        output: Option<ValueId>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct FusionKernelSpec {
+    pub kind: FusionKind,
+    pub supported: bool,
+}
+
+impl FusionKernelSpec {
+    fn new(kind: FusionKind, supported: bool) -> Self {
+        Self { kind, supported }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ActiveFusion {
+    pub kind: FusionKind,
+    pub span: InstrSpan,
+    pub element_count: Option<usize>,
+    pub supported: bool,
+}
+
+struct ActiveContext {
+    plan: Arc<FusionPlan>,
+    active_group: Option<usize>,
+}
+
+static PLAN_CACHE: Lazy<RwLock<HashMap<usize, Weak<FusionPlan>>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+thread_local! {
+    static ACTIVE_PLAN: RefCell<Option<ActiveContext>> = const { RefCell::new(None) };
+}
+
+pub fn prepare_fusion_plan(
+    graph: Option<&AccelGraph>,
+    groups: &[FusionGroup],
+) -> Option<Arc<FusionPlan>> {
+    let graph = graph?;
+    if groups.is_empty() {
+        return None;
+    }
+    let key = graph as *const AccelGraph as usize;
+    if let Some(plan) = PLAN_CACHE
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&key).and_then(|weak| weak.upgrade()))
+    {
+        return Some(plan);
+    }
+
+    let plan = FusionPlan::from_graph(graph, groups);
+    let plan = Arc::new(plan);
+    if let Ok(mut guard) = PLAN_CACHE.write() {
+        guard.insert(key, Arc::downgrade(&plan));
+    }
+    Some(plan)
+}
+
+pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
+    ACTIVE_PLAN.with(|ctx| {
+        let mut slot = ctx.borrow_mut();
+        *slot = plan.map(|plan| ActiveContext {
+            plan,
+            active_group: None,
+        });
+    });
+}
+
+pub fn deactivate_fusion_plan() {
+    ACTIVE_PLAN.with(|ctx| {
+        ctx.borrow_mut().take();
+    });
+}
+
+pub fn set_current_pc(pc: usize) {
+    ACTIVE_PLAN.with(|ctx| {
+        if let Some(context) = ctx.borrow_mut().as_mut() {
+            context.active_group = context.plan.group_for_pc(pc);
+        }
+    });
+}
+
+pub fn active_fusion() -> Option<ActiveFusion> {
+    ACTIVE_PLAN.with(|ctx| {
+        ctx.borrow()
+            .as_ref()
+            .and_then(|context| {
+                context
+                    .active_group
+                    .and_then(|idx| context.plan.groups.get(idx))
+            })
+            .map(|plan| ActiveFusion {
+                kind: plan.group.kind.clone(),
+                span: plan.group.span.clone(),
+                element_count: plan.element_count(),
+                supported: plan.kernel.supported,
+            })
+    })
+}
+
+pub fn active_group_plan_clone() -> Option<FusionGroupPlan> {
+    ACTIVE_PLAN.with(|ctx| {
+        ctx.borrow().as_ref().and_then(|context| {
+            context
+                .active_group
+                .and_then(|idx| context.plan.groups.get(idx).cloned())
+        })
+    })
+}
+
+impl FusionPlan {
+    pub fn from_graph(graph: &AccelGraph, groups: &[FusionGroup]) -> Self {
+        let plans = groups
+            .iter()
+            .enumerate()
+            .map(|(idx, group)| FusionGroupPlan::new(idx, group.clone(), graph))
+            .collect();
+        Self { groups: plans }
+    }
+
+    fn group_for_pc(&self, pc: usize) -> Option<usize> {
+        self.groups
+            .iter()
+            .find(|plan| pc >= plan.group.span.start && pc <= plan.group.span.end)
+            .map(|plan| plan.index)
+    }
+}
+
+impl From<Vec<FusionGroupPlan>> for FusionPlan {
+    fn from(groups: Vec<FusionGroupPlan>) -> Self {
+        Self { groups }
+    }
+}
+
+impl FusionGroupPlan {
+    fn new(index: usize, group: FusionGroup, graph: &AccelGraph) -> Self {
+        let node_set: HashSet<NodeId> = group.nodes.iter().copied().collect();
+        let mut seen_inputs: HashSet<ValueId> = HashSet::new();
+        let mut inputs: Vec<ValueId> = Vec::new();
+        let mut operations = Vec::new();
+        let mut output: Option<ValueId> = None;
+
+        for node_id in &group.nodes {
+            let Some(node) = graph.node(*node_id) else {
+                continue;
+            };
+            for input in &node.inputs {
+                let external = match graph.value(*input) {
+                    Some(info) => match info.origin {
+                        ValueOrigin::NodeOutput { node: origin, .. }
+                            if node_set.contains(&origin) =>
+                        {
+                            false
+                        }
+                        _ => true,
+                    },
+                    None => true,
+                };
+                if external && seen_inputs.insert(*input) {
+                    inputs.push(*input);
+                }
+            }
+
+            let op = match &node.label {
+                AccelNodeLabel::Primitive(p) => FusionOp::Primitive {
+                    op: *p,
+                    inputs: node.inputs.clone(),
+                    output: node.outputs.get(0).copied(),
+                },
+                AccelNodeLabel::Builtin { name } => FusionOp::Builtin {
+                    name: name.clone(),
+                    inputs: node.inputs.clone(),
+                    output: node.outputs.get(0).copied(),
+                },
+                AccelNodeLabel::Unknown => FusionOp::Primitive {
+                    op: PrimitiveOp::UPlus,
+                    inputs: node.inputs.clone(),
+                    output: node.outputs.get(0).copied(),
+                },
+            };
+            operations.push(op);
+
+            if let Some(out) = node.outputs.get(0).copied() {
+                output = Some(out);
+            }
+        }
+
+        let kind = group.kind.clone();
+        let mut plan = Self {
+            index,
+            group,
+            operations,
+            inputs,
+            output,
+            kernel: FusionKernelSpec::new(kind, true),
+        };
+
+        let supported = plan.generate_wgsl("f32").is_some();
+        plan.kernel.supported = supported;
+        plan
+    }
+
+    pub fn element_count(&self) -> Option<usize> {
+        self.group.element_count()
+    }
+
+    pub fn generate_wgsl(&self, scalar_ty: &str) -> Option<String> {
+        if !self.kernel.kind.is_elementwise() {
+            return None;
+        }
+        if !self.kernel.supported {
+            return None;
+        }
+        let output_id = self.output?;
+        let mut exprs: HashMap<ValueId, String> = HashMap::new();
+        for (idx, input_id) in self.inputs.iter().enumerate() {
+            exprs.insert(*input_id, format!("input{idx}.data[idx]"));
+        }
+
+        let mut body = String::new();
+        for (node_idx, op) in self.operations.iter().enumerate() {
+            let tmp_name = format!("tmp{node_idx}");
+            match op {
+                FusionOp::Primitive { op, inputs, output } => {
+                    let expr = primitive_expr(*op, inputs, &exprs)?;
+                    body.push_str(&format!("    let {tmp_name}: {scalar_ty} = {expr};\n"));
+                    if let Some(out) = output {
+                        exprs.insert(*out, tmp_name.clone());
+                    }
+                }
+                FusionOp::Builtin {
+                    name,
+                    inputs,
+                    output,
+                } => {
+                    let expr = builtin_expr(name, inputs, &exprs)?;
+                    body.push_str(&format!("    let {tmp_name}: {scalar_ty} = {expr};\n"));
+                    if let Some(out) = output {
+                        exprs.insert(*out, tmp_name.clone());
+                    }
+                }
+            }
+        }
+
+        let final_expr = exprs.get(&output_id)?.clone();
+
+        let mut shader = String::new();
+        shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>; }}\n"));
+        shader.push_str("struct Params {\n    len: u32;\n    _pad0: u32;\n    _pad1: u32;\n    _pad2: u32;\n}\n\n");
+        for (idx, _) in self.inputs.iter().enumerate() {
+            shader.push_str(&format!(
+                "@group(0) @binding({}) var<storage, read> input{}: Tensor;\n",
+                idx, idx
+            ));
+        }
+        shader.push_str(&format!(
+            "@group(0) @binding({}) var<storage, read_write> output: Tensor;\n",
+            self.inputs.len()
+        ));
+        shader.push_str(&format!(
+            "@group(0) @binding({}) var<uniform> params: Params;\n\n",
+            self.inputs.len() + 1
+        ));
+        shader.push_str("@compute @workgroup_size(256)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n");
+        shader.push_str(
+            "    let idx = gid.x;\n    if (idx >= params.len) {\n        return;\n    }\n",
+        );
+        shader.push_str(&body);
+        shader.push_str(&format!("    output.data[idx] = {final_expr};\n}}\n"));
+        Some(shader)
+    }
+}
+
+impl FusionGroup {
+    pub fn element_count(&self) -> Option<usize> {
+        match &self.shape {
+            ShapeInfo::Scalar => Some(1),
+            ShapeInfo::Tensor(dims) => dims.iter().try_fold(1usize, |acc, dim| {
+                if let Some(size) = dim.and_then(|d| acc.checked_mul(d)) {
+                    Some(size)
+                } else {
+                    None
+                }
+            }),
+            ShapeInfo::Unknown => None,
+        }
+    }
+}
+
+impl FusionKind {
+    pub fn is_elementwise(&self) -> bool {
+        matches!(self, FusionKind::ElementwiseChain)
+    }
+}
+
+fn primitive_expr(
+    op: PrimitiveOp,
+    inputs: &[ValueId],
+    exprs: &HashMap<ValueId, String>,
+) -> Option<String> {
+    let binary = |exprs: &HashMap<ValueId, String>| -> Option<(String, String)> {
+        let lhs = exprs.get(inputs.get(0)?).cloned()?;
+        let rhs = exprs.get(inputs.get(1)?).cloned()?;
+        Some((lhs, rhs))
+    };
+    match op {
+        PrimitiveOp::Add => {
+            let (lhs, rhs) = binary(exprs)?;
+            Some(format!("({lhs} + {rhs})"))
+        }
+        PrimitiveOp::Sub => {
+            let (lhs, rhs) = binary(exprs)?;
+            Some(format!("({lhs} - {rhs})"))
+        }
+        PrimitiveOp::Mul | PrimitiveOp::ElemMul => {
+            let (lhs, rhs) = binary(exprs)?;
+            Some(format!("({lhs} * {rhs})"))
+        }
+        PrimitiveOp::Div | PrimitiveOp::ElemDiv | PrimitiveOp::ElemLeftDiv => {
+            let (lhs, rhs) = binary(exprs)?;
+            Some(format!("({lhs} / {rhs})"))
+        }
+        PrimitiveOp::Pow | PrimitiveOp::ElemPow => {
+            let (lhs, rhs) = binary(exprs)?;
+            Some(format!("pow({lhs}, {rhs})"))
+        }
+        PrimitiveOp::Neg => {
+            let arg = exprs.get(inputs.get(0)?).cloned()?;
+            Some(format!("(-{arg})"))
+        }
+        PrimitiveOp::UPlus => {
+            let arg = exprs.get(inputs.get(0)?).cloned()?;
+            Some(format!("(+{arg})"))
+        }
+        _ => None,
+    }
+}
+
+fn builtin_expr(
+    name: &str,
+    inputs: &[ValueId],
+    exprs: &HashMap<ValueId, String>,
+) -> Option<String> {
+    let func = match name.to_ascii_lowercase().as_str() {
+        "sin" => "sin",
+        "cos" => "cos",
+        "tan" => "tan",
+        "asin" => "asin",
+        "acos" => "acos",
+        "atan" => "atan",
+        "sinh" => "sinh",
+        "cosh" => "cosh",
+        "tanh" => "tanh",
+        "exp" => "exp",
+        "log" => "log",
+        "sqrt" => "sqrt",
+        "abs" => "abs",
+        _ => return None,
+    };
+    let arg = exprs.get(inputs.get(0)?).cloned()?;
+    Some(format!("{func}({arg})"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +632,18 @@ mod tests {
         let group = &groups[0];
         assert_eq!(group.nodes, vec![0, 1]);
         assert_eq!(group.kind, FusionKind::ElementwiseChain);
+    }
+
+    #[test]
+    fn builds_plan_and_template() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        assert_eq!(plan.groups.len(), 1);
+        let group_plan = &plan.groups[0];
+        assert!(group_plan.kernel.supported);
+        let wgsl = group_plan.generate_wgsl("f32").expect("wgsl");
+        assert!(wgsl.contains("@compute"));
+        assert!(group_plan.group.element_count().is_some());
     }
 }

@@ -4212,6 +4212,7 @@ dependencies = [
 name = "runmat-ignition"
 version = "0.0.3"
 dependencies = [
+ "log",
  "runmat-accelerate",
  "runmat-builtins",
  "runmat-gc",

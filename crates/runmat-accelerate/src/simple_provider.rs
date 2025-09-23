@@ -1,6 +1,8 @@
 use anyhow::Result;
 use once_cell::sync::OnceCell;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView, ProviderPrecision,
+};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -30,6 +32,10 @@ impl Default for InProcessProvider {
 }
 
 impl AccelProvider for InProcessProvider {
+    fn precision(&self) -> ProviderPrecision {
+        ProviderPrecision::F64
+    }
+
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap();
@@ -755,6 +761,18 @@ impl AccelProvider for InProcessProvider {
             device_id: 0,
             buffer_id: id,
         })
+    }
+
+    fn fused_elementwise(
+        &self,
+        _shader: &str,
+        _inputs: &[GpuTensorHandle],
+        _output_shape: &[usize],
+        _len: usize,
+    ) -> Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "fused_elementwise not supported by in-process provider"
+        ))
     }
 }
 

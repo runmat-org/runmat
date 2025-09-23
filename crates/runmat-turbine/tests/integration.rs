@@ -295,6 +295,8 @@ fn test_error_handling_in_compilation() {
                 var_count: 0,
                 functions: std::collections::HashMap::new(),
                 var_types: Vec::new(),
+                accel_graph: None,
+                fusion_groups: Vec::new(),
             };
 
             let result = engine.compile_bytecode(&bytecode);

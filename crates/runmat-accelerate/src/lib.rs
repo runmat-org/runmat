@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 
 pub mod fusion;
+pub mod fusion_exec;
+pub mod fusion_residency;
 pub mod graph;
 pub mod native_auto;
 pub mod simple_provider;

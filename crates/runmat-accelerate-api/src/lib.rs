@@ -22,6 +22,12 @@ pub struct ReduceDimResult {
     pub indices: GpuTensorHandle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderPrecision {
+    F32,
+    F64,
+}
+
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: Send + Sync {
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
@@ -38,6 +44,10 @@ pub trait AccelProvider: Send + Sync {
             memory_bytes: None,
             backend: None,
         }
+    }
+
+    fn precision(&self) -> ProviderPrecision {
+        ProviderPrecision::F64
     }
 
     // Optional operator hooks (default to unsupported)
@@ -145,6 +155,18 @@ pub trait AccelProvider: Send + Sync {
     }
     fn reduce_max_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<ReduceDimResult> {
         Err(anyhow::anyhow!("reduce_max_dim not supported by provider"))
+    }
+
+    fn fused_elementwise(
+        &self,
+        _shader: &str,
+        _inputs: &[GpuTensorHandle],
+        _output_shape: &[usize],
+        _len: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "fused_elementwise not supported by provider"
+        ))
     }
 }
 

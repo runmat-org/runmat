@@ -291,6 +291,8 @@ fn test_bytecode_compilation() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     // Initially should not compile (not hot)
@@ -353,6 +355,8 @@ fn test_complex_bytecode_compilation() {
         var_count: 2,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -401,6 +405,8 @@ fn test_control_flow_compilation() {
         var_count: 2,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -471,6 +477,8 @@ fn test_nested_control_flow() {
         var_count: 2,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -523,6 +531,8 @@ fn test_execute_or_compile() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let mut vars = vec![Value::Num(0.0)];
@@ -574,6 +584,8 @@ fn test_engine_reset() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     // Make it hot and compile
@@ -606,6 +618,8 @@ fn test_bytecode_hashing() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let bytecode2 = Bytecode {
@@ -613,6 +627,8 @@ fn test_bytecode_hashing() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let bytecode3 = Bytecode {
@@ -620,6 +636,8 @@ fn test_bytecode_hashing() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     // Same bytecode should produce same hash
@@ -656,6 +674,8 @@ fn test_error_handling() {
         var_count: 0,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -756,6 +776,8 @@ fn test_large_function_compilation() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -805,6 +827,8 @@ fn test_stats_accuracy() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -854,6 +878,8 @@ fn test_jit_arithmetic_compilation() {
         var_count: 4,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -902,6 +928,8 @@ fn test_runtime_interface_implementation() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -957,6 +985,8 @@ fn test_runtime_functions_available() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash1 = engine.calculate_bytecode_hash(&bytecode_with_builtin);
@@ -984,6 +1014,8 @@ fn test_runtime_functions_available() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash2 = engine.calculate_bytecode_hash(&bytecode_with_matrix);
@@ -1009,6 +1041,8 @@ fn test_runtime_functions_available() {
         var_count: 1,
         functions: std::collections::HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let hash3 = engine.calculate_bytecode_hash(&bytecode_with_pow);
@@ -1060,6 +1094,8 @@ fn test_jit_user_function_fallback() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1110,6 +1146,8 @@ fn test_jit_function_variable_preservation() {
         var_count: 2,
         functions: HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
@@ -1152,6 +1190,8 @@ fn test_jit_function_variable_preservation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1224,6 +1264,8 @@ fn test_jit_mixed_execution_patterns() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1284,6 +1326,8 @@ fn test_jit_function_compilation_attempts() {
         var_count: 1,
         functions: HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     // Should not crash when trying to compile function instructions
@@ -1319,6 +1363,8 @@ fn test_jit_engine_statistics_with_functions() {
         var_count: 1,
         functions: HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let mut vars = vec![Value::Num(0.0)];
@@ -1341,6 +1387,8 @@ fn test_jit_engine_statistics_with_functions() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1401,6 +1449,8 @@ fn test_jit_simple_function_compilation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1484,6 +1534,8 @@ fn test_jit_nested_function_calls_compilation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1537,6 +1589,8 @@ fn test_jit_nested_function_calls_compilation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1614,6 +1668,8 @@ fn test_jit_function_parameter_validation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1703,6 +1759,8 @@ fn test_jit_function_variable_isolation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1802,6 +1860,8 @@ fn test_jit_function_compilation_performance() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 
@@ -1862,6 +1922,8 @@ fn test_jit_function_error_handling() {
         var_count: 1,
         functions: HashMap::new(),
         var_types: Vec::new(),
+        accel_graph: None,
+        fusion_groups: Vec::new(),
     };
 
     let mut vars = vec![Value::Num(0.0)];
@@ -1890,6 +1952,8 @@ fn test_jit_function_error_handling() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
+            accel_graph: None,
+            fusion_groups: Vec::new(),
         },
     );
 

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::{auto_offload_options, AutoOffloadLogLevel};
+use crate::{auto_offload_options, fusion::active_fusion, fusion_residency, AutoOffloadLogLevel};
 use anyhow::{anyhow, Result};
 use log::{debug, info, trace};
 use once_cell::sync::OnceCell;
@@ -197,7 +197,14 @@ impl NativeAutoOffload {
         }
         match op {
             BinaryOp::Elementwise => {
-                let elems = element_count_pair(a, b).unwrap_or(0);
+                let mut elems = element_count_pair(a, b).unwrap_or(0);
+                if let Some(active) = active_fusion() {
+                    if active.kind.is_elementwise() {
+                        if let Some(ec) = active.element_count {
+                            elems = ec;
+                        }
+                    }
+                }
                 let should_gpu = self
                     .should_gpu_elementwise(elems)
                     .unwrap_or(elems >= self.thresholds.binary_min_elems);
@@ -348,6 +355,11 @@ impl NativeAutoOffload {
     }
 
     fn should_gpu_elementwise(&self, elements: usize) -> Option<bool> {
+        if let Some(active) = active_fusion() {
+            if active.kind.is_elementwise() {
+                return Some(true);
+            }
+        }
         if elements == 0 {
             return Some(false);
         }
@@ -393,9 +405,14 @@ fn tensor_rows_cols(value: &Value) -> Option<(usize, usize)> {
 }
 
 fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
-    args.iter()
-        .map(|v| gather_if_needed(v).map_err(|e| anyhow!(e)))
-        .collect()
+    let mut out = Vec::with_capacity(args.len());
+    for value in args {
+        if let Value::GpuTensor(handle) = value {
+            fusion_residency::clear(handle);
+        }
+        out.push(gather_if_needed(value).map_err(|e| anyhow!(e))?);
+    }
+    Ok(out)
 }
 
 #[derive(Clone, Copy)]

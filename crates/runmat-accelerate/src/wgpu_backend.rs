@@ -4,7 +4,8 @@ use log::info;
 use once_cell::sync::OnceCell;
 use pollster::block_on;
 use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned, HostTensorView, ReduceDimResult,
+    AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned, HostTensorView,
+    ProviderPrecision, ReduceDimResult,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -67,6 +68,15 @@ struct ScalarParamsF32 {
     total: u32,
     scalar: f32,
     _pad_scalar: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct FusionParams {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 #[repr(C)]
@@ -1066,6 +1076,13 @@ impl WgpuProvider {
 }
 
 impl AccelProvider for WgpuProvider {
+    fn precision(&self) -> ProviderPrecision {
+        match self.precision {
+            NumericPrecision::F32 => ProviderPrecision::F32,
+            NumericPrecision::F64 => ProviderPrecision::F64,
+        }
+    }
+
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         let len = host.data.len();
         let shape = host.shape.to_vec();
@@ -1284,6 +1301,112 @@ impl AccelProvider for WgpuProvider {
 
     fn reduce_max_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<ReduceDimResult> {
         self.reduce_dim_minmax(a, dim, DimReduceExtrema::Max)
+    }
+
+    fn fused_elementwise(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+    ) -> Result<GpuTensorHandle> {
+        if inputs.is_empty() {
+            return Err(anyhow!("fused_elementwise: no inputs"));
+        }
+        if len > u32::MAX as usize {
+            return Err(anyhow!("fused_elementwise: tensor too large"));
+        }
+
+        let entries = inputs
+            .iter()
+            .map(|handle| self.get_entry(handle))
+            .collect::<Result<Vec<_>>>()?;
+
+        let output_buffer = self.create_storage_buffer(len, "runmat-fusion-output");
+
+        let mut layout_entries = Vec::with_capacity(inputs.len() + 2);
+        for idx in 0..inputs.len() {
+            layout_entries.push(storage_read_entry(idx as u32));
+        }
+        layout_entries.push(storage_read_write_entry(inputs.len() as u32));
+        layout_entries.push(uniform_entry((inputs.len() + 1) as u32));
+
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("runmat-fusion-bind-layout"),
+                    entries: &layout_entries,
+                });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("runmat-fusion-pipeline-layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("runmat-fusion-shader"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader)),
+            });
+        let pipeline = self
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("runmat-fusion-pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &module,
+                entry_point: "main",
+            });
+
+        let mut bind_entries = Vec::with_capacity(inputs.len() + 2);
+        for (idx, entry) in entries.iter().enumerate() {
+            bind_entries.push(wgpu::BindGroupEntry {
+                binding: idx as u32,
+                resource: entry.buffer.as_ref().as_entire_binding(),
+            });
+        }
+        bind_entries.push(wgpu::BindGroupEntry {
+            binding: inputs.len() as u32,
+            resource: output_buffer.as_ref().as_entire_binding(),
+        });
+        let params = FusionParams {
+            len: len as u32,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
+        };
+        let params_buffer = self.uniform_buffer(&params, "runmat-fusion-params");
+        bind_entries.push(wgpu::BindGroupEntry {
+            binding: (inputs.len() + 1) as u32,
+            resource: params_buffer.as_entire_binding(),
+        });
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("runmat-fusion-bind-group"),
+            layout: &bind_group_layout,
+            entries: &bind_entries,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-fusion-encoder"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-fusion-pass"),
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            let workgroups = dispatch_size(len as u32, WORKGROUP_SIZE);
+            if workgroups > 0 {
+                pass.dispatch_workgroups(workgroups, 1, 1);
+            }
+        }
+        self.submit(encoder);
+
+        Ok(self.register_existing_buffer(output_buffer, output_shape.to_vec(), len))
     }
 }
 

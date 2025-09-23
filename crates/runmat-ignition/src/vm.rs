@@ -1,11 +1,30 @@
 use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
 use crate::instr::Instr;
+#[cfg(feature = "native-accel")]
+use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
+#[cfg(feature = "native-accel")]
+use runmat_accelerate::{
+    activate_fusion_plan, deactivate_fusion_plan, fusion_residency, prepare_fusion_plan,
+    set_current_pc,
+};
+#[cfg(feature = "native-accel")]
+use runmat_accelerate::{active_group_plan_clone, ValueOrigin, VarKind};
 use runmat_builtins::{Type, Value};
 use runmat_runtime::call_builtin;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
+
+#[cfg(feature = "native-accel")]
+struct FusionPlanGuard;
+
+#[cfg(feature = "native-accel")]
+impl Drop for FusionPlanGuard {
+    fn drop(&mut self) {
+        deactivate_fusion_plan();
+    }
+}
 
 #[derive(Clone, Copy)]
 enum AutoBinaryOp {
@@ -109,6 +128,12 @@ pub fn interpret_with_vars(
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
 ) -> Result<Vec<Value>, String> {
+    #[cfg(feature = "native-accel")]
+    let fusion_plan = prepare_fusion_plan(bytecode.accel_graph.as_ref(), &bytecode.fusion_groups);
+    #[cfg(feature = "native-accel")]
+    activate_fusion_plan(fusion_plan.clone());
+    #[cfg(feature = "native-accel")]
+    let _fusion_guard = FusionPlanGuard;
     let mut stack: Vec<Value> = Vec::new();
     let mut vars = initial_vars.to_vec();
     if vars.len() < bytecode.var_count {
@@ -196,6 +221,25 @@ pub fn interpret_with_vars(
         }};
     }
     while pc < bytecode.instructions.len() {
+        #[cfg(feature = "native-accel")]
+        set_current_pc(pc);
+        #[cfg(feature = "native-accel")]
+        if let (Some(plan), Some(graph)) =
+            (active_group_plan_clone(), bytecode.accel_graph.as_ref())
+        {
+            if plan.group.span.start == pc {
+                match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context) {
+                    Ok(result) => {
+                        stack.push(result);
+                        pc = plan.group.span.end + 1;
+                        continue;
+                    }
+                    Err(err) => {
+                        log::debug!("fusion fallback at pc {}: {}", pc, err);
+                    }
+                }
+            }
+        }
         match bytecode.instructions[pc].clone() {
             Instr::LoadConst(c) => stack.push(Value::Num(c)),
             Instr::LoadBool(b) => stack.push(Value::Bool(b)),
@@ -210,6 +254,10 @@ pub fn interpret_with_vars(
                 let val = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                if i < vars.len() {
+                    #[cfg(feature = "native-accel")]
+                    clear_residency(&vars[i]);
+                }
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
                 }
@@ -251,10 +299,18 @@ pub fn interpret_with_vars(
                     while context.locals.len() <= local_index {
                         context.locals.push(Value::Num(0.0));
                     }
+                    #[cfg(feature = "native-accel")]
+                    if local_index < context.locals.len() {
+                        clear_residency(&context.locals[local_index]);
+                    }
                     context.locals[local_index] = val;
                 } else {
                     if offset >= vars.len() {
                         vars.resize(offset + 1, Value::Num(0.0));
+                    }
+                    #[cfg(feature = "native-accel")]
+                    if offset < vars.len() {
+                        clear_residency(&vars[offset]);
                     }
                     vars[offset] = val;
                     // write-through to persistents if this local is a declared persistent for current function
@@ -279,7 +335,10 @@ pub fn interpret_with_vars(
             }
             Instr::ExitScope(local_count) => {
                 for _ in 0..local_count {
-                    context.locals.pop();
+                    if let Some(val) = context.locals.pop() {
+                        #[cfg(feature = "native-accel")]
+                        clear_residency(&val);
+                    }
                 }
             }
             Instr::RegisterImport { path, wildcard } => {
@@ -7456,6 +7515,95 @@ pub fn interpret_with_vars(
         }
     }
     Ok(vars)
+}
+
+#[cfg(feature = "native-accel")]
+fn try_execute_fusion_group(
+    plan: &runmat_accelerate::FusionGroupPlan,
+    graph: &runmat_accelerate::AccelGraph,
+    stack: &mut Vec<Value>,
+    vars: &mut [Value],
+    context: &ExecutionContext,
+) -> Result<Value, String> {
+    let mut inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
+    let mut stack_entries: Vec<(usize, bool)> = Vec::new();
+
+    for (idx, value_id) in plan.inputs.iter().enumerate() {
+        let info = graph
+            .value(*value_id)
+            .ok_or_else(|| format!("fusion: missing value metadata for id {value_id}"))?;
+        match &info.origin {
+            ValueOrigin::Variable { kind, index } => {
+                let value =
+                    match kind {
+                        VarKind::Global => vars
+                            .get(*index)
+                            .cloned()
+                            .ok_or_else(|| format!("fusion: global var {index} out of range"))?,
+                        VarKind::Local => {
+                            if let Some(frame) = context.call_stack.last() {
+                                let absolute = frame.locals_start + index;
+                                context.locals.get(absolute).cloned().ok_or_else(|| {
+                                    format!("fusion: local var {index} unavailable")
+                                })?
+                            } else {
+                                vars.get(*index).cloned().ok_or_else(|| {
+                                    format!("fusion: local var {index} unavailable")
+                                })?
+                            }
+                        }
+                    };
+                inputs[idx] = Some(value);
+            }
+            ValueOrigin::Constant | ValueOrigin::NodeOutput { .. } | ValueOrigin::Unknown => {
+                stack_entries.push((idx, true));
+            }
+        }
+    }
+
+    let stack_needed = stack_entries.len();
+    if stack.len() < stack_needed {
+        return Err("fusion: stack underflow gathering inputs".to_string());
+    }
+
+    let slice_start = stack.len() - stack_needed;
+    let slice = stack[slice_start..].to_vec();
+    stack.truncate(slice_start);
+
+    let mut consumed: Vec<Value> = Vec::new();
+    for (offset, (input_idx, should_consume)) in stack_entries.into_iter().enumerate() {
+        let val = slice
+            .get(offset)
+            .cloned()
+            .ok_or_else(|| "fusion: unable to read stack segment".to_string())?;
+        if should_consume {
+            consumed.push(val.clone());
+        }
+        inputs[input_idx] = Some(val);
+    }
+
+    let inputs: Vec<Value> = inputs
+        .into_iter()
+        .map(|opt| opt.ok_or_else(|| "fusion: missing input value".to_string()))
+        .collect::<Result<_, _>>()?;
+
+    let request = FusionExecutionRequest { plan, inputs };
+    match execute_elementwise(request) {
+        Ok(result) => Ok(result),
+        Err(err) => {
+            for value in consumed.into_iter().rev() {
+                stack.push(value);
+            }
+            Err(err.to_string())
+        }
+    }
+}
+
+#[cfg(feature = "native-accel")]
+fn clear_residency(value: &Value) {
+    if let Value::GpuTensor(handle) = value {
+        fusion_residency::clear(handle);
+    }
 }
 
 fn parse_exception(err: &str) -> runmat_builtins::MException {
