@@ -68,4 +68,12 @@ impl Bytecode {
             fusion_groups: Vec::new(),
         }
     }
+
+    pub fn with_instructions(instructions: Vec<Instr>, var_count: usize) -> Self {
+        Self {
+            instructions,
+            var_count,
+            ..Self::empty()
+        }
+    }
 }

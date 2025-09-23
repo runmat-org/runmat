@@ -452,90 +452,82 @@ mod tests {
 
     #[test]
     fn test_basic_allocation() {
-        let _ = gc_reset_for_test();
-
-        let value = Value::Num(42.0);
-        let ptr = gc_allocate(value).expect("allocation failed");
-        assert_eq!(*ptr, Value::Num(42.0));
+        gc_test_context(|| {
+            let value = Value::Num(42.0);
+            let ptr = gc_allocate(value).expect("allocation failed");
+            assert_eq!(*ptr, Value::Num(42.0));
+        });
     }
 
     #[test]
     fn test_collection() {
-        let _ = gc_reset_for_test();
+        gc_test_context(|| {
+            let mut _ptrs = Vec::new();
+            for i in 0..100 {
+                let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation failed");
+                _ptrs.push(ptr);
+            }
 
-        // Allocate many objects to trigger collection
-        let mut _ptrs = Vec::new();
-        for i in 0..100 {
-            let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation failed");
-            _ptrs.push(ptr);
-        }
-
-        let _collected = gc_collect_minor().expect("collection failed");
-        // Collection completed successfully
+            let _collected = gc_collect_minor().expect("collection failed");
+            drop(_ptrs);
+        });
     }
 
     #[test]
     fn test_thread_safety() {
         use std::thread;
 
-        let handles: Vec<_> = (0..4)
-            .map(|i| {
-                thread::spawn(move || {
-                    let mut ptrs = Vec::new();
-                    for j in 0..100 {
-                        let value = Value::Num((i * 100 + j) as f64);
-                        let ptr = gc_allocate(value).expect("allocation failed");
-                        ptrs.push(ptr);
-                    }
-                    ptrs
+        gc_test_context(|| {
+            let handles: Vec<_> = (0..4)
+                .map(|i| {
+                    thread::spawn(move || {
+                        let mut ptrs = Vec::new();
+                        for j in 0..100 {
+                            let value = Value::Num((i * 100 + j) as f64);
+                            let ptr = gc_allocate(value).expect("allocation failed");
+                            ptrs.push(ptr);
+                        }
+                        ptrs
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        for handle in handles {
-            let _ptrs = handle.join().expect("thread failed");
-        }
+            for handle in handles {
+                let _ptrs = handle.join().expect("thread failed");
+            }
 
-        // Force collection to clean up
-        let _ = gc_collect_major();
+            let _ = gc_collect_major();
+        });
     }
 
     #[test]
     fn test_root_protection() {
-        let _ = gc_reset_for_test();
+        gc_test_context(|| {
+            let protected = gc_allocate(Value::Num(42.0)).expect("allocation failed");
+            gc_add_root(protected.clone()).expect("root registration failed");
 
-        // Allocate an object and keep a reference
-        let protected = gc_allocate(Value::Num(42.0)).expect("allocation failed");
+            for i in 0..60 {
+                let _ = gc_allocate(Value::String(format!("garbage_{i}")));
+            }
 
-        // Register it as a root
-        gc_add_root(protected.clone()).expect("root registration failed");
+            let _ = gc_collect_minor().expect("collection failed");
+            assert_eq!(*protected, Value::Num(42.0));
 
-        // Allocate garbage
-        for i in 0..60 {
-            let _ = gc_allocate(Value::String(format!("garbage_{i}")));
-        }
-
-        // Force collection
-        let _ = gc_collect_minor().expect("collection failed");
-
-        // Protected object should still be valid
-        assert_eq!(*protected, Value::Num(42.0));
-
-        // Clean up
-        gc_remove_root(protected).expect("root removal failed");
+            gc_remove_root(protected).expect("root removal failed");
+        });
     }
 
     #[test]
     fn test_gc_allocation_and_roots() {
-        let _ = gc_reset_for_test();
+        gc_test_context(|| {
+            let v = gc_allocate(Value::Num(7.0)).expect("allocation failed");
+            assert_eq!(*v, Value::Num(7.0));
 
-        let v = gc_allocate(Value::Num(7.0)).expect("allocation failed");
-        assert_eq!(*v, Value::Num(7.0));
+            gc_add_root(v.clone()).expect("root add failed");
+            let _ = gc_collect_minor().expect("collection failed");
+            assert_eq!(*v, Value::Num(7.0));
 
-        gc_add_root(v.clone()).expect("root add failed");
-        let _ = gc_collect_minor().expect("collection failed");
-        assert_eq!(*v, Value::Num(7.0));
-
-        gc_remove_root(v).expect("root remove failed");
+            gc_remove_root(v).expect("root remove failed");
+        });
     }
 }

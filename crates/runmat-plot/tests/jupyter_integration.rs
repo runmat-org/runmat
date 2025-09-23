@@ -114,9 +114,18 @@ fn test_base64_export() {
     figure.add_line_plot(line_plot);
 
     let result = backend.display_figure(&mut figure);
-    assert!(result.is_ok());
-
-    let base64_html = result.unwrap();
+    let base64_html = match result {
+        Ok(html) => html,
+        Err(err)
+            if err
+                .to_string()
+                .contains("Failed to find suitable GPU adapter") =>
+        {
+            eprintln!("skipping base64 export test: {err}");
+            return;
+        }
+        Err(err) => panic!("{err}"),
+    };
     assert!(base64_html.contains("data:image/png;base64,"));
     assert!(base64_html.contains("<img"));
 }
@@ -400,9 +409,18 @@ fn test_export_integration() {
     // Test PNG export using our export system
     let mut backend = JupyterBackend::with_format(OutputFormat::PNG);
     let result = backend.display_figure(&mut figure);
-
-    assert!(result.is_ok());
-    let png_html = result.unwrap();
+    let png_html = match result {
+        Ok(html) => html,
+        Err(err)
+            if err
+                .to_string()
+                .contains("Failed to find suitable GPU adapter") =>
+        {
+            eprintln!("skipping PNG export integration test: {err}");
+            return;
+        }
+        Err(err) => panic!("{err}"),
+    };
     assert!(png_html.contains("<img"));
     assert!(png_html.contains(".png"));
 }

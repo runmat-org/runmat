@@ -1,4 +1,24 @@
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
+
+type ResidencyClearFn = fn(&GpuTensorHandle);
+
+static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
+
+/// Register a callback used to clear residency tracking when GPU tensors are
+/// gathered back to the host. Backends that maintain residency metadata should
+/// install this hook during initialization.
+pub fn register_residency_clear(handler: ResidencyClearFn) {
+    let _ = RESIDENCY_CLEAR.set(handler);
+}
+
+/// Clear residency metadata for the provided GPU tensor handle, if a backend
+/// has registered a handler via [`register_residency_clear`].
+pub fn clear_residency(handle: &GpuTensorHandle) {
+    if let Some(handler) = RESIDENCY_CLEAR.get() {
+        handler(handle);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuTensorHandle {

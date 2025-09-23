@@ -290,14 +290,7 @@ fn test_error_handling_in_compilation() {
     gc_test_context(|| {
         if let Ok(mut engine) = TurbineEngine::new() {
             // Create bytecode that might be problematic for JIT
-            let mut bytecode = Bytecode {
-                instructions: vec![], // Empty instructions
-                var_count: 0,
-                functions: std::collections::HashMap::new(),
-                var_types: Vec::new(),
-                accel_graph: None,
-                fusion_groups: Vec::new(),
-            };
+            let mut bytecode = Bytecode::empty();
 
             let result = engine.compile_bytecode(&bytecode);
             // Should handle gracefully (might succeed with empty bytecode or fail cleanly)

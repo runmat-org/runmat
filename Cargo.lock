@@ -4157,6 +4157,7 @@ name = "runmat-accelerate-api"
 version = "0.0.3"
 dependencies = [
  "anyhow",
+ "once_cell",
  "serde",
 ]
 
@@ -4212,8 +4213,11 @@ dependencies = [
 name = "runmat-ignition"
 version = "0.0.3"
 dependencies = [
+ "anyhow",
  "log",
+ "once_cell",
  "runmat-accelerate",
+ "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",

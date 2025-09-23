@@ -18,6 +18,9 @@ log = { workspace = true }
 
 [dev-dependencies]
 runmat-lexer = { workspace = true }
+runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+anyhow = { workspace = true }
+once_cell = "1"
 
 [features]
 default = ["native-accel"]

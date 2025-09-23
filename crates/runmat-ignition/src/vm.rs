@@ -1710,6 +1710,8 @@ pub fn interpret_with_vars(
                         let base = stack
                             .pop()
                             .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                        #[cfg(feature = "native-accel")]
+                        clear_residency(&base);
                         let expanded = if spec.expand_all {
                             match base {
                                 Value::Cell(ca) => {
@@ -2844,6 +2846,8 @@ pub fn interpret_with_vars(
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                #[cfg(feature = "native-accel")]
+                clear_residency(&base);
                 match base {
                     Value::Object(obj) => {
                         let cell = runmat_builtins::CellArray::new(
@@ -3622,6 +3626,8 @@ pub fn interpret_with_vars(
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                #[cfg(feature = "native-accel")]
+                clear_residency(&base);
                 match base {
                     Value::Tensor(t) => {
                         let rank = t.shape.len();
@@ -5438,6 +5444,8 @@ pub fn interpret_with_vars(
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                #[cfg(feature = "native-accel")]
+                clear_residency(&base);
                 match base {
                     Value::Tensor(mut t) => {
                         #[derive(Clone)]
@@ -5793,6 +5801,8 @@ pub fn interpret_with_vars(
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                #[cfg(feature = "native-accel")]
+                clear_residency(&base);
                 match base {
                     Value::Tensor(mut t) => {
                         let total = t.data.len();
@@ -6048,6 +6058,8 @@ pub fn interpret_with_vars(
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                #[cfg(feature = "native-accel")]
+                clear_residency(&base);
                 // TODO(GC): write barrier hook if base is in older generation and rhs/indices reference younger objects
                 match base {
                     Value::Object(obj) => {
@@ -6120,6 +6132,8 @@ pub fn interpret_with_vars(
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                #[cfg(feature = "native-accel")]
+                clear_residency(&base);
                 // TODO(GC): write barrier hook for cell element updates
                 match base {
                     Value::Object(obj) => {
@@ -7528,6 +7542,31 @@ fn try_execute_fusion_group(
     let mut inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
     let mut stack_entries: Vec<(usize, bool)> = Vec::new();
 
+    let describe_value = |value: &Value| -> &'static str {
+        match value {
+            Value::Int(_) => "Int",
+            Value::Num(_) => "Num",
+            Value::Complex(_, _) => "Complex",
+            Value::Bool(_) => "Bool",
+            Value::LogicalArray(_) => "LogicalArray",
+            Value::String(_) => "String",
+            Value::StringArray(_) => "StringArray",
+            Value::CharArray(_) => "CharArray",
+            Value::Tensor(_) => "Tensor",
+            Value::ComplexTensor(_) => "ComplexTensor",
+            Value::Cell(_) => "Cell",
+            Value::Struct(_) => "Struct",
+            Value::GpuTensor(_) => "GpuTensor",
+            Value::Object(_) => "Object",
+            Value::HandleObject(_) => "HandleObject",
+            Value::Listener(_) => "Listener",
+            Value::FunctionHandle(_) => "FunctionHandle",
+            Value::Closure(_) => "Closure",
+            Value::ClassRef(_) => "ClassRef",
+            Value::MException(_) => "MException",
+        }
+    };
+
     for (idx, value_id) in plan.inputs.iter().enumerate() {
         let info = graph
             .value(*value_id)
@@ -7553,12 +7592,54 @@ fn try_execute_fusion_group(
                             }
                         }
                     };
+                debug_assert!(
+                    inputs[idx].is_none(),
+                    "fusion: duplicate input slot {} for plan {}",
+                    idx,
+                    plan.index
+                );
                 inputs[idx] = Some(value);
             }
             ValueOrigin::Constant | ValueOrigin::NodeOutput { .. } | ValueOrigin::Unknown => {
                 stack_entries.push((idx, true));
             }
         }
+    }
+
+    if log::log_enabled!(log::Level::Debug) {
+        let stack_needed_preview = stack_entries.len();
+        let stack_snapshot: Vec<&Value> = stack
+            .iter()
+            .rev()
+            .take(stack_needed_preview)
+            .map(|v| v)
+            .collect();
+        let stack_kinds: Vec<&'static str> = stack_snapshot
+            .iter()
+            .rev()
+            .map(|v| describe_value(v))
+            .collect();
+        let input_meta: Vec<String> = plan
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(i, value_id)| {
+                if let Some(info) = graph.value(*value_id) {
+                    format!("#{i}:id={} origin={:?}", value_id, info.origin)
+                } else {
+                    format!("#{i}:id={} origin=<missing>", value_id)
+                }
+            })
+            .collect();
+        log::debug!(
+            "fusion group {} gather: stack_depth={} stack_needed={} stack_kinds={:?} entries={:?} inputs={:?}",
+            plan.index,
+            stack.len(),
+            stack_needed_preview,
+            stack_kinds,
+            stack_entries,
+            input_meta
+        );
     }
 
     let stack_needed = stack_entries.len();
@@ -7570,6 +7651,8 @@ fn try_execute_fusion_group(
     let slice = stack[slice_start..].to_vec();
     stack.truncate(slice_start);
 
+    debug_assert_eq!(slice.len(), stack_needed);
+
     let mut consumed: Vec<Value> = Vec::new();
     for (offset, (input_idx, should_consume)) in stack_entries.into_iter().enumerate() {
         let val = slice
@@ -7579,6 +7662,12 @@ fn try_execute_fusion_group(
         if should_consume {
             consumed.push(val.clone());
         }
+        debug_assert!(
+            inputs[input_idx].is_none(),
+            "fusion: duplicate stack input slot {} for plan {}",
+            input_idx,
+            plan.index
+        );
         inputs[input_idx] = Some(val);
     }
 

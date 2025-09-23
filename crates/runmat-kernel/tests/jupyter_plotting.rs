@@ -409,7 +409,18 @@ fn test_output_format_switching() {
     };
     manager.update_config(png_config);
 
-    let png_data = manager.create_display_data(&mut figure).unwrap();
+    let png_data = match manager.create_display_data(&mut figure) {
+        Ok(data) => data,
+        Err(err)
+            if err
+                .to_string()
+                .contains("Failed to find suitable GPU adapter") =>
+        {
+            eprintln!("skipping PNG format test: {err}");
+            return;
+        }
+        Err(err) => panic!("{err}"),
+    };
     assert!(png_data.data.contains_key("text/html")); // PNG returns HTML img tag
 }
 

@@ -17,6 +17,7 @@ pub struct FusionExecutionRequest<'a> {
 }
 
 pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_elementwise() {
         return Err(anyhow!("unsupported fusion kind"));
     }

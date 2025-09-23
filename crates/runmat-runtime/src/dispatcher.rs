@@ -28,6 +28,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
             let provider = runmat_accelerate_api::provider()
                 .ok_or_else(|| "gather: no acceleration provider registered".to_string())?;
             let host = provider.download(handle).map_err(|e| e.to_string())?;
+            runmat_accelerate_api::clear_residency(handle);
             let tensor = Tensor::new(host.data, host.shape).map_err(|e| e.to_string())?;
             Ok(Value::Tensor(tensor))
         }

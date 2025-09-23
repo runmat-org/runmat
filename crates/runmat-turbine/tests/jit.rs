@@ -281,19 +281,15 @@ fn test_bytecode_compilation() {
     let mut engine = TurbineEngine::new().unwrap();
 
     // Create simple bytecode
-    let bytecode = Bytecode {
-        instructions: vec![
+    let bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(1.0),
             Instr::LoadConst(2.0),
             Instr::Add,
             Instr::StoreVar(0),
         ],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        1,
+    );
 
     // Initially should not compile (not hot)
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -322,8 +318,8 @@ fn test_complex_bytecode_compilation() {
     let mut engine = TurbineEngine::new().unwrap();
 
     // Create complex bytecode with advanced operations and control flow
-    let bytecode = Bytecode {
-        instructions: vec![
+    let bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(5.0),
             Instr::StoreVar(0), // x = 5
             Instr::LoadVar(0),
@@ -352,12 +348,8 @@ fn test_complex_bytecode_compilation() {
             Instr::LoadConst(4.0),
             Instr::CreateMatrix(2, 2), // Create 2x2 matrix from stack
         ],
-        var_count: 2,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        2,
+    );
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
 
@@ -384,8 +376,8 @@ fn test_control_flow_compilation() {
     let mut engine = TurbineEngine::new().unwrap();
 
     // Test conditional execution with proper control flow
-    let bytecode = Bytecode {
-        instructions: vec![
+    let bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(2.0),
             Instr::StoreVar(0), // x = 2
             Instr::LoadVar(0),
@@ -402,12 +394,8 @@ fn test_control_flow_compilation() {
             // End
             Instr::Return,
         ],
-        var_count: 2,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        2,
+    );
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
 
@@ -450,8 +438,8 @@ fn test_nested_control_flow() {
     let mut engine = TurbineEngine::new().unwrap();
 
     // Test nested conditional logic
-    let bytecode = Bytecode {
-        instructions: vec![
+    let bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(3.0),
             Instr::StoreVar(0), // x = 3
             Instr::LoadVar(0),
@@ -474,12 +462,8 @@ fn test_nested_control_flow() {
             // End
             Instr::StoreVar(1),
         ],
-        var_count: 2,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        2,
+    );
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
 
@@ -521,19 +505,15 @@ fn test_execute_or_compile() {
 
     let mut engine = TurbineEngine::new().unwrap();
 
-    let bytecode = Bytecode {
-        instructions: vec![
+    let bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(7.0),
             Instr::LoadConst(3.0),
             Instr::Add,
             Instr::StoreVar(0),
         ],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        1,
+    );
 
     let mut vars = vec![Value::Num(0.0)];
 
@@ -579,14 +559,7 @@ fn test_engine_reset() {
 
     let mut engine = TurbineEngine::new().unwrap();
 
-    let bytecode = Bytecode {
-        instructions: vec![Instr::LoadConst(1.0), Instr::StoreVar(0)],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+    let bytecode = Bytecode::with_instructions(vec![Instr::LoadConst(1.0), Instr::StoreVar(0)], 1);
 
     // Make it hot and compile
     let hash = engine.calculate_bytecode_hash(&bytecode);
@@ -613,32 +586,11 @@ fn test_bytecode_hashing() {
 
     let engine = TurbineEngine::new().unwrap();
 
-    let bytecode1 = Bytecode {
-        instructions: vec![Instr::LoadConst(1.0), Instr::Add],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+    let bytecode1 = Bytecode::with_instructions(vec![Instr::LoadConst(1.0), Instr::Add], 1);
 
-    let bytecode2 = Bytecode {
-        instructions: vec![Instr::LoadConst(1.0), Instr::Add],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+    let bytecode2 = Bytecode::with_instructions(vec![Instr::LoadConst(1.0), Instr::Add], 1);
 
-    let bytecode3 = Bytecode {
-        instructions: vec![Instr::LoadConst(2.0), Instr::Add],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+    let bytecode3 = Bytecode::with_instructions(vec![Instr::LoadConst(2.0), Instr::Add], 1);
 
     // Same bytecode should produce same hash
     assert_eq!(
@@ -669,14 +621,7 @@ fn test_error_handling() {
     assert!(result.is_err());
 
     // Test executing with unsupported value types
-    let bytecode = Bytecode {
-        instructions: vec![Instr::LoadConst(1.0)],
-        var_count: 0,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+    let bytecode = Bytecode::with_instructions(vec![Instr::LoadConst(1.0)], 0);
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
     for _ in 0..15 {
@@ -771,14 +716,7 @@ fn test_large_function_compilation() {
     }
     instructions.push(Instr::StoreVar(0));
 
-    let bytecode = Bytecode {
-        instructions,
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+    let bytecode = Bytecode::with_instructions(instructions, 1);
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
 
@@ -822,14 +760,7 @@ fn test_stats_accuracy() {
     assert_eq!(stats.total_compilations, 0);
     assert_eq!(stats.compiled_functions, 0);
 
-    let bytecode = Bytecode {
-        instructions: vec![Instr::LoadConst(1.0), Instr::StoreVar(0)],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+    let bytecode = Bytecode::with_instructions(vec![Instr::LoadConst(1.0), Instr::StoreVar(0)], 1);
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
 
@@ -857,8 +788,8 @@ fn test_jit_arithmetic_compilation() {
     let mut engine = TurbineEngine::new().unwrap();
 
     // Test simple arithmetic that should be JIT compilable (no control flow)
-    let bytecode = Bytecode {
-        instructions: vec![
+    let bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(5.0),
             Instr::StoreVar(0), // x = 5
             Instr::LoadConst(3.0),
@@ -875,12 +806,8 @@ fn test_jit_arithmetic_compilation() {
             Instr::StoreVar(3), // result2 = 23
             Instr::Return,
         ],
-        var_count: 4,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        4,
+    );
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
 
@@ -918,19 +845,15 @@ fn test_runtime_interface_implementation() {
     // Test the completed runtime interface implementation
     // Runtime functions are now properly implemented and linked
 
-    let bytecode = Bytecode {
-        instructions: vec![
+    let bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(2.0),
             Instr::LoadConst(3.0),
             Instr::Add, // This generates direct f64 arithmetic (fadd)
             Instr::StoreVar(0),
         ],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        1,
+    );
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
 
@@ -976,18 +899,14 @@ fn test_runtime_functions_available() {
     // This test verifies that the symbol lookup works for our runtime functions
 
     // Test builtin call compilation (even if we don't execute it)
-    let bytecode_with_builtin = Bytecode {
-        instructions: vec![
+    let bytecode_with_builtin = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(5.0),
             Instr::CallBuiltin("abs".to_string(), 1), // This should generate a call to runmat_call_builtin
             Instr::StoreVar(0),
         ],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        1,
+    );
 
     let hash1 = engine.calculate_bytecode_hash(&bytecode_with_builtin);
     for _ in 0..15 {
@@ -1002,8 +921,8 @@ fn test_runtime_functions_available() {
     );
 
     // Test matrix creation compilation
-    let bytecode_with_matrix = Bytecode {
-        instructions: vec![
+    let bytecode_with_matrix = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(1.0),
             Instr::LoadConst(2.0),
             Instr::LoadConst(3.0),
@@ -1011,12 +930,8 @@ fn test_runtime_functions_available() {
             Instr::CreateMatrix(2, 2), // This should generate a call to runmat_create_matrix
             Instr::StoreVar(0),
         ],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        1,
+    );
 
     let hash2 = engine.calculate_bytecode_hash(&bytecode_with_matrix);
     for _ in 0..15 {
@@ -1031,19 +946,15 @@ fn test_runtime_functions_available() {
     );
 
     // Test power operation compilation (uses libm pow)
-    let bytecode_with_pow = Bytecode {
-        instructions: vec![
+    let bytecode_with_pow = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(2.0),
             Instr::LoadConst(3.0),
             Instr::Pow, // This should generate a call to libm::pow
             Instr::StoreVar(0),
         ],
-        var_count: 1,
-        functions: std::collections::HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        1,
+    );
 
     let hash3 = engine.calculate_bytecode_hash(&bytecode_with_pow);
     for _ in 0..15 {
@@ -1094,19 +1005,19 @@ fn test_jit_user_function_fallback() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     let bytecode = Bytecode {
-        instructions: vec![
-            Instr::LoadConst(5.0),                        // Load argument
-            Instr::CallFunction("double".to_string(), 1), // Call function
-            Instr::StoreVar(0),                           // Store result
-        ],
-        var_count: 1,
         functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(5.0),                        // Load argument
+                Instr::CallFunction("double".to_string(), 1), // Call function
+                Instr::StoreVar(0),                           // Store result
+            ],
+            1,
+        )
     };
 
     let mut vars = vec![Value::Num(0.0)];
@@ -1136,19 +1047,15 @@ fn test_jit_function_variable_preservation() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     // First execute some JIT code to set variables
-    let jit_bytecode = Bytecode {
-        instructions: vec![
+    let jit_bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(42.0),
             Instr::StoreVar(0),
             Instr::LoadConst(100.0),
             Instr::StoreVar(1),
         ],
-        var_count: 2,
-        functions: HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        2,
+    );
 
     let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
 
@@ -1190,18 +1097,18 @@ fn test_jit_function_variable_preservation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     let function_bytecode = Bytecode {
-        instructions: vec![
-            Instr::CallFunction("add_globals".to_string(), 0),
-            Instr::StoreVar(2),
-        ],
-        var_count: 3,
         functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::CallFunction("add_globals".to_string(), 0),
+                Instr::StoreVar(2),
+            ],
+            3,
+        )
     };
 
     // Extend vars array
@@ -1264,34 +1171,34 @@ fn test_jit_mixed_execution_patterns() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     // Bytecode that mixes arithmetic (JIT-able) with function calls (interpreter)
     let mixed_bytecode = Bytecode {
-        instructions: vec![
-            // JIT-able: x = 5
-            Instr::LoadConst(5.0),
-            Instr::StoreVar(0),
-            // JIT-able: y = x + 3 = 8
-            Instr::LoadVar(0),
-            Instr::LoadConst(3.0),
-            Instr::Add,
-            Instr::StoreVar(1),
-            // Function call: z = square(y) = 64
-            Instr::LoadVar(1),
-            Instr::CallFunction("square".to_string(), 1),
-            Instr::StoreVar(2),
-            // JIT-able: result = z + 10 = 74
-            Instr::LoadVar(2),
-            Instr::LoadConst(10.0),
-            Instr::Add,
-            Instr::StoreVar(3),
-        ],
-        var_count: 4,
         functions,
+        ..Bytecode::with_instructions(
+            vec![
+                // JIT-able: x = 5
+                Instr::LoadConst(5.0),
+                Instr::StoreVar(0),
+                // JIT-able: y = x + 3 = 8
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Add,
+                Instr::StoreVar(1),
+                // Function call: z = square(y) = 64
+                Instr::LoadVar(1),
+                Instr::CallFunction("square".to_string(), 1),
+                Instr::StoreVar(2),
+                // JIT-able: result = z + 10 = 74
+                Instr::LoadVar(2),
+                Instr::LoadConst(10.0),
+                Instr::Add,
+                Instr::StoreVar(3),
+            ],
+            4,
+        )
     };
 
     let mut vars = vec![Value::Num(0.0); 4];
@@ -1313,8 +1220,8 @@ fn test_jit_function_compilation_attempts() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     // Bytecode with function instructions (should not crash JIT compiler)
-    let function_instructions_bytecode = Bytecode {
-        instructions: vec![
+    let function_instructions_bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(42.0),
             Instr::LoadLocal(0),  // Should be handled gracefully
             Instr::StoreLocal(1), // Should be handled gracefully
@@ -1323,12 +1230,8 @@ fn test_jit_function_compilation_attempts() {
             Instr::CallFunction("test".to_string(), 1), // Should trigger fallback
             Instr::StoreVar(0),
         ],
-        var_count: 1,
-        functions: HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        1,
+    );
 
     // Should not crash when trying to compile function instructions
     let _compile_result = engine.compile_bytecode(&function_instructions_bytecode);
@@ -1353,19 +1256,15 @@ fn test_jit_engine_statistics_with_functions() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     // First execute some regular code that can be JIT compiled
-    let jit_bytecode = Bytecode {
-        instructions: vec![
+    let jit_bytecode = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(10.0),
             Instr::LoadConst(20.0),
             Instr::Add,
             Instr::StoreVar(0),
         ],
-        var_count: 1,
-        functions: HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        1,
+    );
 
     let mut vars = vec![Value::Num(0.0)];
 
@@ -1387,15 +1286,12 @@ fn test_jit_engine_statistics_with_functions() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     let function_bytecode = Bytecode {
-        instructions: vec![Instr::CallFunction("noop".to_string(), 0)],
-        var_count: 1,
         functions,
+        ..Bytecode::with_instructions(vec![Instr::CallFunction("noop".to_string(), 0)], 1)
     };
 
     let _ = engine.execute_or_compile(&function_bytecode, &mut vars);
@@ -1449,19 +1345,19 @@ fn test_jit_simple_function_compilation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     let bytecode = Bytecode {
-        instructions: vec![
-            Instr::LoadConst(5.0),
-            Instr::CallFunction("double".to_string(), 1),
-            Instr::StoreVar(0),
-        ],
-        var_count: 1,
         functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(5.0),
+                Instr::CallFunction("double".to_string(), 1),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
     };
 
     let mut vars = vec![Value::Num(0.0)];
@@ -1534,8 +1430,6 @@ fn test_jit_nested_function_calls_compilation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
@@ -1589,19 +1483,19 @@ fn test_jit_nested_function_calls_compilation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     let bytecode = Bytecode {
-        instructions: vec![
-            Instr::LoadConst(4.0),
-            Instr::CallFunction("multiply_and_add".to_string(), 1),
-            Instr::StoreVar(0),
-        ],
-        var_count: 1,
         functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunction("multiply_and_add".to_string(), 1),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
     };
 
     let mut vars = vec![Value::Num(0.0)];
@@ -1668,21 +1562,21 @@ fn test_jit_function_parameter_validation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     // Test with wrong number of arguments (should fallback to interpreter which will handle the error)
     let bytecode_wrong_args = Bytecode {
-        instructions: vec![
-            Instr::LoadConst(5.0),
-            // Only 1 argument but function expects 2
-            Instr::CallFunction("add_two".to_string(), 1),
-            Instr::StoreVar(0),
-        ],
-        var_count: 1,
         functions: functions.clone(),
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(5.0),
+                // Only 1 argument but function expects 2
+                Instr::CallFunction("add_two".to_string(), 1),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
     };
 
     let mut vars = vec![Value::Num(0.0)];
@@ -1698,14 +1592,16 @@ fn test_jit_function_parameter_validation() {
 
     // Test with correct number of arguments
     let bytecode_correct = Bytecode {
-        instructions: vec![
-            Instr::LoadConst(3.0),
-            Instr::LoadConst(7.0),
-            Instr::CallFunction("add_two".to_string(), 2),
-            Instr::StoreVar(0),
-        ],
-        var_count: 1,
         functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(3.0),
+                Instr::LoadConst(7.0),
+                Instr::CallFunction("add_two".to_string(), 2),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
     };
 
     let mut vars_correct = vec![Value::Num(0.0)];
@@ -1759,21 +1655,21 @@ fn test_jit_function_variable_isolation() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     let bytecode = Bytecode {
-        instructions: vec![
-            Instr::LoadConst(100.0),
-            Instr::StoreVar(1), // Store in global var 1
-            Instr::LoadConst(8.0),
-            Instr::CallFunction("isolate_test".to_string(), 1),
-            Instr::StoreVar(0),
-        ],
-        var_count: 2,
         functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(100.0),
+                Instr::StoreVar(1), // Store in global var 1
+                Instr::LoadConst(8.0),
+                Instr::CallFunction("isolate_test".to_string(), 1),
+                Instr::StoreVar(0),
+            ],
+            2,
+        )
     };
 
     let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
@@ -1860,19 +1756,19 @@ fn test_jit_function_compilation_performance() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     let bytecode = Bytecode {
-        instructions: vec![
-            Instr::LoadConst(6.0),
-            Instr::CallFunction("compute_intensive".to_string(), 1),
-            Instr::StoreVar(0),
-        ],
-        var_count: 1,
         functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(6.0),
+                Instr::CallFunction("compute_intensive".to_string(), 1),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
     };
 
     let mut vars = vec![Value::Num(0.0)];
@@ -1913,18 +1809,14 @@ fn test_jit_function_error_handling() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     // Test calling undefined function
-    let bytecode_undefined = Bytecode {
-        instructions: vec![
+    let bytecode_undefined = Bytecode::with_instructions(
+        vec![
             Instr::LoadConst(5.0),
             Instr::CallFunction("undefined_function".to_string(), 1),
             Instr::StoreVar(0),
         ],
-        var_count: 1,
-        functions: HashMap::new(),
-        var_types: Vec::new(),
-        accel_graph: None,
-        fusion_groups: Vec::new(),
-    };
+        1,
+    );
 
     let mut vars = vec![Value::Num(0.0)];
     let result = engine.execute_or_compile(&bytecode_undefined, &mut vars);
@@ -1952,19 +1844,19 @@ fn test_jit_function_error_handling() {
             has_varargin: false,
             has_varargout: false,
             var_types: Vec::new(),
-            accel_graph: None,
-            fusion_groups: Vec::new(),
         },
     );
 
     let bytecode_simple = Bytecode {
-        instructions: vec![
-            Instr::LoadConst(42.0),
-            Instr::CallFunction("simple".to_string(), 1),
-            Instr::StoreVar(0),
-        ],
-        var_count: 1,
         functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(42.0),
+                Instr::CallFunction("simple".to_string(), 1),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
     };
 
     let mut vars_simple = vec![Value::Num(0.0)];

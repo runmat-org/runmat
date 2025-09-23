@@ -103,6 +103,14 @@ impl Default for AutoOffloadOptions {
 static AUTO_OFFLOAD_OPTIONS: Lazy<RwLock<AutoOffloadOptions>> =
     Lazy::new(|| RwLock::new(AutoOffloadOptions::default()));
 
+static RESIDENCY_HOOKS: Lazy<()> = Lazy::new(|| {
+    runmat_accelerate_api::register_residency_clear(fusion_residency::clear);
+});
+
+pub(crate) fn ensure_residency_hooks() {
+    Lazy::force(&RESIDENCY_HOOKS);
+}
+
 pub fn configure_auto_offload(options: AutoOffloadOptions) {
     if let Ok(mut guard) = AUTO_OFFLOAD_OPTIONS.write() {
         *guard = options;
