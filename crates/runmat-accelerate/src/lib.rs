@@ -13,10 +13,14 @@ use runmat_builtins::{Tensor, Value};
 use std::path::PathBuf;
 use std::sync::RwLock;
 
+pub mod fusion;
+pub mod graph;
 pub mod native_auto;
 pub mod simple_provider;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_backend;
+pub use fusion::*;
+pub use graph::*;
 pub use native_auto::{
     is_sink, prepare_builtin_args, promote_binary, promote_reduction_args, promote_unary, BinaryOp,
     ReductionOp, UnaryOp,

@@ -1,3 +1,5 @@
+#[cfg(feature = "native-accel")]
+pub mod accel_graph;
 pub mod bytecode;
 pub mod compiler;
 pub mod functions;

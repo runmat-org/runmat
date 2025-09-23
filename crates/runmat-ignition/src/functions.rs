@@ -1,4 +1,8 @@
 use crate::instr::Instr;
+#[cfg(feature = "native-accel")]
+use runmat_accelerate::graph::AccelGraph;
+#[cfg(feature = "native-accel")]
+use runmat_accelerate::FusionGroup;
 use runmat_builtins::{Type, Value};
 use runmat_hir::{HirStmt, VarId};
 use serde::{Deserialize, Serialize};
@@ -43,4 +47,25 @@ pub struct Bytecode {
     pub functions: HashMap<String, UserFunction>,
     #[serde(default)]
     pub var_types: Vec<Type>,
+    #[cfg(feature = "native-accel")]
+    #[serde(default)]
+    pub accel_graph: Option<AccelGraph>,
+    #[cfg(feature = "native-accel")]
+    #[serde(default)]
+    pub fusion_groups: Vec<FusionGroup>,
+}
+
+impl Bytecode {
+    pub fn empty() -> Self {
+        Self {
+            instructions: Vec::new(),
+            var_count: 0,
+            functions: HashMap::new(),
+            var_types: Vec::new(),
+            #[cfg(feature = "native-accel")]
+            accel_graph: None,
+            #[cfg(feature = "native-accel")]
+            fusion_groups: Vec::new(),
+        }
+    }
 }

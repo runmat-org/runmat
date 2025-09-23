@@ -714,20 +714,9 @@ impl SnapshotBuilder {
     /// Create bytecode for sequence
     fn create_sequence_bytecode(&self, source: &str) -> runmat_ignition::Bytecode {
         match self.compile_to_hir(source) {
-            Ok(hir) => {
-                runmat_ignition::compile(&hir).unwrap_or_else(|_| runmat_ignition::Bytecode {
-                    instructions: Vec::new(),
-                    var_count: 0,
-                    functions: std::collections::HashMap::new(),
-                    var_types: Vec::new(),
-                })
-            }
-            Err(_) => runmat_ignition::Bytecode {
-                instructions: Vec::new(),
-                var_count: 0,
-                functions: std::collections::HashMap::new(),
-                var_types: Vec::new(),
-            },
+            Ok(hir) => runmat_ignition::compile(&hir)
+                .unwrap_or_else(|_| runmat_ignition::Bytecode::empty()),
+            Err(_) => runmat_ignition::Bytecode::empty(),
         }
     }
 
