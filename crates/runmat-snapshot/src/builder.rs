@@ -634,7 +634,10 @@ impl SnapshotBuilder {
     fn create_pattern_hir(&self, source: &str) -> runmat_hir::HirProgram {
         self.compile_to_hir(source).unwrap_or_else(|_| {
             // Fallback to empty program
-            runmat_hir::HirProgram { body: Vec::new() }
+            runmat_hir::HirProgram {
+                body: Vec::new(),
+                var_types: Vec::new(),
+            }
         })
     }
 
@@ -716,12 +719,14 @@ impl SnapshotBuilder {
                     instructions: Vec::new(),
                     var_count: 0,
                     functions: std::collections::HashMap::new(),
+                    var_types: Vec::new(),
                 })
             }
             Err(_) => runmat_ignition::Bytecode {
                 instructions: Vec::new(),
                 var_count: 0,
                 functions: std::collections::HashMap::new(),
+                var_types: Vec::new(),
             },
         }
     }

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use log::{debug, info, warn};
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
 
 use runmat_lexer::{tokenize, tokenize_detailed, Token as LexToken};
@@ -656,6 +656,7 @@ impl ReplEngine {
                     local_var_count: max_local_var,
                     has_varargin: false,
                     has_varargout: false,
+                    var_types: vec![Type::Unknown; max_local_var],
                 };
                 user_functions.insert(name.clone(), user_func);
             }

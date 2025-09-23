@@ -135,6 +135,8 @@ pub enum HirLValue {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirProgram {
     pub body: Vec<HirStmt>,
+    #[serde(default)]
+    pub var_types: Vec<Type>,
 }
 
 /// Result of lowering AST to HIR with full context tracking
@@ -143,12 +145,14 @@ pub struct LoweringResult {
     pub hir: HirProgram,
     pub variables: HashMap<String, usize>,
     pub functions: HashMap<String, HirStmt>,
+    pub var_types: Vec<Type>,
 }
 
 pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
     let mut ctx = Ctx::new();
     let body = ctx.lower_stmts(&prog.body)?;
-    let hir = HirProgram { body };
+    let var_types = ctx.var_types.clone();
+    let hir = HirProgram { body, var_types };
     // Apply flow-sensitive inference to populate implicit knowledge for downstream consumers
     let _ = infer_function_output_types(&hir);
     // Validate class definitions and attributes at lowering time
@@ -1916,9 +1920,13 @@ pub fn lower_with_full_context(
     }
 
     Ok(LoweringResult {
-        hir: HirProgram { body },
+        hir: HirProgram {
+            body,
+            var_types: ctx.var_types.clone(),
+        },
         variables: all_vars,
         functions: ctx.functions,
+        var_types: ctx.var_types,
     })
 }
 

@@ -13,6 +13,10 @@ use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
 use runmat_runtime::gather_if_needed;
 use serde::Deserialize;
 
+const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
+const DEFAULT_CPU_REDUCTION_PER_ELEM: f64 = 1.2e-7;
+const DEFAULT_CPU_MATMUL_PER_FLOP: f64 = 2.5e-11;
+
 #[derive(Clone, Copy, Debug)]
 pub enum BinaryOp {
     Elementwise,
@@ -39,6 +43,9 @@ struct ThresholdConfig {
     binary_min_elems: usize,
     reduction_min_elems: usize,
     matmul_min_flops: usize,
+    cpu_elem_per_elem: f64,
+    cpu_reduction_per_elem: f64,
+    cpu_matmul_per_flop: f64,
 }
 
 impl Default for ThresholdConfig {
@@ -48,6 +55,9 @@ impl Default for ThresholdConfig {
             binary_min_elems: 4_096,
             reduction_min_elems: 4_096,
             matmul_min_flops: 1_000_000, // roughly 100x100x100
+            cpu_elem_per_elem: DEFAULT_CPU_ELEM_PER_ELEM,
+            cpu_reduction_per_elem: DEFAULT_CPU_REDUCTION_PER_ELEM,
+            cpu_matmul_per_flop: DEFAULT_CPU_MATMUL_PER_FLOP,
         }
     }
 }
@@ -82,6 +92,28 @@ where
         AutoOffloadLogLevel::Info => info!("{}", builder()),
         AutoOffloadLogLevel::Trace => trace!("{}", builder()),
     }
+}
+
+fn update_cpu_cost(slot: &mut f64, candidate: f64) {
+    if candidate.is_finite() && candidate > 0.0 && candidate < *slot {
+        *slot = candidate;
+    }
+}
+
+fn value_len(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(t) => Some(t.data.len()),
+        Value::GpuTensor(handle) => Some(handle.shape.iter().product()),
+        Value::Num(_) | Value::Bool(_) | Value::Int(_) => Some(1),
+        Value::Complex(_, _) => Some(1),
+        _ => None,
+    }
+}
+
+fn element_count_pair(a: &Value, b: &Value) -> Option<usize> {
+    let la = value_len(a)?;
+    let lb = value_len(b)?;
+    Some(la.max(lb))
 }
 
 pub fn global() -> Option<&'static NativeAutoOffload> {
@@ -165,7 +197,18 @@ impl NativeAutoOffload {
         }
         match op {
             BinaryOp::Elementwise => {
-                let threshold = self.thresholds.binary_min_elems;
+                let elems = element_count_pair(a, b).unwrap_or(0);
+                let should_gpu = self
+                    .should_gpu_elementwise(elems)
+                    .unwrap_or(elems >= self.thresholds.binary_min_elems);
+                if should_gpu {
+                    log_promotion(|| format!("Elementwise offload accepted ({} elems)", elems));
+                }
+                let threshold = if should_gpu {
+                    1
+                } else {
+                    self.thresholds.binary_min_elems
+                };
                 let a_p = self.promote_tensor_if_large(a, threshold)?;
                 let b_p = self.promote_tensor_if_large(b, threshold)?;
                 Ok((a_p, b_p))
@@ -177,7 +220,10 @@ impl NativeAutoOffload {
                         return Ok((a.clone(), b.clone()));
                     }
                     let flops = ra * ca * cb;
-                    if flops >= self.thresholds.matmul_min_flops {
+                    let should_gpu = self
+                        .should_gpu_matmul(flops)
+                        .unwrap_or(flops >= self.thresholds.matmul_min_flops);
+                    if should_gpu {
                         log_promotion(|| {
                             format!(
                                 "Promoting matmul operands (flops={}, threshold={})",
@@ -206,7 +252,18 @@ impl NativeAutoOffload {
         if !self.enabled || args.is_empty() {
             return Ok(args.to_vec());
         }
-        let threshold = self.thresholds.reduction_min_elems;
+        let elems = value_len(&args[0]).unwrap_or(0);
+        let should_gpu = self
+            .should_gpu_reduction(elems)
+            .unwrap_or(elems >= self.thresholds.reduction_min_elems);
+        if should_gpu {
+            log_promotion(|| format!("Reduction offload accepted ({} elems)", elems));
+        }
+        let threshold = if should_gpu {
+            1
+        } else {
+            self.thresholds.reduction_min_elems
+        };
         let mut out = Vec::with_capacity(args.len());
         if let Some(first) = args.first() {
             out.push(self.promote_tensor_if_large(first, threshold)?);
@@ -288,6 +345,36 @@ impl NativeAutoOffload {
             }
         }
         Ok(args.to_vec())
+    }
+
+    fn should_gpu_elementwise(&self, elements: usize) -> Option<bool> {
+        if elements == 0 {
+            return Some(false);
+        }
+        let cpu_cost = self.thresholds.cpu_elem_per_elem * elements as f64;
+        profile_cost_model()
+            .and_then(|model| model.estimate_elemwise(elements))
+            .map(|gpu| gpu.as_secs_f64() * 0.95 < cpu_cost)
+    }
+
+    fn should_gpu_reduction(&self, elements: usize) -> Option<bool> {
+        if elements == 0 {
+            return Some(false);
+        }
+        let cpu_cost = self.thresholds.cpu_reduction_per_elem * elements as f64;
+        profile_cost_model()
+            .and_then(|model| model.estimate_reduction(elements))
+            .map(|gpu| gpu.as_secs_f64() * 0.95 < cpu_cost)
+    }
+
+    fn should_gpu_matmul(&self, flops: usize) -> Option<bool> {
+        if flops == 0 {
+            return Some(false);
+        }
+        let cpu_cost = self.thresholds.cpu_matmul_per_flop * flops as f64;
+        profile_cost_model()
+            .and_then(|model| model.estimate_matmul_flops(flops))
+            .map(|gpu| gpu.as_secs_f64() * 0.95 < cpu_cost)
     }
 }
 
@@ -375,23 +462,26 @@ fn env_usize(key: &str) -> Option<usize> {
 }
 
 fn auto_calibrate(provider: &'static dyn AccelProvider, cfg: &mut ThresholdConfig) -> Result<()> {
-    if let Some(elem_threshold) = calibrate_elemwise(provider).transpose()? {
+    if let Some(elem_threshold) = calibrate_elemwise(provider, cfg).transpose()? {
         cfg.binary_min_elems = elem_threshold;
         cfg.unary_min_elems = cfg.unary_min_elems.min(elem_threshold);
     }
-    if let Some(red_threshold) = calibrate_reduction(provider).transpose()? {
+    if let Some(red_threshold) = calibrate_reduction(provider, cfg).transpose()? {
         cfg.reduction_min_elems = red_threshold;
     }
-    if let Some(matmul_threshold) = calibrate_matmul(provider).transpose()? {
+    if let Some(matmul_threshold) = calibrate_matmul(provider, cfg).transpose()? {
         cfg.matmul_min_flops = matmul_threshold;
     }
     Ok(())
 }
 
-fn calibrate_elemwise(provider: &'static dyn AccelProvider) -> Option<Result<usize>> {
+fn calibrate_elemwise(
+    provider: &'static dyn AccelProvider,
+    cfg: &mut ThresholdConfig,
+) -> Option<Result<usize>> {
     let sizes = [256usize, 1_024, 4_096, 16_384, 65_536];
     for size in sizes {
-        match compare_elemwise(provider, size) {
+        match compare_elemwise(provider, size, &mut cfg.cpu_elem_per_elem) {
             Ok(Some(true)) => return Some(Ok(size)),
             Ok(Some(false)) => continue,
             Ok(None) => return None,
@@ -401,7 +491,11 @@ fn calibrate_elemwise(provider: &'static dyn AccelProvider) -> Option<Result<usi
     Some(Ok(usize::MAX))
 }
 
-fn compare_elemwise(provider: &'static dyn AccelProvider, elements: usize) -> Result<Option<bool>> {
+fn compare_elemwise(
+    provider: &'static dyn AccelProvider,
+    elements: usize,
+    cpu_cost_slot: &mut f64,
+) -> Result<Option<bool>> {
     if elements == 0 {
         return Ok(Some(false));
     }
@@ -410,6 +504,8 @@ fn compare_elemwise(provider: &'static dyn AccelProvider, elements: usize) -> Re
     let a = Value::Tensor(tensor.clone());
     let b = Value::Tensor(tensor.clone());
     let cpu_time = time(|| runmat_runtime::elementwise_add(&a, &b))?;
+    let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
+    update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {
         if let Some(gpu_time) = model.estimate_elemwise(elements) {
             trace!(
@@ -443,10 +539,13 @@ fn compare_elemwise(provider: &'static dyn AccelProvider, elements: usize) -> Re
     Ok(Some(gpu_time < cpu_time))
 }
 
-fn calibrate_reduction(provider: &'static dyn AccelProvider) -> Option<Result<usize>> {
+fn calibrate_reduction(
+    provider: &'static dyn AccelProvider,
+    cfg: &mut ThresholdConfig,
+) -> Option<Result<usize>> {
     let sizes = [256usize, 1_024, 4_096, 16_384, 65_536];
     for size in sizes {
-        match compare_reduction(provider, size) {
+        match compare_reduction(provider, size, &mut cfg.cpu_reduction_per_elem) {
             Ok(Some(true)) => return Some(Ok(size)),
             Ok(Some(false)) => continue,
             Ok(None) => return None,
@@ -459,11 +558,14 @@ fn calibrate_reduction(provider: &'static dyn AccelProvider) -> Option<Result<us
 fn compare_reduction(
     provider: &'static dyn AccelProvider,
     elements: usize,
+    cpu_cost_slot: &mut f64,
 ) -> Result<Option<bool>> {
     let data: Vec<f64> = (0..elements).map(|i| i as f64).collect();
     let tensor = Tensor::new(data.clone(), vec![elements, 1]).map_err(|e| anyhow!(e))?;
     let value = Value::Tensor(tensor.clone());
     let cpu_time = time(|| runmat_runtime::call_builtin("sum", &[value.clone()]))?;
+    let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
+    update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {
         if let Some(gpu_time) = model.estimate_reduction(elements) {
             trace!(
@@ -494,10 +596,13 @@ fn compare_reduction(
     Ok(Some(gpu_time < cpu_time))
 }
 
-fn calibrate_matmul(provider: &'static dyn AccelProvider) -> Option<Result<usize>> {
+fn calibrate_matmul(
+    provider: &'static dyn AccelProvider,
+    cfg: &mut ThresholdConfig,
+) -> Option<Result<usize>> {
     let dims = [32usize, 64, 96, 128, 192];
     for n in dims {
-        match compare_matmul(provider, n) {
+        match compare_matmul(provider, n, &mut cfg.cpu_matmul_per_flop) {
             Ok(Some(true)) => {
                 let flops = n * n * n;
                 return Some(Ok(flops));
@@ -510,7 +615,11 @@ fn calibrate_matmul(provider: &'static dyn AccelProvider) -> Option<Result<usize
     Some(Ok(usize::MAX))
 }
 
-fn compare_matmul(provider: &'static dyn AccelProvider, n: usize) -> Result<Option<bool>> {
+fn compare_matmul(
+    provider: &'static dyn AccelProvider,
+    n: usize,
+    cpu_cost_slot: &mut f64,
+) -> Result<Option<bool>> {
     if n == 0 {
         return Ok(Some(false));
     }
@@ -522,6 +631,8 @@ fn compare_matmul(provider: &'static dyn AccelProvider, n: usize) -> Result<Opti
     let a = Value::Tensor(ta.clone());
     let b = Value::Tensor(tb.clone());
     let cpu_time = time(|| runmat_runtime::matrix::value_matmul(&a, &b))?;
+    let flops = (n * n * n) as f64;
+    update_cpu_cost(cpu_cost_slot, cpu_time.as_secs_f64() / flops);
     if let Some(model) = profile_cost_model() {
         if let Some(gpu_time) = model.estimate_matmul(n, n, n) {
             trace!(
@@ -693,6 +804,10 @@ impl ProfileCostModel {
 
     fn estimate_matmul(&self, m: usize, k: usize, n: usize) -> Option<Duration> {
         let flops = m.checked_mul(k)?.checked_mul(n)?;
+        self.matmul.and_then(|model| model.estimate(flops as f64))
+    }
+
+    fn estimate_matmul_flops(&self, flops: usize) -> Option<Duration> {
         self.matmul.and_then(|model| model.estimate(flops as f64))
     }
 

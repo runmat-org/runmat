@@ -1,5 +1,6 @@
 use crate::functions::UserFunction;
 use crate::instr::Instr;
+use runmat_builtins::Type;
 use runmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
 use std::collections::HashMap;
 
@@ -14,6 +15,7 @@ pub struct Compiler {
     pub loop_stack: Vec<LoopLabels>,
     pub functions: HashMap<String, UserFunction>,
     pub imports: Vec<(Vec<String>, bool)>,
+    pub var_types: Vec<Type>,
 }
 
 impl Compiler {
@@ -309,16 +311,43 @@ impl Compiler {
         }
 
         visit_stmts(&prog.body, &mut max_var);
+        let mut var_types = prog.var_types.clone();
+        if var_types.len() < max_var {
+            var_types.resize(max_var, Type::Unknown);
+        }
         Self {
             instructions: Vec::new(),
             var_count: max_var,
             loop_stack: Vec::new(),
             functions: HashMap::new(),
             imports: Vec::new(),
+            var_types,
         }
     }
 
+    fn ensure_var(&mut self, id: usize) {
+        if id + 1 > self.var_count {
+            self.var_count = id + 1;
+        }
+        while self.var_types.len() <= id {
+            self.var_types.push(Type::Unknown);
+        }
+    }
+
+    fn alloc_temp(&mut self) -> usize {
+        let id = self.var_count;
+        self.var_count += 1;
+        if self.var_types.len() <= id {
+            self.var_types.push(Type::Unknown);
+        }
+        id
+    }
+
     pub fn emit(&mut self, instr: Instr) -> usize {
+        match &instr {
+            Instr::LoadVar(id) | Instr::StoreVar(id) => self.ensure_var(*id),
+            _ => {}
+        }
         let pc = self.instructions.len();
         self.instructions.push(instr);
         pc
@@ -436,11 +465,9 @@ impl Compiler {
                     self.compile_expr(start)?;
                     self.emit(Instr::StoreVar(var.0));
                     self.compile_expr(end)?;
-                    let end_var = self.var_count;
-                    self.var_count += 1;
+                    let end_var = self.alloc_temp();
                     self.emit(Instr::StoreVar(end_var));
-                    let step_var = self.var_count;
-                    self.var_count += 1;
+                    let step_var = self.alloc_temp();
                     if let Some(step_expr) = step {
                         self.compile_expr(step_expr)?;
                         self.emit(Instr::StoreVar(step_var));
@@ -690,6 +717,20 @@ impl Compiler {
                 for stmt in body {
                     visit_stmt_for_vars(stmt, &mut max_local_var);
                 }
+                let var_map =
+                    runmat_hir::remapping::create_complete_function_var_map(params, outputs, body);
+                let local_var_count = var_map.len();
+                if local_var_count > max_local_var {
+                    max_local_var = local_var_count;
+                }
+                let mut func_var_types = vec![Type::Unknown; local_var_count];
+                for (orig, local) in &var_map {
+                    if let Some(ty) = self.var_types.get(orig.0) {
+                        if let Some(slot) = func_var_types.get_mut(local.0) {
+                            *slot = ty.clone();
+                        }
+                    }
+                }
                 let user_func = UserFunction {
                     name: name.clone(),
                     params: params.clone(),
@@ -698,6 +739,7 @@ impl Compiler {
                     local_var_count: max_local_var,
                     has_varargin: *has_varargin,
                     has_varargout: *has_varargout,
+                    var_types: func_var_types,
                 };
                 self.functions.insert(name.clone(), user_func);
             }
@@ -706,8 +748,7 @@ impl Compiler {
                 cases,
                 otherwise,
             } => {
-                let temp_id = self.var_count;
-                self.var_count += 1;
+                let temp_id = self.alloc_temp();
                 self.compile_expr(expr)?;
                 self.emit(Instr::StoreVar(temp_id));
                 let mut end_jumps: Vec<usize> = Vec::new();
@@ -2395,6 +2436,7 @@ impl Compiler {
                     local_var_count: capture_count + params.len() + 1,
                     has_varargin: false,
                     has_varargout: false,
+                    var_types: vec![Type::Unknown; capture_count + params.len() + 1],
                 };
                 self.functions.insert(synthesized.clone(), user_func);
 

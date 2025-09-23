@@ -1,5 +1,5 @@
 use crate::instr::Instr;
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_hir::{HirStmt, VarId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,6 +13,8 @@ pub struct UserFunction {
     pub local_var_count: usize,
     pub has_varargin: bool,
     pub has_varargout: bool,
+    #[serde(default)]
+    pub var_types: Vec<Type>,
 }
 
 /// Represents a call frame in the call stack
@@ -39,4 +41,6 @@ pub struct Bytecode {
     pub instructions: Vec<Instr>,
     pub var_count: usize,
     pub functions: HashMap<String, UserFunction>,
+    #[serde(default)]
+    pub var_types: Vec<Type>,
 }

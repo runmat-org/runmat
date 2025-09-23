@@ -10,6 +10,7 @@ pub fn compile(prog: &HirProgram) -> Result<Bytecode, String> {
         instructions: c.instructions,
         var_count: c.var_count,
         functions: c.functions,
+        var_types: c.var_types,
     })
 }
 
@@ -24,5 +25,6 @@ pub fn compile_with_functions(
         instructions: c.instructions,
         var_count: c.var_count,
         functions: c.functions,
+        var_types: c.var_types,
     })
 }

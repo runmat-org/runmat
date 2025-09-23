@@ -11,7 +11,7 @@ use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use log::{debug, error, info, warn};
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_gc::gc_allocate;
 use runmat_ignition::{Bytecode, Instr};
 
@@ -668,8 +668,13 @@ fn execute_user_function_isolated(
     }
 
     // Execute the function using Ignition interpreter
+    let mut func_var_types = function_def.var_types.clone();
+    if func_var_types.len() < local_var_count {
+        func_var_types.resize(local_var_count, Type::Unknown);
+    }
     let func_program = runmat_hir::HirProgram {
         body: remapped_body,
+        var_types: func_var_types,
     };
     let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;

@@ -1,7 +1,7 @@
 use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
 use crate::instr::Instr;
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_runtime::call_builtin;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -1987,8 +1987,13 @@ pub fn interpret_with_vars(
                         }
                     }
                 }
+                let mut func_var_types = func.var_types.clone();
+                if func_var_types.len() < local_var_count {
+                    func_var_types.resize(local_var_count, Type::Unknown);
+                }
                 let func_program = runmat_hir::HirProgram {
                     body: remapped_body,
+                    var_types: func_var_types,
                 };
                 let func_bytecode =
                     crate::compile_with_functions(&func_program, &bytecode.functions)?;
@@ -2122,8 +2127,13 @@ pub fn interpret_with_vars(
                         }
                     }
                 }
+                let mut func_var_types = func.var_types.clone();
+                if func_var_types.len() < local_var_count {
+                    func_var_types.resize(local_var_count, Type::Unknown);
+                }
                 let func_program = runmat_hir::HirProgram {
                     body: remapped_body,
+                    var_types: func_var_types,
                 };
                 let func_bytecode =
                     crate::compile_with_functions(&func_program, &bytecode.functions)?;
@@ -2412,8 +2422,13 @@ pub fn interpret_with_vars(
                         }
                     }
                 }
+                let mut func_var_types = func.var_types.clone();
+                if func_var_types.len() < local_var_count {
+                    func_var_types.resize(local_var_count, Type::Unknown);
+                }
                 let func_program = runmat_hir::HirProgram {
                     body: remapped_body,
+                    var_types: func_var_types,
                 };
                 let func_bytecode =
                     crate::compile_with_functions(&func_program, &bytecode.functions)?;
@@ -6763,8 +6778,13 @@ pub fn interpret_with_vars(
                                             }
                                         }
                                     }
+                                    let mut func_var_types = func.var_types.clone();
+                                    if func_var_types.len() < local_var_count {
+                                        func_var_types.resize(local_var_count, Type::Unknown);
+                                    }
                                     let func_program = runmat_hir::HirProgram {
                                         body: remapped_body,
+                                        var_types: func_var_types,
                                     };
                                     let func_bytecode = crate::compile_with_functions(
                                         &func_program,
@@ -6896,8 +6916,13 @@ pub fn interpret_with_vars(
                                                 }
                                             }
                                         }
+                                        let mut func_var_types = func.var_types.clone();
+                                        if func_var_types.len() < local_var_count {
+                                            func_var_types.resize(local_var_count, Type::Unknown);
+                                        }
                                         let func_program = runmat_hir::HirProgram {
                                             body: remapped_body,
+                                            var_types: func_var_types,
                                         };
                                         let func_bytecode = crate::compile_with_functions(
                                             &func_program,
@@ -6988,12 +7013,18 @@ pub fn interpret_with_vars(
                                                 &func.outputs,
                                                 &func.body,
                                             );
+                                        let local_var_count = var_map.len();
                                         let remapped_body =
                                             runmat_hir::remapping::remap_function_body(
                                                 &func.body, &var_map,
                                             );
+                                        let mut func_var_types = func.var_types.clone();
+                                        if func_var_types.len() < local_var_count {
+                                            func_var_types.resize(local_var_count, Type::Unknown);
+                                        }
                                         let func_program = runmat_hir::HirProgram {
                                             body: remapped_body,
+                                            var_types: func_var_types,
                                         };
                                         let func_bytecode = crate::compile_with_functions(
                                             &func_program,
@@ -7310,8 +7341,13 @@ pub fn interpret_with_vars(
                                                 }
                                             }
                                         }
+                                        let mut func_var_types = func.var_types.clone();
+                                        if func_var_types.len() < local_var_count {
+                                            func_var_types.resize(local_var_count, Type::Unknown);
+                                        }
                                         let func_program = runmat_hir::HirProgram {
                                             body: remapped_body,
+                                            var_types: func_var_types,
                                         };
                                         let func_bytecode = crate::compile_with_functions(
                                             &func_program,

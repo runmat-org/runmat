@@ -294,6 +294,7 @@ fn test_error_handling_in_compilation() {
                 instructions: vec![], // Empty instructions
                 var_count: 0,
                 functions: std::collections::HashMap::new(),
+                var_types: Vec::new(),
             };
 
             let result = engine.compile_bytecode(&bytecode);
