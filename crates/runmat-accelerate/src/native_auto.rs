@@ -100,6 +100,19 @@ fn initialize() -> Option<NativeAutoOffload> {
             debug!("Native auto-offload calibration failed: {err}");
         }
     }
+    let model_status = if profile_cost_model().is_some() {
+        "profile"
+    } else {
+        "fallback"
+    };
+    info!(
+        "Native auto-offload thresholds: unary={} binary={} reduction={} matmul_flops={} (model: {})",
+        config.unary_min_elems,
+        config.binary_min_elems,
+        config.reduction_min_elems,
+        config.matmul_min_flops,
+        model_status
+    );
     Some(NativeAutoOffload::new(provider, config))
 }
 
