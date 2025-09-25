@@ -176,13 +176,12 @@ pub const DOC_MD: &str = r#"---
     integration: "fusion_gpu::fused_elementwise_residency_and_gather"
 ---
 
-# sum
-
+# MATLAB / RunMat Runtime `sum` Function
 `y = sum(x)` adds together the elements of `x`. Scalar inputs return a scalar; matrices and
 higher-dimensional tensors reduce along the first non-singleton dimension by default. You can
 specify a dimension explicitly with `sum(x, dim)`.
 
-## Behaviour
+## Behavior
 - `sum(x)` on a vector returns the sum of all elements.
 - `sum(X)` on a matrix returns a row vector containing column sums (dimension 1 reduction).
 - `sum(X, 2)` returns a column vector of row sums.
@@ -190,17 +189,10 @@ specify a dimension explicitly with `sum(x, dim)`.
 - Empty arrays return zero with matching shape semantics (MATLAB-compatible).
 - Errors for non-numeric, non-logical inputs (structs, cells, strings).
 
-## GPU Support
-When `x` is a `gpuArray`, RunMat keeps the data on the device and asks the active acceleration
-provider to execute the reduction. In the common case, the provider launches a native GPU kernel
-and returns another GPU handle, so you can continue composing GPU operations without calling `gather` 
-("gather" copies GPU results back to CPU memory). If the provider cannot run the kernel, RunMat 
-automatically gathers the tensor to the CPU and finishes the sum there—no extra code required.
-
-## Understanding RunMat Accelerate & Fusion
+## RunMat GPU Support
 RunMat observes the operations you write and builds a computation graph on the fly. Accelerate
 spots GPU-friendly patterns (for example elementwise work feeding a reduction) and generates
-compact WGSL kernels so less data moves between CPU and GPU. Fusion inlines constants, honours
+compact WGSL kernels so less data moves between CPU and GPU. Fusion inlines constants, honors
 MATLAB broadcasting rules, and delays execution until the result is needed (displayed, stored in
 CPU memory, or explicitly gathered via `gather`). The net effect: you keep writing MATLAB-style code while
 RunMat handles kernel generation and scheduling automatically.
@@ -223,8 +215,46 @@ values = [1, 2, 3, 4];
 partial = sum(values(1:2));      % demonstrates subranges
 \`\`\`
 
-## RunMat vs MATLAB behaviour
-- Semantics match MATLAB’s `sum` for numeric and logical inputs, including edge cases with empty
+## Common use cases for `sum`
+
+### Sum each column of a matrix (column-wise sum)
+\`\`\`matlab
+A = [1 2 3; 4 5 6];
+colSums = sum(A);      % [5 7 9]
+\`\`\`
+
+### Sum each row of a matrix (row-wise sum)
+\`\`\`matlab
+A = [1 2 3; 4 5 6];
+rowSums = sum(A, 2);   % [6; 15]
+\`\`\`
+
+### Count true values in a logical array (number of matches)
+\`\`\`matlab
+flags = [true false true true];
+numTrue = sum(flags);  % 3
+\`\`\`
+
+### Sum of squares (energy) of a vector or matrix
+\`\`\`matlab
+x = rand(1, 1000);
+energy = sum(x .^ 2);
+\`\`\`
+
+### Sum along a specific dimension of an N-D array
+\`\`\`matlab
+X = rand(4, 5, 6);
+s = sum(X, 3);         % sums along the 3rd dimension → size 4x5x1
+\`\`\`
+
+### Sum on the GPU (`gpuArray`)
+\`\`\`matlab
+G = gpuArray(rand(2048, 2048));
+result = gather(sum(G));   % column-wise sum on GPU, then bring to CPU
+\`\`\`
+
+## RunMat vs MATLAB behavior
+- RunMat semantics match MATLAB's `sum` for numeric and logical inputs, including edge cases with empty
   arrays and the dimension argument.
 - RunMat transparently offloads eligible computation to the GPU via Accelerate and Fusion;
   MATLAB requires the Parallel Computing Toolbox and typically executes separate kernels per step.
@@ -235,10 +265,10 @@ partial = sum(values(1:2));      % demonstrates subranges
 
 ## Source & Feedback
 - Implementation: [crates/runmat-runtime/src/builtins/math/sum.rs](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/sum.rs) (contains code, specs, and the associated tests).
-- Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
+- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 
 ## See Also
-`prod`, `mean`, `cumsum`, `gpuArray`, `gather`
+[`prod`](/docs/builtins/math/prod), [`mean`](/docs/builtins/math/mean), [`cumsum`](/docs/builtins/math/cumsum), [`gpuArray`](/docs/builtins/accel/gpu_array), [`gather`](/docs/builtins/accel/gather)
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

@@ -17,6 +17,7 @@ members = [
     "crates/runmat-gc",
     "crates/runmat-snapshot",
     "runmat",
+    "tools/runmatfunc",
 ]
 resolver = "2"
 
