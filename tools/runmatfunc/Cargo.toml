@@ -24,10 +24,14 @@ camino = "1"
 tempfile = "3"
 glob = "0.3"
 similar = "2"
+futures = "0.3"
 
 runmat-builtins = { path = "../../crates/runmat-builtins" }
 runmat-accelerate = { path = "../../crates/runmat-accelerate" }
 runmat-runtime = { path = "../../crates/runmat-runtime" }
+codex-core = { git = "https://github.com/openai/codex.git", package = "codex-core", optional = true }
+core_test_support = { git = "https://github.com/openai/codex.git", package = "core_test_support", optional = true }
+codex-protocol = { git = "https://github.com/openai/codex.git", package = "codex-protocol", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -38,7 +42,7 @@ insta = { version = "1", features = ["yaml"] }
 default = ["tui"]
 tui = []
 headless = []
-embedded-codex = []
+embedded-codex = ["codex-core", "core_test_support", "codex-protocol"]
 
 [package.metadata.deb]
 description = "RunMat Function Manager"

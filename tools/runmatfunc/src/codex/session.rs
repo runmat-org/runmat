@@ -26,3 +26,66 @@ pub fn run_authoring(ctx: &AuthoringContext) -> Result<Option<String>> {
         Err(err) => Err(err).with_context(|| "codex authoring session failed"),
     }
 }
+
+#[cfg(all(test, feature = "embedded-codex"))]
+mod embedded_tests {
+    use super::*;
+    use crate::builtin::metadata::BuiltinRecord;
+
+    #[test]
+    fn fixture_summary_is_returned() {
+        let record = BuiltinRecord {
+            name: "fixture".to_string(),
+            category: Some("tests".to_string()),
+            summary: Some("Fixture builtin".to_string()),
+            keywords: Vec::new(),
+            accel_tags: Vec::new(),
+            is_sink: false,
+            doc_markdown: Some("RunMat Codex fixture documentation".to_string()),
+            param_types: Vec::new(),
+            return_type: "Value".to_string(),
+        };
+
+        let ctx = AuthoringContext {
+            builtin: record,
+            prompt: "Summarize the RunMat fixture".to_string(),
+            doc_markdown: Some("RunMat Codex fixture documentation".to_string()),
+            source_paths: Vec::new(),
+        };
+
+        let result = run_authoring(&ctx).expect("codex run should succeed");
+        let summary = result.expect("embedded codex should return summary");
+        assert!(summary.contains("RunMat Codex fixture response"));
+    }
+}
+
+#[cfg(all(test, not(feature = "embedded-codex")))]
+mod stub_tests {
+    use super::*;
+    use crate::builtin::metadata::BuiltinRecord;
+
+    #[test]
+    fn stub_client_returns_none() {
+        let record = BuiltinRecord {
+            name: "fixture".to_string(),
+            category: None,
+            summary: None,
+            keywords: Vec::new(),
+            accel_tags: Vec::new(),
+            is_sink: false,
+            doc_markdown: None,
+            param_types: Vec::new(),
+            return_type: "Value".to_string(),
+        };
+
+        let ctx = AuthoringContext {
+            builtin: record,
+            prompt: "Test".to_string(),
+            doc_markdown: None,
+            source_paths: Vec::new(),
+        };
+
+        let result = run_authoring(&ctx).expect("stub client should succeed");
+        assert!(result.is_none());
+    }
+}

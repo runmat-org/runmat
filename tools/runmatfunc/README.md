@@ -44,7 +44,7 @@ Implemented pieces:
 4. **Context manifest & doc emission** ✅ (writes `builtins.json` + `builtins.d.ts`).
 5. **Workspace + tests** ✅ (read/write helpers, diff preview, targeted `cargo test`).
 6. **TUI scaffolding** ✅ (list + detail pane, actions with shortcuts).
-7. **Codex integration** ⬜ (stub client in place; embed `codex-rs` behind `embedded-codex`).
+7. **Codex integration** ⬜ (stub client in place; enable `embedded-codex` to link codex-rs).
 8. **Jobs queue/scheduler** ⬜ (batch/headless workflows).
 
 ## Run Order Checklist
@@ -70,9 +70,9 @@ runmatfunc browse                   # interactive TUI (↑/↓ navigate, t run t
 ```
 
 > **Note:** Codex execution currently uses a stub client unless the
-> `embedded-codex` feature is enabled and linked against the `codex-rs`
-> library. With that feature active, `runmatfunc builtin <name> --codex`
-> will execute the request inside the tool.
+> `embedded-codex` feature is enabled and the [codex-rs](https://github.com/openai/codex) workspace
+> is available. With that feature active (`cargo run -p runmatfunc --features embedded-codex -- builtin sin --codex`),
+> the tool will link against `codex-core` directly.
 
 ## Contributing
 
