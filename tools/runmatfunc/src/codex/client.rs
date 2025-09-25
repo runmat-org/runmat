@@ -28,7 +28,7 @@ pub struct CodexRequest {
     pub sources: Vec<PathBuf>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct CodexResponse {
     pub summary: String,
 }
@@ -166,5 +166,31 @@ impl Drop for EnvVarGuard {
             Some(val) => std::env::set_var(&self.key, val),
             None => std::env::remove_var(&self.key),
         }
+    }
+}
+
+#[cfg(feature = "embedded-codex")]
+pub fn is_available() -> bool {
+    true
+}
+
+#[cfg(not(feature = "embedded-codex"))]
+pub fn is_available() -> bool {
+    false
+}
+
+#[cfg(all(test, not(feature = "embedded-codex")))]
+mod tests {
+    #[test]
+    fn stub_reports_unavailable() {
+        assert!(!super::is_available());
+    }
+}
+
+#[cfg(all(test, feature = "embedded-codex"))]
+mod embedded_tests {
+    #[test]
+    fn embedded_reports_available() {
+        assert!(super::is_available());
     }
 }

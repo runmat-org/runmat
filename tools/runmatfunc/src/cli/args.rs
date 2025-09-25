@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
 /// Root CLI arguments for runmatfunc.
@@ -11,6 +13,10 @@ pub struct CliArgs {
     /// Enable verbose logging
     #[arg(long)]
     pub verbose: bool,
+
+    /// Override configuration file path
+    #[arg(long = "config", value_name = "PATH")]
+    pub config_path: Option<PathBuf>,
 }
 
 /// High-level command enum. Additional subcommands will be fleshed out during implementation.
@@ -22,8 +28,8 @@ pub enum Command {
     Manifest,
     /// Emit documentation bundle (JSON + d.ts)
     Docs {
-        #[arg(long, default_value = "docs/generated")]
-        out_dir: String,
+        #[arg(long = "out-dir", value_name = "PATH")]
+        out_dir: Option<String>,
     },
     /// Execute a builtin authoring job headlessly (placeholder)
     Builtin {
@@ -32,9 +38,37 @@ pub enum Command {
         model: Option<String>,
         #[arg(long)]
         codex: bool,
+        #[arg(long)]
+        diff: bool,
+    },
+    /// Manage the headless job queue
+    Queue {
+        #[command(subcommand)]
+        action: QueueAction,
     },
 }
 
 pub fn parse() -> CliArgs {
     CliArgs::parse()
+}
+
+#[derive(Debug, Subcommand)]
+pub enum QueueAction {
+    /// Add a builtin to the queue
+    Add {
+        builtin: String,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        codex: bool,
+    },
+    /// List pending jobs
+    List,
+    /// Run queued jobs headlessly
+    Run {
+        #[arg(long = "limit")]
+        max: Option<usize>,
+    },
+    /// Clear all queued jobs
+    Clear,
 }

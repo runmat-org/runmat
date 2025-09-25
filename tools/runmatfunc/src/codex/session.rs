@@ -1,21 +1,24 @@
 use anyhow::{Context, Result};
 
-use crate::codex::client::{default_client, CodexRequest};
+use crate::codex::client::{default_client, CodexRequest, CodexResponse};
 use crate::context::types::AuthoringContext;
 
 /// Run an authoring session through Codex. Returns optional summary text when the
 /// client is available (None indicates stub/no client).
-pub fn run_authoring(ctx: &AuthoringContext) -> Result<Option<String>> {
+pub fn run_authoring(
+    ctx: &AuthoringContext,
+    model: Option<String>,
+) -> Result<Option<CodexResponse>> {
     let client = default_client()?;
     let request = CodexRequest {
-        model: None,
+        model,
         prompt: ctx.prompt.clone(),
         doc_markdown: ctx.doc_markdown.clone(),
         sources: ctx.source_paths.clone(),
     };
 
     match client.run(&request) {
-        Ok(response) => Ok(Some(response.summary)),
+        Ok(response) => Ok(Some(response)),
         Err(err)
             if err
                 .to_string()
@@ -53,9 +56,10 @@ mod embedded_tests {
             source_paths: Vec::new(),
         };
 
-        let result = run_authoring(&ctx).expect("codex run should succeed");
+        let result = run_authoring(&ctx, Some("fixture-model".to_string()))
+            .expect("codex run should succeed");
         let summary = result.expect("embedded codex should return summary");
-        assert!(summary.contains("RunMat Codex fixture response"));
+        assert!(summary.summary.contains("RunMat Codex fixture response"));
     }
 }
 
@@ -85,7 +89,7 @@ mod stub_tests {
             source_paths: Vec::new(),
         };
 
-        let result = run_authoring(&ctx).expect("stub client should succeed");
+        let result = run_authoring(&ctx, None).expect("stub client should succeed");
         assert!(result.is_none());
     }
 }

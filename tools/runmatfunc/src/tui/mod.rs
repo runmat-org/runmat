@@ -14,11 +14,14 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Terminal;
 
+use crate::app::config::AppConfig;
 use crate::builtin::metadata::{BuiltinManifest, BuiltinRecord};
 use crate::context::gather;
 use crate::context::types::AuthoringContext;
 use crate::context::{manifest as manifest_ctx, serialize};
-use crate::workspace::tests;
+use crate::workspace::{diff as workspace_diff, tests};
+
+const HELP_TEXT: &str = "↑/↓ to navigate • t=tests • d=emit docs • f=diff • q=quit";
 
 #[derive(Clone)]
 struct StatusMessage {
@@ -42,20 +45,32 @@ impl StatusMessage {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DetailMode {
+    Context,
+    Diff,
+}
+
 struct TuiState {
     manifest: BuiltinManifest,
     selected: usize,
     detail: Option<AuthoringContext>,
     status: StatusMessage,
+    config: AppConfig,
+    detail_mode: DetailMode,
+    diff_cache: Option<String>,
 }
 
 impl TuiState {
-    fn new(manifest: BuiltinManifest) -> Result<Self> {
+    fn new(manifest: BuiltinManifest, config: AppConfig) -> Result<Self> {
         let mut state = Self {
             manifest,
             selected: 0,
             detail: None,
-            status: StatusMessage::info("↑/↓ to navigate • t=tests • d=emit docs • q=quit"),
+            status: StatusMessage::info(HELP_TEXT),
+            config,
+            detail_mode: DetailMode::Context,
+            diff_cache: None,
         };
         state.refresh_detail()?;
         Ok(state)
@@ -67,7 +82,7 @@ impl TuiState {
 
     fn refresh_detail(&mut self) -> Result<()> {
         if let Some(record) = self.current_record() {
-            match gather::build_authoring_context(&record.name) {
+            match gather::build_authoring_context(&record.name, &self.config) {
                 Ok(ctx) => {
                     self.detail = Some(ctx);
                 }
@@ -88,6 +103,8 @@ impl TuiState {
         let new_index = ((self.selected as isize) + delta).clamp(0, (len - 1) as isize) as usize;
         if new_index != self.selected {
             self.selected = new_index;
+            self.detail_mode = DetailMode::Context;
+            self.diff_cache = None;
             self.refresh_detail()?;
         }
         Ok(())
@@ -95,29 +112,34 @@ impl TuiState {
 
     fn run_tests(&mut self) {
         if let Some(detail) = &self.detail {
-            match tests::run_builtin_tests(detail) {
+            match tests::run_builtin_tests(detail, &self.config) {
                 Ok(outcome) => {
                     if outcome.success {
                         self.status = StatusMessage::info(format!(
-                            "Tests passed for {}",
-                            detail.builtin.name
+                            "Tests passed for {} (logs: {})",
+                            detail.builtin.name,
+                            outcome.log_dir.display()
                         ));
                     } else {
                         let summary: Vec<String> = outcome
                             .reports
                             .iter()
                             .map(|rep| {
-                                format!(
-                                    "{}: {}",
-                                    rep.label,
-                                    if rep.success { "ok" } else { "failed" }
-                                )
+                                let status = if rep.skipped {
+                                    "skipped"
+                                } else if rep.success {
+                                    "ok"
+                                } else {
+                                    "failed"
+                                };
+                                format!("{}: {}", rep.label, status)
                             })
                             .collect();
                         self.status = StatusMessage::error(format!(
-                            "Tests failed for {} -> {}",
+                            "Tests failed for {} -> {} (logs: {})",
                             detail.builtin.name,
-                            summary.join(", ")
+                            summary.join(", "),
+                            outcome.log_dir.display()
                         ));
                     }
                 }
@@ -129,20 +151,61 @@ impl TuiState {
     }
 
     fn emit_docs(&mut self) {
-        match manifest_ctx::build_manifest().and_then(|manifest| {
-            serialize::write_manifest_files(&manifest, std::path::Path::new("docs/generated"))
-        }) {
+        let docs_dir = self.config.docs_output_dir().to_path_buf();
+        match manifest_ctx::build_manifest()
+            .and_then(|manifest| serialize::write_manifest_files(&manifest, docs_dir.as_path()))
+        {
             Ok(_) => {
-                self.status = StatusMessage::info("Docs written to docs/generated");
+                self.status =
+                    StatusMessage::info(format!("Docs written to {}", docs_dir.display()));
             }
             Err(err) => {
                 self.status = StatusMessage::error(format!("Doc emission failed: {err}"));
             }
         }
     }
+
+    fn toggle_diff(&mut self) {
+        match self.detail_mode {
+            DetailMode::Context => {
+                self.refresh_diff();
+                self.detail_mode = DetailMode::Diff;
+            }
+            DetailMode::Diff => {
+                self.detail_mode = DetailMode::Context;
+                self.status = StatusMessage::info(HELP_TEXT);
+            }
+        }
+    }
+
+    fn refresh_diff(&mut self) {
+        if let Some(detail) = &self.detail {
+            match workspace_diff::git_diff(&detail.source_paths) {
+                Ok(Some(diff)) => {
+                    self.diff_cache = Some(diff);
+                    self.status =
+                        StatusMessage::info("Showing git diff (press f to return to context view)");
+                }
+                Ok(None) => {
+                    let message = "No workspace differences for selected sources.".to_string();
+                    self.diff_cache = Some(message.clone());
+                    self.status = StatusMessage::info(message);
+                }
+                Err(err) => {
+                    let message = format!("Diff error: {err}");
+                    self.diff_cache = Some(message.clone());
+                    self.status = StatusMessage::error(message);
+                }
+            }
+        } else {
+            let message = "No builtin selected.".to_string();
+            self.diff_cache = Some(message.clone());
+            self.status = StatusMessage::info(message);
+        }
+    }
 }
 
-pub fn run(manifest: BuiltinManifest) -> Result<()> {
+pub fn run(manifest: BuiltinManifest, config: AppConfig) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     stdout.execute(EnterAlternateScreen)?;
@@ -150,7 +213,7 @@ pub fn run(manifest: BuiltinManifest) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = tui_loop(&mut terminal, manifest);
+    let result = tui_loop(&mut terminal, manifest, config);
 
     disable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -162,8 +225,9 @@ pub fn run(manifest: BuiltinManifest) -> Result<()> {
 fn tui_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     manifest: BuiltinManifest,
+    config: AppConfig,
 ) -> Result<()> {
-    let mut state = TuiState::new(manifest)?;
+    let mut state = TuiState::new(manifest, config)?;
     let mut list_state = ListState::default();
     list_state.select(Some(state.selected));
 
@@ -185,6 +249,9 @@ fn tui_loop(
                     }
                     KeyCode::Char('d') => {
                         state.emit_docs();
+                    }
+                    KeyCode::Char('f') => {
+                        state.toggle_diff();
                     }
                     _ => {}
                 },
@@ -231,11 +298,17 @@ fn draw_ui(frame: &mut ratatui::Frame<'_>, state: &TuiState, list_state: &mut Li
     frame.render_stateful_widget(list, columns[0], list_state);
 
     // Detail pane on the right
-    let detail_text = state
-        .detail
-        .as_ref()
-        .map(render_detail_text)
-        .unwrap_or_else(|| "Loading…".to_string());
+    let detail_text = match state.detail_mode {
+        DetailMode::Context => state
+            .detail
+            .as_ref()
+            .map(|ctx| render_context_detail(ctx, &state.config))
+            .unwrap_or_else(|| "Loading…".to_string()),
+        DetailMode::Diff => state
+            .diff_cache
+            .clone()
+            .unwrap_or_else(|| "Press 'f' to load git diff for source hints.".to_string()),
+    };
     let detail = Paragraph::new(detail_text)
         .block(Block::default().title("Details").borders(Borders::ALL))
         .wrap(Wrap { trim: true });
@@ -253,11 +326,22 @@ fn draw_ui(frame: &mut ratatui::Frame<'_>, state: &TuiState, list_state: &mut Li
     frame.render_widget(status, outer[1]);
 }
 
-fn render_detail_text(ctx: &AuthoringContext) -> String {
+fn render_context_detail(ctx: &AuthoringContext, config: &AppConfig) -> String {
     let mut out = String::new();
     if let Some(summary) = &ctx.builtin.summary {
         out.push_str(&format!("Summary: {}\n\n", summary));
     }
+    out.push_str(&format!(
+        "Codex: {}\n\n",
+        if crate::codex::client::is_available() {
+            format!(
+                "available (default model: {})",
+                config.default_model.as_deref().unwrap_or("default")
+            )
+        } else {
+            "not available (enable embedded-codex feature)".to_string()
+        }
+    ));
     out.push_str(&format!("Prompt:\n{}\n", ctx.prompt));
     if let Some(doc) = &ctx.doc_markdown {
         out.push_str("\nDocumentation Excerpt:\n");

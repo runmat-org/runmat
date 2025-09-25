@@ -25,6 +25,9 @@ tempfile = "3"
 glob = "0.3"
 similar = "2"
 futures = "0.3"
+directories-next = "2"
+chrono = { version = "0.4", features = ["serde"] }
+toml = "0.8"
 
 runmat-builtins = { path = "../../crates/runmat-builtins" }
 runmat-accelerate = { path = "../../crates/runmat-accelerate" }

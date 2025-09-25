@@ -45,7 +45,7 @@ Implemented pieces:
 5. **Workspace + tests** ✅ (read/write helpers, diff preview, targeted `cargo test`).
 6. **TUI scaffolding** ✅ (list + detail pane, actions with shortcuts).
 7. **Codex integration** ⬜ (stub client in place; enable `embedded-codex` to link codex-rs).
-8. **Jobs queue/scheduler** ⬜ (batch/headless workflows).
+8. **Jobs queue/scheduler** ✅ (batch/headless workflows).
 
 ## Run Order Checklist
 
@@ -57,7 +57,7 @@ Implemented pieces:
 - [x] Workspace helpers for diffs/tests
 - [x] TUI browse view (basic list/detail)
 - [ ] Codex client integration
-- [ ] Job queue + scheduler
+- [x] Job queue + scheduler
 
 ## Usage (current)
 
@@ -67,12 +67,36 @@ runmatfunc manifest                 # print builtin metadata summary
 runmatfunc docs --out-dir docs/generated  # emit docs bundle
 runmatfunc builtin sin --codex      # assemble authoring context for builtin 'sin' (attempt Codex)
 runmatfunc browse                   # interactive TUI (↑/↓ navigate, t run tests, d emit docs, q quit)
+runmatfunc builtin sin --diff       # show git diff for builtin-related files alongside context
+runmatfunc queue add sin --codex    # enqueue a headless job (stored under artifacts/runmatfunc/queue.json)
+runmatfunc queue run                # run queued jobs headlessly (writes transcripts + test logs)
+runmatfunc queue list               # inspect queued jobs and their target Codex models
 ```
 
 > **Note:** Codex execution currently uses a stub client unless the
 > `embedded-codex` feature is enabled and the [codex-rs](https://github.com/openai/codex) workspace
 > is available. With that feature active (`cargo run -p runmatfunc --features embedded-codex -- builtin sin --codex`),
-> the tool will link against `codex-core` directly.
+> the tool will link against `codex-core` directly. The CLI and TUI surface Codex availability so
+> you always know whether authoring sessions will call the real client or the stub.
+
+## Configuration
+
+`runmatfunc` loads configuration from `~/.runmatfunc/config.toml` (override with
+`RUNMATFUNC_CONFIG`). Environment variables take precedence over file values:
+
+- `RUNMATFUNC_DEFAULT_MODEL` – default Codex model when `--model` is omitted.
+- `RUNMATFUNC_ARTIFACTS_DIR` – base directory for logs, transcripts, and queue state.
+- `RUNMATFUNC_DOCS_OUTPUT_DIR` – default target for `runmatfunc docs`.
+- `RUNMATFUNC_SNIPPET_INCLUDE` / `RUNMATFUNC_SNIPPET_EXCLUDE` – extra glob patterns (comma/semicolon
+  separated) merged into snippet discovery.
+- `RUNMATFUNC_ENABLE_OPTIONAL_FEATURES=1` – enable optional Cargo features (for example
+  `blas-lapack`) required by a builtin’s test plan.
+
+The artifacts directory now contains:
+
+- `tests/<builtin>/` – captured stdout/stderr for targeted cargo test runs.
+- `transcripts/` – JSON transcripts emitted by headless queue runs.
+- `queue.json` – persisted job queue state.
 
 ## Contributing
 
