@@ -30,6 +30,8 @@ pub enum Command {
         name: String,
         #[arg(long)]
         model: Option<String>,
+        #[arg(long)]
+        codex: bool,
     },
 }
 
