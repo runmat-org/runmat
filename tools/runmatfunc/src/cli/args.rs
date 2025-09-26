@@ -31,15 +31,10 @@ pub enum Command {
         #[arg(long = "out-dir", value_name = "PATH")]
         out_dir: Option<String>,
     },
-    /// Execute a builtin authoring job headlessly (placeholder)
+    /// Builtin authoring helpers
     Builtin {
-        name: String,
-        #[arg(long)]
-        model: Option<String>,
-        #[arg(long)]
-        codex: bool,
-        #[arg(long)]
-        diff: bool,
+        #[command(subcommand)]
+        action: BuiltinAction,
     },
     /// Manage the headless job queue
     Queue {
@@ -50,6 +45,25 @@ pub enum Command {
 
 pub fn parse() -> CliArgs {
     CliArgs::parse()
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BuiltinAction {
+    /// Generate or migrate a builtin implementation
+    Generate {
+        #[arg(long = "name", value_name = "NAME")]
+        name: String,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        codex: bool,
+        #[arg(long)]
+        diff: bool,
+        #[arg(long = "show-doc")]
+        show_doc: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

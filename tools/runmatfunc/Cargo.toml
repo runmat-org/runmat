@@ -35,6 +35,7 @@ runmat-runtime = { path = "../../crates/runmat-runtime" }
 codex-core = { git = "https://github.com/openai/codex.git", package = "codex-core", optional = true }
 core_test_support = { git = "https://github.com/openai/codex.git", package = "core_test_support", optional = true }
 codex-protocol = { git = "https://github.com/openai/codex.git", package = "codex-protocol", optional = true }
+codex-apply-patch = { git = "https://github.com/openai/codex.git", package = "codex-apply-patch", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -45,7 +46,7 @@ insta = { version = "1", features = ["yaml"] }
 default = ["tui"]
 tui = []
 headless = []
-embedded-codex = ["codex-core", "core_test_support", "codex-protocol"]
+embedded-codex = ["codex-core", "core_test_support", "codex-protocol", "codex-apply-patch"]
 
 [package.metadata.deb]
 description = "RunMat Function Manager"

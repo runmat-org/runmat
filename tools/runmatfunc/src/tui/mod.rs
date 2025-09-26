@@ -82,7 +82,11 @@ impl TuiState {
 
     fn refresh_detail(&mut self) -> Result<()> {
         if let Some(record) = self.current_record() {
-            match gather::build_authoring_context(&record.name, &self.config) {
+            match gather::build_authoring_context(
+                &record.name,
+                record.category.as_deref(),
+                &self.config,
+            ) {
                 Ok(ctx) => {
                     self.detail = Some(ctx);
                 }
@@ -343,10 +347,10 @@ fn render_context_detail(ctx: &AuthoringContext, config: &AppConfig) -> String {
         }
     ));
     out.push_str(&format!("Prompt:\n{}\n", ctx.prompt));
-    if let Some(doc) = &ctx.doc_markdown {
-        out.push_str("\nDocumentation Excerpt:\n");
-        out.push_str(&truncate(doc, 800));
-        out.push('\n');
+    if ctx.doc_markdown.is_some() {
+        out.push_str(
+            "\nDocumentation excerpt hidden (use CLI `runmatfunc builtin <name> --show-doc`).\n",
+        );
     }
     if !ctx.source_paths.is_empty() {
         out.push_str("\nSource Hints:\n");
@@ -357,12 +361,4 @@ fn render_context_detail(ctx: &AuthoringContext, config: &AppConfig) -> String {
         }
     }
     out
-}
-
-fn truncate(text: &str, max: usize) -> String {
-    if text.len() <= max {
-        text.to_string()
-    } else {
-        format!("{}…", &text[..max])
-    }
 }

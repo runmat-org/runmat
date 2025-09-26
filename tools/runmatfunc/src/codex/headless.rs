@@ -22,7 +22,7 @@ pub fn run_builtin_headless(
     model: Option<String>,
     use_codex: bool,
 ) -> Result<HeadlessRunResult> {
-    let authoring_ctx = gather::build_authoring_context(builtin, config)?;
+    let authoring_ctx = gather::build_authoring_context(builtin, None, config)?;
     let resolved_model = model.clone().or_else(|| config.default_model.clone());
 
     let codex_available = client::is_available();

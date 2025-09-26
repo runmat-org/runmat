@@ -44,7 +44,7 @@ Implemented pieces:
 4. **Context manifest & doc emission** ✅ (writes `builtins.json` + `builtins.d.ts`).
 5. **Workspace + tests** ✅ (read/write helpers, diff preview, targeted `cargo test`).
 6. **TUI scaffolding** ✅ (list + detail pane, actions with shortcuts).
-7. **Codex integration** ⬜ (stub client in place; enable `embedded-codex` to link codex-rs).
+7. **Codex integration** ✅ (respects Codex config/auth, falls back to fixture for tests).
 8. **Jobs queue/scheduler** ✅ (batch/headless workflows).
 
 ## Run Order Checklist
@@ -56,7 +56,7 @@ Implemented pieces:
 - [x] Doc emitter writing JSON + d.ts
 - [x] Workspace helpers for diffs/tests
 - [x] TUI browse view (basic list/detail)
-- [ ] Codex client integration
+- [x] Codex client integration
 - [x] Job queue + scheduler
 
 ## Usage (current)
@@ -65,9 +65,10 @@ Implemented pieces:
 runmatfunc --help                   # view CLI options
 runmatfunc manifest                 # print builtin metadata summary
 runmatfunc docs --out-dir docs/generated  # emit docs bundle
-runmatfunc builtin sin --codex      # assemble authoring context for builtin 'sin' (attempt Codex)
+runmatfunc builtin generate --name sin --category math/trigonometry --codex  # assemble authoring context for new builtin work
+runmatfunc builtin generate --name sin --category math/trigonometry --codex --show-doc  # include DOC_MD in CLI output when needed
 runmatfunc browse                   # interactive TUI (↑/↓ navigate, t run tests, d emit docs, q quit)
-runmatfunc builtin sin --diff       # show git diff for builtin-related files alongside context
+runmatfunc builtin generate --name sin --category math/trigonometry --diff  # show git diff for builtin-related files alongside context
 runmatfunc queue add sin --codex    # enqueue a headless job (stored under artifacts/runmatfunc/queue.json)
 runmatfunc queue run                # run queued jobs headlessly (writes transcripts + test logs)
 runmatfunc queue list               # inspect queued jobs and their target Codex models
@@ -76,7 +77,7 @@ runmatfunc queue list               # inspect queued jobs and their target Codex
 > **Note:** Codex execution currently uses a stub client unless the
 > `embedded-codex` feature is enabled and the [codex-rs](https://github.com/openai/codex) workspace
 > is available. With that feature active (`cargo run -p runmatfunc --features embedded-codex -- builtin sin --codex`),
-> the tool will link against `codex-core` directly. The CLI and TUI surface Codex availability so
+> the tool will link against `codex-core` directly. For example: `cargo run -p runmatfunc --features embedded-codex -- builtin generate --name sin --category math/trigonometry --codex`. The CLI and TUI surface Codex availability so
 > you always know whether authoring sessions will call the real client or the stub.
 
 ## Configuration
@@ -91,6 +92,8 @@ runmatfunc queue list               # inspect queued jobs and their target Codex
   separated) merged into snippet discovery.
 - `RUNMATFUNC_ENABLE_OPTIONAL_FEATURES=1` – enable optional Cargo features (for example
   `blas-lapack`) required by a builtin’s test plan.
+- `RUNMATFUNC_USE_CODEX_FIXTURE=1` – force Codex calls to use the bundled SSE fixture (primarily for
+  automated tests when real Codex auth is unavailable).
 
 The artifacts directory now contains:
 

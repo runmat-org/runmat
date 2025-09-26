@@ -2,61 +2,80 @@ use std::fmt::Write;
 
 use crate::app::config::AppConfig;
 use crate::builtin::metadata::BuiltinRecord;
+use crate::context::reference;
+
+const IMPLEMENTATION_NOTES: &[&str] = &[
+    "Create a dedicated builtin module (DOC_MD, GPU/Fusion specs, runtime registration, helper routines, tests).",
+    "Mirror RunMat semantics exactly; raise MATLAB-compatible errors and keep GPU fallbacks in sync with host code.",
+    "Share helpers via builtins/common rather than referencing legacy modules.",
+    "Document GPU fallbacks and TODOs inline if provider hooks are incomplete.",
+];
+
+const TESTING_EXPECTATIONS: &[&str] = &[
+    "cargo test -p runmat-runtime --lib -- <builtin>",
+    "cargo test -p runmat-runtime --tests -- <builtin>",
+    "Include doc example smoke tests (test_support::doc_examples)",
+];
 
 /// Build a textual prompt describing the builtin authoring task.
 pub fn render_prompt(record: &BuiltinRecord, config: &AppConfig) -> String {
     let mut prompt = String::new();
     let _ = writeln!(prompt, "Builtin: {}", record.name);
-    if let Some(summary) = &record.summary {
-        let _ = writeln!(prompt, "Summary: {}", summary);
+    let default_model = config.default_model.as_deref().unwrap_or("gpt-5-codex");
+    let _ = writeln!(prompt, "Preferred Codex model: {}", default_model);
+    prompt.push('\n');
+
+    for (label, body) in reference::reference_sections() {
+        let _ = writeln!(prompt, "===== {label} =====");
+        prompt.push_str(body);
+        if !prompt.ends_with('\n') {
+            prompt.push('\n');
+        }
+        prompt.push('\n');
     }
+
+    prompt.push_str("===== Task =====\n");
     if let Some(category) = &record.category {
-        let _ = writeln!(prompt, "Category: {}", category);
-    }
-    if !record.keywords.is_empty() {
-        let _ = writeln!(prompt, "Keywords: {}", record.keywords.join(", "));
-    }
-    if !record.accel_tags.is_empty() {
-        let _ = writeln!(prompt, "GPU Tags: {}", record.accel_tags.join(", "));
-    }
-    if let Some(model) = &config.default_model {
-        let _ = writeln!(prompt, "Preferred Codex model: {}", model);
-    }
-
-    prompt.push_str("\nAuthoring Checklist:\n");
-    prompt.push_str("1. Create a dedicated builtin module (DOC_MD, GPU/Fusion specs, runtime registration, helper routines, tests).\n");
-    prompt.push_str("2. Mirror RunMat semantics exactly; raise MATLAB-compatible errors and keep GPU fallbacks in sync with host code.\n");
-    prompt.push_str("3. Update DOC_MD YAML frontmatter with title/category/keywords/summary, GPU + fusion metadata, references, tested blocks, and any required features.\n");
-    prompt.push_str("4. Register GPU + fusion specs via register_builtin_gpu_spec!/register_builtin_fusion_spec! with concise notes.\n");
-    prompt.push_str("5. Cover scalars, broadcasting, dimension arguments, gpuArray residency, and doc examples in #[cfg(test)] including native-accel providers.\n");
-    prompt.push_str("6. Keep the module self-contained; share helpers via builtins/common rather than referencing legacy monoliths.\n");
-
-    prompt.push_str("\nDocs & References:\n");
-    if let Some(path) = config.generation_plan_path() {
-        let _ = writeln!(prompt, "- Blueprint: {}", path.display());
+        let module_hint = format_module_path(category, &record.name);
+        let _ = writeln!(
+            prompt,
+            "- Implement the `{}` builtin at `{}`.",
+            record.name, module_hint
+        );
     } else {
-        prompt.push_str("- Blueprint: generation-plan-2.md (ensure YAML + GPU guidance)\n");
-    }
-    if let Some(path) = config.fusion_design_doc() {
-        let _ = writeln!(prompt, "- Fusion/GPU design: {}", path.display());
+        let _ = writeln!(
+            prompt,
+            "- Implement the `{}` builtin and choose an appropriate category under `crates/runmat-runtime/src/builtins/`.",
+            record.name
+        );
     }
     prompt.push_str(
-        "- Keep docs/builtins.d.ts and docs/generated/builtins.json aligned via runmatfunc docs.\n",
+        "- Use the references above to follow the RunMat builtin template (DOC_MD, GPU/Fusion specs, tests).\n",
+    );
+    prompt.push_str(
+        "- Ensure MATLAB-compatible semantics and document GPU fallbacks when provider hooks are incomplete.\n\n",
     );
 
-    prompt.push_str("\nImplementation Notes:\n");
-    prompt.push_str("- Include TODO markers for any unsupported GPU hooks; document fallbacks.\n");
-    prompt.push_str(
-        "- Prefer helper methods from builtins/common for tensor conversions and GPU gather.\n",
-    );
-    prompt.push_str("- Avoid importing legacy aggregated modules once per-builtin file exists; update globs/snippets accordingly.\n");
+    prompt.push_str("===== Implementation Notes =====\n");
+    for note in IMPLEMENTATION_NOTES {
+        let _ = writeln!(prompt, "- {}", note);
+    }
+    prompt.push('\n');
 
-    prompt.push_str("\nTesting Expectations:\n");
-    prompt.push_str("- cargo test -p runmat-runtime --lib -- <builtin> for unit coverage.\n");
-    prompt.push_str(
-        "- cargo test -p runmat-runtime --tests -- <builtin> for integration/fusion harnesses.\n",
-    );
-    prompt.push_str("- Include doc example smoke tests (test_support::doc_examples).\n");
+    prompt.push_str("===== Testing Expectations =====\n");
+    for note in TESTING_EXPECTATIONS {
+        let _ = writeln!(prompt, "- {}", note.replace("<builtin>", &record.name));
+    }
 
     prompt
+}
+
+fn format_module_path(category: &str, name: &str) -> String {
+    let mut segments: Vec<String> = category
+        .split('/')
+        .map(|segment| segment.trim().to_ascii_lowercase().replace([' ', '-'], "_"))
+        .collect();
+    let file = format!("{}.rs", name.trim().to_ascii_lowercase());
+    segments.push(file);
+    format!("crates/runmat-runtime/src/builtins/{}", segments.join("/"))
 }

@@ -1,20 +1,26 @@
 use std::path::PathBuf;
 
 #[cfg(feature = "embedded-codex")]
-use std::{ffi::OsString, sync::Arc};
+use std::{ffi::OsString, fs, io::ErrorKind, sync::Arc};
+
+use anyhow::Result;
+#[cfg(feature = "embedded-codex")]
+use anyhow::{bail, Context};
 
 #[cfg(feature = "embedded-codex")]
-use codex_core::{ContentItem, ModelClient, Prompt, ResponseEvent, ResponseItem};
+use codex_core::{
+    config::{Config, ConfigOverrides},
+    protocol::{
+        AskForApproval, EventMsg, InputItem, Op, ReviewDecision, SandboxPolicy, Submission,
+    },
+    AuthManager, CodexAuth, ConversationManager,
+};
 #[cfg(feature = "embedded-codex")]
-use codex_protocol::mcp_protocol::ConversationId;
+use codex_protocol::config_types::ReasoningEffort;
 #[cfg(feature = "embedded-codex")]
 use core_test_support::load_default_config_for_test;
 #[cfg(feature = "embedded-codex")]
-use futures::StreamExt;
-#[cfg(feature = "embedded-codex")]
 use tempfile::TempDir;
-
-use anyhow::Result;
 
 #[cfg(not(feature = "embedded-codex"))]
 use anyhow::anyhow;
@@ -53,7 +59,7 @@ struct StubCodexClient;
 #[cfg(not(feature = "embedded-codex"))]
 impl CodexClient for StubCodexClient {
     fn run(&self, _request: &CodexRequest) -> Result<CodexResponse> {
-        Err(anyhow!(
+        Err(anyhow::anyhow!(
             "Codex integration requires the 'embedded-codex' feature and linked codex-rs"
         ))
     }
@@ -65,91 +71,176 @@ struct EmbeddedCodexClient;
 #[cfg(feature = "embedded-codex")]
 impl CodexClient for EmbeddedCodexClient {
     fn run(&self, request: &CodexRequest) -> Result<CodexResponse> {
-        const FIXTURE_SSE: &str = include_str!("../../tests/fixtures/codex_fixture.sse");
-
         let runtime = tokio::runtime::Runtime::new()?;
-        let codex_home = TempDir::new()?;
-
-        let config = Arc::new(load_default_config_for_test(&codex_home));
-        let provider = config.model_provider.clone();
-        let effort = config.model_reasoning_effort;
-        let summary = config.model_reasoning_summary;
-
-        // Write fixture to temp file and configure Codex to read from it.
-        let fixture_path = codex_home.path().join("embedded_fixture.sse");
-        std::fs::write(&fixture_path, FIXTURE_SSE)?;
-
-        let _fixture_guard = EnvVarGuard::set("CODEX_RS_SSE_FIXTURE", &fixture_path);
-        let _api_key_guard = EnvVarGuard::set("OPENAI_API_KEY", "dummy");
-        let _base_url_guard = EnvVarGuard::set("OPENAI_BASE_URL", "http://unused.local");
-
-        let client = ModelClient::new(
-            Arc::clone(&config),
-            None,
-            provider,
-            effort,
-            summary,
-            ConversationId::new(),
-        );
-
-        let mut prompt = Prompt::default();
-        prompt.input.push(ResponseItem::Message {
-            id: None,
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText {
-                text: request.prompt.clone(),
-            }],
-        });
-        if let Some(doc) = &request.doc_markdown {
-            prompt.input.push(ResponseItem::Message {
-                id: None,
-                role: "system".to_string(),
-                content: vec![ContentItem::InputText { text: doc.clone() }],
-            });
-        }
-
-        let mut summary_text = runtime.block_on(async {
-            let mut stream = client.stream(&prompt).await?;
-            let mut collected = String::new();
-            while let Some(event) = stream.next().await {
-                match event? {
-                    ResponseEvent::OutputTextDelta(delta) => {
-                        collected.push_str(&delta);
-                    }
-                    ResponseEvent::OutputItemDone(item) => {
-                        if let ResponseItem::Message { content, .. } = item {
-                            for chunk in content {
-                                if let ContentItem::OutputText { text } = chunk {
-                                    collected.push_str(&text);
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Result::<String>::Ok(collected)
-        })?;
-
-        if summary_text.trim().is_empty() {
-            summary_text = "Codex returned no response".to_string();
-        }
-
-        Ok(CodexResponse {
-            summary: summary_text,
-        })
+        let context = load_runtime_context()?;
+        runtime.block_on(async { run_conversation(context, request).await })
     }
 }
 
 #[cfg(feature = "embedded-codex")]
-struct EnvVarGuard {
+async fn run_conversation(
+    context: RuntimeContext,
+    request: &CodexRequest,
+) -> Result<CodexResponse> {
+    let manager = ConversationManager::new(Arc::clone(&context.auth_manager));
+    let config_owned = (*context.config).clone();
+    let conversation = manager
+        .new_conversation(config_owned)
+        .await
+        .map(|new_conv| (new_conv.conversation_id, new_conv.conversation))?;
+    let (conversation_id, conversation) = conversation;
+
+    let result = drive_turn(&conversation, &context, request).await;
+    let _ = manager.remove_conversation(&conversation_id).await;
+    result
+}
+
+#[cfg(feature = "embedded-codex")]
+async fn drive_turn(
+    conversation: &Arc<codex_core::CodexConversation>,
+    context: &RuntimeContext,
+    request: &CodexRequest,
+) -> Result<CodexResponse> {
+    let mut text = request.prompt.clone();
+    if let Some(doc) = &request.doc_markdown {
+        text.push_str("\n\nDOC_MD:\n");
+        text.push_str(doc);
+    }
+
+    let items = vec![InputItem::Text { text }];
+    let submission = Submission {
+        id: "turn-1".to_string(),
+        op: Op::UserTurn {
+            items,
+            cwd: context.config.cwd.clone(),
+            approval_policy: context.config.approval_policy,
+            sandbox_policy: context.config.sandbox_policy.clone(),
+            model: context.config.model.clone(),
+            effort: context.config.model_reasoning_effort,
+            summary: context.config.model_reasoning_summary,
+            final_output_json_schema: None,
+        },
+    };
+    conversation.submit_with_id(submission).await?;
+
+    let mut combined = String::new();
+    let mut last_agent_message = None;
+
+    loop {
+        let event = conversation.next_event().await?;
+        match event.msg {
+            EventMsg::TaskComplete(task) => {
+                last_agent_message = task.last_agent_message;
+                break;
+            }
+            EventMsg::AgentMessage(msg) => {
+                if !combined.is_empty() {
+                    combined.push('\n');
+                }
+                combined.push_str(&msg.message);
+            }
+            EventMsg::AgentMessageDelta(delta) => {
+                combined.push_str(&delta.delta);
+            }
+            EventMsg::ApplyPatchApprovalRequest(_) => {
+                auto_patch_approval(conversation, &event.id).await?;
+            }
+            EventMsg::ExecApprovalRequest(_) => {
+                auto_exec_approval(conversation, &event.id).await?;
+            }
+            EventMsg::PatchApplyEnd(end) => {
+                if !end.success {
+                    return Err(anyhow::anyhow!(end.stderr.trim().to_string()));
+                }
+            }
+            EventMsg::TurnDiff(diff) => {
+                if !diff.unified_diff.trim().is_empty() {
+                    combined.push_str("\n\n[diff]\n");
+                    combined.push_str(&diff.unified_diff);
+                }
+            }
+            EventMsg::Error(err) => {
+                return Err(anyhow::anyhow!(err.message));
+            }
+            EventMsg::StreamError(err) => {
+                return Err(anyhow::anyhow!(err.message));
+            }
+            EventMsg::ShutdownComplete => break,
+            _ => {}
+        }
+    }
+
+    let summary = last_agent_message
+        .filter(|msg| !msg.trim().is_empty())
+        .unwrap_or_else(|| {
+            let trimmed = combined.trim();
+            if trimmed.is_empty() {
+                "Codex returned no response".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        });
+
+    Ok(CodexResponse { summary })
+}
+
+#[cfg(feature = "embedded-codex")]
+async fn auto_patch_approval(
+    conversation: &Arc<codex_core::CodexConversation>,
+    request_id: &str,
+) -> Result<()> {
+    let submission = Submission {
+        id: format!("patch-approval-{}", request_id),
+        op: Op::PatchApproval {
+            id: request_id.to_string(),
+            decision: ReviewDecision::ApprovedForSession,
+        },
+    };
+    conversation.submit_with_id(submission).await?;
+    Ok(())
+}
+
+#[cfg(feature = "embedded-codex")]
+async fn auto_exec_approval(
+    conversation: &Arc<codex_core::CodexConversation>,
+    request_id: &str,
+) -> Result<()> {
+    let submission = Submission {
+        id: format!("exec-approval-{}", request_id),
+        op: Op::ExecApproval {
+            id: request_id.to_string(),
+            decision: ReviewDecision::ApprovedForSession,
+        },
+    };
+    conversation.submit_with_id(submission).await?;
+    Ok(())
+}
+
+#[cfg(feature = "embedded-codex")]
+pub(crate) struct EnvVarGuard {
     key: String,
     previous: Option<OsString>,
 }
 
 #[cfg(feature = "embedded-codex")]
+struct FixtureGuard {
+    _home: TempDir,
+    _sse: EnvVarGuard,
+    _api: EnvVarGuard,
+    _base: EnvVarGuard,
+    _home_env: EnvVarGuard,
+}
+
+#[cfg(feature = "embedded-codex")]
+struct RuntimeContext {
+    config: Arc<Config>,
+    auth_manager: Arc<AuthManager>,
+    _fixture_guard: Option<FixtureGuard>,
+}
+
+#[cfg(feature = "embedded-codex")]
 impl EnvVarGuard {
-    fn set(key: &str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+    pub(crate) fn set(key: &str, value: impl AsRef<std::ffi::OsStr>) -> Self {
         let previous = std::env::var_os(key);
         std::env::set_var(key, value);
         Self {
@@ -170,8 +261,110 @@ impl Drop for EnvVarGuard {
 }
 
 #[cfg(feature = "embedded-codex")]
+fn load_runtime_context() -> Result<RuntimeContext> {
+    match attempt_user_context()? {
+        UserContextStatus::Ready(context) => Ok(context),
+        UserContextStatus::MissingConfig if should_use_fixture() => load_fixture_context(),
+        UserContextStatus::MissingAuth if should_use_fixture() => load_fixture_context(),
+        UserContextStatus::MissingConfig => bail!(
+            "Codex configuration not found. Configure Codex (see https://github.com/openai/codex/blob/main/docs/config.md) or set RUNMATFUNC_USE_CODEX_FIXTURE=1 when running tests."
+        ),
+        UserContextStatus::MissingAuth => bail!(
+            "Codex authentication not available. Run `codex auth login` or set OPENAI_API_KEY before enabling --codex."
+        ),
+    }
+}
+
+#[cfg(feature = "embedded-codex")]
+fn attempt_user_context() -> Result<UserContextStatus> {
+    let config = match Config::load_with_cli_overrides(Vec::new(), ConfigOverrides::default()) {
+        Ok(cfg) => cfg,
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            return Ok(UserContextStatus::MissingConfig)
+        }
+        Err(err) => return Err(err.into()),
+    };
+
+    let mut config = config;
+    config.model = "gpt-5-codex".to_string();
+    config.model_reasoning_effort = Some(ReasoningEffort::High);
+    config.cwd = std::env::current_dir()?;
+    config.approval_policy = AskForApproval::Never;
+    config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+
+    let auth_manager = AuthManager::shared(config.codex_home.clone());
+    let has_token = auth_manager.auth().is_some()
+        || std::env::var("OPENAI_API_KEY")
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false);
+
+    if !has_token {
+        return Ok(UserContextStatus::MissingAuth);
+    }
+
+    Ok(UserContextStatus::Ready(RuntimeContext {
+        config: Arc::new(config),
+        auth_manager,
+        _fixture_guard: None,
+    }))
+}
+
+#[cfg(feature = "embedded-codex")]
+fn load_fixture_context() -> Result<RuntimeContext> {
+    const FIXTURE_SSE: &str = include_str!("../../tests/fixtures/codex_fixture.sse");
+
+    let codex_home = TempDir::new()?;
+    let mut config = load_default_config_for_test(&codex_home);
+    config.model = "gpt-5-codex".to_string();
+    config.model_reasoning_effort = Some(ReasoningEffort::High);
+    config.cwd = std::env::current_dir()?;
+    config.approval_policy = AskForApproval::Never;
+    config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
+    let config = Arc::new(config);
+
+    let fixture_path = codex_home.path().join("embedded_fixture.sse");
+    fs::write(&fixture_path, FIXTURE_SSE).context("writing Codex SSE fixture")?;
+
+    let sse_guard = EnvVarGuard::set("CODEX_RS_SSE_FIXTURE", &fixture_path);
+    let api_guard = EnvVarGuard::set("OPENAI_API_KEY", "dummy");
+    let base_guard = EnvVarGuard::set("OPENAI_BASE_URL", "http://unused.local");
+    let home_guard = EnvVarGuard::set("CODEX_HOME", codex_home.path());
+
+    Ok(RuntimeContext {
+        config,
+        auth_manager,
+        _fixture_guard: Some(FixtureGuard {
+            _home: codex_home,
+            _sse: sse_guard,
+            _api: api_guard,
+            _base: base_guard,
+            _home_env: home_guard,
+        }),
+    })
+}
+
+#[cfg(feature = "embedded-codex")]
+enum UserContextStatus {
+    Ready(RuntimeContext),
+    MissingConfig,
+    MissingAuth,
+}
+
+#[cfg(feature = "embedded-codex")]
+fn should_use_fixture() -> bool {
+    matches!(
+        std::env::var("RUNMATFUNC_USE_CODEX_FIXTURE")
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
+    )
+}
+
+#[cfg(feature = "embedded-codex")]
 pub fn is_available() -> bool {
-    true
+    matches!(attempt_user_context(), Ok(UserContextStatus::Ready(_))) || should_use_fixture()
 }
 
 #[cfg(not(feature = "embedded-codex"))]
@@ -191,6 +384,7 @@ mod tests {
 mod embedded_tests {
     #[test]
     fn embedded_reports_available() {
+        let _fixture_flag = super::EnvVarGuard::set("RUNMATFUNC_USE_CODEX_FIXTURE", "1");
         assert!(super::is_available());
     }
 }

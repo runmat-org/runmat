@@ -1,112 +1,31 @@
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use anyhow::Result;
-use glob::{glob, Pattern};
-use tracing::debug;
 
 use crate::app::config::AppConfig;
 use crate::builtin::metadata::BuiltinRecord;
+use crate::context::reference::REFERENCE_FILE_PATHS;
 
 /// Return source paths relevant for the builtin (implementation, docs, tests).
 pub fn source_paths(record: &BuiltinRecord, config: &AppConfig) -> Result<Vec<PathBuf>> {
-    let mut unique: HashSet<PathBuf> = HashSet::new();
-    let excludes = compile_patterns(&config.snippet_excludes);
-
-    add_candidate(
-        &mut unique,
-        PathBuf::from("crates/runmat-runtime/src/lib.rs"),
-        &excludes,
-    );
-
-    if let Some(candidate) = expected_builtin_module(record) {
-        add_candidate(&mut unique, candidate, &excludes);
-    }
-
-    // Legacy fallback for yet-to-be migrated modules.
-    let lowered = record.name.to_ascii_lowercase();
-    add_glob_results(
-        &mut unique,
-        format!("crates/runmat-runtime/src/**/*{lowered}*.rs"),
-        &excludes,
-    );
-
-    add_candidate(
-        &mut unique,
-        PathBuf::from("crates/runmat-runtime/src/mathematics.rs"),
-        &excludes,
-    );
-    add_candidate(
-        &mut unique,
-        PathBuf::from("crates/runmat-runtime/src/arrays.rs"),
-        &excludes,
-    );
-    add_candidate(
-        &mut unique,
-        PathBuf::from("crates/runmat-runtime/src/elementwise.rs"),
-        &excludes,
-    );
-    add_candidate(
-        &mut unique,
-        PathBuf::from("crates/runmat-runtime/src/accel.rs"),
-        &excludes,
-    );
+    let mut paths: BTreeSet<PathBuf> = REFERENCE_FILE_PATHS
+        .iter()
+        .map(|p| PathBuf::from(p))
+        .collect();
 
     if let Some(plan) = config.generation_plan_path() {
-        add_candidate(&mut unique, plan.to_path_buf(), &excludes);
+        paths.insert(plan.to_path_buf());
     }
     if let Some(doc) = config.fusion_design_doc() {
-        add_candidate(&mut unique, doc.to_path_buf(), &excludes);
+        paths.insert(doc.to_path_buf());
     }
 
-    for pattern in &config.snippet_includes {
-        add_glob_results(&mut unique, pattern.clone(), &excludes);
+    if let Some(candidate) = expected_builtin_module(record) {
+        paths.insert(candidate);
     }
 
-    let mut paths: Vec<PathBuf> = unique.into_iter().collect();
-    paths.sort();
-    Ok(paths)
-}
-
-fn add_candidate(set: &mut HashSet<PathBuf>, path: PathBuf, excludes: &[Pattern]) {
-    if should_exclude(&path, excludes) {
-        return;
-    }
-    if path.exists() {
-        set.insert(path);
-    } else {
-        debug!("snippet candidate {} missing; skipping", path.display());
-    }
-}
-
-fn add_glob_results(set: &mut HashSet<PathBuf>, pattern: String, excludes: &[Pattern]) {
-    match glob(&pattern) {
-        Ok(entries) => {
-            for entry in entries.flatten() {
-                if entry.is_file() && !should_exclude(&entry, excludes) {
-                    set.insert(entry);
-                }
-            }
-        }
-        Err(err) => debug!("invalid snippet glob '{}': {}", pattern, err),
-    }
-}
-
-fn compile_patterns(patterns: &[String]) -> Vec<Pattern> {
-    patterns
-        .iter()
-        .filter_map(|raw| match Pattern::new(raw) {
-            Ok(pattern) => Some(pattern),
-            Err(err) => {
-                debug!("invalid snippet exclude pattern '{}': {}", raw, err);
-                None
-            }
-        })
-        .collect()
-}
-
-fn should_exclude(path: &Path, patterns: &[Pattern]) -> bool {
-    patterns.iter().any(|pat| pat.matches_path(path))
+    Ok(paths.into_iter().collect())
 }
 
 fn expected_builtin_module(record: &BuiltinRecord) -> Option<PathBuf> {

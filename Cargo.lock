@@ -5491,6 +5491,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
+ "codex-apply-patch",
  "codex-core",
  "codex-protocol",
  "core_test_support",

@@ -1,5 +1,5 @@
 use crate::app::AppContext;
-use crate::cli::args::{Command, QueueAction};
+use crate::cli::args::{BuiltinAction, Command, QueueAction};
 use crate::cli::CliArgs;
 use anyhow::Result;
 
@@ -9,12 +9,23 @@ pub fn handle_command(ctx: &mut AppContext, args: &CliArgs) -> Result<()> {
         None | Some(Command::Browse) => ctx.launch_tui(),
         Some(Command::Manifest) => ctx.print_manifest(),
         Some(Command::Docs { out_dir }) => ctx.emit_docs(out_dir.as_deref()),
-        Some(Command::Builtin {
-            name,
-            model,
-            codex,
-            diff,
-        }) => ctx.run_builtin(name, model.clone(), *codex, *diff),
+        Some(Command::Builtin { action }) => match action {
+            BuiltinAction::Generate {
+                name,
+                category,
+                model,
+                codex,
+                diff,
+                show_doc,
+            } => ctx.run_builtin(
+                name,
+                category.as_deref(),
+                model.clone(),
+                *codex,
+                *diff,
+                *show_doc,
+            ),
+        },
         Some(Command::Queue { action }) => match action {
             QueueAction::Add {
                 builtin,

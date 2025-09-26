@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use indicatif::ProgressBar;
+use std::time::Duration;
 
 use crate::app::config::AppConfig;
 use crate::cli::CliArgs;
@@ -55,12 +57,14 @@ impl AppContext {
     pub fn run_builtin(
         &mut self,
         name: &str,
+        category: Option<&str>,
         model: Option<String>,
         use_codex: bool,
         show_diff: bool,
+        show_doc: bool,
     ) -> Result<()> {
         let resolved_model = model.clone().or_else(|| self.config.default_model.clone());
-        let ctx = crate::context::gather::build_authoring_context(name, &self.config)?;
+        let ctx = crate::context::gather::build_authoring_context(name, category, &self.config)?;
         let codex_available = crate::codex::client::is_available();
         println!(
             "Preparing builtin '{}' (model: {})",
@@ -76,8 +80,14 @@ impl AppContext {
             }
         );
         println!("\nPrompt:\n{}", ctx.prompt);
-        if let Some(doc) = &ctx.doc_markdown {
-            println!("\nDocumentation (excerpt):\n{}", truncate(doc, 600));
+        if show_doc {
+            if let Some(doc) = &ctx.doc_markdown {
+                println!("\nDocumentation (DOC_MD):\n{}", doc);
+            }
+        } else if ctx.doc_markdown.is_some() {
+            println!(
+                "\n[runmatfunc] Documentation excerpt hidden (rerun with --show-doc to display)."
+            );
         }
         println!("\nRelevant sources:");
         for path in &ctx.source_paths {
@@ -96,6 +106,14 @@ impl AppContext {
                 }
             }
         }
+        let mut spinner = None;
+        if use_codex && codex_available {
+            let pb = ProgressBar::new_spinner();
+            pb.set_message("Contacting Codex…");
+            pb.enable_steady_tick(Duration::from_millis(120));
+            spinner = Some(pb);
+        }
+
         if use_codex && !codex_available {
             println!(
                 "\n[runmatfunc] Codex requested but not available; rerun with --features embedded-codex"
@@ -104,17 +122,29 @@ impl AppContext {
         if use_codex && codex_available {
             match crate::codex::session::run_authoring(&ctx, resolved_model.clone()) {
                 Ok(Some(response)) => {
+                    if let Some(pb) = spinner.take() {
+                        pb.finish_with_message("[runmatfunc] Codex response received");
+                    }
                     println!("\n[runmatfunc] Codex response:\n{}", response.summary);
                 }
                 Ok(None) => {
+                    if let Some(pb) = spinner.take() {
+                        pb.finish_with_message("[runmatfunc] Codex feature disabled (no response)");
+                    }
                     println!("\n[runmatfunc] Codex integration not enabled (requires embedded-codex feature).");
                 }
                 Err(err) => {
+                    if let Some(pb) = spinner.take() {
+                        pb.finish_with_message("[runmatfunc] Codex error");
+                    }
                     println!("\n[runmatfunc] Codex error: {err}");
                 }
             }
         } else if !use_codex {
             println!("\n[runmatfunc] Codex integration skipped (pass --codex to enable).");
+        }
+        if let Some(pb) = spinner.take() {
+            pb.finish_and_clear();
         }
         match workspace_tests::run_builtin_tests(&ctx, &self.config) {
             Ok(outcome) => {
@@ -298,14 +328,6 @@ impl AppContext {
             job_queue::queue_path(&self.config).display()
         );
         Ok(())
-    }
-}
-
-fn truncate(input: &str, max: usize) -> String {
-    if input.len() <= max {
-        input.to_string()
-    } else {
-        format!("{}…", &input[..max])
     }
 }
 
