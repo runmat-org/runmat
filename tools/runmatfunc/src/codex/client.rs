@@ -1,17 +1,20 @@
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
 #[cfg(feature = "embedded-codex")]
-use std::{ffi::OsString, fs, io::ErrorKind, sync::Arc};
+use std::{env, ffi::OsString, fs, io::ErrorKind, sync::Arc};
 
 use anyhow::Result;
 #[cfg(feature = "embedded-codex")]
-use anyhow::{bail, Context};
+use anyhow::{anyhow, bail, Context};
 
 #[cfg(feature = "embedded-codex")]
 use codex_core::{
     config::{Config, ConfigOverrides},
     protocol::{
-        AskForApproval, EventMsg, InputItem, Op, ReviewDecision, SandboxPolicy, Submission,
+        AskForApproval, EventMsg, FileChange, InputItem, Op, PatchApplyBeginEvent, ReviewDecision,
+        SandboxPolicy, Submission,
     },
     AuthManager, CodexAuth, ConversationManager,
 };
@@ -124,7 +127,10 @@ async fn drive_turn(
     conversation.submit_with_id(submission).await?;
 
     let mut combined = String::new();
-    let mut last_agent_message = None;
+    let mut last_agent_message: Option<String> = None;
+    let mut turn_diffs: Vec<String> = Vec::new();
+    let mut manual_patch_results: HashMap<String, ManualPatchOutcome> = HashMap::new();
+    let mut exec_commands: HashMap<String, ExecCommandContext> = HashMap::new();
 
     loop {
         let event = conversation.next_event().await?;
@@ -134,10 +140,7 @@ async fn drive_turn(
                 break;
             }
             EventMsg::AgentMessage(msg) => {
-                if !combined.is_empty() {
-                    combined.push('\n');
-                }
-                combined.push_str(&msg.message);
+                append_with_gap(&mut combined, &msg.message);
             }
             EventMsg::AgentMessageDelta(delta) => {
                 combined.push_str(&delta.delta);
@@ -148,26 +151,120 @@ async fn drive_turn(
             EventMsg::ExecApprovalRequest(_) => {
                 auto_exec_approval(conversation, &event.id).await?;
             }
+            EventMsg::PatchApplyBegin(begin) => {
+                if !manual_patch_results.contains_key(&begin.call_id) {
+                    let outcome = apply_patch_locally(&begin, &context.config.cwd)
+                        .with_context(|| "failed to apply patch locally")?;
+                    if let Some(ref stdout) = outcome.stdout {
+                        if !stdout.trim().is_empty() {
+                            append_with_gap(
+                                &mut combined,
+                                &format!("apply_patch stdout:\n{}", stdout.trim_end()),
+                            );
+                        }
+                    }
+                    if let Some(ref stderr) = outcome.stderr {
+                        if !stderr.trim().is_empty() {
+                            append_with_gap(
+                                &mut combined,
+                                &format!("apply_patch stderr:\n{}", stderr.trim_end()),
+                            );
+                        }
+                    }
+                    manual_patch_results.insert(begin.call_id.clone(), outcome);
+                }
+            }
             EventMsg::PatchApplyEnd(end) => {
-                if !end.success {
-                    return Err(anyhow::anyhow!(end.stderr.trim().to_string()));
+                if let Some(outcome) = manual_patch_results.remove(&end.call_id) {
+                    if !outcome.success {
+                        let mut message = outcome.stderr.clone().unwrap_or_default();
+                        if message.trim().is_empty() {
+                            message = end.stderr.clone();
+                        }
+                        let message = message.trim();
+                        if message.is_empty() {
+                            return Err(anyhow!("apply_patch failed"));
+                        } else {
+                            return Err(anyhow!(message.to_string()));
+                        }
+                    }
+                } else if !end.success {
+                    let stderr = end.stderr.trim();
+                    let err_msg = if stderr.is_empty() {
+                        "apply_patch failed".to_string()
+                    } else {
+                        stderr.to_string()
+                    };
+                    return Err(anyhow!(err_msg));
+                }
+            }
+            EventMsg::ExecCommandBegin(begin) => {
+                exec_commands.insert(
+                    begin.call_id.clone(),
+                    ExecCommandContext {
+                        command: begin.command,
+                        aggregated_output: String::new(),
+                    },
+                );
+            }
+            EventMsg::ExecCommandOutputDelta(delta) => {
+                if let Some(ctx) = exec_commands.get_mut(&delta.call_id) {
+                    if let Ok(chunk) = String::from_utf8(delta.chunk) {
+                        ctx.aggregated_output.push_str(&chunk);
+                    }
+                }
+            }
+            EventMsg::ExecCommandEnd(end) => {
+                if let Some(ctx) = exec_commands.remove(&end.call_id) {
+                    let output = if end.aggregated_output.is_empty() {
+                        ctx.aggregated_output
+                    } else {
+                        end.aggregated_output.clone()
+                    };
+                    let command = ctx.command.join(" ");
+                    let exit_line = format!("exec `{}` exited {}", command, end.exit_code);
+                    append_with_gap(&mut combined, &exit_line);
+                    if !output.trim().is_empty() {
+                        append_with_gap(
+                            &mut combined,
+                            &format!("exec output:\n{}", output.trim_end()),
+                        );
+                    }
+                    if !end.stderr.trim().is_empty() {
+                        append_with_gap(
+                            &mut combined,
+                            &format!("exec stderr:\n{}", end.stderr.trim_end()),
+                        );
+                    }
+                    if end.exit_code != 0 {
+                        return Err(anyhow!(format!(
+                            "command `{}` failed with exit code {}",
+                            command, end.exit_code
+                        )));
+                    }
                 }
             }
             EventMsg::TurnDiff(diff) => {
                 if !diff.unified_diff.trim().is_empty() {
-                    combined.push_str("\n\n[diff]\n");
-                    combined.push_str(&diff.unified_diff);
+                    turn_diffs.push(diff.unified_diff);
                 }
             }
             EventMsg::Error(err) => {
-                return Err(anyhow::anyhow!(err.message));
+                return Err(anyhow!(err.message));
             }
             EventMsg::StreamError(err) => {
-                return Err(anyhow::anyhow!(err.message));
+                return Err(anyhow!(err.message));
             }
             EventMsg::ShutdownComplete => break,
             _ => {}
         }
+    }
+
+    if !turn_diffs.is_empty() {
+        append_with_gap(
+            &mut combined,
+            &format!("turn diff:\n{}", turn_diffs.join("\n")),
+        );
     }
 
     let summary = last_agent_message
@@ -214,6 +311,185 @@ async fn auto_exec_approval(
     };
     conversation.submit_with_id(submission).await?;
     Ok(())
+}
+
+#[cfg(feature = "embedded-codex")]
+struct ManualPatchOutcome {
+    success: bool,
+    stdout: Option<String>,
+    stderr: Option<String>,
+}
+
+#[cfg(feature = "embedded-codex")]
+struct ExecCommandContext {
+    command: Vec<String>,
+    aggregated_output: String,
+}
+
+#[cfg(feature = "embedded-codex")]
+fn apply_patch_locally(begin: &PatchApplyBeginEvent, cwd: &Path) -> Result<ManualPatchOutcome> {
+    if begin.changes.is_empty() {
+        return Ok(ManualPatchOutcome {
+            success: true,
+            stdout: Some("apply_patch: no changes".to_string()),
+            stderr: None,
+        });
+    }
+
+    let patch = build_patch_from_changes(&begin.changes, cwd)?;
+    let mut stdout_buf = Vec::new();
+    let mut stderr_buf = Vec::new();
+    let guard = WorkingDirGuard::new(cwd)?;
+    let result = codex_apply_patch::apply_patch(&patch, &mut stdout_buf, &mut stderr_buf);
+    drop(guard);
+
+    let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+
+    match result {
+        Ok(()) => Ok(ManualPatchOutcome {
+            success: true,
+            stdout: if stdout.trim().is_empty() {
+                None
+            } else {
+                Some(stdout)
+            },
+            stderr: if stderr.trim().is_empty() {
+                None
+            } else {
+                Some(stderr)
+            },
+        }),
+        Err(err) => {
+            let mut message = err.to_string();
+            if !stderr.trim().is_empty() {
+                if !message.is_empty() {
+                    message.push_str("\n");
+                }
+                message.push_str(stderr.trim());
+            }
+
+            Ok(ManualPatchOutcome {
+                success: false,
+                stdout: if stdout.trim().is_empty() {
+                    None
+                } else {
+                    Some(stdout)
+                },
+                stderr: Some(message),
+            })
+        }
+    }
+}
+
+#[cfg(feature = "embedded-codex")]
+fn build_patch_from_changes(changes: &HashMap<PathBuf, FileChange>, cwd: &Path) -> Result<String> {
+    let mut ordered: BTreeMap<PathBuf, &FileChange> = BTreeMap::new();
+    for (path, change) in changes {
+        ordered.insert(path.clone(), change);
+    }
+
+    let mut patch = String::from("*** Begin Patch\n");
+    for (index, (path, change)) in ordered.into_iter().enumerate() {
+        if index > 0 {
+            if !patch.ends_with('\n') {
+                patch.push('\n');
+            }
+        }
+        let rel = match path.strip_prefix(cwd) {
+            Ok(rel) => rel,
+            Err(_) => path.as_path(),
+        };
+        let rel_display = rel.to_string_lossy().replace('\\', "/");
+        match change {
+            FileChange::Add { content } => {
+                writeln!(patch, "*** Add File: {}", rel_display)?;
+                for line in content.split_inclusive('\n') {
+                    if let Some(stripped) = line.strip_suffix('\n') {
+                        writeln!(patch, "+{}", stripped)?;
+                    } else {
+                        writeln!(patch, "+{}", line)?;
+                    }
+                }
+            }
+            FileChange::Delete { .. } => {
+                writeln!(patch, "*** Delete File: {}", rel_display)?;
+            }
+            FileChange::Update {
+                unified_diff,
+                move_path,
+            } => {
+                writeln!(patch, "*** Update File: {}", rel_display)?;
+                if let Some(move_path) = move_path {
+                    let rel_move = match move_path.strip_prefix(cwd) {
+                        Ok(rel) => rel,
+                        Err(_) => move_path.as_path(),
+                    };
+                    writeln!(
+                        patch,
+                        "*** Move to: {}",
+                        rel_move.to_string_lossy().replace('\\', "/")
+                    )?;
+                }
+                patch.push_str(unified_diff);
+                if !unified_diff.ends_with('\n') {
+                    patch.push('\n');
+                }
+            }
+        }
+    }
+    if !patch.ends_with('\n') {
+        patch.push('\n');
+    }
+    patch.push_str("*** End Patch\n");
+    Ok(patch)
+}
+
+#[cfg(feature = "embedded-codex")]
+struct WorkingDirGuard {
+    original: PathBuf,
+    changed: bool,
+}
+
+#[cfg(feature = "embedded-codex")]
+impl WorkingDirGuard {
+    fn new(target: &Path) -> Result<Self> {
+        let original = env::current_dir()?;
+        if original != target {
+            env::set_current_dir(target)?;
+            Ok(Self {
+                original,
+                changed: true,
+            })
+        } else {
+            Ok(Self {
+                original,
+                changed: false,
+            })
+        }
+    }
+}
+
+#[cfg(feature = "embedded-codex")]
+impl Drop for WorkingDirGuard {
+    fn drop(&mut self) {
+        if self.changed {
+            if let Err(err) = env::set_current_dir(&self.original) {
+                eprintln!("warning: failed to restore current dir: {err}");
+            }
+        }
+    }
+}
+
+#[cfg(feature = "embedded-codex")]
+fn append_with_gap(buffer: &mut String, text: &str) {
+    if text.trim().is_empty() {
+        return;
+    }
+    if !buffer.is_empty() {
+        buffer.push('\n');
+    }
+    buffer.push_str(text);
 }
 
 #[cfg(feature = "embedded-codex")]
@@ -382,9 +658,44 @@ mod tests {
 
 #[cfg(all(test, feature = "embedded-codex"))]
 mod embedded_tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    use super::{default_client, CodexRequest, EnvVarGuard};
+    use tempfile::TempDir;
+
     #[test]
     fn embedded_reports_available() {
-        let _fixture_flag = super::EnvVarGuard::set("RUNMATFUNC_USE_CODEX_FIXTURE", "1");
+        let _fixture_flag = EnvVarGuard::set("RUNMATFUNC_USE_CODEX_FIXTURE", "1");
+        let temp_home = TempDir::new().expect("temp dir");
+        let _home_guard = EnvVarGuard::set("CODEX_HOME", temp_home.path());
         assert!(super::is_available());
+    }
+
+    #[test]
+    fn fixture_applies_patch() -> anyhow::Result<()> {
+        let _fixture_flag = EnvVarGuard::set("RUNMATFUNC_USE_CODEX_FIXTURE", "1");
+        let temp_home = TempDir::new()?;
+        let _home_guard = EnvVarGuard::set("CODEX_HOME", temp_home.path());
+
+        let fixture_path = PathBuf::from("tools/runmatfunc/fixture.txt");
+        if fixture_path.exists() {
+            fs::remove_file(&fixture_path)?;
+        }
+
+        let client = default_client()?;
+        let request = CodexRequest {
+            model: None,
+            prompt: "apply fixture patch".to_string(),
+            doc_markdown: None,
+            sources: vec![],
+        };
+        let response = client.run(&request)?;
+        assert!(fixture_path.exists());
+        let contents = fs::read_to_string(&fixture_path)?;
+        assert_eq!(contents, "fixture contents\n");
+        fs::remove_file(fixture_path)?;
+        assert!(response.summary.contains("Applied"));
+        Ok(())
     }
 }
