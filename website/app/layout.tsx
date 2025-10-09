@@ -40,20 +40,11 @@ export const metadata: Metadata = {
     siteName: 'RunMat',
     title: 'RunMat - High-Performance MATLAB/Octave Runtime',
     description: 'Drop-in replacement for MATLAB and GNU Octave with the same syntax but dramatically faster performance. Jupyter kernel, BLAS/LAPACK, JIT compilation, and GPU-accelerated plotting.',
-    images: [
-      {
-        url: '/og-image.png',
-        width: 1200,
-        height: 630,
-        alt: 'RunMat - High-Performance MATLAB/Octave Runtime',
-      }
-    ]
   },
   twitter: {
     card: 'summary_large_image',
     title: 'RunMat - High-Performance MATLAB/Octave Runtime',
     description: 'Drop-in replacement for MATLAB and GNU Octave with the same syntax but dramatically faster performance. Jupyter kernel, BLAS/LAPACK, and JIT compilation.',
-    images: ['/og-image.png'],
   },
   robots: {
     index: true,

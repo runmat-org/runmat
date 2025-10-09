@@ -8,7 +8,7 @@ slug: "rust-llm-training-distribution"
 tags: ["Rust", "LLM", "MATLAB", "RunMat", "Programming Languages"]
 keywords: "Rust LLM code generation, training distribution, programming languages, RunMat, scientific computing"
 excerpt: "Training data quality shapes LLM outputs. Rust’s tight distribution and strong compiler feedback make it uniquely suited for reliable model-assisted coding."
-image: "/website/public/rust-blog-image.png"
+image: "https://runmat.org/rust-blog-image.png"
 imageAlt: "Why Rust for LLM code gen"
 ogType: "article"
 ogTitle: "Why Rust Improves LLM-Written Code"
