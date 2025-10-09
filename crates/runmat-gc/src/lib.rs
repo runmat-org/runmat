@@ -123,7 +123,7 @@ impl HighPerformanceGC {
         // - Utilization threshold
         // - Aggressive mode: periodic minor GC by allocation count to satisfy stress configs
         if usage > cfg.minor_gc_threshold
-            || (cfg.minor_gc_threshold <= 0.35 && alloc_count > 0 && alloc_count % 32 == 0)
+            || (cfg.minor_gc_threshold <= 0.35 && alloc_count > 0 && alloc_count.is_multiple_of(32))
         {
             let _ = self.collect_minor();
         }
