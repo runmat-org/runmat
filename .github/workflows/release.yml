@@ -316,7 +316,7 @@ jobs:
           ref: ${{ github.ref_name }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.90.0
         with:
           components: clippy,rustfmt
 

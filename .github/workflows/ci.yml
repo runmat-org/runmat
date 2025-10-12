@@ -43,7 +43,7 @@ jobs:
 
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.90.0
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
