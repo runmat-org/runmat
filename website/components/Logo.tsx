@@ -6,13 +6,13 @@ type LogoProps = {
 };
 
 export default function Logo({ height = 20, className }: LogoProps) {
-  const id = React.useId();
-  const g0 = `${id}-g0`;
-  const g1 = `${id}-g1`;
-  const g2 = `${id}-g2`;
-  const g3 = `${id}-g3`;
-  const g4 = `${id}-g4`;
-  const g5 = `${id}-g5`;
+  // Use fixed IDs to avoid React hooks (unsupported in next/og) and keep OG rendering safe
+  const g0 = `rmog-g0`;
+  const g1 = `rmog-g1`;
+  const g2 = `rmog-g2`;
+  const g3 = `rmog-g3`;
+  const g4 = `rmog-g4`;
+  const g5 = `rmog-g5`;
 
   return (
     <svg
