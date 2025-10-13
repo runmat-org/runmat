@@ -315,6 +315,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
+      - name: Install BLAS/LAPACK/ZMQ dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.90.0
         with:
@@ -372,7 +378,8 @@ jobs:
             --force '*' \
             --no-git-commit \
             --exact \
-            --yes
+            --yes \
+            --update-dependents
 
       - name: Preflight crates publish (dry-run)
         shell: bash
@@ -381,7 +388,8 @@ jobs:
           GIT_SSL_CAINFO: /etc/ssl/certs/ca-certificates.crt
         run: |
           set -euo pipefail
-          DRY_RUN_OUTPUT="$(cargo workspaces publish --all --yes --allow-dirty --skip-published --dry-run --token "$CARGO_REGISTRY_TOKEN" 2>&1 || true)"
+          # Let dry-run fail loudly if compilation or verification fails
+          DRY_RUN_OUTPUT="$(cargo workspaces publish --all --yes --allow-dirty --skip-published --dry-run --token "$CARGO_REGISTRY_TOKEN" 2>&1)"
           echo "$DRY_RUN_OUTPUT"
           if ! echo "$DRY_RUN_OUTPUT" | grep -Eqi 'publish(ing)?[[:space:]]+[a-z0-9_-]'; then
             echo "No crates selected for publish (dry run). Failing to avoid false green release."
