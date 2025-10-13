@@ -8,12 +8,20 @@ export const contentType = 'image/png';
 export const runtime = 'nodejs';
 export const dynamic = 'force-static';
 
-function getFrontmatter(slug: string): { title?: string; description?: string; image?: string } | null {
+type BlogFrontmatter = { title?: string; description?: string; image?: string };
+
+function getFrontmatter(slug: string): BlogFrontmatter | null {
   try {
     const filePath = join(process.cwd(), 'content/blog', `${slug}.md`);
     const fileContent = readFileSync(filePath, 'utf-8');
     const { data } = matter(fileContent);
-    return data as any;
+    // gray-matter returns `data` as an arbitrary object; we narrow the subset we use
+    const fm = data as Partial<BlogFrontmatter>;
+    return {
+      title: typeof fm.title === 'string' ? fm.title : undefined,
+      description: typeof fm.description === 'string' ? fm.description : undefined,
+      image: typeof fm.image === 'string' ? fm.image : undefined,
+    };
   } catch {
     return null;
   }
