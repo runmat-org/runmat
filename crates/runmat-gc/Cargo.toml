@@ -7,11 +7,11 @@ authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
 
 [dependencies]
-runmat-gc-api = { path = "../runmat-gc-api" }
+runmat-gc-api = { workspace = true }
 runmat-builtins = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
-runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+runmat-accelerate-api = { workspace = true }
 parking_lot = "0.12"
 num-traits = "0.2"
 once_cell = "1.19"
