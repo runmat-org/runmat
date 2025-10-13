@@ -21,7 +21,7 @@ thiserror = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-hir = { workspace = true }
-runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+runmat-accelerate-api = { workspace = true }
 once_cell = "1"
 
 # Optional backend deps

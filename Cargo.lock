@@ -4196,7 +4196,7 @@ version = "0.0.1"
 
 [[package]]
 name = "runmat-hir"
-version = "1.0.0"
+version = "0.0.3"
 dependencies = [
  "runmat-builtins",
  "runmat-lexer",

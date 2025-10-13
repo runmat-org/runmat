@@ -378,8 +378,7 @@ jobs:
             --force '*' \
             --no-git-commit \
             --exact \
-            --yes \
-            --update-dependents
+            --yes
 
       - name: Preflight crates publish (dry-run)
         shell: bash
