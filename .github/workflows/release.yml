@@ -404,11 +404,14 @@ jobs:
           set -euxo pipefail
           # If we're on a tag (detached HEAD), create a temporary local branch for tooling that requires one
           if ! git symbolic-ref -q HEAD >/dev/null; then
-            git checkout -B "release-tmp-${VERSION}" "$GITHUB_SHA"
+            TMP_BRANCH="release-tmp-${VERSION}"
+            git checkout -B "$TMP_BRANCH" "$GITHUB_SHA"
           fi
           # Ensure git identity exists for any local tagging that tools may perform
           git config user.email "${GITHUB_ACTOR:-github-actions}@users.noreply.github.com" || true
           git config user.name  "${GITHUB_ACTOR:-github-actions}" || true
+          # Determine current branch name (tmp branch above or existing)
+          CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           cargo workspaces publish --all --yes --allow-dirty --skip-published \
-            --allow-branch ".*" \
+            --allow-branch "$CUR_BRANCH" \
             --token "$CARGO_REGISTRY_TOKEN"
