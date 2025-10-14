@@ -410,4 +410,5 @@ jobs:
           git config user.email "${GITHUB_ACTOR:-github-actions}@users.noreply.github.com" || true
           git config user.name  "${GITHUB_ACTOR:-github-actions}" || true
           cargo workspaces publish --all --yes --allow-dirty --skip-published \
+            --allow-branch ".*" \
             --token "$CARGO_REGISTRY_TOKEN"
