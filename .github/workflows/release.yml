@@ -23,7 +23,6 @@ jobs:
       matrix:
         platform:
           
-
           - release_for: windows-x86_64
             os: windows-latest-l
             target: x86_64-pc-windows-msvc
@@ -51,8 +50,6 @@ jobs:
             bin: runmat
             name: runmat-linux-x86_64.tar.gz
             command: build
-
-          
 
     runs-on: ${{ matrix.platform.os }}
     steps:
@@ -341,7 +338,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          for d in crates/*; do
+          for d in crates/* runmat; do
             if [ -d "$d" ]; then
               # Copy root LICENSE to each crate as LICENSE (crates.io requires in-package)
               if [ -f LICENSE ] || [ -f LICENSE.md ]; then
@@ -356,7 +353,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          for toml in crates/*/Cargo.toml; do
+          for toml in crates/*/Cargo.toml runmat/Cargo.toml; do
             # If license-file points outside the crate, retarget it to in-crate LICENSE
             if grep -q '^license-file\s*=\s*"\..*/LICENSE' "$toml"; then
               sed -i.bak 's#^license-file\s*=\s*"\..*/LICENSE.*#license-file = "LICENSE"#' "$toml"
@@ -427,7 +424,7 @@ jobs:
         run: |
           set -euo pipefail
           # Let dry-run fail loudly if compilation or verification fails
-          DRY_RUN_OUTPUT="$(cargo workspaces publish --all --yes --allow-dirty --skip-published --dry-run --no-verify --token "$CARGO_REGISTRY_TOKEN" 2>&1)"
+          DRY_RUN_OUTPUT="$(cargo workspaces publish --all --yes --allow-dirty --skip-published --dry-run --from-git --no-verify --token "$CARGO_REGISTRY_TOKEN" 2>&1)"
           echo "$DRY_RUN_OUTPUT"
           if ! echo "$DRY_RUN_OUTPUT" | grep -Eqi 'publish(ing)?[[:space:]]+[a-z0-9_-]'; then
             echo "No crates selected for publish (dry run). Failing to avoid false green release."
@@ -444,7 +441,12 @@ jobs:
           # Ensure git identity exists for any local tagging that tools may perform
           git config user.email "${GITHUB_ACTOR:-github-actions}@users.noreply.github.com" || true
           git config user.name  "${GITHUB_ACTOR:-github-actions}" || true
+          # Silence git CA warning in some envs
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            git config --global http.cainfo /etc/ssl/certs/ca-certificates.crt || true
+            git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt || true
+          fi
           # Publish from local main with branch guard
-          cargo workspaces publish --all --yes --allow-dirty --skip-published \
+          cargo workspaces publish --all --yes --allow-dirty --skip-published --from-git --delay 15 \
             --allow-branch "$CARGO_PUBLISH_BRANCH" \
             --token "$CARGO_REGISTRY_TOKEN"
