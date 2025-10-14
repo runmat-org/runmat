@@ -447,6 +447,6 @@ jobs:
             git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt || true
           fi
           # Publish from local main with branch guard
-          cargo workspaces publish --all --yes --allow-dirty --skip-published --from-git --delay 15 \
+          cargo workspaces publish --all --yes --allow-dirty --skip-published --from-git \
             --allow-branch "$CARGO_PUBLISH_BRANCH" \
             --token "$CARGO_REGISTRY_TOKEN"
