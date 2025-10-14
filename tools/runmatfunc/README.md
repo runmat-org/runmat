@@ -74,6 +74,13 @@ runmatfunc queue run                # run queued jobs headlessly (writes transcr
 runmatfunc queue list               # inspect queued jobs and their target Codex models
 ```
 
+When the `embedded-codex` feature is active, Codex-driven sessions automatically execute
+`apply_patch` requests locally using the bundled helper. The helper is also registered in tests,
+so the fixture-powered regression suite exercises the same path your shell will use.
+
+The Codex CLI (`codex exec`) must be available on `PATH` (or pointed to via
+`RUNMATFUNC_CODEX_PATH`) when running with `--codex`.
+
 > **Note:** Codex execution currently uses a stub client unless the
 > `embedded-codex` feature is enabled and the [codex-rs](https://github.com/openai/codex) workspace
 > is available. With that feature active (`cargo run -p runmatfunc --features embedded-codex -- builtin sin --codex`),

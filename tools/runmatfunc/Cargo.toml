@@ -41,6 +41,7 @@ codex-apply-patch = { git = "https://github.com/openai/codex.git", package = "co
 assert_cmd = "2"
 predicates = "3"
 insta = { version = "1", features = ["yaml"] }
+ctor = "0.2"
 
 [features]
 default = ["tui"]

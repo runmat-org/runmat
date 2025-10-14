@@ -1665,6 +1665,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctor"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a2785755761f3ddc1492979ce1e48d2c00d09311c39e4466429188f3dd6501"
+dependencies = [
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3329,7 +3339,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0eb5160c60ba1e809707918ee329adb99d222888155835c6feedba19f6c3fd4"
 dependencies = [
- "ctor",
+ "ctor 0.1.26",
  "ghost",
  "inventory-impl",
 ]
@@ -5496,6 +5506,7 @@ dependencies = [
  "codex-protocol",
  "core_test_support",
  "crossterm",
+ "ctor 0.2.9",
  "directories-next",
  "futures",
  "glob",

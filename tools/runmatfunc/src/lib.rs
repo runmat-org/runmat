@@ -21,3 +21,11 @@ fn touch_runtime() {
     let value = runmat_builtins::Value::Bool(false);
     let _ = runmat_runtime::is_gpu_value(&value);
 }
+
+#[cfg(all(test, feature = "embedded-codex"))]
+#[ctor::ctor]
+fn handle_apply_patch_invocation_for_tests() {
+    if let Some(code) = crate::codex::apply_patch::maybe_run_apply_patch_from_env() {
+        std::process::exit(code);
+    }
+}
