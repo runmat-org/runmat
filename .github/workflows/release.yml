@@ -388,16 +388,36 @@ jobs:
           # Set env for later steps
           echo "CARGO_PUBLISH_BRANCH=main" >> "$GITHUB_ENV"
 
-      - name: Bump workspace crate versions (idempotent)
+      - name: Verify crate versions match tag (no bump in CI)
         shell: bash
         run: |
-          set -euxo pipefail
-          # If Cargo.toml already set to RELEASE_VERSION, this is a no-op
-          cargo workspaces version custom "$RELEASE_VERSION" \
-            --force '*' \
-            --no-git-commit \
-            --exact \
-            --yes
+          set -euo pipefail
+          mismatches=()
+          check_file() {
+            local file="$1"
+            # Extract version within [package] table
+            local ver_line
+            ver_line=$(awk 'BEGIN{inpkg=0} 
+              /^\[package\]/{inpkg=1; next}
+              /^\[/{if(inpkg){exit}; inpkg=0}
+              { if(inpkg && $0 ~ /^version[[:space:]]*=/){ print; exit } }' "$file" || true)
+            if [ -z "${ver_line:-}" ]; then return; fi
+            local ver
+            ver=$(printf '%s' "$ver_line" | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+            if [ -n "${ver:-}" ] && [ "$ver" != "$RELEASE_VERSION" ]; then
+              mismatches+=("$file:$ver != $RELEASE_VERSION")
+            fi
+          }
+          for toml in runmat/Cargo.toml crates/*/Cargo.toml; do
+            [ -f "$toml" ] || continue
+            check_file "$toml"
+          done
+          if [ ${#mismatches[@]} -gt 0 ]; then
+            echo "Version mismatch between tag and Cargo.toml files:" >&2
+            printf ' - %s\n' "${mismatches[@]}" >&2
+            echo "Please merge a version bump PR on main before tagging." >&2
+            exit 1
+          fi
 
       - name: Preflight crates publish (dry-run)
         shell: bash
