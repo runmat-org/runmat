@@ -1,6 +1,6 @@
 [package]
 name = "runmat-lexer"
-version = "0.0.14"
+version = "0.0.15"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
