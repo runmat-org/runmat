@@ -402,16 +402,23 @@ jobs:
           GIT_SSL_CAINFO: /etc/ssl/certs/ca-certificates.crt
         run: |
           set -euxo pipefail
-          # If we're on a tag (detached HEAD), create a temporary local branch for tooling that requires one
-          if ! git symbolic-ref -q HEAD >/dev/null; then
-            TMP_BRANCH="release-tmp-${VERSION}"
-            git checkout -B "$TMP_BRANCH" "$GITHUB_SHA"
+          # Require releases to be cut from main: ensure the tag commit is on origin/main
+          git fetch origin +refs/heads/main:refs/remotes/origin/main
+          if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+            echo "origin/main not found" >&2
+            exit 1
           fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "Tag commit $GITHUB_SHA is not on origin/main. Aborting publish." >&2
+            exit 1
+          fi
+          # Create a local main branch at the tag commit to satisfy tools that require a named branch
+          git checkout -B main "$GITHUB_SHA"
           # Ensure git identity exists for any local tagging that tools may perform
           git config user.email "${GITHUB_ACTOR:-github-actions}@users.noreply.github.com" || true
           git config user.name  "${GITHUB_ACTOR:-github-actions}" || true
-          # Determine current branch name (tmp branch above or existing)
-          CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          # Publish from local main with branch guard
+          CARGO_PUBLISH_BRANCH=main
           cargo workspaces publish --all --yes --allow-dirty --skip-published \
-            --allow-branch "$CUR_BRANCH" \
+            --allow-branch "$CARGO_PUBLISH_BRANCH" \
             --token "$CARGO_REGISTRY_TOKEN"
