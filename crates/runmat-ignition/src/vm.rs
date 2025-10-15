@@ -7730,13 +7730,11 @@ fn try_execute_fusion_group(
             }
         }
     } else {
-        Ok(result) => Ok(result),
-        Err(err) => {
-            for value in consumed.into_iter().rev() {
-                stack.push(value);
-            }
-            Err(err.to_string())
+        // Unknown fusion kind; restore stack and report
+        for value in consumed.into_iter().rev() {
+            stack.push(value);
         }
+        Err("fusion: unsupported fusion kind".to_string())
     }
 }
 
