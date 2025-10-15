@@ -4,6 +4,9 @@ version = "0.0.15"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
+description = "Baseline interpreter for RunMat enabling instant startup and execution"
+homepage = "https://runmat.org"
+repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-builtins = { workspace = true }

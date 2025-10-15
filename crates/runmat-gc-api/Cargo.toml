@@ -2,6 +2,9 @@
 name = "runmat-gc-api"
 version = "0.0.15"
 edition = "2021"
+description = "Public API types for the RunMat garbage collector"
+homepage = "https://runmat.org"
+repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 

@@ -4,6 +4,9 @@ version = "0.0.15"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
+description = "Jupyter kernel implementation for RunMat using ZeroMQ and the Jupyter protocol"
+homepage = "https://runmat.org"
+repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 tokio = { workspace = true }
