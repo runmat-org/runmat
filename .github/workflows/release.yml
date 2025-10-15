@@ -446,7 +446,31 @@ jobs:
             git config --global http.cainfo /etc/ssl/certs/ca-certificates.crt || true
             git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt || true
           fi
-          # Publish from local main with branch guard
-          cargo workspaces publish --all --yes --allow-dirty --skip-published --from-git \
-            --allow-branch "$CARGO_PUBLISH_BRANCH" \
-            --token "$CARGO_REGISTRY_TOKEN"
+          # Publish from local main with branch guard, retrying on crates.io rate limits (HTTP 429)
+          MAX_RETRIES=4
+          ATTEMPT=1
+          while [ $ATTEMPT -le $MAX_RETRIES ]; do
+            set +e
+            OUTPUT=$(cargo workspaces publish --all --yes --allow-dirty --skip-published --from-git \
+              --allow-branch "$CARGO_PUBLISH_BRANCH" \
+              --token "$CARGO_REGISTRY_TOKEN" 2>&1)
+            STATUS=$?
+            set -e
+            echo "$OUTPUT"
+            if [ $STATUS -eq 0 ]; then
+              echo "Publish succeeded."
+              break
+            fi
+            if echo "$OUTPUT" | grep -qi 'Too Many Requests'; then
+              echo "Hit crates.io rate limit (HTTP 429). Sleeping 900 seconds before retry ($ATTEMPT/$MAX_RETRIES)..."
+              sleep 900
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+            echo "Publish failed with non-rate-limit error. Aborting."
+            exit $STATUS
+          done
+          if [ $ATTEMPT -gt $MAX_RETRIES ]; then
+            echo "Exceeded maximum retries due to crates.io rate limiting. Please retry later or contact help@crates.io."
+            exit 1
+          fi
