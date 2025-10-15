@@ -1,6 +1,6 @@
 [package]
 name = "runmat-repl"
-version = "0.0.15"
+version = "0.0.16"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
