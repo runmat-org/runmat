@@ -2,7 +2,7 @@ use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
 use crate::instr::Instr;
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::{execute_elementwise, execute_reduction, FusionExecutionRequest};
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
     activate_fusion_plan, deactivate_fusion_plan, fusion_residency, prepare_fusion_plan,
@@ -7676,7 +7676,60 @@ fn try_execute_fusion_group(
         .collect::<Result<_, _>>()?;
 
     let request = FusionExecutionRequest { plan, inputs };
-    match execute_elementwise(request) {
+    if plan.group.kind.is_elementwise() {
+        match execute_elementwise(request) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else if plan.group.kind.is_reduction() {
+        // Derive (reduce_len, num_slices) primarily from the first input's actual shape.
+        // Default MATLAB reduction is along dimension 1 (rows) producing 1 x ncols.
+        let (reduce_len, num_slices) = {
+            // The plan inputs vector aligns with consumed values by stack_pattern
+            // and variables/constants. We look at the first input value we gathered.
+            let first_input = request.inputs.get(0);
+            if let Some(val) = first_input {
+                match val {
+                    Value::GpuTensor(h) => {
+                        if h.shape.len() >= 2 {
+                            (h.shape[0].max(1), h.shape[1].max(1))
+                        } else if h.shape.len() == 1 {
+                            (h.shape[0].max(1), 1)
+                        } else {
+                            (1, 1)
+                        }
+                    }
+                    Value::Tensor(t) => {
+                        if t.shape.len() >= 2 {
+                            (t.shape[0].max(1), t.shape[1].max(1))
+                        } else if t.shape.len() == 1 {
+                            (t.shape[0].max(1), 1)
+                        } else {
+                            (1, 1)
+                        }
+                    }
+                    _ => (1, 1),
+                }
+            } else {
+                (1, 1)
+            }
+        };
+        let workgroup_size = 256u32;
+        match execute_reduction(request, reduce_len, num_slices, workgroup_size) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else {
         Ok(result) => Ok(result),
         Err(err) => {
             for value in consumed.into_iter().rev() {

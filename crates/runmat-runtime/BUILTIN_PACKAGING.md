@@ -101,6 +101,8 @@ pub struct BuiltinGpuSpec {
     pub provider_hooks: &'static [ProviderHook],
     pub constant_strategy: ConstantStrategy,
     pub residency: ResidencyPolicy,
+    // NaN handling mode for reductions; defaults to Include if omitted in existing builtins
+    pub nan_mode: ReductionNaN,
     pub notes: &'static str,
 }
 
@@ -152,6 +154,7 @@ use crate::builtins::common::test_support;
 use crate::builtins::{BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy,
     FusionError, FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook,
     ResidencyPolicy, ScalarType, ShapeRequirements};
+use crate::builtins::common::spec::ReductionNaN;
 
 pub const DOC_MD: &str = r#"---
   title: "sum"
@@ -279,6 +282,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     provider_hooks: &[ProviderHook::Reduction { name: "reduce_sum" }],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
+    nan_mode: ReductionNaN::Include,
     notes: "Provider should return a fresh GPU handle sized according to the reduction dimension.",
 };
 
@@ -311,18 +315,20 @@ register_builtin_fusion_spec!(FUSION_SPEC);
     doc_md = DOC_MD
 )]
 fn sum_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    if rest.is_empty() {
-        return sum_all(value);
+    match rest.as_slice() {
+        [] => sum_all(value, ReductionNaN::Include),
+        [dim] => sum_with_dim(value, dim, ReductionNaN::Include),
+        [dim, Value::Str(s)] if s.eq_ignore_ascii_case("omitnan") =>
+            sum_with_dim(value, dim, ReductionNaN::Omit),
+        [Value::Str(s)] if s.eq_ignore_ascii_case("omitnan") =>
+            sum_all(value, ReductionNaN::Omit),
+        _ => Err("sum: unsupported arguments".to_string()),
     }
-    if rest.len() == 1 {
-        return sum_with_dim(value, &rest[0]);
-    }
-    Err("sum: unsupported arguments".to_string())
 }
 
-fn sum_all(value: Value) -> Result<Value, String> {
+fn sum_all(value: Value, nan: ReductionNaN) -> Result<Value, String> {
     if let Value::GpuTensor(handle) = value {
-        return gpu_reduce_default(handle);
+        return gpu_reduce_default(handle, nan);
     }
     match value {
         Value::Tensor(t) => tensor_ops::sum_default(&t),
@@ -336,22 +342,22 @@ fn sum_all(value: Value) -> Result<Value, String> {
     }
 }
 
-fn sum_with_dim(value: Value, dim: &Value) -> Result<Value, String> {
+fn sum_with_dim(value: Value, dim: &Value, nan: ReductionNaN) -> Result<Value, String> {
     let dim_f = match dim {
         Value::Num(d) => *d,
         Value::Int(i) => i.to_f64(),
         _ => return Err("sum: dim must be numeric".to_string()),
     };
     if let Value::GpuTensor(handle) = value {
-        return gpu_reduce_dim(handle, dim_f);
+        return gpu_reduce_dim(handle, dim_f, nan);
     }
     let tensor = tensor_ops::to_tensor(value)?;
     tensor_ops::sum_dim(&tensor, dim_f)
 }
 
-fn gpu_reduce_default(handle: runmat_accelerate_api::GpuTensorHandle) -> Result<Value, String> {
+fn gpu_reduce_default(handle: runmat_accelerate_api::GpuTensorHandle, nan: ReductionNaN) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(out) = provider.reduce_sum_all(&handle) {
+        if let Ok(out) = provider.reduce_sum_all(&handle, nan) {
             return Ok(Value::GpuTensor(out));
         }
     }
@@ -359,17 +365,17 @@ fn gpu_reduce_default(handle: runmat_accelerate_api::GpuTensorHandle) -> Result<
     tensor_ops::sum_default(&gathered)
 }
 
-fn gpu_reduce_dim(handle: runmat_accelerate_api::GpuTensorHandle, dim: f64) -> Result<Value, String> {
+fn gpu_reduce_dim(handle: runmat_accelerate_api::GpuTensorHandle, dim: f64, nan: ReductionNaN) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let dim_usize = if dim < 1.0 { 1usize } else { dim as usize };
-        match provider.reduce_sum_dim(&handle, dim_usize) {
+        match provider.reduce_sum_dim(&handle, dim_usize, nan) {
             Ok(out) => return Ok(Value::GpuTensor(out)),
             Err(_) => {}
         }
     }
     let gathered = gpu_helpers::gather_tensor(&handle)?;
     let tensor = Value::Tensor(gathered);
-    sum_with_dim(tensor, &Value::Num(dim))
+    sum_with_dim(tensor, &Value::Num(dim), nan)
 }
 
 #[cfg(test)]

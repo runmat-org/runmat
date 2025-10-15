@@ -1408,6 +1408,133 @@ impl AccelProvider for WgpuProvider {
 
         Ok(self.register_existing_buffer(output_buffer, output_shape.to_vec(), len))
     }
+
+    fn fused_reduction(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        reduce_len: usize,
+        num_slices: usize,
+        workgroup_size: u32,
+    ) -> Result<GpuTensorHandle> {
+        if inputs.is_empty() {
+            return Err(anyhow!("fused_reduction: no inputs"));
+        }
+        if reduce_len == 0 {
+            return Err(anyhow!("fused_reduction: zero reduce_len"));
+        }
+        let out_elems: usize = output_shape.iter().product();
+        if out_elems != num_slices.max(1) {
+            return Err(anyhow!(
+                "fused_reduction: output_shape {:?} inconsistent with num_slices {}",
+                output_shape, num_slices
+            ));
+        }
+
+        // Create shader module
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("runmat-fused-reduction"),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(shader)),
+            });
+        let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("runmat-reduction-bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("runmat-reduction-pl"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("runmat-reduction-pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
+        // Buffers
+        let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
+        let out_len = num_slices.max(1);
+        let out_buffer = self.create_storage_buffer(out_len * self.element_size, "runmat-reduction-out");
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct Params { nrows: u32, ncols: u32, ld: u32, flags: u32 }
+        let nrows = reduce_len as u32;
+        let ncols = num_slices as u32;
+        let params = Params { nrows, ncols, ld: nrows, flags: 0 };
+        let params_bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&params as *const Params) as *const u8,
+                std::mem::size_of::<Params>(),
+            )
+        };
+        let params_buffer = Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("runmat-reduction-params"),
+            contents: params_bytes,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        }));
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("runmat-reduction-bg"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: input_buf.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: out_buffer.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: params_buffer.as_ref().as_entire_binding() },
+            ],
+        });
+
+        // Dispatch
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-reduction-encoder") });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("runmat-reduction-pass"), timestamp_writes: None });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(ncols.max(1), 1, 1);
+        }
+        self.submit(encoder);
+
+        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len))
+    }
 }
 
 pub fn register_wgpu_provider(opts: WgpuProviderOptions) -> Result<&'static WgpuProvider> {

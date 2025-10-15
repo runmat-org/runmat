@@ -188,6 +188,26 @@ pub trait AccelProvider: Send + Sync {
             "fused_elementwise not supported by provider"
         ))
     }
+
+    /// Generic fused reduction entrypoint.
+    ///
+    /// The shader is expected to implement a column-major reduction across `reduce_len` with
+    /// `num_slices` independent slices (e.g., columns). Providers should create a uniform buffer
+    /// compatible with the expected `Params/MParams` struct in the shader and dispatch
+    /// `num_slices` workgroups with `workgroup_size` threads, or an equivalent strategy.
+    fn fused_reduction(
+        &self,
+        _shader: &str,
+        _inputs: &[GpuTensorHandle],
+        _output_shape: &[usize],
+        _reduce_len: usize,
+        _num_slices: usize,
+        _workgroup_size: u32,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "fused_reduction not supported by provider"
+        ))
+    }
 }
 
 static mut GLOBAL_PROVIDER: Option<&'static dyn AccelProvider> = None;

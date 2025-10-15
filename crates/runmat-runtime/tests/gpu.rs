@@ -144,10 +144,12 @@ fn gpu_scalar_elementwise_and_sum_remain_on_device() {
         panic!("expected gpu sum result");
     }
 
-    // Gather and verify values: original + 2 then sum -> (3+4+5+6)=18
+    // Gather and verify values: default sum reduces along the first non-singleton dimension
+    // so we expect column sums after adding 2 to each element (columns: [3,4] and [5,6]).
     let gsum = runmat_runtime::call_builtin("gather", &[s]).unwrap();
     if let Value::Tensor(ts) = gsum {
-        assert_eq!(ts.data, vec![18.0]);
+        assert_eq!(ts.shape, vec![1, 2]);
+        assert_eq!(ts.data, vec![7.0, 11.0]);
     } else {
         panic!("expected tensor");
     }

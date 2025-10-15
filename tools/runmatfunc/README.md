@@ -65,7 +65,7 @@ Implemented pieces:
 runmatfunc --help                   # view CLI options
 runmatfunc manifest                 # print builtin metadata summary
 runmatfunc docs --out-dir docs/generated  # emit docs bundle
-runmatfunc builtin generate --name sin --category math/trigonometry --codex  # assemble authoring context for new builtin work
+runmatfunc builtin generate --name sin --category math/trigonometry --codex  # generate builtin skeleton (and assemble authoring context)
 runmatfunc builtin generate --name sin --category math/trigonometry --codex --show-doc  # include DOC_MD in CLI output when needed
 runmatfunc browse                   # interactive TUI (↑/↓ navigate, t run tests, d emit docs, q quit)
 runmatfunc builtin generate --name sin --category math/trigonometry --diff  # show git diff for builtin-related files alongside context
@@ -86,6 +86,22 @@ The Codex CLI (`codex exec`) must be available on `PATH` (or pointed to via
 > is available. With that feature active (`cargo run -p runmatfunc --features embedded-codex -- builtin sin --codex`),
 > the tool will link against `codex-core` directly. For example: `cargo run -p runmatfunc --features embedded-codex -- builtin generate --name sin --category math/trigonometry --codex`. The CLI and TUI surface Codex availability so
 > you always know whether authoring sessions will call the real client or the stub.
+
+### Builtin generator
+
+- The `builtin generate` command creates a skeleton at `crates/runmat-runtime/src/builtins/<cat>/<subcat>/<name>.rs`, wires the `mod.rs` chain, and includes:
+  - A DOC_MD stub with YAML frontmatter.
+  - A `#[runtime_builtin]` function stub returning a placeholder error.
+  - A minimal smoke test named `<name>_compiles_smoke` so filtered tests pass.
+- After generation, rebuild the workspace so the new builtin is registered in the inventory:
+
+```bash
+cargo build
+cargo test -p runmat-runtime -- <name>
+runmatfunc docs --out-dir website/content/generated
+```
+
+If Codex is installed and enabled, `--codex` will open a Codex session with the assembled prompt; otherwise the session is skipped.
 
 ## Configuration
 

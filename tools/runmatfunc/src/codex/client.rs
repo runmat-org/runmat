@@ -15,7 +15,7 @@ use {
     serde_json::Value,
     std::collections::HashSet,
     std::ffi::OsString,
-    std::io::Write,
+    std::io::{BufRead, Write},
     std::path::Path,
     std::process::{Command, Stdio},
     std::sync::Arc,
@@ -114,6 +114,14 @@ fn run_via_cli(
         .arg("--cd")
         .arg(context.config.cwd.as_os_str());
 
+    // Verbose header for visibility
+    println!(
+        "codex: exec starting (bin: {} | model: {} | cd: {})",
+        binary.display(),
+        model,
+        context.config.cwd.display()
+    );
+
     command
         .current_dir(&context.config.cwd)
         .stdin(Stdio::piped())
@@ -123,16 +131,238 @@ fn run_via_cli(
     let mut child = command.spawn().context("failed to spawn codex CLI")?;
 
     if let Some(mut stdin) = child.stdin.take() {
+        let bytes = prompt.as_bytes().len();
         stdin
             .write_all(prompt.as_bytes())
             .and_then(|_| stdin.write_all(b"\n"))
             .and_then(|_| stdin.flush())
             .context("failed to write prompt to codex CLI")?;
+        // Ensure EOF is observed promptly by the Codex CLI
+        println!("codex: wrote {} bytes to stdin; closing pipe", bytes);
+        drop(stdin);
     }
 
+    // Stream stdout JSON lines and stderr concurrently for live visibility
+    let mut aggregated = String::new();
+    let mut last_agent_message: Option<String> = None;
+    let mut seen_agent_items: HashSet<String> = HashSet::new();
+
+    let mut stdout_reader = std::io::BufReader::new(
+        child
+            .stdout
+            .take()
+            .context("codex CLI: failed to take stdout")?,
+    );
+    let mut stderr_reader = std::io::BufReader::new(
+        child
+            .stderr
+            .take()
+            .context("codex CLI: failed to take stderr")?,
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+
+    // stderr thread
+    let tx_err = tx.clone();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match stderr_reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let s = line.trim_end().to_string();
+                    if !s.is_empty() {
+                        let _ = tx_err.send(format!("[codex stderr] {s}"));
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // stdout thread (JSON events)
+    let tx_out = tx.clone();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match stdout_reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let s = line.trim_end().to_string();
+                    if !s.is_empty() {
+                        let _ = tx_out.send(s);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // Keep-alive and timeout mechanics
+    let start_time = std::time::Instant::now();
+    let mut last_activity = start_time;
+    let mut last_notice = start_time;
+    let keepalive_every = std::time::Duration::from_secs(10);
+    let timeout = std::env::var("RUNMATFUNC_CODEX_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(std::time::Duration::from_secs(180));
+
+    // Consume events as they arrive, printing a concise stream
+    while let Ok(line) = rx.recv_timeout(std::time::Duration::from_millis(200)) {
+        // Try JSON first
+        match serde_json::from_str::<Value>(&line) {
+            Ok(parsed) => match parsed.get("type").and_then(|v| v.as_str()) {
+                Some("thread.started") => {
+                    if let Some(tid) = parsed.get("thread_id").and_then(|v| v.as_str()) {
+                        println!("codex: thread started ({tid})");
+                    } else {
+                        println!("codex: thread started");
+                    }
+                    last_activity = std::time::Instant::now();
+                }
+                Some("turn.started") => {
+                    println!("codex: turn started");
+                    last_activity = std::time::Instant::now();
+                }
+                Some("item.completed") => {
+                    if let Some(item) = parsed.get("item") {
+                        if let Some(item_type) = item.get("item_type").and_then(|v| v.as_str()) {
+                            match item_type {
+                                "agent_message" => {
+                                    if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                                        let key = item
+                                            .get("id")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string())
+                                            .unwrap_or_else(|| text.to_string());
+                                        if seen_agent_items.insert(key) {
+                                            println!("codex: {}", text.trim_end());
+                                            append_with_gap(&mut aggregated, text);
+                                            last_agent_message = Some(text.to_string());
+                                        }
+                                        last_activity = std::time::Instant::now();
+                                    }
+                                }
+                                "command_execution" => {
+                                    let command = item
+                                        .get("command")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("command");
+                                    if let Some(code) =
+                                        item.get("exit_code").and_then(|v| v.as_i64())
+                                    {
+                                        println!("codex exec: `{command}` → {code}");
+                                    }
+                                    last_activity = std::time::Instant::now();
+                                }
+                                "file_change" => {
+                                    if let Some(status) =
+                                        item.get("status").and_then(|v| v.as_str())
+                                    {
+                                        println!("apply_patch: {status}");
+                                    }
+                                    last_activity = std::time::Instant::now();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Some("turn.failed") => {
+                    let message = parsed
+                        .get("error")
+                        .and_then(|e| e.get("message"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("codex turn failed");
+                    return Err(anyhow!(message.to_string()));
+                }
+                Some("turn.completed") => {
+                    println!("codex: turn completed");
+                    last_activity = std::time::Instant::now();
+                }
+                Some("response.created") => {
+                    println!("codex: response created");
+                    last_activity = std::time::Instant::now();
+                }
+                Some("response.completed") => {
+                    println!("codex: response completed");
+                    last_activity = std::time::Instant::now();
+                }
+                Some("error") => {
+                    let message = parsed
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("codex error");
+                    return Err(anyhow!(message.to_string()));
+                }
+                Some(other) => println!("codex: event {other}"),
+                _ => {}
+            },
+            Err(_) => {
+                // Non-JSON: forward as-is (already stderr lines are prefixed)
+                if !line.trim().is_empty() {
+                    println!("codex: {}", line.trim_end());
+                    append_with_gap(&mut aggregated, &line);
+                    last_activity = std::time::Instant::now();
+                }
+            }
+        }
+        // keepalive + timeout
+        let now = std::time::Instant::now();
+        if now.duration_since(last_notice) >= keepalive_every {
+            let idle = now.duration_since(last_activity).as_secs();
+            let elapsed = now.duration_since(start_time).as_secs();
+            println!("codex: waiting… idle={}s elapsed={}s", idle, elapsed);
+            last_notice = now;
+        }
+        if now.duration_since(start_time) >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(anyhow!(format!(
+                "codex timeout after {}s (set RUNMATFUNC_CODEX_TIMEOUT_MS to adjust)",
+                timeout.as_secs()
+            )));
+        }
+        // continue draining while process runs
+        if let Some(status) = child.try_wait().ok().flatten() {
+            // break after pipes drain fully
+            if status.success() {
+                // continue a couple more recv timeouts to drain
+                for _ in 0..4 {
+                    if let Ok(extra) = rx.recv_timeout(std::time::Duration::from_millis(25)) {
+                        if !extra.trim().is_empty() {
+                            println!("codex: {}", extra.trim_end());
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                // finalize
+                let summary = last_agent_message
+                    .filter(|msg| !msg.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        let trimmed = aggregated.trim();
+                        if trimmed.is_empty() {
+                            "Codex returned no response".to_string()
+                        } else {
+                            trimmed.to_string()
+                        }
+                    });
+                return Ok(CodexResponse { summary });
+            } else {
+                return Err(anyhow!(format!("codex CLI exited with {status}")));
+            }
+        }
+    }
+
+    // If we exit the loop due to timeout without child exit, wait and finish
     let output = child
         .wait_with_output()
-        .context("failed to wait for codex CLI")?;
+        .context("failed to wait for codex CLI (final)")?;
     if !output.status.success() {
         let stderr_text = String::from_utf8_lossy(&output.stderr);
         return Err(anyhow!(
@@ -140,113 +370,6 @@ fn run_via_cli(
             output.status,
             stderr_text.trim()
         ));
-    }
-
-    let stdout_text =
-        String::from_utf8(output.stdout).context("codex CLI produced non-utf8 stdout")?;
-    let mut aggregated = String::new();
-    let mut last_agent_message: Option<String> = None;
-    let mut seen_agent_items: HashSet<String> = HashSet::new();
-
-    for raw_line in stdout_text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let parsed: Value = match serde_json::from_str(line) {
-            Ok(value) => value,
-            Err(err) => {
-                append_with_gap(
-                    &mut aggregated,
-                    &format!("codex emitted non-json output ({err}): {line}"),
-                );
-                continue;
-            }
-        };
-
-        match parsed.get("type").and_then(|v| v.as_str()) {
-            Some("item.completed") => {
-                if let Some(item) = parsed.get("item") {
-                    if let Some(item_type) = item.get("item_type").and_then(|v| v.as_str()) {
-                        match item_type {
-                            "agent_message" => {
-                                if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
-                                    let key = item
-                                        .get("id")
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| text.to_string());
-                                    if seen_agent_items.insert(key) {
-                                        append_with_gap(&mut aggregated, text);
-                                        last_agent_message = Some(text.to_string());
-                                    }
-                                }
-                            }
-                            "command_execution" => {
-                                let command = item
-                                    .get("command")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("unknown command");
-                                let exit_code = item
-                                    .get("exit_code")
-                                    .and_then(|v| v.as_i64())
-                                    .unwrap_or_default();
-                                let output = item
-                                    .get("aggregated_output")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or_default();
-                                append_with_gap(
-                                    &mut aggregated,
-                                    &format!(
-                                        "exec `{command}` exited {exit_code}\n{}",
-                                        output.trim_end()
-                                    ),
-                                );
-                            }
-                            "file_change" => {
-                                if let Some(status) = item.get("status").and_then(|v| v.as_str()) {
-                                    append_with_gap(
-                                        &mut aggregated,
-                                        &format!("apply_patch status: {status}"),
-                                    );
-                                }
-                            }
-                            "error" => {
-                                if let Some(message) = item.get("message").and_then(|v| v.as_str())
-                                {
-                                    append_with_gap(&mut aggregated, message);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            Some("turn.failed") => {
-                let message = parsed
-                    .get("error")
-                    .and_then(|e| e.get("message"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("codex turn failed");
-                return Err(anyhow!(message.to_string()));
-            }
-            Some("error") => {
-                let message = parsed
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("codex error");
-                return Err(anyhow!(message.to_string()));
-            }
-            _ => {}
-        }
-    }
-
-    let stderr_text = String::from_utf8_lossy(&output.stderr);
-    if !stderr_text.trim().is_empty() {
-        append_with_gap(
-            &mut aggregated,
-            &format!("codex stderr:\n{}", stderr_text.trim_end()),
-        );
     }
 
     let summary = last_agent_message
@@ -259,7 +382,6 @@ fn run_via_cli(
                 trimmed.to_string()
             }
         });
-
     Ok(CodexResponse { summary })
 }
 
@@ -494,7 +616,7 @@ mod embedded_tests {
         let temp_home = TempDir::new()?;
         let _home_guard = EnvVarGuard::set("CODEX_HOME", temp_home.path());
 
-        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixture.txt");
+        let fixture_path = std::env::current_dir()?.join("target/runmatfunc/fixture.txt");
         if fixture_path.exists() {
             fs::remove_file(&fixture_path)?;
         }

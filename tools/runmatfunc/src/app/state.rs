@@ -5,6 +5,7 @@ use indicatif::ProgressBar;
 use std::time::Duration;
 
 use crate::app::config::AppConfig;
+use crate::builtin::template as builtin_template;
 use crate::cli::CliArgs;
 use crate::context::{manifest, serialize};
 use crate::jobs::{queue as job_queue, scheduler};
@@ -63,6 +64,26 @@ impl AppContext {
         show_diff: bool,
         show_doc: bool,
     ) -> Result<()> {
+        // If a category was provided, attempt to generate a skeleton builtin before proceeding.
+        if let Some(cat) = category {
+            match builtin_template::generate_if_missing(name, cat) {
+                Ok(outcome) => {
+                    if outcome.created {
+                        println!(
+                            "[runmatfunc] created builtin skeleton at {}",
+                            outcome.target_file.display()
+                        );
+                    }
+                }
+                Err(err) => {
+                    println!(
+                        "[runmatfunc] warning: generator failed (continuing): {}",
+                        err
+                    );
+                }
+            }
+        }
+
         let resolved_model = model.clone().or_else(|| self.config.default_model.clone());
         let ctx = crate::context::gather::build_authoring_context(name, category, &self.config)?;
         let codex_available = crate::codex::client::is_available();
@@ -146,48 +167,119 @@ impl AppContext {
         if let Some(pb) = spinner.take() {
             pb.finish_and_clear();
         }
-        match workspace_tests::run_builtin_tests(&ctx, &self.config) {
+        let mut outcome = match workspace_tests::run_builtin_tests(&ctx, &self.config) {
             Ok(outcome) => {
-                if outcome.success {
-                    println!(
-                        "[runmatfunc] tests passed for {} (logs: {})",
-                        ctx.builtin.name,
-                        outcome.log_dir.display()
-                    );
-                } else {
-                    println!(
-                        "[runmatfunc] tests failed for {} (logs: {})",
-                        ctx.builtin.name,
-                        outcome.log_dir.display()
-                    );
-                }
-
-                for report in &outcome.reports {
-                    let status = if report.skipped {
-                        "skipped"
-                    } else if report.success {
-                        "ok"
-                    } else {
-                        "FAILED"
-                    };
-                    println!("  {} -> {}", report.label, status);
-                    if let Some(note) = &report.note {
-                        println!("    note: {}", note);
-                    }
-                    if let Some(path) = &report.stdout_path {
-                        println!("    stdout log: {}", path.display());
-                    } else if !report.stdout.trim().is_empty() {
-                        println!("    stdout:\n{}", indent(&report.stdout, 6));
-                    }
-                    if let Some(path) = &report.stderr_path {
-                        println!("    stderr log: {}", path.display());
-                    } else if !report.stderr.trim().is_empty() {
-                        println!("    stderr:\n{}", indent(&report.stderr, 6));
-                    }
-                }
+                outcome
             }
             Err(err) => {
                 println!("[runmatfunc] test execution error: {err}");
+                return Ok(());
+            }
+        };
+
+        // Iterative Codex loop: if tests failed and Codex is available, append failures and retry up to 2 times
+        if use_codex && codex_available && !outcome.success {
+            let mut attempts = 0usize;
+            while attempts < 2 {
+                attempts += 1;
+                let mut failure_digest = String::new();
+                failure_digest.push_str("Tests failed. Here are logs and errors.\n\n");
+                for report in &outcome.reports {
+                    if report.skipped || report.success {
+                        continue;
+                    }
+                    failure_digest.push_str(&format!("# {}\n", report.label));
+                    if !report.stdout.trim().is_empty() {
+                        failure_digest.push_str("STDOUT:\n");
+                        failure_digest.push_str(&report.stdout);
+                        failure_digest.push_str("\n\n");
+                    }
+                    if !report.stderr.trim().is_empty() {
+                        failure_digest.push_str("STDERR:\n");
+                        failure_digest.push_str(&report.stderr);
+                        failure_digest.push_str("\n\n");
+                    }
+                }
+
+                let polish_tail = None;
+                let _ = crate::codex::session::run_authoring_with_extra(
+                    &ctx,
+                    resolved_model.clone(),
+                    &failure_digest,
+                    polish_tail,
+                );
+
+                // Re-run tests
+                match workspace_tests::run_builtin_tests(&ctx, &self.config) {
+                    Ok(new_outcome) => {
+                        outcome = new_outcome;
+                        if outcome.success {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        println!("[runmatfunc] test execution error after Codex fix: {err}");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Final polish pass: ask Codex to re-check against BUILTIN_PACKAGING.md and fix any gaps, then test again
+        if use_codex && codex_available && outcome.success {
+            let polish = "Re-check the implementation against the Builtin Packaging template. Paste the entire template and ensure all required sections (DOC_MD, GPU/Fusion specs, tests, error semantics) are present and correct. Apply changes via apply_patch when necessary. Then stop.";
+            let tail = Some("Template is included above in references: crates/runmat-runtime/BUILTIN_PACKAGING.md");
+            let _ = crate::codex::session::run_authoring_with_extra(
+                &ctx,
+                resolved_model.clone(),
+                polish,
+                tail,
+            );
+            // Re-run tests one last time
+            match workspace_tests::run_builtin_tests(&ctx, &self.config) {
+                Ok(new_outcome) => {
+                    outcome = new_outcome;
+                }
+                Err(err) => println!("[runmatfunc] test execution error after polish: {err}"),
+            }
+        }
+
+        // Report final outcome
+        if outcome.success {
+            println!(
+                "[runmatfunc] tests passed for {} (logs: {})",
+                ctx.builtin.name,
+                outcome.log_dir.display()
+            );
+        } else {
+            println!(
+                "[runmatfunc] tests failed for {} (logs: {})",
+                ctx.builtin.name,
+                outcome.log_dir.display()
+            );
+        }
+
+        for report in &outcome.reports {
+            let status = if report.skipped {
+                "skipped"
+            } else if report.success {
+                "ok"
+            } else {
+                "FAILED"
+            };
+            println!("  {} -> {}", report.label, status);
+            if let Some(note) = &report.note {
+                println!("    note: {}", note);
+            }
+            if let Some(path) = &report.stdout_path {
+                println!("    stdout log: {}", path.display());
+            } else if !report.stdout.trim().is_empty() {
+                println!("    stdout:\n{}", indent(&report.stdout, 6));
+            }
+            if let Some(path) = &report.stderr_path {
+                println!("    stderr log: {}", path.display());
+            } else if !report.stderr.trim().is_empty() {
+                println!("    stderr:\n{}", indent(&report.stderr, 6));
             }
         }
         Ok(())

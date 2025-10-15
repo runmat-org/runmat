@@ -1,0 +1,13 @@
+
+running 8 tests
+test builtins::math::reduction::sum::tests::doc_examples_are_registered ... ok
+test builtins::math::reduction::sum::tests::sum_scalar_value ... ok
+test builtins::math::reduction::sum::tests::sum_row_vector_defaults_to_scalar ... ok
+test builtins::math::reduction::sum::tests::sum_matrix_row_reduction_dim_two ... ok
+test builtins::math::reduction::sum::tests::sum_matrix_column_reduction ... ok
+test builtins::math::reduction::sum::tests::sum_dimension_validation ... ok
+test builtins::math::reduction::sum::tests::sum_logical_array_counts_true_values ... ok
+test builtins::math::reduction::sum::tests::sum_gpu_round_trip ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.00s
+

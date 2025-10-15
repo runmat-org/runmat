@@ -30,6 +30,42 @@ pub fn run_authoring(
     }
 }
 
+/// Run an authoring session with extra instructions appended to the prompt (for iterative fixes).
+pub fn run_authoring_with_extra(
+    ctx: &AuthoringContext,
+    model: Option<String>,
+    extra_instructions: &str,
+    extra_tail: Option<&str>,
+) -> Result<Option<CodexResponse>> {
+    let client = default_client()?;
+    let mut prompt = String::with_capacity(ctx.prompt.len() + extra_instructions.len() + 128);
+    prompt.push_str(&ctx.prompt);
+    prompt.push_str("\n\n===== Additional Instructions =====\n");
+    prompt.push_str(extra_instructions);
+    if let Some(tail) = extra_tail {
+        prompt.push_str("\n\n");
+        prompt.push_str(tail);
+    }
+    let request = CodexRequest {
+        model,
+        prompt,
+        doc_markdown: ctx.doc_markdown.clone(),
+        sources: ctx.source_paths.clone(),
+    };
+
+    match client.run(&request) {
+        Ok(response) => Ok(Some(response)),
+        Err(err)
+            if err
+                .to_string()
+                .contains("requires the 'embedded-codex' feature") =>
+        {
+            Ok(None)
+        }
+        Err(err) => Err(err).with_context(|| "codex authoring session failed"),
+    }
+}
+
 #[cfg(all(test, feature = "embedded-codex"))]
 mod embedded_tests {
     use super::*;
