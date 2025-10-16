@@ -115,7 +115,12 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
     Ok(Value::GpuTensor(output))
 }
 
-pub fn execute_reduction(request: FusionExecutionRequest<'_>, reduce_len: usize, num_slices: usize, workgroup_size: u32) -> Result<Value> {
+pub fn execute_reduction(
+    request: FusionExecutionRequest<'_>,
+    reduce_len: usize,
+    num_slices: usize,
+    workgroup_size: u32,
+) -> Result<Value> {
     crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_reduction() {
         return Err(anyhow!("unsupported fusion kind"));
@@ -140,25 +145,46 @@ pub fn execute_reduction(request: FusionExecutionRequest<'_>, reduce_len: usize,
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
     for value in &request.inputs {
         match value {
-            Value::GpuTensor(handle) => prepared.push(PreparedInput { handle: handle.clone(), owned: None }),
+            Value::GpuTensor(handle) => prepared.push(PreparedInput {
+                handle: handle.clone(),
+                owned: None,
+            }),
             Value::Tensor(t) => {
-                let view = HostTensorView { data: &t.data, shape: &t.shape };
+                let view = HostTensorView {
+                    data: &t.data,
+                    shape: &t.shape,
+                };
                 let handle = provider.upload(&view)?;
-                prepared.push(PreparedInput { handle: handle.clone(), owned: Some(handle) });
+                prepared.push(PreparedInput {
+                    handle: handle.clone(),
+                    owned: Some(handle),
+                });
             }
             Value::Num(n) => {
                 temp_scalars.push(vec![*n; len]);
                 let data = temp_scalars.last().unwrap();
-                let view = HostTensorView { data, shape: &constant_shape };
+                let view = HostTensorView {
+                    data,
+                    shape: &constant_shape,
+                };
                 let handle = provider.upload(&view)?;
-                prepared.push(PreparedInput { handle: handle.clone(), owned: Some(handle) });
+                prepared.push(PreparedInput {
+                    handle: handle.clone(),
+                    owned: Some(handle),
+                });
             }
             Value::Int(i) => {
                 temp_scalars.push(vec![i.to_f64(); len]);
                 let data = temp_scalars.last().unwrap();
-                let view = HostTensorView { data, shape: &constant_shape };
+                let view = HostTensorView {
+                    data,
+                    shape: &constant_shape,
+                };
                 let handle = provider.upload(&view)?;
-                prepared.push(PreparedInput { handle: handle.clone(), owned: Some(handle) });
+                prepared.push(PreparedInput {
+                    handle: handle.clone(),
+                    owned: Some(handle),
+                });
             }
             _ => return Err(anyhow!("fusion: unsupported value type")),
         }
@@ -176,7 +202,14 @@ pub fn execute_reduction(request: FusionExecutionRequest<'_>, reduce_len: usize,
         .generate_reduction_wgsl(scalar_ty)
         .ok_or_else(|| anyhow!("fusion: reduction WGSL generation failed"))?;
 
-    let output = provider.fused_reduction(&shader, &handles, &output_shape, reduce_len, num_slices, workgroup_size)?;
+    let output = provider.fused_reduction(
+        &shader,
+        &handles,
+        &output_shape,
+        reduce_len,
+        num_slices,
+        workgroup_size,
+    )?;
     fusion_residency::mark(&output);
 
     for input in prepared {

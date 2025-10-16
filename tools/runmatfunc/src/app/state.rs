@@ -168,9 +168,7 @@ impl AppContext {
             pb.finish_and_clear();
         }
         let mut outcome = match workspace_tests::run_builtin_tests(&ctx, &self.config) {
-            Ok(outcome) => {
-                outcome
-            }
+            Ok(outcome) => outcome,
             Err(err) => {
                 println!("[runmatfunc] test execution error: {err}");
                 return Ok(());

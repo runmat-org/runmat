@@ -95,7 +95,10 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
         if !node.is_reduction() || assigned.contains(&node.id) {
             continue;
         }
-        let span = InstrSpan { start: node.span.start, end: node.span.end };
+        let span = InstrSpan {
+            start: node.span.start,
+            end: node.span.end,
+        };
         groups.push(FusionGroup {
             id: group_id,
             kind: FusionKind::Reduction,
@@ -538,9 +541,7 @@ impl FusionGroupPlan {
         }
         let mut shader = String::new();
         shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>; }}\n"));
-        shader.push_str(
-            "struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n",
-        );
+        shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
         shader.push_str(&format!(
             "@group(0) @binding(0) var<storage, read> input0: Tensor;\n"
         ));
@@ -558,7 +559,10 @@ impl FusionGroupPlan {
         );
         shader.push_str("  let col = wid.x;\n");
         shader.push_str("  if (col >= params.ncols) { return; }\n");
-        shader.push_str(&format!("  var acc: {scalar_ty} = {}0.0;\n", if scalar_ty == "f64" { "f64(" } else { "" }));
+        shader.push_str(&format!(
+            "  var acc: {scalar_ty} = {}0.0;\n",
+            if scalar_ty == "f64" { "f64(" } else { "" }
+        ));
         if scalar_ty == "f64" {
             shader.push_str("  // close cast for f64 literal\n");
         }

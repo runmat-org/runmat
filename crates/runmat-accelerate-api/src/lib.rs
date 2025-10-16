@@ -204,9 +204,7 @@ pub trait AccelProvider: Send + Sync {
         _num_slices: usize,
         _workgroup_size: u32,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "fused_reduction not supported by provider"
-        ))
+        Err(anyhow::anyhow!("fused_reduction not supported by provider"))
     }
 }
 

@@ -2,7 +2,9 @@ use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
 use crate::instr::Instr;
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::fusion_exec::{execute_elementwise, execute_reduction, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::{
+    execute_elementwise, execute_reduction, FusionExecutionRequest,
+};
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
     activate_fusion_plan, deactivate_fusion_plan, fusion_residency, prepare_fusion_plan,

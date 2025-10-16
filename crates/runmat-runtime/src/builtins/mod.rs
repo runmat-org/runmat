@@ -2,6 +2,7 @@
 
 pub mod accel;
 pub mod array;
+pub mod common;
 pub mod introspection;
 pub mod io;
 pub mod logical;

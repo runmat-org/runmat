@@ -1,13 +1,14 @@
 
-running 8 tests
-test builtins::math::reduction::sum::tests::doc_examples_are_registered ... ok
-test builtins::math::reduction::sum::tests::sum_scalar_value ... ok
-test builtins::math::reduction::sum::tests::sum_row_vector_defaults_to_scalar ... ok
-test builtins::math::reduction::sum::tests::sum_matrix_row_reduction_dim_two ... ok
-test builtins::math::reduction::sum::tests::sum_matrix_column_reduction ... ok
-test builtins::math::reduction::sum::tests::sum_dimension_validation ... ok
-test builtins::math::reduction::sum::tests::sum_logical_array_counts_true_values ... ok
-test builtins::math::reduction::sum::tests::sum_gpu_round_trip ... ok
+running 9 tests
+test builtins::math::reduction::sum::tests::sum_dimension_greater_than_ndims_returns_input ... ok
+test builtins::math::reduction::sum::tests::sum_matrix_dimension_two ... ok
+test builtins::math::reduction::sum::tests::sum_matrix_default_dimension ... ok
+test builtins::math::reduction::sum::tests::doc_examples_present ... ok
+test builtins::math::reduction::sum::tests::sum_scalar_num ... ok
+test builtins::math::reduction::sum::tests::sum_with_include_nan_propagates ... ok
+test builtins::math::reduction::sum::tests::sum_gpu_provider_roundtrip ... ok
+test builtins::math::reduction::sum::tests::sum_with_omit_nan_default_dimension ... ok
+test builtins::math::reduction::sum::tests::sum_gpu_omit_nan_falls_back_to_host ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.00s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.00s
 
