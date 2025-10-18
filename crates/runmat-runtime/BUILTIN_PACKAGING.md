@@ -90,4 +90,5 @@ crates/runmat-runtime/
 - Documentation export writes `docs/generated/builtins.json` and `docs/generated/builtins.d.ts` for the Next.js site.
 
 ## Legacy Module Cleanup
-- Legacy modules are located in `crates/runmat-runtime/src/builtins/legacy/`.
+- Legacy modules are located in `crates/runmat-runtime/src/builtins/*.rs` (e.g. not in a subdirectory).
+- Once you are finished authoring a module, search the legacy modules for any legacy implementations of the function and remove them, and clean up any references to them in the codebase.
