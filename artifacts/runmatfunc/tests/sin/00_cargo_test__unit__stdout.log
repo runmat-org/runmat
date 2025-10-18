@@ -1,0 +1,13 @@
+
+running 8 tests
+test arrays::tests::test_linspace_single_point ... ok
+test builtins::math::trigonometry::sin::tests::sin_complex_scalar ... ok
+test builtins::math::trigonometry::sin::tests::sin_int_value_promotes ... ok
+test builtins::math::trigonometry::sin::tests::sin_char_array_roundtrip ... ok
+test builtins::math::trigonometry::sin::tests::doc_examples_present ... ok
+test builtins::math::trigonometry::sin::tests::sin_scalar ... ok
+test builtins::math::trigonometry::sin::tests::sin_tensor_elements ... ok
+test builtins::math::trigonometry::sin::tests::sin_gpu_provider_roundtrip ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s
+

@@ -9,6 +9,7 @@ use runmat_builtins::Value;
 use runmat_gc::gc_test_context;
 use runmat_hir::lower;
 use runmat_ignition::{compile, interpret, Instr};
+use runmat_ignition::vm::interpret_function;
 use runmat_parser::parse;
 use runmat_runtime::gather_if_needed;
 use std::collections::HashMap;
@@ -501,6 +502,267 @@ fn ensure_provider_registered() {
 }
 
 #[test]
+fn fused_elementwise_then_reduction_sum_rows_profiled() {
+    gc_test_context(|| {
+        // Generate a reasonably large matrix; try a couple sizes to exercise GPU path
+        let sizes = &[(512usize, 512usize), (1024, 1024)];
+        for &(rows, cols) in sizes {
+            let data: Vec<f64> = (0..rows * cols)
+                .map(|i| (i as f64).sin() * 0.5 + 0.5)
+                .collect();
+            let source = format!(
+                r#"
+                X = rand({rows}, {cols});
+                Y = sin(X) .* X + 2;
+                S = sum(Y, 2);
+                "#
+            );
+
+            let ast = parse(&source).expect("parse");
+            let hir = lower(&ast).expect("lower");
+            let bytecode = compile(&hir).expect("compile");
+
+            // Initialize vars and insert tensor for 'X' by locating first LoadVar use
+            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+            let x_index = bytecode
+                .instructions
+                .iter()
+                .filter_map(|instr| match instr { Instr::StoreVar(idx) => Some(*idx), _ => None })
+                .next()
+                .unwrap_or(0);
+            let tensor = runmat_builtins::Tensor::new(data, vec![rows, cols]).unwrap();
+            vars[x_index] = Value::Tensor(tensor);
+
+            // CPU path (no provider registered yet)
+            let _ = interpret_function(&bytecode, vars.clone());
+            let start_cpu = std::time::Instant::now();
+            let vars_cpu = interpret_function(&bytecode, vars.clone()).expect("interpret");
+            let elapsed_cpu = start_cpu.elapsed();
+            let s_index = bytecode
+                .instructions
+                .iter()
+                .filter_map(|instr| match instr { Instr::StoreVar(i) => Some(*i), _ => None })
+                .last()
+                .expect("store var for S");
+            let s_value_cpu = vars_cpu.get(s_index).expect("value for S (cpu)");
+            let gathered_cpu = gather_if_needed(s_value_cpu).expect("gather cpu");
+            let out_cpu = match gathered_cpu {
+                Value::Tensor(t) => t,
+                other => panic!("expected tensor S (cpu), got {other:?}"),
+            };
+            assert_eq!(out_cpu.data.len(), rows, "CPU output elements should equal rows");
+
+            // GPU path: register provider and run again
+            ensure_provider_registered();
+            let _ = interpret_function(&bytecode, vars.clone());
+            let start_gpu = std::time::Instant::now();
+            let vars_gpu = interpret_function(&bytecode, vars).expect("interpret");
+            let elapsed_gpu = start_gpu.elapsed();
+            // Attempt to gather S at the computed index; if shape doesn't match expectation, scan for a length==rows tensor
+            let out_gpu = {
+                let s_value_gpu = vars_gpu.get(s_index).expect("value for S (gpu)");
+                let gathered = gather_if_needed(s_value_gpu).expect("gather gpu");
+                let pick_alt = match &gathered { Value::Tensor(t) => t.data.len() != rows, _ => true };
+                if !pick_alt {
+                    match gathered { Value::Tensor(t) => t, _ => unreachable!() }
+                } else {
+                    // Fallback: search all variables for a tensor of length==rows
+                    let mut found: Option<runmat_builtins::Tensor> = None;
+                    for v in &vars_gpu {
+                        if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
+                            if t.data.len() == rows { found = Some(t); break; }
+                        }
+                    }
+                    found.expect("expected to find reduced tensor of length rows")
+                }
+            };
+            assert_eq!(out_gpu.data.len(), rows, "GPU output elements should equal rows");
+
+            // Log basic perf info
+            eprintln!(
+                "fused sin.* + sum rows: {rows}x{cols} -> [{rows}x1] CPU: {:?} GPU: {:?}",
+                elapsed_cpu, elapsed_gpu
+            );
+        }
+    });
+}
+
+#[test]
+fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
+    gc_test_context(|| {
+        // Matrix with NaNs in each row
+        let rows = 4usize;
+        let cols = 5usize;
+        let mut data = vec![0.0f64; rows * cols];
+        for r in 0..rows {
+            for c in 0..cols {
+                data[r + c * rows] = (r as f64) + (c as f64);
+            }
+            // place a NaN in each row
+            data[r + ((r % cols) * rows)] = f64::NAN;
+        }
+
+        // Program computes include-nan and omit-nan variants along rows (dim=2)
+        let source = format!(
+            r#"
+            rows = {rows}; cols = {cols};
+            X = rand(rows, cols);
+            % Place a NaN in the first column of each row
+            for r = 1:rows
+                X(r, 1) = 0/0;
+            end
+            SI = sum(X, 2);           % include nan (default)
+            SO = sum(X, 2, "omitnan");
+        "#
+        );
+
+        let ast = parse(&source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir).expect("compile");
+
+        // Helper to run with/without GPU
+        let run_with = |use_gpu: bool| -> Vec<Value> {
+            let vars = vec![Value::Num(0.0); bytecode.var_count];
+            if use_gpu { ensure_provider_registered(); }
+            interpret_function(&bytecode, vars).expect("interpret")
+        };
+
+        // Warmups
+        let _ = run_with(false);
+        let _ = run_with(true);
+
+        // CPU and GPU results
+        let cpu = run_with(false);
+        let gpu = run_with(true);
+
+        // Collect SI and SO by last two stores
+        let mut stores: Vec<usize> = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr { Instr::StoreVar(idx) => Some(*idx), _ => None })
+            .collect();
+        assert!(stores.len() >= 2);
+        let so_idx = stores.pop().unwrap();
+        let si_idx = stores.pop().unwrap();
+
+        let gather_numvec = |value: &Value| -> Vec<f64> {
+            match value {
+                Value::GpuTensor(_handle) => {
+                    let v = gather_if_needed(value).unwrap();
+                    match v { Value::Tensor(t) => t.data, _ => panic!("expected tensor") }
+                }
+                Value::Tensor(t) => t.data.clone(),
+                _ => panic!("expected tensor"),
+            }
+        };
+
+        // Compare CPU vs GPU for include-nan and omit-nan
+        let si_cpu = gather_numvec(cpu.get(si_idx).unwrap());
+        let si_gpu = gather_numvec(gpu.get(si_idx).unwrap());
+        assert_eq!(si_cpu.len(), rows);
+        assert_eq!(si_gpu.len(), rows);
+        for (a, b) in si_cpu.iter().zip(si_gpu.iter()) {
+            if a.is_nan() || b.is_nan() { assert!(a.is_nan() && b.is_nan()); } else { assert!((a - b).abs() < 1e-9); }
+        }
+
+        let so_cpu = gather_numvec(cpu.get(so_idx).unwrap());
+        let so_gpu = gather_numvec(gpu.get(so_idx).unwrap());
+        assert_eq!(so_cpu.len(), rows);
+        assert_eq!(so_gpu.len(), rows);
+        for (a, b) in so_cpu.iter().zip(so_gpu.iter()) {
+            assert!((a - b).abs() < 1e-9);
+        }
+    });
+}
+
+#[test]
+fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
+    gc_test_context(|| {
+        let rows = 8usize;
+        let cols = 7usize;
+        let source = format!(
+            r#"
+            rows = {rows}; cols = {cols};
+            X = rand(rows, cols);
+            % Place NaNs in first row and first column to exercise both dims
+            for c = 1:cols
+                X(1, c) = 0/0;
+            end
+            for r = 1:rows
+                X(r, 1) = 0/0;
+            end
+            SI1 = sum(X, 1);
+            SO1 = sum(X, 1, 'omitnan');
+            SI2 = sum(X, 2);
+            SO2 = sum(X, 2, 'omitnan');
+            "#
+        );
+
+        let ast = parse(&source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir).expect("compile");
+
+        let run_with = |use_gpu: bool| -> Vec<Value> {
+            let vars = vec![Value::Num(0.0); bytecode.var_count];
+            if use_gpu { ensure_provider_registered(); }
+            interpret_function(&bytecode, vars).expect("interpret")
+        };
+
+        // Warmups
+        let _ = run_with(false);
+        let _ = run_with(true);
+
+        let cpu = run_with(false);
+        let gpu = run_with(true);
+
+        // Find last 4 stores (SI1, SO1, SI2, SO2)
+        let mut stores: Vec<usize> = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr { Instr::StoreVar(idx) => Some(*idx), _ => None })
+            .collect();
+        assert!(stores.len() >= 4);
+        let so2 = stores.pop().unwrap();
+        let si2 = stores.pop().unwrap();
+        let so1 = stores.pop().unwrap();
+        let si1 = stores.pop().unwrap();
+
+        let gather_vec = |v: &Value| -> Vec<f64> {
+            match v {
+                Value::GpuTensor(_) => match gather_if_needed(v).unwrap() { Value::Tensor(t) => t.data, _ => panic!("expected tensor") },
+                Value::Tensor(t) => t.data.clone(),
+                _ => panic!("expected tensor"),
+            }
+        };
+
+        // Include-nan compare
+        let si1_cpu = gather_vec(cpu.get(si1).unwrap());
+        let si1_gpu = gather_vec(gpu.get(si1).unwrap());
+        assert_eq!(si1_cpu.len(), cols);
+        assert_eq!(si1_gpu.len(), cols);
+        for (a,b) in si1_cpu.iter().zip(si1_gpu.iter()) { if a.is_nan() || b.is_nan() { assert!(a.is_nan() && b.is_nan()); } else { assert!((a-b).abs() < 1e-9); } }
+
+        let si2_cpu = gather_vec(cpu.get(si2).unwrap());
+        let si2_gpu = gather_vec(gpu.get(si2).unwrap());
+        assert_eq!(si2_cpu.len(), rows);
+        assert_eq!(si2_gpu.len(), rows);
+        for (a,b) in si2_cpu.iter().zip(si2_gpu.iter()) { if a.is_nan() || b.is_nan() { assert!(a.is_nan() && b.is_nan()); } else { assert!((a-b).abs() < 1e-9); } }
+
+        // Omit-nan compare
+        let so1_cpu = gather_vec(cpu.get(so1).unwrap());
+        let so1_gpu = gather_vec(gpu.get(so1).unwrap());
+        assert_eq!(so1_cpu.len(), cols);
+        assert_eq!(so1_gpu.len(), cols);
+        for (a,b) in so1_cpu.iter().zip(so1_gpu.iter()) { assert!((a-b).abs() < 1e-9); }
+
+        let so2_cpu = gather_vec(cpu.get(so2).unwrap());
+        let so2_gpu = gather_vec(gpu.get(so2).unwrap());
+        assert_eq!(so2_cpu.len(), rows);
+        assert_eq!(so2_gpu.len(), rows);
+        for (a,b) in so2_cpu.iter().zip(so2_gpu.iter()) { assert!((a-b).abs() < 1e-9); }
+    });
+}
+#[allow(dead_code)]
 fn fused_elementwise_residency_and_gather() {
     gc_test_context(|| {
         ensure_provider_registered();

@@ -25,63 +25,6 @@ fn div_complex(a_re: f64, a_im: f64, b_re: f64, b_im: f64) -> (f64, f64) {
 }
 
 #[runtime_builtin(
-    name = "sin",
-    category = "math/trigonometry",
-    summary = "Sine of input in radians (element-wise).",
-    examples = "y = sin(pi/2)",
-    keywords = "sine,trig,angle",
-    related = "cos,tan",
-    accel = "unary"
-)]
-fn sin_builtin(x: Value) -> Result<Value, String> {
-    match x {
-        Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider() {
-                if let Ok(hc) = p.unary_sin(&h) {
-                    return Ok(Value::GpuTensor(hc));
-                }
-            }
-            Err("sin: unsupported for gpuArray".to_string())
-        }
-        Value::Num(n) => Ok(Value::Num(n.sin())),
-        Value::Int(i) => Ok(Value::Num(i.to_f64().sin())),
-        Value::Tensor(t) => {
-            let data: Vec<f64> = t.data.iter().map(|&v| v.sin()).collect();
-            Ok(Value::Tensor(Tensor::new(data, t.shape.clone())?))
-        }
-        Value::Complex(re, im) => {
-            let (r, i) = sin_complex(re, im);
-            Ok(Value::Complex(r, i))
-        }
-        Value::ComplexTensor(ct) => {
-            let out: Vec<(f64, f64)> = ct
-                .data
-                .iter()
-                .map(|&(re, im)| sin_complex(re, im))
-                .collect();
-            Ok(Value::ComplexTensor(runmat_builtins::ComplexTensor::new(
-                out,
-                ct.shape.clone(),
-            )?))
-        }
-        Value::LogicalArray(la) => {
-            let data: Vec<f64> = la
-                .data
-                .iter()
-                .map(|&b| if b != 0 { 1.0f64.sin() } else { 0.0f64.sin() })
-                .collect();
-            Ok(Value::Tensor(Tensor::new(data, la.shape.clone())?))
-        }
-        Value::CharArray(ca) => {
-            let data: Vec<f64> = ca.data.iter().map(|&ch| (ch as u32 as f64).sin()).collect();
-            Ok(Value::Tensor(Tensor::new(data, vec![ca.rows, ca.cols])?))
-        }
-        Value::String(_) | Value::StringArray(_) => Err("sin: expected numeric input".to_string()),
-        other => Err(format!("sin: unsupported input {other:?}")),
-    }
-}
-
-#[runtime_builtin(
     name = "cos",
     category = "math/trigonometry",
     summary = "Cosine of input in radians (element-wise).",

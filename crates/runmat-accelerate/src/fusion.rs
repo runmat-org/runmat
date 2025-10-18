@@ -539,46 +539,58 @@ impl FusionGroupPlan {
         if self.inputs.is_empty() {
             return None;
         }
+        // Determine axis from constants: inputs[1] if present; 1-based dim -> 0 for columns, 1 for rows.
+        let mut axis = 0usize;
+        if let Some(Value::Num(n)) = self.constants.get(&1) {
+            if *n >= 1.0 { axis = (*n as usize).saturating_sub(1); }
+        } else if let Some(Value::Int(i)) = self.constants.get(&1) {
+            let v = i.to_f64(); if v >= 1.0 { axis = (v as usize).saturating_sub(1); }
+        }
+
+        // Detect omitnan constant (compile-time selection)
+        let omitnan = self.constants.values().any(|v| match v {
+            Value::String(s) => s.eq_ignore_ascii_case("omitnan"),
+            _ => false,
+        });
+
         let mut shader = String::new();
         shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>; }}\n"));
         shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
-        shader.push_str(&format!(
-            "@group(0) @binding(0) var<storage, read> input0: Tensor;\n"
-        ));
-        shader.push_str(&format!(
-            "@group(0) @binding(1) var<storage, read_write> output: Tensor;\n"
-        ));
-        shader.push_str(&format!(
-            "@group(0) @binding(2) var<uniform> params: MParams;\n\n"
-        ));
-        shader.push_str("fn idx(r: u32, c: u32, ld: u32) -> u32 { return c * ld + r; }\n");
-        shader.push_str("fn is_omitnan(flags: u32) -> bool { return (flags & 1u) == 1u; }\n\n");
+        shader.push_str(&format!("@group(0) @binding(0) var<storage, read> input0: Tensor;\n"));
+        shader.push_str(&format!("@group(0) @binding(1) var<storage, read_write> output: Tensor;\n"));
+        shader.push_str(&format!("@group(0) @binding(2) var<uniform> params: MParams;\n\n"));
+        shader.push_str(&format!("const OMITNAN: bool = {}bool({});\n\n", if scalar_ty=="f64" { "" } else { "" }, if omitnan { "true" } else { "false" }));
         shader.push_str("@compute @workgroup_size(256)\n");
-        shader.push_str(
-            "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
-        );
-        shader.push_str("  let col = wid.x;\n");
-        shader.push_str("  if (col >= params.ncols) { return; }\n");
-        shader.push_str(&format!(
-            "  var acc: {scalar_ty} = {}0.0;\n",
-            if scalar_ty == "f64" { "f64(" } else { "" }
-        ));
-        if scalar_ty == "f64" {
-            shader.push_str("  // close cast for f64 literal\n");
+        if axis == 0 {
+            // Column-wise: reduce over rows; one output per column (ncols)
+            shader.push_str(
+                "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
+            );
+            shader.push_str("  let col = wid.x;\n  if (col >= params.ncols) { return; }\n");
+            shader.push_str(&format!("  var acc: {scalar_ty} = {}0.0;\n", if scalar_ty == "f64" { "f64(" } else { "" }));
+            if scalar_ty == "f64" { shader.push_str("  // close cast for f64 literal\n"); }
+            shader.push_str("  var saw_nan: bool = false;\n  var r = lid.x;\n");
+            shader.push_str("  while (r < params.nrows) {\n    let v = input0.data[ (col * params.ld) + r ];\n    if (OMITNAN) { if (!isNan(v)) { acc = acc + v; } } else { if (isNan(v)) { saw_nan = true; } else { acc = acc + v; } }\n    r += 256u;\n  }\n");
+        } else {
+            // Row-wise: reduce over cols; one output per row (nrows)
+            shader.push_str(
+                "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
+            );
+            shader.push_str("  let row = wid.x;\n  if (row >= params.nrows) { return; }\n");
+            shader.push_str(&format!("  var acc: {scalar_ty} = {}0.0;\n", if scalar_ty == "f64" { "f64(" } else { "" }));
+            if scalar_ty == "f64" { shader.push_str("  // close cast for f64 literal\n"); }
+            shader.push_str("  var saw_nan: bool = false;\n  var c = lid.x;\n");
+            shader.push_str("  while (c < params.ncols) {\n    let v = input0.data[ row + (c * params.ld) ];\n    if (OMITNAN) { if (!isNan(v)) { acc = acc + v; } } else { if (isNan(v)) { saw_nan = true; } else { acc = acc + v; } }\n    c += 256u;\n  }\n");
         }
-        shader.push_str("  var saw_nan: bool = false;\n");
-        shader.push_str("  var r = lid.x;\n");
-        shader.push_str(
-            "  while (r < params.nrows) {\n    let v = input0.data[idx(r, col, params.ld)];\n    if (is_omitnan(params.flags)) { if (!isNan(v)) { acc = acc + v; } } else { if (isNan(v)) { saw_nan = true; } else { acc = acc + v; } }\n    r += 256u;\n  }\n",
-        );
-        shader.push_str(
-            "  var<workgroup> tile: array<f32, 256u>;\n  // Note: workgroup array declared as f32 for portability; providers may specialize.\n",
-        );
-        shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
+        shader.push_str("  var<workgroup> tile: array<f32, 256u>;\n  tile[lid.x] = acc;\n  workgroupBarrier();\n");
         shader.push_str(
             "  var off = 128u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    if (!is_omitnan(params.flags) && (isNan(a) || isNan(b))) { tile[lid.x] = f32(NaN); } else { tile[lid.x] = a + b; }\n  } workgroupBarrier(); off = off / 2u; }\n",
         );
-        shader.push_str("  if (lid.x == 0u) { output.data[col] = tile[0u]; }\n}\n");
+        if axis == 0 {
+            shader.push_str("  if (lid.x == 0u) { output.data[col] = tile[0u]; }\n}\n");
+        } else {
+            shader.push_str("  if (lid.x == 0u) { output.data[row] = tile[0u]; }\n}\n");
+        }
         Some(shader)
     }
 }

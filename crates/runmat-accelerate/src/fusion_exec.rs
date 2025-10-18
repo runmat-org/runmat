@@ -241,5 +241,11 @@ fn infer_output_shape(
             return Ok(resolved);
         }
     }
+    // Fallback: preserve the shape of the first non-empty input (avoids scalars/constants)
+    for handle in inputs {
+        if !handle.shape.is_empty() {
+            return Ok(handle.shape.clone());
+        }
+    }
     Ok(vec![len, 1])
 }

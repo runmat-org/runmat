@@ -11,7 +11,7 @@ use runmat_accelerate::{
     set_current_pc,
 };
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::{active_group_plan_clone, ValueOrigin, VarKind};
+use runmat_accelerate::{active_group_plan_clone, ValueOrigin, VarKind, ShapeInfo, FusionOp as AccelFusionOp};
 use runmat_builtins::{Type, Value};
 use runmat_runtime::call_builtin;
 use std::cell::RefCell;
@@ -7689,38 +7689,219 @@ fn try_execute_fusion_group(
             }
         }
     } else if plan.group.kind.is_reduction() {
-        // Derive (reduce_len, num_slices) primarily from the first input's actual shape.
-        // Default MATLAB reduction is along dimension 1 (rows) producing 1 x ncols.
+        // Determine reduction axis from constants if available (MATLAB dim is 1-based).
+        // Default axis: 0 (rows) -> column-wise reduction producing 1 x ncols.
+        let mut axis = 0usize;
+        if let Some(dim_const) = plan.constants.get(&1) {
+            // second argument position in inputs (value, dim)
+            axis = match dim_const {
+                Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
+                Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
+                _ => axis,
+            };
+        }
         let (reduce_len, num_slices) = {
-            // The plan inputs vector aligns with consumed values by stack_pattern
-            // and variables/constants. We look at the first input value we gathered.
-            let first_input = request.inputs.get(0);
-            if let Some(val) = first_input {
-                match val {
+            // Try to get the data tensor's shape via the reduction builtin op input id
+            let mut rows_cols: Option<(usize, usize)> = None;
+            // Prefer immediately-consumed stack values (common for reductions over producer results)
+            for v in &consumed {
+                match v {
                     Value::GpuTensor(h) => {
-                        if h.shape.len() >= 2 {
-                            (h.shape[0].max(1), h.shape[1].max(1))
-                        } else if h.shape.len() == 1 {
-                            (h.shape[0].max(1), 1)
-                        } else {
-                            (1, 1)
-                        }
+                        rows_cols = Some((
+                            h.shape.get(0).copied().unwrap_or(1).max(1),
+                            h.shape.get(1).copied().unwrap_or(1).max(1),
+                        ));
+                        break;
                     }
                     Value::Tensor(t) => {
-                        if t.shape.len() >= 2 {
-                            (t.shape[0].max(1), t.shape[1].max(1))
-                        } else if t.shape.len() == 1 {
-                            (t.shape[0].max(1), 1)
-                        } else {
-                            (1, 1)
+                        rows_cols = Some((
+                            t.shape.get(0).copied().unwrap_or(1).max(1),
+                            t.shape.get(1).copied().unwrap_or(1).max(1),
+                        ));
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            let data_value_id: Option<runmat_accelerate::graph::ValueId> = plan
+                .operations
+                .iter()
+                .find_map(|op| match op {
+                    AccelFusionOp::Builtin { name, inputs, .. }
+                        if name == "sum" || name == "mean" => inputs.get(0).copied(),
+                    _ => None,
+                });
+
+            if let Some(data_id) = data_value_id {
+                // Map data_id to plan input index if external
+                if let Some(input_index) = plan.inputs.iter().position(|vid| *vid == data_id) {
+                    // If this input came from the stack, it will have an entry in stack_pattern; use consumed value
+                    if let Some(stack_offset) = plan
+                        .stack_pattern
+                        .iter()
+                        .position(|&idx| idx == input_index)
+                    {
+                        if let Some(val) = consumed.get(stack_offset) {
+                            match val {
+                                Value::GpuTensor(h) => {
+                                    let r = h.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let c = h.shape.get(1).copied().unwrap_or(1).max(1);
+                                    rows_cols = Some((r, c));
+                                }
+                                Value::Tensor(t) => {
+                                    let r = t.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let c = t.shape.get(1).copied().unwrap_or(1).max(1);
+                                    rows_cols = Some((r, c));
+                                }
+                                _ => {}
+                            }
                         }
                     }
-                    _ => (1, 1),
+                    // Otherwise, it was a variable/constant; use request.inputs
+                    if rows_cols.is_none() {
+                        if let Some(val) = request.inputs.get(input_index) {
+                            match val {
+                                Value::GpuTensor(h) => {
+                                    let r = h.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let c = h.shape.get(1).copied().unwrap_or(1).max(1);
+                                    rows_cols = Some((r, c));
+                                }
+                                Value::Tensor(t) => {
+                                    let r = t.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let c = t.shape.get(1).copied().unwrap_or(1).max(1);
+                                    rows_cols = Some((r, c));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                 }
-            } else {
-                (1, 1)
+                if rows_cols.is_none() {
+                    if let Some(info) = graph.value(data_id) {
+                        // Try direct variable lookup to get runtime value shape
+                        match &info.origin {
+                            ValueOrigin::Variable { kind, index } => {
+                                let val = match kind {
+                                    VarKind::Global => vars.get(*index).cloned(),
+                                    VarKind::Local => {
+                                        if let Some(frame) = context.call_stack.last() {
+                                            let absolute = frame.locals_start + index;
+                                            context.locals.get(absolute).cloned()
+                                        } else {
+                                            vars.get(*index).cloned()
+                                        }
+                                    }
+                                };
+                                if let Some(v) = val {
+                                    match v {
+                                        Value::GpuTensor(h) => {
+                                            rows_cols = Some((
+                                                h.shape.get(0).copied().unwrap_or(1).max(1),
+                                                h.shape.get(1).copied().unwrap_or(1).max(1),
+                                            ));
+                                        }
+                                        Value::Tensor(t) => {
+                                            rows_cols = Some((
+                                                t.shape.get(0).copied().unwrap_or(1).max(1),
+                                                t.shape.get(1).copied().unwrap_or(1).max(1),
+                                            ));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        if rows_cols.is_none() {
+                            if let ShapeInfo::Tensor(dims) = &info.shape {
+                                if !dims.is_empty() {
+                                    let r = dims.get(0).and_then(|d| *d).unwrap_or(1);
+                                    let c = dims.get(1).and_then(|d| *d).unwrap_or(1);
+                                    rows_cols = Some((r.max(1), c.max(1)));
+                                }
+                            }
+                        }
+                    }
+                }
             }
+
+            // Fallback: any tensor input
+            if rows_cols.is_none() {
+                for v in &consumed {
+                    match v {
+                        Value::GpuTensor(h) => {
+                            rows_cols = Some((
+                                h.shape.get(0).copied().unwrap_or(1).max(1),
+                                h.shape.get(1).copied().unwrap_or(1).max(1),
+                            ));
+                            break;
+                        }
+                        Value::Tensor(t) => {
+                            rows_cols = Some((
+                                t.shape.get(0).copied().unwrap_or(1).max(1),
+                                t.shape.get(1).copied().unwrap_or(1).max(1),
+                            ));
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                if rows_cols.is_none() {
+                    for v in &request.inputs {
+                        match v {
+                            Value::GpuTensor(h) => {
+                                rows_cols = Some((
+                                    h.shape.get(0).copied().unwrap_or(1).max(1),
+                                    h.shape.get(1).copied().unwrap_or(1).max(1),
+                                ));
+                                break;
+                            }
+                            Value::Tensor(t) => {
+                                rows_cols = Some((
+                                    t.shape.get(0).copied().unwrap_or(1).max(1),
+                                    t.shape.get(1).copied().unwrap_or(1).max(1),
+                                ));
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            let (r, c) = rows_cols.unwrap_or((1, 1));
+            eprintln!("[vm reduction] derived rows={} cols={} for axis {}", r, c, axis);
+            if axis == 0 { (r, c) } else { (c, r) }
         };
+        eprintln!(
+            "[vm reduction] axis={} reduce_len={} num_slices={} constants={:?}",
+            axis, reduce_len, num_slices, plan.constants
+        );
+        // If shape derivation failed (1x1) but inputs/consumed suggest a larger tensor, skip fusion
+        let looks_wrong = reduce_len == 1 && num_slices == 1 && {
+            let mut big = false;
+            let mut check_val = |v: &Value| {
+                match v {
+                    Value::GpuTensor(h) => {
+                        let prod = h.shape.iter().copied().product::<usize>();
+                        if prod > 1 { big = true; }
+                    }
+                    Value::Tensor(t) => {
+                        let prod = t.shape.iter().copied().product::<usize>();
+                        if prod > 1 { big = true; }
+                    }
+                    _ => {}
+                }
+            };
+            for v in &consumed { check_val(v); }
+            for v in &request.inputs { check_val(v); }
+            big
+        };
+        if looks_wrong {
+            for value in consumed.into_iter().rev() { stack.push(value); }
+            return Err("fusion: reduction shape unresolved".to_string());
+        }
+
         let workgroup_size = 256u32;
         match execute_reduction(request, reduce_len, num_slices, workgroup_size) {
             Ok(result) => Ok(result),

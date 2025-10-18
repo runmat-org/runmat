@@ -1433,60 +1433,32 @@ impl AccelProvider for WgpuProvider {
             ));
         }
 
-        // Create shader module
-        let module = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("runmat-fused-reduction"),
-                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(shader)),
-            });
-        let bind_group_layout =
-            self.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("runmat-reduction-bgl"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                    ],
+        // Decide path: single-pass if reduce_len <= workgroup_size else two-pass
+        if reduce_len as u32 <= workgroup_size {
+            // Single-pass using provided shader
+            // Create shader module (label includes hash to aid driver-side caching)
+            let shader_hash = seahash::hash(shader.as_bytes());
+            let label = format!("runmat-fused-reduction-{}-{:x}", self.device_id, shader_hash);
+            let module = self
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some(&label),
+                    source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(shader)),
                 });
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("runmat-reduction-bgl"),
+                entries: &[
+                    storage_read_entry(0),
+                    storage_read_write_entry(1),
+                    uniform_entry(2),
+                ],
+            });
+            let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("runmat-reduction-pl"),
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
-        let pipeline = self
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("runmat-reduction-pipeline"),
                 layout: Some(&pipeline_layout),
                 module: &module,
@@ -1495,79 +1467,111 @@ impl AccelProvider for WgpuProvider {
                 cache: None,
             });
 
+            // Buffers
+            let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
+            let out_len = num_slices.max(1);
+            let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
+
+            #[repr(C)]
+            #[derive(Clone, Copy)]
+            struct Params { nrows: u32, ncols: u32, ld: u32, flags: u32 }
+            let flags = if shader.contains("const OMITNAN: bool = true") { 1u32 } else { 0u32 };
+            let params = Params { nrows: reduce_len as u32, ncols: num_slices as u32, ld: reduce_len as u32, flags };
+            let params_buffer = Arc::new(self.uniform_buffer(&params, "runmat-reduction-params"));
+
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-reduction-bg"),
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: input_buf.as_ref().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: out_buffer.as_ref().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: params_buffer.as_ref().as_entire_binding() },
+                ],
+            });
+
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-reduction-encoder") });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("runmat-reduction-pass"), timestamp_writes: None });
+                pass.set_pipeline(&pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((num_slices as u32).max(1), 1, 1);
+            }
+            self.submit(encoder);
+
+            let handle = self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len);
+            return Ok(handle);
+        }
+
+        // Two-pass reduction for large reduce_len
+        let scalar_ty = match self.precision { NumericPrecision::F64 => "f64", _ => "f32" };
+        let flags = if shader.contains("const OMITNAN: bool = true") { 1u32 } else { 0u32 };
+        let chunks = ((reduce_len as u32) + workgroup_size - 1) / workgroup_size;
+        let partials_len = num_slices.max(1) * (chunks as usize);
+
+        // Pass 1 shader: each (slice, chunk) reduces up to workgroup_size elements
+        let pass1 = format!(
+            "struct Tensor {{ data: array<{st}>; }}\nstruct P1Params {{ nrows:u32,ncols:u32,ld:u32,flags:u32,chunks:u32 }}\n@group(0) @binding(0) var<storage,read> input0: Tensor;\n@group(0) @binding(1) var<storage,read_write> partials: Tensor;\n@group(0) @binding(2) var<uniform> params: P1Params;\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x; let chunk = wid.y;\n  if (slice >= params.ncols || chunk >= params.chunks) {{ return; }}\n  let start = chunk * {wg}; let end = min(params.nrows, start + {wg});\n  var acc: {st} = {zero};\n  var i = start + lid.x;\n  loop {{ if (i >= end) {{ break; }} let v = input0.data[(slice * params.ld) + i]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} i += {wg}; }}\n  var<workgroup> tile: array<f32,{wg}>; tile[lid.x] = acc; workgroupBarrier();\n  var off = {half}; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ partials.data[(slice * params.chunks) + chunk] = {cast}tile[0u]; }}\n}}",
+            st=scalar_ty, wg=workgroup_size, half=workgroup_size/2, zero=if scalar_ty=="f64" { "f64(0.0)" } else { "0.0" }, cast=if scalar_ty=="f64" { "f64(" } else { "" }
+        );
+
+        // Pass 2 shader: each slice reduces across chunks
+        let pass2 = format!(
+            "struct Tensor {{ data: array<{st}>; }}\nstruct P2Params {{ ncols:u32,chunks:u32,flags:u32 }}\n@group(0) @binding(0) var<storage,read> partials: Tensor;\n@group(0) @binding(1) var<storage,read_write> output: Tensor;\n@group(0) @binding(2) var<uniform> params: P2Params;\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x; if (slice >= params.ncols) {{ return; }}\n  var acc: {st} = {zero}; var c = lid.x;\n  loop {{ if (c >= params.chunks) {{ break; }} let v = partials.data[(slice * params.chunks) + c]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} c += {wg}; }}\n  var<workgroup> tile: array<f32,{wg}>; tile[lid.x] = acc; workgroupBarrier();\n  var off = {half}; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ output.data[slice] = {cast}tile[0u]; }}\n}}",
+            st=scalar_ty, wg=workgroup_size, half=workgroup_size/2, zero=if scalar_ty=="f64" { "f64(0.0)" } else { "0.0" }, cast=if scalar_ty=="f64" { "f64(" } else { "" }
+        );
+
+        // Create pipelines
+        let m1 = self.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("runmat-reduction-pass1"), source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(pass1)) });
+        let m2 = self.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("runmat-reduction-pass2"), source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(pass2)) });
+        let bgl1 = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("runmat-reduction-p1-bgl"), entries: &[storage_read_entry(0), storage_read_write_entry(1), uniform_entry(2)] });
+        let bgl2 = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("runmat-reduction-p2-bgl"), entries: &[storage_read_entry(0), storage_read_write_entry(1), uniform_entry(2)] });
+        let pl1 = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("runmat-reduction-p1-pl"), bind_group_layouts: &[&bgl1], push_constant_ranges: &[] });
+        let pl2 = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("runmat-reduction-p2-pl"), bind_group_layouts: &[&bgl2], push_constant_ranges: &[] });
+        let p1 = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("runmat-reduction-pass1"), layout: Some(&pl1), module: &m1, entry_point: "main", compilation_options: wgpu::PipelineCompilationOptions::default(), cache: None });
+        let p2 = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("runmat-reduction-pass2"), layout: Some(&pl2), module: &m2, entry_point: "main", compilation_options: wgpu::PipelineCompilationOptions::default(), cache: None });
+
         // Buffers
         let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
-        let out_len = num_slices.max(1);
-        let out_buffer =
-            self.create_storage_buffer(out_len * self.element_size, "runmat-reduction-out");
+        let partials_buffer = self.create_storage_buffer(partials_len, "runmat-reduction-partials");
+        let out_buffer = self.create_storage_buffer(num_slices.max(1), "runmat-reduction-out");
 
-        #[repr(C)]
-        #[derive(Clone, Copy)]
-        struct Params {
-            nrows: u32,
-            ncols: u32,
-            ld: u32,
-            flags: u32,
-        }
-        let nrows = reduce_len as u32;
-        let ncols = num_slices as u32;
-        let params = Params {
-            nrows,
-            ncols,
-            ld: nrows,
-            flags: 0,
-        };
-        let params_bytes = unsafe {
-            std::slice::from_raw_parts(
-                (&params as *const Params) as *const u8,
-                std::mem::size_of::<Params>(),
-            )
-        };
-        let params_buffer = Arc::new(self.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("runmat-reduction-params"),
-                contents: params_bytes,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            },
-        ));
+        // Uniforms
+        #[repr(C)] #[derive(Clone, Copy)] struct P1 { nrows:u32,ncols:u32,ld:u32,flags:u32,chunks:u32 }
+        #[repr(C)] #[derive(Clone, Copy)] struct P2 { ncols:u32,chunks:u32,flags:u32 }
+        let p1 = P1 { nrows: reduce_len as u32, ncols: num_slices as u32, ld: reduce_len as u32, flags, chunks };
+        let p2u = P2 { ncols: num_slices as u32, chunks, flags };
+        let p1_buf = Arc::new(self.uniform_buffer(&p1, "runmat-reduction-p1-params"));
+        let p2_buf = Arc::new(self.uniform_buffer(&p2u, "runmat-reduction-p2-params"));
 
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runmat-reduction-bg"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: input_buf.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: out_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_ref().as_entire_binding(),
-                },
-            ],
-        });
+        // Bind groups
+        let bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("runmat-reduction-p1-bg"), layout: &bgl1, entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: input_buf.as_ref().as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: partials_buffer.as_ref().as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: p1_buf.as_ref().as_entire_binding() },
+        ]});
+        let bg2 = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("runmat-reduction-p2-bg"), layout: &bgl2, entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: partials_buffer.as_ref().as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: out_buffer.as_ref().as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: p2_buf.as_ref().as_entire_binding() },
+        ]});
 
-        // Dispatch
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-reduction-encoder"),
-            });
+        // Dispatch two passes
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-reduction-2pass-encoder") });
         {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-reduction-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(ncols.max(1), 1, 1);
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("runmat-reduction-pass1"), timestamp_writes: None });
+            pass.set_pipeline(&p1);
+            pass.set_bind_group(0, &bg1, &[]);
+            pass.dispatch_workgroups((num_slices as u32).max(1), chunks.max(1), 1);
+        }
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("runmat-reduction-pass2"), timestamp_writes: None });
+            pass.set_pipeline(&p2);
+            pass.set_bind_group(0, &bg2, &[]);
+            pass.dispatch_workgroups((num_slices as u32).max(1), 1, 1);
         }
         self.submit(encoder);
 
-        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len))
+        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), num_slices.max(1)))
     }
 }
 

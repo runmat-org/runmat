@@ -39,7 +39,7 @@ tested:
   integration: "builtins::math::reduction::sum::tests::sum_gpu_provider_roundtrip"
 ---
 
-# MATLAB-Compatible `sum`
+# MATLAB / RunMat `sum` Function
 `sum(x)` adds together elements of scalars, vectors, matrices, and higher-dimensional tensors.
 When no dimension is supplied, the reduction runs along the first non-singleton dimension.
 
@@ -87,11 +87,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[ProviderHook::Reduction {
-        name: "reduce_sum_dim",
+            name: "reduce_sum_dim",
     }],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
+    two_pass_threshold: Some(256),
+    workgroup_size: Some(256),
+    accepts_nan_mode: true,
     notes:
         "Providers may specialise reduce_sum_dim / reduce_sum; omitnan falls back to the CPU path.",
 };
@@ -143,11 +146,19 @@ fn parse_arguments(args: &[Value]) -> Result<(Option<usize>, ReductionNaN), Stri
             }
         }
         2 => {
-            let dim = tensor::parse_dimension(&args[0], "sum")?;
-            if let Some(mode) = parse_nan_mode(&args[1])? {
+            // Accept either order: (dim, mode) or (mode, dim)
+            if let Some(mode) = parse_nan_mode(&args[0])? {
+                // (mode, dim)
+                let dim = tensor::parse_dimension(&args[1], "sum")?;
                 Ok((Some(dim), mode))
             } else {
-                Err("sum: expected 'omitnan' or 'includenan' as the third argument".to_string())
+                // (dim, mode)
+                let dim = tensor::parse_dimension(&args[0], "sum")?;
+                if let Some(mode) = parse_nan_mode(&args[1])? {
+                    Ok((Some(dim), mode))
+                } else {
+                    Err("sum: expected 'omitnan' or 'includenan' as the third argument".to_string())
+                }
             }
         }
         _ => Err("sum: unsupported arguments".to_string()),
@@ -210,6 +221,71 @@ fn sum_gpu(
                 }
             }
         }
+    } else if nan_mode == ReductionNaN::Omit {
+        // Device path via generic fused reduction with omitnan baked into the shader.
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            let axis = target_dim.saturating_sub(1);
+            if handle.shape.len() == 2 && axis <= 1 {
+                let rows = *handle.shape.get(0).unwrap_or(&1);
+                let cols = *handle.shape.get(1).unwrap_or(&1);
+                let (reduce_len, num_slices, axis_is_row) = if axis == 0 {
+                    (rows, cols, false)
+                } else {
+                    (cols, rows, true)
+                };
+                let output_shape = reduction_shape(&handle.shape, target_dim)
+                    .unwrap_or_else(|| vec![num_slices]);
+                let scalar_ty = match provider.precision() {
+                    runmat_accelerate_api::ProviderPrecision::F32 => "f32",
+                    runmat_accelerate_api::ProviderPrecision::F64 => "f64",
+                };
+                // Minimal WGSL with omitnan=true
+                let mut shader = String::new();
+                shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>; }}\n"));
+                shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
+                shader.push_str("@group(0) @binding(0) var<storage, read> input0: Tensor;\n");
+                shader.push_str("@group(0) @binding(1) var<storage, read_write> output: Tensor;\n");
+                shader.push_str("@group(0) @binding(2) var<uniform> params: MParams;\n\n");
+                shader.push_str("@compute @workgroup_size(256)\n");
+                if axis_is_row {
+                    // Row-wise: one output per row; reduce over columns
+                    shader.push_str(
+                        "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
+                    );
+                    shader.push_str("  let row = wid.x; if (row >= params.nrows) { return; }\n");
+                    shader.push_str(&format!("  var acc: {scalar_ty} = {}0.0;\n", if scalar_ty=="f64" { "f64(" } else { "" }));
+                    if scalar_ty=="f64" { shader.push_str("  // close f64 literal\n"); }
+                    shader.push_str("  var c = lid.x;\n  while (c < params.ncols) {\n    let v = input0.data[row + (c * params.ld)];\n    if (!isNan(v)) { acc = acc + v; }\n    c += 256u;\n  }\n");
+                } else {
+                    // Column-wise: one output per column; reduce over rows
+                    shader.push_str(
+                        "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
+                    );
+                    shader.push_str("  let col = wid.x; if (col >= params.ncols) { return; }\n");
+                    shader.push_str(&format!("  var acc: {scalar_ty} = {}0.0;\n", if scalar_ty=="f64" { "f64(" } else { "" }));
+                    if scalar_ty=="f64" { shader.push_str("  // close f64 literal\n"); }
+                    shader.push_str("  var r = lid.x;\n  while (r < params.nrows) {\n    let v = input0.data[(col * params.ld) + r];\n    if (!isNan(v)) { acc = acc + v; }\n    r += 256u;\n  }\n");
+                }
+                shader.push_str("  var<workgroup> tile: array<f32, 256u>;\n  tile[lid.x] = acc;\n  workgroupBarrier();\n");
+                shader.push_str("  var off = 128u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n");
+                if axis_is_row {
+                    shader.push_str("  if (lid.x == 0u) { output.data[row] = tile[0u]; }\n}\n");
+                } else {
+                    shader.push_str("  if (lid.x == 0u) { output.data[col] = tile[0u]; }\n}\n");
+                }
+
+                if let Ok(device_result) = provider.fused_reduction(
+                    &shader,
+                    std::slice::from_ref(&handle),
+                    &output_shape,
+                    reduce_len,
+                    num_slices,
+                    256,
+                ) {
+                    return Ok(Value::GpuTensor(device_result));
+                }
+            }
+        }
     }
 
     let gathered = gpu_helpers::gather_tensor(&handle)?;
@@ -243,7 +319,7 @@ fn reduce_tensor_dim(
             ReductionNaN::Omit => {
                 if value.is_nan() {
                     0.0
-                } else {
+    } else {
                     value
                 }
             }
@@ -305,10 +381,10 @@ fn reduce_tensor_dim(
                 ReductionNaN::Omit => {
                     if any_value {
                         sum
-                    } else {
-                        0.0
-                    }
-                }
+            } else {
+                0.0
+            }
+        }
             };
         }
     }

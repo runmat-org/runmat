@@ -101,8 +101,14 @@ pub struct BuiltinGpuSpec {
     pub provider_hooks: &'static [ProviderHook],
     pub constant_strategy: ConstantStrategy,
     pub residency: ResidencyPolicy,
-    // NaN handling mode for reductions; defaults to Include if omitted in existing builtins
+    // NaN handling mode for reductions (Include/Omit)
     pub nan_mode: ReductionNaN,
+    // Optional: prefer two-pass reduction when reduce_len > threshold
+    pub two_pass_threshold: Option<usize>,
+    // Optional: workgroup size hint for generated WGSL
+    pub workgroup_size: Option<u32>,
+    // Whether provider hook supports device-side omitnan
+    pub accepts_nan_mode: bool,
     pub notes: &'static str,
 }
 
@@ -123,6 +129,28 @@ register_builtin_fusion_spec!(FUSION_SPEC);
 - `register_builtin_*` macros submit the specs into inventory so Accelerate and the Function Manager can discover them.
 - Provider hooks map to methods exposed by `runmat-accelerate-api`. For reductions, add `ProviderHook::Reduction { name: "reduce_sum" }`.
 - `notes` must stay concise (one or two sentences) and focus on actionable implementation details: provider prerequisites, fallbacks, precision caveats, or residency expectations. Avoid repeating long-form documentation that already exists in `DOC_MD`.
+
+### Planner Constants and Fusion
+- Builtins should document any constants the planner will inline (e.g. `dim`, `'omitnan'`).
+- Use `constant_strategy: InlineLiteral` for small immediates; prefer uniform buffers for runtime switches across kernels.
+- Reductions must clearly define output shape for `dim=1` (column-wise) vs `dim=2` (row-wise), and behavior for dims > ndims.
+
+### Two-Pass Reductions
+- When `reduce_len` exceeds the workgroup size, providers should use a two-pass kernel:
+  - Pass 1: per-slice partial reductions (one workgroup per slice × chunks).
+  - Pass 2: reduce partials across chunks.
+- Builtins should set `two_pass_threshold` and optionally `workgroup_size` to guide generation.
+- NaN handling (`omitnan`/`includenan`) must be honored consistently across passes.
+
+### Testing and Benchmarks
+- Provide CPU vs GPU parity tests covering:
+  - dim=1 and dim=2; include/omitnan; empty and scalar edge cases.
+  - Fused producer → reduction (e.g., `sin(X).*X + 2` → `sum(..., dim)`).
+  - Large shapes to validate two-pass speedup; include warmup to amortize pipeline compile.
+
+### FunMatFunc Authoring Hints
+- Include a minimal checklist in each builtin for argument parsing, planner constants, GPU spec fields, fusion WGSL body, and examples.
+- Keep `DOC_MD` examples executable; prefer small, deterministic inputs for CI.
 
 ## BLAS / LAPACK Integration Points
 - BLAS/LAPACK-backed builtins live under `src/blas.rs` and `src/lapack.rs` guarded by `#[cfg(feature = "blas-lapack")]`.

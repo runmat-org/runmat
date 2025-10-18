@@ -2540,6 +2540,7 @@ fn log_builtin(x: f64) -> Result<f64, String> {
 
 // -------- Reductions: sum/prod/mean/any/all --------
 
+#[allow(dead_code)]
 fn tensor_sum_all(t: &runmat_builtins::Tensor) -> f64 {
     t.data.iter().sum()
 }
@@ -2626,6 +2627,7 @@ fn prod_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     Err("prod: unsupported arguments".to_string())
 }
 
+#[allow(dead_code)]
 fn mean_all_or_cols(a: Value) -> Result<Value, String> {
     match a {
         Value::GpuTensor(h) => {
@@ -2660,6 +2662,7 @@ fn mean_all_or_cols(a: Value) -> Result<Value, String> {
     }
 }
 
+#[allow(dead_code)]
 fn mean_dim(a: Value, dim: f64) -> Result<Value, String> {
     if let Value::GpuTensor(h) = a {
         if let Some(p) = runmat_accelerate_api::provider() {
@@ -2706,20 +2709,7 @@ fn mean_dim(a: Value, dim: f64) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "mean", accel = "reduction")]
-fn mean_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
-    if rest.is_empty() {
-        return mean_all_or_cols(a);
-    }
-    if rest.len() == 1 {
-        match &rest[0] {
-            Value::Num(d) => return mean_dim(a, *d),
-            Value::Int(i) => return mean_dim(a, i.to_i64() as f64),
-            _ => {}
-        }
-    }
-    Err("mean: unsupported arguments".to_string())
-}
+// legacy mean removed; new implementation lives under builtins/math/reduction/mean.rs
 
 fn any_all_or_cols(a: Value) -> Result<Value, String> {
     match a {

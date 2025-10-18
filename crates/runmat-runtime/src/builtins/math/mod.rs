@@ -1,2 +1,2 @@
-pub mod placeholder {}
 pub mod reduction;
+pub mod trigonometry;

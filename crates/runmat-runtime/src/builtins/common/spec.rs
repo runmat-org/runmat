@@ -110,6 +110,12 @@ pub struct BuiltinGpuSpec {
     pub constant_strategy: ConstantStrategy,
     pub residency: ResidencyPolicy,
     pub nan_mode: ReductionNaN,
+    /// If set, reductions with reduce_len greater than this should prefer a two-pass kernel.
+    pub two_pass_threshold: Option<usize>,
+    /// Optional workgroup size hint for generated kernels.
+    pub workgroup_size: Option<u32>,
+    /// Whether the provider hook (if used) supports device-side omitnan handling.
+    pub accepts_nan_mode: bool,
     pub notes: &'static str,
 }
 

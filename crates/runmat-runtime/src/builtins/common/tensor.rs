@@ -23,8 +23,7 @@ pub fn logical_to_tensor(logical: &LogicalArray) -> Result<Tensor, String> {
     Tensor::new(data, logical.shape.clone()).map_err(|e| format!("logical->tensor: {e}"))
 }
 
-/// Convert a `Value` into an owned `Tensor`.
-pub fn value_into_tensor(value: Value) -> Result<Tensor, String> {
+fn value_into_tensor_impl(name: &str, value: Value) -> Result<Tensor, String> {
     match value {
         Value::Tensor(t) => Ok(t),
         Value::LogicalArray(logical) => logical_to_tensor(&logical),
@@ -35,10 +34,20 @@ pub fn value_into_tensor(value: Value) -> Result<Tensor, String> {
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
             .map_err(|e| format!("tensor: {e}")),
         other => Err(format!(
-            "sum: unsupported input type {:?}; expected numeric or logical values",
+            "{name}: unsupported input type {:?}; expected numeric or logical values",
             other
         )),
     }
+}
+
+/// Convert a `Value` into an owned `Tensor`, defaulting error messages to `"sum"`.
+pub fn value_into_tensor(value: Value) -> Result<Tensor, String> {
+    value_into_tensor_impl("sum", value)
+}
+
+/// Convert a `Value` into a tensor while customising the builtin name in error messages.
+pub fn value_into_tensor_for(name: &str, value: Value) -> Result<Tensor, String> {
+    value_into_tensor_impl(name, value)
 }
 
 /// Clone a `Value` and coerce it into a tensor.
