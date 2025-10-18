@@ -5,5 +5,4 @@
 pub use crate::arrays::*;
 
 mod ones;
-mod rand;
 mod zeros;
