@@ -71,78 +71,6 @@ fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Tensor, String> {
     Tensor::new_2d(data, 1, n_usize)
 }
 
-/// Generate zeros tensor with arbitrary dimensions
-/// zeros(d1, d2, ..., dk) creates a k-D tensor of zeros
-#[runtime_builtin(
-    name = "zeros",
-    category = "array/creation",
-    summary = "Array of all zeros.",
-    examples = "A = zeros(2,3)",
-    keywords = "zeros,allocate,create",
-    related = "ones,eye"
-)]
-fn zeros_var_builtin(rest: Vec<Value>) -> Result<Tensor, String> {
-    if rest.is_empty() {
-        return Err("zeros: expected at least 1 dimension".to_string());
-    }
-    let mut dims: Vec<usize> = Vec::with_capacity(rest.len());
-    for v in &rest {
-        let n: f64 = v.try_into()?;
-        if n < 0.0 {
-            return Err("Matrix dimensions must be non-negative".to_string());
-        }
-        dims.push(n as usize);
-    }
-    // Semantics: zeros(n) -> n x n (2-D). For >1 args, use them as provided.
-    if dims.len() == 1 {
-        dims = vec![dims[0], dims[0]];
-    }
-    Ok(Tensor::zeros(dims))
-}
-
-#[cfg(test)]
-fn zeros_builtin(m: i32, n: i32) -> Result<Tensor, String> {
-    if m < 0 || n < 0 {
-        return Err("Matrix dimensions must be non-negative".to_string());
-    }
-    Ok(Tensor::zeros(vec![m as usize, n as usize]))
-}
-
-/// Generate ones tensor with arbitrary dimensions
-#[runtime_builtin(
-    name = "ones",
-    category = "array/creation",
-    summary = "Array of all ones.",
-    examples = "B = ones(3)",
-    keywords = "ones,allocate,create",
-    related = "zeros,eye"
-)]
-fn ones_var_builtin(rest: Vec<Value>) -> Result<Tensor, String> {
-    if rest.is_empty() {
-        return Err("ones: expected at least 1 dimension".to_string());
-    }
-    let mut dims: Vec<usize> = Vec::with_capacity(rest.len());
-    for v in &rest {
-        let n: f64 = v.try_into()?;
-        if n < 0.0 {
-            return Err("Matrix dimensions must be non-negative".to_string());
-        }
-        dims.push(n as usize);
-    }
-    if dims.len() == 1 {
-        dims = vec![dims[0], dims[0]];
-    }
-    Ok(Tensor::ones(dims))
-}
-
-#[cfg(test)]
-fn ones_builtin(m: i32, n: i32) -> Result<Tensor, String> {
-    if m < 0 || n < 0 {
-        return Err("Matrix dimensions must be non-negative".to_string());
-    }
-    Ok(Tensor::ones(vec![m as usize, n as usize]))
-}
-
 /// Generate identity matrix
 /// eye(n) creates an n×n identity matrix
 #[runtime_builtin(
@@ -165,34 +93,6 @@ fn eye_builtin(n: i32) -> Result<Tensor, String> {
     }
 
     Tensor::new_2d(data, n_usize, n_usize)
-}
-
-/// Generate random matrix with uniform distribution [0,1)
-/// rand(m, n) creates an m×n matrix of random numbers
-#[runtime_builtin(name = "rand")]
-fn rand_builtin(m: i32, n: i32) -> Result<Tensor, String> {
-    if m < 0 || n < 0 {
-        return Err("Matrix dimensions must be non-negative".to_string());
-    }
-
-    let rows = m as usize;
-    let cols = n as usize;
-    let total_elements = rows * cols;
-
-    // Use a simple linear congruential generator for reproducible results
-    // This is not cryptographically secure but suitable for basic mathematical operations
-    static mut SEED: u64 = 1;
-    let mut data = Vec::with_capacity(total_elements);
-
-    unsafe {
-        for _ in 0..total_elements {
-            SEED = SEED.wrapping_mul(1103515245).wrapping_add(12345);
-            let random_val = ((SEED >> 16) & 0x7fff) as f64 / 32768.0;
-            data.push(random_val);
-        }
-    }
-
-    Tensor::new_2d(data, rows, cols)
 }
 
 /// Generate matrix filled with specific value
@@ -386,22 +286,6 @@ mod tests {
     }
 
     #[test]
-    fn test_zeros() {
-        let result = zeros_builtin(2, 3).unwrap();
-        assert_eq!(result.rows, 2);
-        assert_eq!(result.cols, 3);
-        assert!(result.data.iter().all(|&x| x == 0.0));
-    }
-
-    #[test]
-    fn test_ones() {
-        let result = ones_builtin(2, 2).unwrap();
-        assert_eq!(result.rows, 2);
-        assert_eq!(result.cols, 2);
-        assert!(result.data.iter().all(|&x| x == 1.0));
-    }
-
-    #[test]
     fn test_eye() {
         let result = eye_builtin(3).unwrap();
         assert_eq!(result.rows, 3);
@@ -441,19 +325,8 @@ mod tests {
     }
 
     #[test]
-    fn test_rand_dimensions() {
-        let result = rand_builtin(3, 4).unwrap();
-        assert_eq!(result.rows, 3);
-        assert_eq!(result.cols, 4);
-        assert_eq!(result.data.len(), 12);
-        // Check that values are in [0, 1)
-        assert!(result.data.iter().all(|&x| (0.0..1.0).contains(&x)));
-    }
-
-    #[test]
     fn test_error_cases() {
         assert!(linspace_builtin(0.0, 1.0, -1).is_err());
-        assert!(zeros_builtin(-1, 5).is_err());
         assert!(eye_builtin(-1).is_err());
         assert!(range_builtin(1.0, 0.0, 5.0).is_err());
     }

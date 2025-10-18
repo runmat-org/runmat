@@ -89,6 +89,14 @@ crates/runmat-runtime/
   - `runmatfunc list`
 - Documentation export writes `docs/generated/builtins.json` and `docs/generated/builtins.d.ts` for the Next.js site.
 
+## Accelerate Provider Integration
+- Complete the accelerate API and implement the provider hooks for the builtins if needed.
+- The provider hooks are located in `crates/runmat-accelerate-api/src/lib.rs`.
+- The fallback (simple provider) is located in `crates/runmat-accelerate/src/simple_provider.rs`.
+- The WGPU provider is located in `crates/runmat-accelerate/src/wgpu_backend.rs`.
+- Ensure that the provider hooks are implemented for the builtins that need them.
+- The goal is to have a fully functional GPU implementation of the builtins, with the ability to run on the GPU if the provider is registered.
+
 ## Legacy Module Cleanup
 - Legacy modules are located in `crates/runmat-runtime/src/builtins/*.rs` (e.g. not in a subdirectory).
 - Once you are finished authoring a module, search the legacy modules for any legacy implementations of the function and remove them, and clean up any references to them in the codebase.

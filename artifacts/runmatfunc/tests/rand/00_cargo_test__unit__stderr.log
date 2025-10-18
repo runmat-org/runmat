@@ -1,0 +1,31 @@
+   Compiling runmat-accelerate-api v0.0.3 (/Users/nallana/Source/runmat-acc/crates/runmat-accelerate-api)
+   Compiling runmat-runtime v0.0.3 (/Users/nallana/Source/runmat-acc/crates/runmat-runtime)
+   Compiling runmat-builtins v0.0.3 (/Users/nallana/Source/runmat-acc/crates/runmat-builtins)
+   Compiling runmat-gc v0.0.3 (/Users/nallana/Source/runmat-acc/crates/runmat-gc)
+   Compiling runmat-hir v1.0.0 (/Users/nallana/Source/runmat-acc/crates/runmat-hir)
+   Compiling runmat-macros v0.0.3 (/Users/nallana/Source/runmat-acc/crates/runmat-macros)
+   Compiling runmat-plot v0.0.3 (/Users/nallana/Source/runmat-acc/crates/runmat-plot)
+error: unreachable pattern
+   --> crates/runmat-runtime/src/builtins/array/rand.rs:258:9
+    |
+258 |         _ => rand_double(shape),
+    |         ^ no value can reach this
+    |
+note: multiple earlier patterns match some of the same values
+   --> crates/runmat-runtime/src/builtins/array/rand.rs:258:9
+    |
+241 |         Value::GpuTensor(handle) => rand_like_gpu(handle, shape),
+    |         ------------------------ matches some of the same values
+242 |         Value::ComplexTensor(_) | Value::Complex(_, _) => rand_complex(shape),
+    |         ---------------------------------------------- matches some of the same values
+243 |         Value::Tensor(_) | Value::Num(_) | Value::Int(_) => rand_double(shape),
+    |         ------------------------------------------------ matches some of the same values
+244 |         Value::LogicalArray(_) | Value::Bool(_) | Value::CharArray(_) => rand_double(shape),
+    |         ------------------------------------------------------------- matches some of the same values
+...
+258 |         _ => rand_double(shape),
+    |         ^ ...and 1 other patterns collectively make this unreachable
+    = note: `-D unreachable-patterns` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(unreachable_patterns)]`
+
+error: could not compile `runmat-runtime` (lib) due to 1 previous error

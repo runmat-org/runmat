@@ -13,6 +13,22 @@ fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn rng_state() -> &'static Mutex<u64> {
+    static RNG: OnceCell<Mutex<u64>> = OnceCell::new();
+    RNG.get_or_init(|| Mutex::new(0x9e3779b97f4a7c15))
+}
+
+fn next_uniform(state: &mut u64) -> f64 {
+    const MULTIPLIER: u64 = 6364136223846793005;
+    const INCREMENT: u64 = 1;
+    const SHIFT: u32 = 11;
+    const SCALE: f64 = 1.0 / ((1u64 << 53) as f64);
+
+    *state = state.wrapping_mul(MULTIPLIER).wrapping_add(INCREMENT);
+    let bits = *state >> SHIFT;
+    (bits as f64) * SCALE
+}
+
 pub struct InProcessProvider {
     next_id: AtomicU64,
 }
@@ -77,6 +93,58 @@ impl AccelProvider for InProcessProvider {
             memory_bytes: None,
             backend: Some("inprocess".to_string()),
         }
+    }
+
+    fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let len: usize = shape.iter().copied().product();
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard = registry().lock().unwrap();
+        guard.insert(id, vec![0.0; len]);
+        Ok(GpuTensorHandle {
+            shape: shape.to_vec(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn zeros_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.zeros(&prototype.shape)
+    }
+
+    fn ones(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let len: usize = shape.iter().copied().product();
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard = registry().lock().unwrap();
+        guard.insert(id, vec![1.0; len]);
+        Ok(GpuTensorHandle {
+            shape: shape.to_vec(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn ones_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.ones(&prototype.shape)
+    }
+
+    fn random_uniform(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let len: usize = shape.iter().copied().product();
+        let mut data = vec![0.0; len];
+        {
+            let mut guard = rng_state().lock().unwrap();
+            for slot in &mut data {
+                *slot = next_uniform(&mut *guard);
+            }
+        }
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut buf_guard = registry().lock().unwrap();
+        buf_guard.insert(id, data);
+        Ok(GpuTensorHandle {
+            shape: shape.to_vec(),
+            device_id: 0,
+            buffer_id: id,
+        })
     }
 
     fn elem_add(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {

@@ -70,6 +70,36 @@ pub trait AccelProvider: Send + Sync {
         ProviderPrecision::F64
     }
 
+    /// Allocate a zero-initialised tensor with the provided shape on the device.
+    fn zeros(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("zeros not supported by provider"))
+    }
+
+    /// Allocate a one-initialised tensor with the provided shape on the device.
+    fn ones(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("ones not supported by provider"))
+    }
+
+    /// Allocate a zero-initialised tensor matching the prototype tensor.
+    fn zeros_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        self.zeros(&prototype.shape)
+    }
+
+    /// Allocate a one-initialised tensor matching the prototype tensor.
+    fn ones_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        self.ones(&prototype.shape)
+    }
+
+    /// Allocate a tensor filled with random values drawn from U(0, 1).
+    fn random_uniform(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("random_uniform not supported by provider"))
+    }
+
+    /// Allocate a tensor filled with random values matching the prototype shape.
+    fn random_uniform_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        self.random_uniform(&prototype.shape)
+    }
+
     // Optional operator hooks (default to unsupported)
     fn elem_add(
         &self,

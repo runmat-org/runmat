@@ -1,0 +1,14 @@
+
+running 9 tests
+test builtins::array::zeros::tests::zeros_from_size_vector ... ok
+test builtins::array::zeros::tests::zeros_rectangular_from_dims ... ok
+test builtins::array::zeros::tests::zeros_square_from_single_dimension ... ok
+test builtins::array::zeros::tests::zeros_like_tensor_infers_shape ... ok
+test builtins::array::zeros::tests::zeros_like_complex_scalar ... ok
+test builtins::array::zeros::tests::zeros_default_scalar ... ok
+test builtins::array::zeros::tests::zeros_logical_output ... ok
+test builtins::array::zeros::tests::doc_examples_present ... ok
+test builtins::array::zeros::tests::zeros_gpu_like_alloc ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 58 filtered out; finished in 0.01s
+

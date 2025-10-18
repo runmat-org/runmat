@@ -13,6 +13,12 @@ pub fn zeros(shape: &[usize]) -> Result<Tensor, String> {
         .map_err(|e| format!("tensor zeros: {e}"))
 }
 
+/// Construct an one-filled tensor with the provided shape.
+pub fn ones(shape: &[usize]) -> Result<Tensor, String> {
+    Tensor::new(vec![1.0; element_count(shape)], shape.to_vec())
+        .map_err(|e| format!("tensor ones: {e}"))
+}
+
 /// Convert a logical array (0/1 bytes) into a numeric tensor.
 pub fn logical_to_tensor(logical: &LogicalArray) -> Result<Tensor, String> {
     let data: Vec<f64> = logical
