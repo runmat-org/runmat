@@ -288,16 +288,18 @@ impl AppContext {
         builtin: &str,
         model: Option<String>,
         use_codex: bool,
+        category: Option<String>,
     ) -> Result<()> {
-        let entry = job_queue::QueueEntry::new(builtin.to_string(), model.clone(), use_codex);
+        let entry = job_queue::QueueEntry::new(builtin.to_string(), category.clone(), model.clone(), use_codex);
         let queue = job_queue::add_entry(&self.config, entry)?;
         let model_label = model
             .as_deref()
             .or_else(|| self.config.default_model.as_deref())
             .unwrap_or("default");
         println!(
-            "[runmatfunc] queued '{}' (model: {}, codex: {}) — total jobs: {}",
+            "[runmatfunc] queued '{}' (category: {}, model: {}, codex: {}) — total jobs: {}",
             builtin,
+            category.as_deref().unwrap_or(""),
             model_label,
             use_codex,
             queue.len()

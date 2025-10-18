@@ -29,9 +29,10 @@ pub fn handle_command(ctx: &mut AppContext, args: &CliArgs) -> Result<()> {
         Some(Command::Queue { action }) => match action {
             QueueAction::Add {
                 builtin,
+                category,
                 model,
                 codex,
-            } => ctx.queue_add(builtin, model.clone(), *codex),
+            } => ctx.queue_add(builtin, model.clone(), *codex, category.clone()),
             QueueAction::List => ctx.queue_list(),
             QueueAction::Run { max } => ctx.queue_run(*max),
             QueueAction::Clear => ctx.queue_clear(),

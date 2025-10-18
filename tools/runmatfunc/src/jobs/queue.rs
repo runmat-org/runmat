@@ -11,6 +11,8 @@ use crate::app::config::AppConfig;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueEntry {
     pub builtin: String,
+    #[serde(default)]
+    pub category: Option<String>,
     pub model: Option<String>,
     #[serde(default)]
     pub use_codex: bool,
@@ -18,9 +20,10 @@ pub struct QueueEntry {
 }
 
 impl QueueEntry {
-    pub fn new(builtin: String, model: Option<String>, use_codex: bool) -> Self {
+    pub fn new(builtin: String, category: Option<String>, model: Option<String>, use_codex: bool) -> Self {
         Self {
             builtin,
+            category,
             model,
             use_codex,
             enqueued_at: Utc::now().to_rfc3339(),

@@ -71,6 +71,9 @@ pub enum QueueAction {
     /// Add a builtin to the queue
     Add {
         builtin: String,
+        /// Optional category path like "array" or "math/reduction"
+        #[arg(long)]
+        category: Option<String>,
         #[arg(long)]
         model: Option<String>,
         #[arg(long)]

@@ -19,10 +19,11 @@ pub struct HeadlessRunResult {
 pub fn run_builtin_headless(
     config: &AppConfig,
     builtin: &str,
+    category: Option<String>,
     model: Option<String>,
     use_codex: bool,
 ) -> Result<HeadlessRunResult> {
-    let authoring_ctx = gather::build_authoring_context(builtin, None, config)?;
+    let authoring_ctx = gather::build_authoring_context(builtin, category.as_deref(), config)?;
     let resolved_model = model.clone().or_else(|| config.default_model.clone());
 
     let codex_available = client::is_available();

@@ -6,9 +6,11 @@ use crate::context::reference;
 
 const IMPLEMENTATION_NOTES: &[&str] = &[
     "Create a dedicated builtin module (DOC_MD, GPU/Fusion specs, runtime registration, helper routines, tests).",
-    "Mirror RunMat semantics exactly; raise MATLAB-compatible errors and keep GPU fallbacks in sync with host code.",
+    "Mirror function semantics exactly to MATLAB, as this is a MATLAB compatible runtime; ",
+    "raise MATLAB-compatible errors and keep GPU fallbacks in sync with host code.",
     "Share helpers via builtins/common rather than referencing legacy modules.",
-    "Document GPU fallbacks and TODOs inline if provider hooks are incomplete.",
+    "Document GPU fallbacks and complete any provider hooks that are incomplete that are needed ",
+    "for the function to work correctly and completely on the GPU.",
 ];
 
 const TESTING_EXPECTATIONS: &[&str] = &[

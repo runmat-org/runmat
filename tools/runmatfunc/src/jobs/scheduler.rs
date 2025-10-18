@@ -57,5 +57,11 @@ pub fn run_queue(
 }
 
 fn run_entry(config: &AppConfig, entry: &QueueEntry) -> Result<HeadlessRunResult> {
-    headless::run_builtin_headless(config, &entry.builtin, entry.model.clone(), entry.use_codex)
+    headless::run_builtin_headless(
+        config,
+        &entry.builtin,
+        entry.category.clone(),
+        entry.model.clone(),
+        entry.use_codex,
+    )
 }
