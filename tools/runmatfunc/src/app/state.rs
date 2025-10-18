@@ -290,7 +290,12 @@ impl AppContext {
         use_codex: bool,
         category: Option<String>,
     ) -> Result<()> {
-        let entry = job_queue::QueueEntry::new(builtin.to_string(), category.clone(), model.clone(), use_codex);
+        let entry = job_queue::QueueEntry::new(
+            builtin.to_string(),
+            category.clone(),
+            model.clone(),
+            use_codex,
+        );
         let queue = job_queue::add_entry(&self.config, entry)?;
         let model_label = model
             .as_deref()

@@ -20,7 +20,12 @@ pub struct QueueEntry {
 }
 
 impl QueueEntry {
-    pub fn new(builtin: String, category: Option<String>, model: Option<String>, use_codex: bool) -> Self {
+    pub fn new(
+        builtin: String,
+        category: Option<String>,
+        model: Option<String>,
+        use_codex: bool,
+    ) -> Self {
         Self {
             builtin,
             category,

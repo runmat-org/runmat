@@ -96,8 +96,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[
-        ProviderHook::Reduction { name: "reduce_mean_dim" },
-        ProviderHook::Reduction { name: "reduce_mean" },
+        ProviderHook::Reduction {
+            name: "reduce_mean_dim",
+        },
+        ProviderHook::Reduction {
+            name: "reduce_mean",
+        },
     ],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,

@@ -8,8 +8,8 @@ use runmat_accelerate_api::{
 use runmat_builtins::Value;
 use runmat_gc::gc_test_context;
 use runmat_hir::lower;
-use runmat_ignition::{compile, interpret, Instr};
 use runmat_ignition::vm::interpret_function;
+use runmat_ignition::{compile, interpret, Instr};
 use runmat_parser::parse;
 use runmat_runtime::gather_if_needed;
 use std::collections::HashMap;
@@ -527,7 +527,10 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
             let x_index = bytecode
                 .instructions
                 .iter()
-                .filter_map(|instr| match instr { Instr::StoreVar(idx) => Some(*idx), _ => None })
+                .filter_map(|instr| match instr {
+                    Instr::StoreVar(idx) => Some(*idx),
+                    _ => None,
+                })
                 .next()
                 .unwrap_or(0);
             let tensor = runmat_builtins::Tensor::new(data, vec![rows, cols]).unwrap();
@@ -541,7 +544,10 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
             let s_index = bytecode
                 .instructions
                 .iter()
-                .filter_map(|instr| match instr { Instr::StoreVar(i) => Some(*i), _ => None })
+                .filter_map(|instr| match instr {
+                    Instr::StoreVar(i) => Some(*i),
+                    _ => None,
+                })
                 .last()
                 .expect("store var for S");
             let s_value_cpu = vars_cpu.get(s_index).expect("value for S (cpu)");
@@ -550,7 +556,11 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                 Value::Tensor(t) => t,
                 other => panic!("expected tensor S (cpu), got {other:?}"),
             };
-            assert_eq!(out_cpu.data.len(), rows, "CPU output elements should equal rows");
+            assert_eq!(
+                out_cpu.data.len(),
+                rows,
+                "CPU output elements should equal rows"
+            );
 
             // GPU path: register provider and run again
             ensure_provider_registered();
@@ -562,21 +572,34 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
             let out_gpu = {
                 let s_value_gpu = vars_gpu.get(s_index).expect("value for S (gpu)");
                 let gathered = gather_if_needed(s_value_gpu).expect("gather gpu");
-                let pick_alt = match &gathered { Value::Tensor(t) => t.data.len() != rows, _ => true };
+                let pick_alt = match &gathered {
+                    Value::Tensor(t) => t.data.len() != rows,
+                    _ => true,
+                };
                 if !pick_alt {
-                    match gathered { Value::Tensor(t) => t, _ => unreachable!() }
+                    match gathered {
+                        Value::Tensor(t) => t,
+                        _ => unreachable!(),
+                    }
                 } else {
                     // Fallback: search all variables for a tensor of length==rows
                     let mut found: Option<runmat_builtins::Tensor> = None;
                     for v in &vars_gpu {
                         if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
-                            if t.data.len() == rows { found = Some(t); break; }
+                            if t.data.len() == rows {
+                                found = Some(t);
+                                break;
+                            }
                         }
                     }
                     found.expect("expected to find reduced tensor of length rows")
                 }
             };
-            assert_eq!(out_gpu.data.len(), rows, "GPU output elements should equal rows");
+            assert_eq!(
+                out_gpu.data.len(),
+                rows,
+                "GPU output elements should equal rows"
+            );
 
             // Log basic perf info
             eprintln!(
@@ -623,7 +646,9 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         // Helper to run with/without GPU
         let run_with = |use_gpu: bool| -> Vec<Value> {
             let vars = vec![Value::Num(0.0); bytecode.var_count];
-            if use_gpu { ensure_provider_registered(); }
+            if use_gpu {
+                ensure_provider_registered();
+            }
             interpret_function(&bytecode, vars).expect("interpret")
         };
 
@@ -639,7 +664,10 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         let mut stores: Vec<usize> = bytecode
             .instructions
             .iter()
-            .filter_map(|instr| match instr { Instr::StoreVar(idx) => Some(*idx), _ => None })
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
             .collect();
         assert!(stores.len() >= 2);
         let so_idx = stores.pop().unwrap();
@@ -649,7 +677,10 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
             match value {
                 Value::GpuTensor(_handle) => {
                     let v = gather_if_needed(value).unwrap();
-                    match v { Value::Tensor(t) => t.data, _ => panic!("expected tensor") }
+                    match v {
+                        Value::Tensor(t) => t.data,
+                        _ => panic!("expected tensor"),
+                    }
                 }
                 Value::Tensor(t) => t.data.clone(),
                 _ => panic!("expected tensor"),
@@ -662,7 +693,11 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         assert_eq!(si_cpu.len(), rows);
         assert_eq!(si_gpu.len(), rows);
         for (a, b) in si_cpu.iter().zip(si_gpu.iter()) {
-            if a.is_nan() || b.is_nan() { assert!(a.is_nan() && b.is_nan()); } else { assert!((a - b).abs() < 1e-9); }
+            if a.is_nan() || b.is_nan() {
+                assert!(a.is_nan() && b.is_nan());
+            } else {
+                assert!((a - b).abs() < 1e-9);
+            }
         }
 
         let so_cpu = gather_numvec(cpu.get(so_idx).unwrap());
@@ -704,7 +739,9 @@ fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
 
         let run_with = |use_gpu: bool| -> Vec<Value> {
             let vars = vec![Value::Num(0.0); bytecode.var_count];
-            if use_gpu { ensure_provider_registered(); }
+            if use_gpu {
+                ensure_provider_registered();
+            }
             interpret_function(&bytecode, vars).expect("interpret")
         };
 
@@ -719,7 +756,10 @@ fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
         let mut stores: Vec<usize> = bytecode
             .instructions
             .iter()
-            .filter_map(|instr| match instr { Instr::StoreVar(idx) => Some(*idx), _ => None })
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
             .collect();
         assert!(stores.len() >= 4);
         let so2 = stores.pop().unwrap();
@@ -729,7 +769,10 @@ fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
 
         let gather_vec = |v: &Value| -> Vec<f64> {
             match v {
-                Value::GpuTensor(_) => match gather_if_needed(v).unwrap() { Value::Tensor(t) => t.data, _ => panic!("expected tensor") },
+                Value::GpuTensor(_) => match gather_if_needed(v).unwrap() {
+                    Value::Tensor(t) => t.data,
+                    _ => panic!("expected tensor"),
+                },
                 Value::Tensor(t) => t.data.clone(),
                 _ => panic!("expected tensor"),
             }
@@ -740,26 +783,42 @@ fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
         let si1_gpu = gather_vec(gpu.get(si1).unwrap());
         assert_eq!(si1_cpu.len(), cols);
         assert_eq!(si1_gpu.len(), cols);
-        for (a,b) in si1_cpu.iter().zip(si1_gpu.iter()) { if a.is_nan() || b.is_nan() { assert!(a.is_nan() && b.is_nan()); } else { assert!((a-b).abs() < 1e-9); } }
+        for (a, b) in si1_cpu.iter().zip(si1_gpu.iter()) {
+            if a.is_nan() || b.is_nan() {
+                assert!(a.is_nan() && b.is_nan());
+            } else {
+                assert!((a - b).abs() < 1e-9);
+            }
+        }
 
         let si2_cpu = gather_vec(cpu.get(si2).unwrap());
         let si2_gpu = gather_vec(gpu.get(si2).unwrap());
         assert_eq!(si2_cpu.len(), rows);
         assert_eq!(si2_gpu.len(), rows);
-        for (a,b) in si2_cpu.iter().zip(si2_gpu.iter()) { if a.is_nan() || b.is_nan() { assert!(a.is_nan() && b.is_nan()); } else { assert!((a-b).abs() < 1e-9); } }
+        for (a, b) in si2_cpu.iter().zip(si2_gpu.iter()) {
+            if a.is_nan() || b.is_nan() {
+                assert!(a.is_nan() && b.is_nan());
+            } else {
+                assert!((a - b).abs() < 1e-9);
+            }
+        }
 
         // Omit-nan compare
         let so1_cpu = gather_vec(cpu.get(so1).unwrap());
         let so1_gpu = gather_vec(gpu.get(so1).unwrap());
         assert_eq!(so1_cpu.len(), cols);
         assert_eq!(so1_gpu.len(), cols);
-        for (a,b) in so1_cpu.iter().zip(so1_gpu.iter()) { assert!((a-b).abs() < 1e-9); }
+        for (a, b) in so1_cpu.iter().zip(so1_gpu.iter()) {
+            assert!((a - b).abs() < 1e-9);
+        }
 
         let so2_cpu = gather_vec(cpu.get(so2).unwrap());
         let so2_gpu = gather_vec(gpu.get(so2).unwrap());
         assert_eq!(so2_cpu.len(), rows);
         assert_eq!(so2_gpu.len(), rows);
-        for (a,b) in so2_cpu.iter().zip(so2_gpu.iter()) { assert!((a-b).abs() < 1e-9); }
+        for (a, b) in so2_cpu.iter().zip(so2_gpu.iter()) {
+            assert!((a - b).abs() < 1e-9);
+        }
     });
 }
 #[allow(dead_code)]

@@ -11,7 +11,9 @@ use runmat_accelerate::{
     set_current_pc,
 };
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::{active_group_plan_clone, ValueOrigin, VarKind, ShapeInfo, FusionOp as AccelFusionOp};
+use runmat_accelerate::{
+    active_group_plan_clone, FusionOp as AccelFusionOp, ShapeInfo, ValueOrigin, VarKind,
+};
 use runmat_builtins::{Type, Value};
 use runmat_runtime::call_builtin;
 use std::cell::RefCell;
@@ -7723,12 +7725,13 @@ fn try_execute_fusion_group(
                     _ => {}
                 }
             }
-            let data_value_id: Option<runmat_accelerate::graph::ValueId> = plan
-                .operations
-                .iter()
-                .find_map(|op| match op {
+            let data_value_id: Option<runmat_accelerate::graph::ValueId> =
+                plan.operations.iter().find_map(|op| match op {
                     AccelFusionOp::Builtin { name, inputs, .. }
-                        if name == "sum" || name == "mean" => inputs.get(0).copied(),
+                        if name == "sum" || name == "mean" =>
+                    {
+                        inputs.get(0).copied()
+                    }
                     _ => None,
                 });
 
@@ -7870,8 +7873,15 @@ fn try_execute_fusion_group(
             }
 
             let (r, c) = rows_cols.unwrap_or((1, 1));
-            eprintln!("[vm reduction] derived rows={} cols={} for axis {}", r, c, axis);
-            if axis == 0 { (r, c) } else { (c, r) }
+            eprintln!(
+                "[vm reduction] derived rows={} cols={} for axis {}",
+                r, c, axis
+            );
+            if axis == 0 {
+                (r, c)
+            } else {
+                (c, r)
+            }
         };
         eprintln!(
             "[vm reduction] axis={} reduce_len={} num_slices={} constants={:?}",
@@ -7880,25 +7890,33 @@ fn try_execute_fusion_group(
         // If shape derivation failed (1x1) but inputs/consumed suggest a larger tensor, skip fusion
         let looks_wrong = reduce_len == 1 && num_slices == 1 && {
             let mut big = false;
-            let mut check_val = |v: &Value| {
-                match v {
-                    Value::GpuTensor(h) => {
-                        let prod = h.shape.iter().copied().product::<usize>();
-                        if prod > 1 { big = true; }
+            let mut check_val = |v: &Value| match v {
+                Value::GpuTensor(h) => {
+                    let prod = h.shape.iter().copied().product::<usize>();
+                    if prod > 1 {
+                        big = true;
                     }
-                    Value::Tensor(t) => {
-                        let prod = t.shape.iter().copied().product::<usize>();
-                        if prod > 1 { big = true; }
-                    }
-                    _ => {}
                 }
+                Value::Tensor(t) => {
+                    let prod = t.shape.iter().copied().product::<usize>();
+                    if prod > 1 {
+                        big = true;
+                    }
+                }
+                _ => {}
             };
-            for v in &consumed { check_val(v); }
-            for v in &request.inputs { check_val(v); }
+            for v in &consumed {
+                check_val(v);
+            }
+            for v in &request.inputs {
+                check_val(v);
+            }
             big
         };
         if looks_wrong {
-            for value in consumed.into_iter().rev() { stack.push(value); }
+            for value in consumed.into_iter().rev() {
+                stack.push(value);
+            }
             return Err("fusion: reduction shape unresolved".to_string());
         }
 

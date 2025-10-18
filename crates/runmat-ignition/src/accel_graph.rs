@@ -337,7 +337,6 @@ impl<'a> GraphBuilder<'a> {
         self.stack.push(out_value);
     }
 
-
     fn push_constant(&mut self, ty: Type, constant: Option<Value>) {
         let id = self.new_value(ValueOrigin::Constant, ty, constant);
         self.stack.push(id);

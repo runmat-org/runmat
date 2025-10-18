@@ -119,12 +119,13 @@ register_builtin_fusion_spec!(FUSION_SPEC);
 fn sin_builtin(value: Value) -> Result<Value, String> {
     match value {
         Value::GpuTensor(handle) => sin_gpu(handle),
-        Value::Complex(re, im) => Ok(Value::Complex(sin_complex_re(re, im), sin_complex_im(re, im))),
+        Value::Complex(re, im) => Ok(Value::Complex(
+            sin_complex_re(re, im),
+            sin_complex_im(re, im),
+        )),
         Value::ComplexTensor(ct) => sin_complex_tensor(ct),
         Value::CharArray(ca) => sin_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err("sin: expected numeric input".to_string())
-        }
+        Value::String(_) | Value::StringArray(_) => Err("sin: expected numeric input".to_string()),
         other => sin_real(other),
     }
 }
@@ -155,8 +156,7 @@ fn sin_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
         .iter()
         .map(|&(re, im)| (sin_complex_re(re, im), sin_complex_im(re, im)))
         .collect::<Vec<_>>();
-    let tensor =
-        ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("sin: {e}"))?;
+    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("sin: {e}"))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -166,8 +166,7 @@ fn sin_char_array(ca: CharArray) -> Result<Value, String> {
         .iter()
         .map(|&ch| (ch as u32 as f64).sin())
         .collect::<Vec<_>>();
-    let tensor =
-        Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("sin: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("sin: {e}"))?;
     Ok(Value::Tensor(tensor))
 }
 

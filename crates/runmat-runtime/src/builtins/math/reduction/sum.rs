@@ -87,7 +87,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[ProviderHook::Reduction {
-            name: "reduce_sum_dim",
+        name: "reduce_sum_dim",
     }],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
@@ -233,8 +233,8 @@ fn sum_gpu(
                 } else {
                     (cols, rows, true)
                 };
-                let output_shape = reduction_shape(&handle.shape, target_dim)
-                    .unwrap_or_else(|| vec![num_slices]);
+                let output_shape =
+                    reduction_shape(&handle.shape, target_dim).unwrap_or_else(|| vec![num_slices]);
                 let scalar_ty = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F32 => "f32",
                     runmat_accelerate_api::ProviderPrecision::F64 => "f64",
@@ -242,7 +242,8 @@ fn sum_gpu(
                 // Minimal WGSL with omitnan=true
                 let mut shader = String::new();
                 shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>; }}\n"));
-                shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
+                shader
+                    .push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
                 shader.push_str("@group(0) @binding(0) var<storage, read> input0: Tensor;\n");
                 shader.push_str("@group(0) @binding(1) var<storage, read_write> output: Tensor;\n");
                 shader.push_str("@group(0) @binding(2) var<uniform> params: MParams;\n\n");
@@ -253,8 +254,13 @@ fn sum_gpu(
                         "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
                     );
                     shader.push_str("  let row = wid.x; if (row >= params.nrows) { return; }\n");
-                    shader.push_str(&format!("  var acc: {scalar_ty} = {}0.0;\n", if scalar_ty=="f64" { "f64(" } else { "" }));
-                    if scalar_ty=="f64" { shader.push_str("  // close f64 literal\n"); }
+                    shader.push_str(&format!(
+                        "  var acc: {scalar_ty} = {}0.0;\n",
+                        if scalar_ty == "f64" { "f64(" } else { "" }
+                    ));
+                    if scalar_ty == "f64" {
+                        shader.push_str("  // close f64 literal\n");
+                    }
                     shader.push_str("  var c = lid.x;\n  while (c < params.ncols) {\n    let v = input0.data[row + (c * params.ld)];\n    if (!isNan(v)) { acc = acc + v; }\n    c += 256u;\n  }\n");
                 } else {
                     // Column-wise: one output per column; reduce over rows
@@ -262,8 +268,13 @@ fn sum_gpu(
                         "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
                     );
                     shader.push_str("  let col = wid.x; if (col >= params.ncols) { return; }\n");
-                    shader.push_str(&format!("  var acc: {scalar_ty} = {}0.0;\n", if scalar_ty=="f64" { "f64(" } else { "" }));
-                    if scalar_ty=="f64" { shader.push_str("  // close f64 literal\n"); }
+                    shader.push_str(&format!(
+                        "  var acc: {scalar_ty} = {}0.0;\n",
+                        if scalar_ty == "f64" { "f64(" } else { "" }
+                    ));
+                    if scalar_ty == "f64" {
+                        shader.push_str("  // close f64 literal\n");
+                    }
                     shader.push_str("  var r = lid.x;\n  while (r < params.nrows) {\n    let v = input0.data[(col * params.ld) + r];\n    if (!isNan(v)) { acc = acc + v; }\n    r += 256u;\n  }\n");
                 }
                 shader.push_str("  var<workgroup> tile: array<f32, 256u>;\n  tile[lid.x] = acc;\n  workgroupBarrier();\n");
@@ -319,7 +330,7 @@ fn reduce_tensor_dim(
             ReductionNaN::Omit => {
                 if value.is_nan() {
                     0.0
-    } else {
+                } else {
                     value
                 }
             }
@@ -381,10 +392,10 @@ fn reduce_tensor_dim(
                 ReductionNaN::Omit => {
                     if any_value {
                         sum
-            } else {
-                0.0
-            }
-        }
+                    } else {
+                        0.0
+                    }
+                }
             };
         }
     }
