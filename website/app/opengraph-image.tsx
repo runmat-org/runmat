@@ -11,5 +11,3 @@ export default function Image() {
     subtitle: 'Fast, Free, Modern MATLAB Runtime' 
   });
 }
-
-

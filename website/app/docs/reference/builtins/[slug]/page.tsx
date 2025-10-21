@@ -19,9 +19,10 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const b = builtins.find(x => x.slug === slug);
   if (!b) return {};
   return {
-    title: `${b.name} — RunMat Builtin`,
-    description: b.summary || `${b.name} builtin function in RunMat`,
-    alternates: { canonical: `/docs/reference/builtins/${b.slug}` },
+    title: `${b.name} | MATLAB / RunMat Function`,
+    description: `${b.name} builtin function in documentation`,
+    openGraph: { title: `${b.name} - RunMat`, description: `${b.name} builtin function in documentation` },
+    twitter: { card: 'summary', title: `${b.name} - RunMat`, description: `${b.name} builtin function in documentation` },
   };
 }
 

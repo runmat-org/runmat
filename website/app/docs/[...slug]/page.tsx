@@ -6,7 +6,7 @@ import { docsTree, findNodeBySlug, findPathBySlug, flatten, DocsNode } from "@/c
 import { DocsContentSwitch } from "@/components/DocsContentSwitch";
 import { DocsArticleVisibility } from "@/components/DocsArticleVisibility";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
-import { slugifyHeading } from "@/lib/utils";
+import { HeadingsNav } from "@/components/HeadingsNav";
 
 // Polyfill URL.canParse for Node environments that don't support it yet (e.g., Node 18)
 const _u = URL;
@@ -75,7 +75,6 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
   }
   if (!source) notFound();
   const crumbs = findPathBySlug(slug) ?? [];
-  const headings = extractHeadings(source);
   return (
     <div className="grid lg:grid-cols-[minmax(0,1fr)_260px] gap-8">
       <article className="prose dark:prose-invert max-w-none scroll-smooth">
@@ -102,44 +101,9 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
         {/* Client search/results overlay */}
         <DocsContentSwitch source={source} />
       </article>
-      <aside className="hidden lg:block">
-        <div className="sticky top-24">
-          <div className="text-sm font-semibold text-foreground/90 mb-2">On this page</div>
-          <ul className="text-sm space-y-2">
-            {headings.map((h, i) => (
-              <li key={i} className={h.depth > 2 ? "pl-4" : undefined}>
-                <a href={`#${h.id}`} className="text-muted-foreground hover:text-foreground">
-                  {h.text}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </aside>
+      <HeadingsNav source={source} />
     </div>
   );
-}
-
-type Heading = { depth: number; text: string; id: string };
-
-function extractHeadings(md: string): Heading[] {
-  const lines = md.split(/\r?\n/);
-  const out: Heading[] = [];
-  let inFence = false;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (/^```/.test(line)) { inFence = !inFence; continue; }
-    if (inFence) continue; // ignore code fences
-    // Support ATX-style headings (## .. ######) and Setext-style (underlines of --- or === for previous line)
-    const m = /^(#{2,6})\s+(.+)$/.exec(line);
-    if (!m) continue;
-    const depth = m[1].length; // 2..6
-    // Remove backticks and inline code markers
-    const text = m[2].replace(/`/g, "");
-    const id = slugifyHeading(text);
-    out.push({ depth, text, id });
-  }
-  return out;
 }
 
 // Map well-known slug prefixes to repo files when not present in the manifest

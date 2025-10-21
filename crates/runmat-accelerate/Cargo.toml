@@ -1,6 +1,6 @@
 [package]
 name = "runmat-accelerate"
-version = "0.0.3"
+version = "0.0.17"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Pluggable GPU acceleration layer for RunMat (CUDA, ROCm, Metal, Vulkan/Spir-V)"
@@ -21,7 +21,7 @@ thiserror = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-hir = { workspace = true }
-runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+runmat-accelerate-api = { workspace = true }
 once_cell = "1"
 bytemuck = { version = "1.14", features = ["derive"] }
 log = { workspace = true }

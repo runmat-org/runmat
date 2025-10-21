@@ -1,9 +1,10 @@
 import React from 'react';
 
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import matter from 'gray-matter';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+import { HeadingsNav } from '@/components/HeadingsNav';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 
@@ -22,6 +23,9 @@ interface BlogPost {
     readTime: string;
     tags: string[];
     excerpt: string;
+    image?: string;
+    imageAlt?: string;
+    canonical?: string;
   };
   content: string;
 }
@@ -47,15 +51,36 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const post = getBlogPost(slug);
   if (!post) return {};
 
+  const img = post.frontmatter.image;
+  let imageUrl: string | undefined = undefined;
+  if (img && typeof img === 'string') {
+    if (img.startsWith('http://') || img.startsWith('https://')) {
+      imageUrl = img;
+    } else if (img.startsWith('/')) {
+      const localPath = join(process.cwd(), 'public', img.replace(/^\//, ''));
+      if (existsSync(localPath)) {
+        imageUrl = img;
+      }
+    }
+  }
+
   return {
     title: post.frontmatter.title,
     description: post.frontmatter.description,
+    alternates: post.frontmatter.canonical ? { canonical: post.frontmatter.canonical } : undefined,
     openGraph: {
       title: post.frontmatter.title,
       description: post.frontmatter.description,
       type: 'article',
       publishedTime: post.frontmatter.date,
       authors: [post.frontmatter.author],
+      images: imageUrl ? [imageUrl] : undefined,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: post.frontmatter.title,
+      description: post.frontmatter.description,
+      images: imageUrl ? [imageUrl] : undefined,
     },
   };
 }
@@ -92,6 +117,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       readTime={post.frontmatter.readTime}
       author={post.frontmatter.author}
       tags={post.frontmatter.tags}
+      rightAside={<HeadingsNav source={post.content} />}
     >
       <MarkdownRenderer source={post.content} />
       

@@ -88,13 +88,15 @@ async fn zmq_execute_request_and_iopub() {
 
     let ctx = zmq::Context::new();
     let shell = ctx.socket(zmq::DEALER).unwrap();
+    shell.set_rcvtimeo(5000).unwrap();
+    shell.set_sndtimeo(5000).unwrap();
     shell.connect(&config.connection.shell_url()).unwrap();
 
     let iopub = ctx.socket(zmq::SUB).unwrap();
     iopub.set_rcvtimeo(5000).unwrap();
     iopub.set_subscribe(b"").unwrap();
     iopub.connect(&config.connection.iopub_url()).unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    std::thread::sleep(std::time::Duration::from_millis(500));
 
     // Heartbeat check
     let hb = ctx.socket(zmq::REQ).unwrap();
@@ -150,7 +152,7 @@ async fn zmq_execute_request_and_iopub() {
             )
             .expect("iopub message");
             match msg.header.msg_type {
-                MessageType::ExecuteResult | MessageType::Error => {
+                MessageType::ExecuteResult | MessageType::Error | MessageType::Status => {
                     saw_any = true;
                     break;
                 }

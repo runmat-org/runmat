@@ -1,7 +1,10 @@
 [package]
 name = "runmat-accelerate-api"
-version = "0.0.3"
+version = "0.0.17"
 edition = "2021"
+description = "Common API types for RunMat GPU acceleration backends"
+homepage = "https://runmat.org"
+repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }

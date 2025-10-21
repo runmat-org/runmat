@@ -1,9 +1,12 @@
 [package]
 name = "runmat-repl"
-version = "0.0.3"
+version = "0.0.17"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
+description = "Interactive RunMat REPL with line editing and Jupyter kernel integration"
+homepage = "https://runmat.org"
+repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-lexer = { workspace = true }

@@ -1,15 +1,18 @@
 [package]
 name = "runmat-builtins"
-version = "0.0.3"
+version = "0.0.17"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
+description = "RunMat built-in functions and standard library components"
+homepage = "https://runmat.org"
+repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 inventory = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
-runmat-accelerate-api = { path = "../runmat-accelerate-api" }
-runmat-gc-api = { path = "../runmat-gc-api" }
+runmat-accelerate-api = { workspace = true }
+runmat-gc-api = { workspace = true }
 
 [dev-dependencies]
 trybuild = "1"

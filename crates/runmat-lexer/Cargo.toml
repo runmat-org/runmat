@@ -1,9 +1,12 @@
 [package]
 name = "runmat-lexer"
-version = "0.0.3"
+version = "0.0.17"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
+description = "Lexer for the RunMat language (MATLAB/Octave syntax) built with logos"
+homepage = "https://runmat.org"
+repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 logos = { workspace = true }

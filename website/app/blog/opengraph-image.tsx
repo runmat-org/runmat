@@ -11,5 +11,3 @@ export default function Image() {
     subtitle: 'Latest updates and insights from the RunMat team' 
   });
 }
-
-

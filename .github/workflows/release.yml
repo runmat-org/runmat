@@ -23,7 +23,6 @@ jobs:
       matrix:
         platform:
           
-
           - release_for: windows-x86_64
             os: windows-latest-l
             target: x86_64-pc-windows-msvc
@@ -51,8 +50,6 @@ jobs:
             bin: runmat
             name: runmat-linux-x86_64.tar.gz
             command: build
-
-          
 
     runs-on: ${{ matrix.platform.os }}
     steps:
@@ -315,8 +312,14 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
+      - name: Install BLAS/LAPACK/ZMQ dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.90.0
         with:
           components: clippy,rustfmt
 
@@ -335,7 +338,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          for d in crates/*; do
+          for d in crates/* runmat; do
             if [ -d "$d" ]; then
               # Copy root LICENSE to each crate as LICENSE (crates.io requires in-package)
               if [ -f LICENSE ] || [ -f LICENSE.md ]; then
@@ -350,7 +353,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          for toml in crates/*/Cargo.toml; do
+          for toml in crates/*/Cargo.toml runmat/Cargo.toml; do
             # If license-file points outside the crate, retarget it to in-crate LICENSE
             if grep -q '^license-file\s*=\s*"\..*/LICENSE' "$toml"; then
               sed -i.bak 's#^license-file\s*=\s*"\..*/LICENSE.*#license-file = "LICENSE"#' "$toml"
@@ -363,44 +366,111 @@ jobs:
             fi
           done
 
-      - name: Bump workspace crate versions (idempotent)
+      - name: Prepare branch context for publish (main)
         shell: bash
         run: |
           set -euxo pipefail
-          # If Cargo.toml already set to RELEASE_VERSION, this is a no-op
-          cargo workspaces version custom "$RELEASE_VERSION" \
-            --force '*' \
-            --no-git-commit \
-            --exact \
-            --yes || true
+          # Ensure releases are cut from main: verify tag commit is on origin/main
+          git fetch origin +refs/heads/main:refs/remotes/origin/main || true
+          if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+            echo "origin/main not found" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "Tag commit $GITHUB_SHA is not on origin/main. Aborting publish." >&2
+            exit 1
+          fi
+          # Create local main at the tag commit to satisfy tools that require a branch
+          git checkout -B main "$GITHUB_SHA"
+          # Set env for later steps
+          echo "CARGO_PUBLISH_BRANCH=main" >> "$GITHUB_ENV"
+
+      - name: Verify crate versions match tag (no bump in CI)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mismatches=()
+          check_file() {
+            local file="$1"
+            # Extract version within [package] table
+            local ver_line
+            ver_line=$(awk 'BEGIN{inpkg=0} 
+              /^\[package\]/{inpkg=1; next}
+              /^\[/{if(inpkg){exit}; inpkg=0}
+              { if(inpkg && $0 ~ /^version[[:space:]]*=/){ print; exit } }' "$file" || true)
+            if [ -z "${ver_line:-}" ]; then return; fi
+            local ver
+            ver=$(printf '%s' "$ver_line" | sed -E 's/.*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+            if [ -n "${ver:-}" ] && [ "$ver" != "$RELEASE_VERSION" ]; then
+              mismatches+=("$file:$ver != $RELEASE_VERSION")
+            fi
+          }
+          for toml in runmat/Cargo.toml crates/*/Cargo.toml; do
+            [ -f "$toml" ] || continue
+            check_file "$toml"
+          done
+          if [ ${#mismatches[@]} -gt 0 ]; then
+            echo "Version mismatch between tag and Cargo.toml files:" >&2
+            printf ' - %s\n' "${mismatches[@]}" >&2
+            echo "Please merge a version bump PR on main before tagging." >&2
+            exit 1
+          fi
+
+      - name: Preflight crates publish (dry-run)
+        shell: bash
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GIT_SSL_CAINFO: /etc/ssl/certs/ca-certificates.crt
+        run: |
+          set -euo pipefail
+          # Let dry-run fail loudly if compilation or verification fails
+          DRY_RUN_OUTPUT="$(cargo workspaces publish --all --yes --allow-dirty --skip-published --dry-run --from-git --no-verify --token "$CARGO_REGISTRY_TOKEN" 2>&1)"
+          echo "$DRY_RUN_OUTPUT"
+          if ! echo "$DRY_RUN_OUTPUT" | grep -Eqi 'publish(ing)?[[:space:]]+[a-z0-9_-]'; then
+            echo "No crates selected for publish (dry run). Failing to avoid false green release."
+            exit 1
+          fi
 
       - name: Publish all crates in dependency order
         shell: bash
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GIT_SSL_CAINFO: /etc/ssl/certs/ca-certificates.crt
         run: |
           set -euxo pipefail
-          # Ensure we are on a branch (not detached); prefer main if tag checkout
-          if ! git symbolic-ref -q HEAD >/dev/null; then
-            git fetch origin +refs/heads/*:refs/remotes/origin/*
-            # Always use main as the publishing base to avoid treating tag name as a branch
-            if git show-ref --verify --quiet "refs/heads/main"; then
-              git checkout main
-            else
-              git checkout -B main origin/main || true
-            fi
-          fi
-          # Ensure git has a CA bundle configured (some environments lack http.cainfo)
+          # Ensure git identity exists for any local tagging that tools may perform
+          git config user.email "${GITHUB_ACTOR:-github-actions}@users.noreply.github.com" || true
+          git config user.name  "${GITHUB_ACTOR:-github-actions}" || true
+          # Silence git CA warning in some envs
           if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-            git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt || true
             git config --global http.cainfo /etc/ssl/certs/ca-certificates.crt || true
-          elif [ -f /etc/pki/tls/certs/ca-bundle.crt ]; then
-            git config --global http.sslcainfo /etc/pki/tls/certs/ca-bundle.crt || true
-            git config --global http.cainfo /etc/pki/tls/certs/ca-bundle.crt || true
-          elif [ -f /etc/ssl/ca-bundle.pem ]; then
-            git config --global http.sslcainfo /etc/ssl/ca-bundle.pem || true
-            git config --global http.cainfo /etc/ssl/ca-bundle.pem || true
+            git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt || true
           fi
-          # Publish in correct order, skipping already published crates
-          cargo workspaces publish --all --yes --allow-dirty --skip-published \
-            --token "$CARGO_REGISTRY_TOKEN"
+          # Publish from local main with branch guard, retrying on crates.io rate limits (HTTP 429)
+          MAX_RETRIES=4
+          ATTEMPT=1
+          while [ $ATTEMPT -le $MAX_RETRIES ]; do
+            set +e
+            OUTPUT=$(cargo workspaces publish --all --yes --allow-dirty --skip-published --from-git \
+              --allow-branch "$CARGO_PUBLISH_BRANCH" \
+              --token "$CARGO_REGISTRY_TOKEN" 2>&1)
+            STATUS=$?
+            set -e
+            echo "$OUTPUT"
+            if [ $STATUS -eq 0 ]; then
+              echo "Publish succeeded."
+              break
+            fi
+            if echo "$OUTPUT" | grep -qi 'Too Many Requests'; then
+              echo "Hit crates.io rate limit (HTTP 429). Sleeping 900 seconds before retry ($ATTEMPT/$MAX_RETRIES)..."
+              sleep 900
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+            echo "Publish failed with non-rate-limit error. Aborting."
+            exit $STATUS
+          done
+          if [ $ATTEMPT -gt $MAX_RETRIES ]; then
+            echo "Exceeded maximum retries due to crates.io rate limiting. Please retry later or contact help@crates.io."
+            exit 1
+          fi

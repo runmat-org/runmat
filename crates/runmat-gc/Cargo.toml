@@ -1,17 +1,17 @@
 [package]
 name = "runmat-gc"
-version = "0.0.3"
+version = "0.0.17"
 edition = "2021"
 description = "Generational garbage collector for RunMat with optional pointer compression"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
 
 [dependencies]
-runmat-gc-api = { path = "../runmat-gc-api" }
+runmat-gc-api = { workspace = true }
 runmat-builtins = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
-runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+runmat-accelerate-api = { workspace = true }
 parking_lot = "0.12"
 num-traits = "0.2"
 once_cell = "1.19"

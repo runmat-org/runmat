@@ -3422,7 +3422,7 @@ fn disp_builtin(x: Value) -> Result<Value, String> {
 
 #[runmat_macros::runtime_builtin(name = "struct")]
 fn struct_builtin(rest: Vec<Value>) -> Result<Value, String> {
-    if rest.len() % 2 != 0 {
+    if !rest.len().is_multiple_of(2) {
         return Err("struct: expected name/value pairs".to_string());
     }
     let mut st = runmat_builtins::StructValue::new();
