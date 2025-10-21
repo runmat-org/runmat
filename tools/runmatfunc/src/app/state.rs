@@ -242,6 +242,25 @@ impl AppContext {
             }
         }
 
+        // Documentation quality pass: ask Codex to ensure DOC_MD quality matches existing good builtins
+        if use_codex && codex_available && outcome.success {
+            let doc_prompt = "Review and improve the DOC_MD for this builtin to match the tone, structure, and completeness of the best existing builtins under crates/runmat-runtime/src/builtins. Ensure: (1) headlines and sections match the style of the best existing builtins; (2) GPU Execution section reflects provider hooks and fusion residency; (3) realistic, runnable Examples; (4) See Also with correct names. Note that the headings have been selected carefully for SEO and communication purposes, so please do not change them. If anything is missing or inconsistent, update DOC_MD via apply_patch. Then stop.";
+            let doc_tail = Some("For reference, browse good copies in crates/runmat-runtime/src/builtins (e.g., math/reduction/sum.rs, math/reduction/mean.rs, math/trigonometry/sin.rs, array/zeros.rs/ones.rs/rand.rs). Keep changes scoped to DOC_MD unless code/docs mismatch requires minor fixes.");
+            let _ = crate::codex::session::run_authoring_with_extra(
+                &ctx,
+                resolved_model.clone(),
+                doc_prompt,
+                doc_tail,
+            );
+            // Re-run tests to ensure doc changes didn't regress behavior (some tests parse DOC_MD examples)
+            match workspace_tests::run_builtin_tests(&ctx, &self.config) {
+                Ok(new_outcome) => {
+                    outcome = new_outcome;
+                }
+                Err(err) => println!("[runmatfunc] test execution error after doc pass: {err}"),
+            }
+        }
+
         // Report final outcome
         if outcome.success {
             println!(

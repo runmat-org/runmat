@@ -41,11 +41,11 @@ tested:
   integration: "builtins::math::reduction::sum::tests::sum_gpu_provider_roundtrip"
 ---
 
-# MATLAB / RunMat `sum` Function
+# What does the `sum` function do in MATLAB / RunMat?
 `sum(x)` adds together elements of scalars, vectors, matrices, and higher-dimensional tensors.
 When no dimension is supplied, the reduction runs along the first non-singleton dimension.
 
-## Behaviour
+## How does the `sum` function behave in MATLAB / RunMat?
 - `sum(X)` on an `m × n` matrix returns a row vector (`1 × n`) with column sums.
 - `sum(X, 2)` returns a column vector (`m × 1`) containing row sums.
 - Logical inputs are promoted to double precision (`true → 1.0`, `false → 0.0`).
@@ -54,33 +54,96 @@ When no dimension is supplied, the reduction runs along the first non-singleton 
 - Empty slices return zeros with MATLAB-compatible shape semantics.
 - Dimensions larger than `ndims(X)` leave the input unchanged.
 
-## GPU Execution
+## `sum` Function GPU Execution Behaviour
 When RunMat Accelerate is active, tensors that already reside on the device stay on the GPU.
-Providers may implement `reduce_sum_dim` or `reduce_sum` for fast execution; otherwise
-RunMat transparently gathers the data and falls back to the host implementation.
-`'omitnan'` always uses the host path today because providers do not yet accept NaN policies.
+If the provider lacks those hooks, RunMat gathers the data from the GPU to the host and falls back to the host implementation.
 
-## Examples
+## Examples of using the `sum` function in MATLAB / RunMat
+
+### Summing the elements of a matrix
 
 ```matlab
 A = [1 2 3; 4 5 6];
-colSums = sum(A);      % [5 7 9]
-rowSums = sum(A, 2);   % [6; 15]
+colSums = sum(A);
+rowSums = sum(A, 2);
 ```
+
+Expected output:
+
+```matlab
+colSums = [5 7 9];
+rowSums = [6; 15];
+```
+
+### Summing the elements of a vector with NaN values
 
 ```matlab
 values = [1 NaN 3];
 total = sum(values, 'omitnan');   % 4
 ```
 
+Expected output:
+```matlab
+total = 4;
+```
+
+### Summing the elements of a matrix on a GPU
+
+In RunMat:
+
+```matlab
+G = rand(1024, 1024);
+result = sum(G .^ 2);
+```
+
+In MathWorks MATLAB (supported in RunMat as well):
+
 ```matlab
 G = gpuArray(rand(1024, 1024));
 energy = sum(G .^ 2);
-result = gather(energy);          % column sums computed on the device when supported
+result = gather(energy);
 ```
 
+In both cases, the expected output is:
+
+```matlab
+result = [2.5 3.5 4.5];
+```
+
+## GPU residency in RunMat (Do I need `gpuArray`?)
+
+You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB). 
+
+In RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the above example, the result of the `sum` call will already be on the GPU when the fusion planner has detected a net benefit to operating the fused expression it is part of on the GPU.
+
+To preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.
+
+Since MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.
+
+## FAQ
+
+### When should I use the `sum` function?
+
+Use `sum` whenever you need to add together the elements of a tensor. This is useful for calculating totals, sums of squares, or performing statistical analysis.
+
+### Does `sum` produce double arrays by default?
+
+Yes, by default, `sum` creates dense double-precision arrays unless you explicitly specify a type such as `'single'` or use the `'like'` argument to match a prototype array.
+
+### What does `sum(A)` return?
+
+If you call `sum(A)`, where `A` is an array, the result is a new array of the same shape as `A` with the sum of each slice along the first non-singleton dimension. For example, if `A` is a 2x3 matrix, `sum(A)` will return a 1x3 matrix with the sum of each column.
+
+### How do I compute the sum of a specific dimension?
+
+You can use the `dim` argument to specify the dimension along which to compute the sum. For example, `sum(A, 2)` will return a 2x1 matrix with the sum of each row.
+
 ## See Also
-[`prod`], [`mean`], [`cumsum`], [`gpuArray`], [`gather`]
+[prod](./prod), [mean](./mean), [cumsum](./cumsum), [gpuArray](../accel/gpu_array), [gather](../accel/gather)
+
+## Source & Feedback
+- The full source code for the implementation of the `sum` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/sum.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/sum.rs)
+- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

@@ -42,8 +42,13 @@ crates/runmat-runtime/
 
 ## Inline Documentation Expectations
 - YAML frontmatter should cover `title`, `category`, `keywords`, `summary`, `references`, `gpu_support`, `fusion`, `tested`, and any flags relevant to BLAS/LAPACK usage.
-- Markdown body should explain numerics, broadcasting, error behaviour, GPU semantics (including how Accelerate fuses kernels and manages residency), and thorough examples of usage within the MATLAB language syntax. Aim for 5-10 examples, and pick examples based on the most common use cases that would be searched on a search engine for when using the function.
+- Markdown body should explain numerics, broadcasting, error behaviour, GPU semantics (including how Accelerate fuses kernels and manages residency), and thorough examples of usage within the MATLAB language syntax. 
+  - Include 5-10 examples, and pick examples based on the most common use cases that would be searched on a search engine for when using the function.
+  - Write the headlines for the examples as headings, written in a way that a user would search for when the function is the ideal solution for the problem.
+  - E.g. "Calculating the sine of a matrix"
 - Encourage users to understand GPU offload: describe gpuArray creation, gather, and the lazy execution model (Ignition + Accelerate detect fusion opportunities, queue kernels, and execute on demand).
+- Add a FAQ section at the end of the documentation that answers common questions about the builtin. Aim for 5-10 questions, along with good answers.
+- Use American English spelling and grammar.
 
 ## GPU & Fusion Spec Types
 - Authoritative implementations of types live in `crates/runmat-runtime/src/builtins/common/spec.rs`. The Function Manager links against the same module to stay in sync.

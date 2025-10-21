@@ -41,11 +41,11 @@ tested:
   integration: "builtins::math::reduction::mean::tests::mean_gpu_provider_roundtrip"
 ---
 
-# MATLAB / RunMat `mean` Function
+# What does the `mean` function do in MATLAB / RunMat?
 `mean(x)` computes the arithmetic mean of scalars, vectors, matrices, and higher-dimensional tensors.
 When no dimension is supplied, the reduction runs along the first non-singleton dimension.
 
-## Behaviour
+## How does the `mean` function behave in MATLAB / RunMat?
 - `mean(X)` on an `m × n` matrix returns a row vector (`1 × n`) with column averages.
 - `mean(X, 2)` returns a column vector (`m × 1`) containing row averages.
 - Logical inputs are promoted to double precision (`true → 1.0`, `false → 0.0`).
@@ -54,13 +54,13 @@ When no dimension is supplied, the reduction runs along the first non-singleton 
 - Empty slices produce `NaN` outputs that follow MATLAB's shape semantics.
 - Dimensions larger than `ndims(X)` leave the input unchanged.
 
-## GPU Execution
-When RunMat Accelerate is active, tensors that already reside on the device stay on the GPU.
-Providers may implement `reduce_mean_dim` or `reduce_mean` for fast execution; otherwise RunMat
-transparently gathers the data and falls back to the host implementation. `'omitnan'` always
-uses the host path today because providers do not yet accept the NaN policy.
+## `mean` Function GPU Execution Behaviour
+When the input tensor lives on the GPU, RunMat first asks the active acceleration provider for a device-side reduction buffer via `reduce_mean_dim` / `reduce_mean`.
+If the provider lacks those hooks, RunMat gathers the data from the GPU to the host and falls back to the host implementation.
 
-## Examples
+## Examples of using the `mean` function in MATLAB / RunMat
+
+### Computing the mean of a matrix
 
 ```matlab
 A = [1 2 3; 4 5 6];
@@ -68,28 +68,98 @@ colMeans = mean(A);      % [2.5 3.5 4.5]
 rowMeans = mean(A, 2);   % [2; 5]
 ```
 
+Expected output:
+
+```matlab
+colMeans = [2.5 3.5 4.5];
+rowMeans = [2; 5];
+```
+
+### Computing the mean of a vector with NaN values
+
 ```matlab
 values = [1 NaN 3];
 avg = mean(values, 'omitnan');   % 2
 ```
 
+Expected output:
+
+```matlab
+avg = 2;
+```
+
+### Computing the row vs column means of a matrix
+
+```matlab
+A = [1 2 3; 4 5 6];
+colMeans = mean(A);      % [2.5 3.5 4.5]
+rowMeans = mean(A, 2);   % [2; 5]
+```
+
+Expected output:
+
+```matlab
+colMeans = [2.5 3.5 4.5];
+rowMeans = [2; 5];
+```
+
+### Computing the mean of a matrix on a GPU
+
+In RunMat:
+
+```matlab
+G = rand(1024, 1024);
+result = mean(G .^ 2);
+```
+
+In MathWorks MATLAB (supported in RunMat as well):
+
 ```matlab
 G = gpuArray(rand(1024, 1024));
 energy = mean(G .^ 2);
-result = gather(energy);          % column means computed on the device when supported
+result = gather(energy);
 ```
 
-## RunMat vs MATLAB behavior
-- Matches MATLAB for numeric, logical, empty, and `'omitnan'` cases, including propagation rules.
-- GPU execution is transparent: RunMat keeps tensors resident on the device and fuses upstream work when possible.
-- When providers do not expose mean reductions, RunMat falls back to host execution automatically.
+In both cases, the expected output is:
 
-## Source & Feedback
-- Implementation: `crates/runmat-runtime/src/builtins/math/reduction/mean.rs`
-- Issues & feature requests: https://github.com/runmat-org/runmat/issues/new/choose
+```matlab
+result = [2.5 3.5 4.5];
+```
+
+## GPU residency in RunMat (Do I need `gpuArray`?)
+
+You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB). 
+
+In RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the above example, the result of the `mean` call will already be on the GPU when the fusion planner has detected a net benefit to operating the fused expression it is part of on the GPU.
+
+To preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.
+
+Since MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.
+
+## FAQ
+
+### When should I use the `mean` function?
+
+Use `mean` whenever you need to compute the arithmetic mean of a tensor. This is useful for calculating averages, central tendencies, or performing statistical analysis.
+
+### Does `mean` produce double arrays by default?
+
+Yes, by default, `mean` creates dense double-precision arrays unless you explicitly specify a type such as `'single'` or use the `'like'` argument to match a prototype array.
+
+### What does `mean(A)` return?
+
+If you call `mean(A)`, where `A` is an array, the result is a new array of the same shape as `A` with the mean of each slice along the first non-singleton dimension. For example, if `A` is a 2x3 matrix, `mean(A)` will return a 1x3 matrix with the mean of each column.
+
+### How do I compute the mean of a specific dimension?
+
+You can use the `dim` argument to specify the dimension along which to compute the mean. For example, `mean(A, 2)` will return a 2x1 matrix with the mean of each row.
 
 ## See Also
-[`sum`], [`median`], [`cumsum`], [`gpuArray`], [`gather`]
+[sum](./sum), [median](./median), [cumsum](./cumsum), [gpuArray](../accel/gpu_array), [gather](../accel/gather)
+
+## Source & Feedback
+- The full source code for the implementation of the `mean` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/mean.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/mean.rs)
+- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

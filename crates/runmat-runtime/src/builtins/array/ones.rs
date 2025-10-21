@@ -41,11 +41,11 @@ tested:
   integration: "builtins::array::ones::tests::ones_gpu_like_alloc"
 ---
 
-# MATLAB / RunMat `ones` Function
+# What does the `ones` function do in MATLAB / RunMat?
 `ones` creates arrays filled with ones. It mirrors MATLAB semantics across the scalar,
 vector, matrix, and N-D forms, including `'like'` and `'logical'` options.
 
-## Behaviour
+## How does the `ones` function behave in MATLAB / RunMat?
 - `ones()` returns the scalar `1`.
 - `ones(n)` returns an `n × n` double array.
 - `ones(m, n, ...)` returns a dense double array with the requested dimensions.
@@ -54,29 +54,134 @@ vector, matrix, and N-D forms, including `'like'` and `'logical'` options.
 - `ones(___, 'logical')` returns a logical array instead of double precision (all elements set to `true`).
 - `ones(___, 'like', prototype)` matches the device residency and numeric/logical flavour of `prototype`.
 
-## GPU Execution
+## `ones` Function GPU Execution Behaviour
 When the prototype or `'like'` argument is a GPU tensor, RunMat asks the active acceleration
 provider to allocate a one-filled buffer. Acceleration providers that do not yet support the dedicated hooks
 fall back to zero-allocation plus scalar fill or, as a last resort, upload a host tensor.
-This guarantees correct behaviour while documenting the extra transfer cost.
+This guarantees correct behaviour.
 
-## Examples
+## Examples of using the `ones` function in MATLAB / RunMat
+
+### Creating a 3x3 matrix of ones
 
 ```matlab
 B = ones(3);
 ```
 
+Expected output:
+
+```matlab
+B = [1 1 1; 1 1 1; 1 1 1];
+```
+
+### Creating a 4x1 logical matrix of ones
+
 ```matlab
 mask = ones(4, 1, 'logical');
 ```
 
+Expected output:
+
 ```matlab
+mask = [1 1 1 1];
+```
+
+### Creating a 64x64 matrix of ones on a GPU
+
+In RunMat:
+
+```
+H = ones(64, 64);
+```
+
+In MathWorks MATLAB (supported in RunMat as well):
+
+```matlab
+H = gpuArray(ones(64, 64));
+
+% OR:
+
 G = gpuArray(rand(64, 64));
 H = ones(64, 64, 'like', G);
 ```
 
+In both cases, the expected output is:
+
+```matlab
+H = [1 1 1 ... 1; 1 1 1 ... 1; ...; 1 1 1 ... 1];
+```
+
+## GPU residency in RunMat (Do I need `gpuArray`?)
+
+You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB). 
+
+In RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the above example, the result of the `ones` call will already be on the GPU when the fusion planner has detected a net benefit to operating the fused expression it is part of on the GPU.
+
+To preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.
+
+Since MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.
+
+## FAQ
+
+### When should I use the `ones` function?
+
+Use `ones` whenever you need to create arrays pre-filled with the value `1`, such as for initializing weights, creating masks, or testing other algorithms. Preallocating with `ones` ensures correct type and shape throughout your code and helps prevent bugs caused by uninitialized arrays.
+
+### Does `ones` produce double arrays by default?
+
+Yes, by default, `ones` creates dense double-precision arrays unless you explicitly specify a type such as `'logical'` or use the `'like'` argument to match a prototype array.
+
+### What does `ones(n)` return?
+
+`ones(n)` returns an `n × n` dense double-precision matrix filled with ones. For example, `ones(3)` yields a 3-by-3 matrix of all ones.
+
+### How do I create a logical array of ones?
+
+Pass `'logical'` as the last argument:  
+```matlab
+mask = ones(5, 1, 'logical');
+```
+This produces a 5x1 logical array, i.e., all elements have value `true` (`1` in binary).
+
+### How do I match the type and device residency of an existing array?
+
+Use the `'like', prototype` syntax:  
+```matlab
+A = gpuArray(rand(2,2));
+B = ones(2, 2, 'like', A);
+```
+`B` will be a GPU array with the same type and shape as `A`.
+
+### Can I create N-dimensional arrays with ones?
+
+Yes! Pass more than two dimension arguments (or a size vector):  
+```matlab
+T = ones(2, 3, 4);
+```
+This creates a 2×3×4 tensor of ones.
+
+### How does `ones(A)` behave?
+
+If you call `ones(A)`, where `A` is an array, the result is a new array of ones with the same shape as `A`.
+
+### Is the output always dense?
+
+Yes. `ones` always produces a dense array. For sparse matrices of ones, use `sparse` with appropriate arguments.
+
+### What if I call `ones` with no arguments?
+
+`ones()` returns the scalar value `1`.
+
+### Can I use `ones` to preallocate arrays for later assignment?
+
+Absolutely. Preallocating with `ones` (or `zeros`) and then filling in values is a recommended practice for efficiency and code clarity when the final values are known to overwrite the initial ones.
+
 ## See Also
-[`zeros`], [`eye`], [`gpuArray`], [`gather`]
+[zeros](./zeros), [eye](./eye), [gpuArray](../accel/gpu_array), [gather](../accel/gather)
+
+## Source & Feedback
+- The full source code for the implementation of the `ones` function is available at: [`crates/runmat-runtime/src/builtins/array/ones.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/ones.rs)
+- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

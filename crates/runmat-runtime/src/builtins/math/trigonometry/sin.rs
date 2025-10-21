@@ -42,37 +42,109 @@ tested:
   integration: "builtins::math::trigonometry::sin::tests::sin_gpu_provider_roundtrip"
 ---
 
-# MATLAB / RunMat `sin` Function
+# What does the `sin` function do in MATLAB / RunMat?
 `y = sin(x)` computes the sine of every element in `x`, with angles specified in radians.
 
-## Behaviour
+## How does the `sin` function behave in MATLAB / RunMat?
 - Works on scalars, vectors, matrices, and N-D tensors with MATLAB broadcasting semantics.
 - Logical inputs are converted to double precision (`true → 1.0`, `false → 0.0`) before applying sine.
 - Complex inputs follow MATLAB's definition: `sin(a + bi) = sin(a)cosh(b) + i·cos(a)sinh(b)`.
 - Character arrays are treated as their numeric code points and return a double array of the same size.
 
-## GPU Execution
+## `sin` Function GPU Execution Behaviour
 When RunMat Accelerate is active, tensors that already reside on the GPU remain on the device.
 If the selected provider implements `unary_sin`, the operation executes directly on the GPU. Otherwise,
-RunMat gathers the data back to the host and uses the CPU implementation automatically to preserve behaviour.
+RunMat gathers the data from the GPU to the host and falls back to the host implementation.
 
-## Examples
+## Examples of using the `sin` function in MATLAB / RunMat
+
+### Computing the sine of a scalar
+
+```matlab
+y = sin(pi/2);
+```
+
+Expected output:
+
+```matlab
+y = 1;
+```
+
+### Computing the sine of a vector
 
 ```matlab
 x = linspace(0, 2*pi, 5);
 y = sin(x);
 ```
 
-```matlab
-z = sin(1 + 2i);     % complex input
-```
+Expected output:
 
 ```matlab
-y = sin(pi/2);
+y = [0 0.5 1 0.5 0];
 ```
+
+### Computing the sine of a complex number
+
+```matlab
+z = sin(1 + 2i);
+```
+
+Expected output:
+
+```matlab
+z = 3.1657 + 1.9596i;
+```
+
+### Computing the sine of a matrix on a GPU
+
+In RunMat:
+
+```matlab
+G = rand(1024, 1024);
+result = sin(G);
+```
+
+In MathWorks MATLAB (supported in RunMat as well):
+
+```matlab
+G = gpuArray(rand(1024, 1024));
+result_gpu = sin(G);
+result = gather(result_gpu);
+```
+
+In both cases, the expected output is:
+
+```matlab
+result = [0.8415 0.9093 0.1411 -0.7568 -0.9589];
+```
+
+## GPU residency in RunMat (Do I need `gpuArray`?)
+
+You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB). 
+
+In RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the above example, the result of the `sin` call will already be on the GPU when the fusion planner has detected a net benefit to operating the fused expression it is part of on the GPU.
+
+To preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.
+
+Since MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.
+
+## FAQ
+
+### When should I use the `sin` function?
+Use `sin` whenever you need to compute the sine of a scalar, vector, matrix, or N-D tensor. This is useful for computing the sine of angles, waves, or other periodic functions.
+
+### Does `sin` produce double arrays by default?
+Yes, by default, `sin` creates dense double-precision arrays unless you explicitly specify a type such as `'single'` or use the `'like'` argument to match a prototype array.
+
+### What does `sin(A)` return?
+If you call `sin(A)`, where `A` is an array, the result is a new array of the same shape as `A` with the sine of each element. For example, if `A` is a 2x3 matrix, `sin(A)` will return a 2x3 matrix with the sine of each element.
 
 ## See Also
-[`cos`], [`tan`], [`gpuArray`], [`gather`]
+[cos](./cos), [tan](./tan), [gpuArray](../accel/gpu_array), [gather](../accel/gather)
+
+## Source & Feedback
+- The full source code for the implementation of the `sin` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs)
+- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
