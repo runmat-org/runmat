@@ -79,7 +79,7 @@ rowSums = [6; 15];
 
 ```matlab
 values = [1 NaN 3];
-total = sum(values, 'omitnan');   % 4
+total = sum(values, 'omitnan');
 ```
 
 Expected output:
