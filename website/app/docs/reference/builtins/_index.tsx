@@ -7,7 +7,18 @@ export const dynamic = 'force-static';
 
 export const metadata: Metadata = {
   title: 'Built-in Functions | Docs',
-  description: 'Reference for built-in functions in RunMat.'
+  description: 'Reference for built-in functions in RunMat.',
+  openGraph: {
+    title: 'Built-in Functions | Docs',
+    description: 'Reference for built-in functions in RunMat.',
+    images: [{ url: '/docs/reference/builtins/opengraph-image' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Built-in Functions | Docs',
+    description: 'Reference for built-in functions in RunMat.',
+    images: [{ url: '/docs/reference/builtins/opengraph-image' }],
+  },
 };
 
 export default function BuiltinsIndexPage() {
@@ -30,5 +41,3 @@ export default function BuiltinsIndexPage() {
     </div>
   );
 }
-
-

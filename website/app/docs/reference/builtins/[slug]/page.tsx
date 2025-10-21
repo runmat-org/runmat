@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { slugifyHeading } from '@/lib/utils';
+import { builtinMetadataForSlug } from './meta';
 
 export const dynamic = 'force-static';
 
@@ -15,15 +16,7 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
-  const builtins = loadBuiltins();
-  const b = builtins.find(x => x.slug === slug);
-  if (!b) return {};
-  return {
-    title: `${b.name} | MATLAB / RunMat Function`,
-    description: `${b.name} builtin function in documentation`,
-    openGraph: { title: `${b.name} - RunMat`, description: `${b.name} builtin function in documentation` },
-    twitter: { card: 'summary', title: `${b.name} - RunMat`, description: `${b.name} builtin function in documentation` },
-  };
+  return builtinMetadataForSlug(slug);
 }
 
 export default async function BuiltinDetailPage({ params }: { params: Promise<{ slug: string }> }) {
