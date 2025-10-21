@@ -1058,13 +1058,13 @@
           "x"
         ],
         "inTypes": [
-          "string"
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "double"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -1080,13 +1080,13 @@
           "x"
         ],
         "inTypes": [
-          "any"
+          "string"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "any"
+          "double"
         ],
         "nargin": {
           "min": 0,
@@ -1361,6 +1361,28 @@
         ],
         "outTypes": [
           "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -1650,28 +1672,6 @@
           "min": 0,
           "max": 1
         }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "any"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "any"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
       }
     ],
     "internal": false
@@ -1795,28 +1795,6 @@
     "signatures": [
       {
         "in": [
-          "x"
-        ],
-        "inTypes": [
-          "string"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [
           "x",
           "y"
         ],
@@ -1833,6 +1811,28 @@
         "nargin": {
           "min": 0,
           "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
         },
         "nargout": {
           "min": 0,
@@ -1914,9 +1914,9 @@
     "name": "gather",
     "slug": "gather",
     "category": [
-      "general"
+      "acceleration/gpu"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Bring data from GPU back to host memory.",
     "status": "implemented",
     "signatures": [
       {
@@ -1940,7 +1940,40 @@
           "min": 0,
           "max": 1
         }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
       }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "A = gather(G)"
+      }
+    ],
+    "keywords": [
+      "gather",
+      "gpu",
+      "accelerate"
     ],
     "internal": false
   },
@@ -2090,9 +2123,9 @@
     "name": "gpuArray",
     "slug": "gpuarray",
     "category": [
-      "general"
+      "acceleration/gpu"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Move data to GPU and return a gpuArray handle.",
     "status": "implemented",
     "signatures": [
       {
@@ -2116,7 +2149,122 @@
           "min": 0,
           "max": 1
         }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
       }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "G = gpuArray(A)"
+      }
+    ],
+    "keywords": [
+      "gpuArray",
+      "gpu",
+      "accelerate"
+    ],
+    "internal": false
+  },
+  {
+    "name": "gpuDevice",
+    "slug": "gpudevice",
+    "category": [
+      "acceleration/gpu"
+    ],
+    "summary": "Return information about the active GPU device.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "info = gpuDevice()"
+      }
+    ],
+    "keywords": [
+      "gpu",
+      "device",
+      "info"
+    ],
+    "internal": false
+  },
+  {
+    "name": "gpuInfo",
+    "slug": "gpuinfo",
+    "category": [
+      "acceleration/gpu"
+    ],
+    "summary": "Pretty string describing the active GPU device.",
+    "status": "implemented",
+    "signatures": [
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": null,
+        "code": "disp(gpuInfo())"
+      }
+    ],
+    "keywords": [
+      "gpu",
+      "device",
+      "info"
     ],
     "internal": false
   },
@@ -2421,30 +2569,6 @@
     "summary": "Runtime builtin function",
     "status": "implemented",
     "signatures": [
-      {
-        "in": [
-          "x",
-          "y"
-        ],
-        "inTypes": [
-          "any",
-          "any"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "logical"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 2
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
       {
         "in": [
           "x",
@@ -2979,6 +3103,24 @@
     "status": "implemented",
     "signatures": [
       {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
         "in": [
           "x"
         ],
@@ -2994,24 +3136,6 @@
         "nargin": {
           "min": 0,
           "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [],
-        "inTypes": [],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 0
         },
         "nargout": {
           "min": 0,
@@ -3031,6 +3155,24 @@
     "status": "implemented",
     "signatures": [
       {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
         "in": [
           "x"
         ],
@@ -3046,24 +3188,6 @@
         "nargin": {
           "min": 0,
           "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [],
-        "inTypes": [],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 0
         },
         "nargout": {
           "min": 0,
@@ -3471,9 +3595,9 @@
     "name": "mean",
     "slug": "mean",
     "category": [
-      "general"
+      "math/reduction"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Average elements of scalars, vectors, matrices, or N-D tensors.",
     "status": "implemented",
     "signatures": [
       {
@@ -3501,7 +3625,15 @@
         }
       }
     ],
-    "internal": false
+    "keywords": [
+      "mean",
+      "average",
+      "reduction",
+      "gpu",
+      "omitnan"
+    ],
+    "internal": false,
+    "mdxPath": "builtins-mdx/mean.mdx"
   },
   {
     "name": "mesh",
@@ -3913,7 +4045,7 @@
     "category": [
       "array/creation"
     ],
-    "summary": "Array of all ones.",
+    "summary": "Create arrays filled with ones.",
     "status": "implemented",
     "signatures": [
       {
@@ -3927,7 +4059,7 @@
           "out"
         ],
         "outTypes": [
-          "Tensor"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -3939,18 +4071,15 @@
         }
       }
     ],
-    "examples": [
-      {
-        "title": null,
-        "code": "B = ones(3)"
-      }
-    ],
     "keywords": [
       "ones",
-      "allocate",
-      "create"
+      "array",
+      "logical",
+      "gpu",
+      "like"
     ],
-    "internal": false
+    "internal": false,
+    "mdxPath": "builtins-mdx/ones.mdx"
   },
   {
     "name": "orderfields",
@@ -4838,29 +4967,27 @@
     "name": "rand",
     "slug": "rand",
     "category": [
-      "general"
+      "array/creation"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Uniform random numbers on (0, 1).",
     "status": "implemented",
     "signatures": [
       {
         "in": [
-          "x",
-          "y"
+          "x"
         ],
         "inTypes": [
-          "int",
-          "int"
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "Tensor"
+          "any"
         ],
         "nargin": {
           "min": 0,
-          "max": 2
+          "max": 1
         },
         "nargout": {
           "min": 0,
@@ -4868,7 +4995,15 @@
         }
       }
     ],
-    "internal": false
+    "keywords": [
+      "rand",
+      "random",
+      "uniform",
+      "gpu",
+      "like"
+    ],
+    "internal": false,
+    "mdxPath": "builtins-mdx/rand.mdx"
   },
   {
     "name": "randn",
@@ -5448,7 +5583,7 @@
     "category": [
       "math/trigonometry"
     ],
-    "summary": "Sine of input in radians (element-wise).",
+    "summary": "Sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
     "status": "implemented",
     "signatures": [
       {
@@ -5474,18 +5609,14 @@
         }
       }
     ],
-    "examples": [
-      {
-        "title": null,
-        "code": "y = sin(pi/2)"
-      }
-    ],
     "keywords": [
+      "sin",
       "sine",
-      "trig",
-      "angle"
+      "trigonometry",
+      "gpu"
     ],
-    "internal": false
+    "internal": false,
+    "mdxPath": "builtins-mdx/sin.mdx"
   },
   {
     "name": "sinh",
@@ -5650,6 +5781,28 @@
         ],
         "outTypes": [
           "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -6361,9 +6514,9 @@
     "name": "sum",
     "slug": "sum",
     "category": [
-      "general"
+      "math/reduction"
     ],
-    "summary": "Runtime builtin function",
+    "summary": "Sum elements of scalars, vectors, matrices, or N-D tensors.",
     "status": "implemented",
     "signatures": [
       {
@@ -6391,7 +6544,14 @@
         }
       }
     ],
-    "internal": false
+    "keywords": [
+      "sum",
+      "reduction",
+      "gpu",
+      "omitnan"
+    ],
+    "internal": false,
+    "mdxPath": "builtins-mdx/sum.mdx"
   },
   {
     "name": "surf",
@@ -6848,7 +7008,7 @@
     "category": [
       "array/creation"
     ],
-    "summary": "Array of all zeros.",
+    "summary": "Create arrays filled with zeros.",
     "status": "implemented",
     "signatures": [
       {
@@ -6862,7 +7022,7 @@
           "out"
         ],
         "outTypes": [
-          "Tensor"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -6874,17 +7034,14 @@
         }
       }
     ],
-    "examples": [
-      {
-        "title": null,
-        "code": "A = zeros(2,3)"
-      }
-    ],
     "keywords": [
       "zeros",
-      "allocate",
-      "create"
+      "array",
+      "logical",
+      "gpu",
+      "like"
     ],
-    "internal": false
+    "internal": false,
+    "mdxPath": "builtins-mdx/zeros.mdx"
   }
 ]

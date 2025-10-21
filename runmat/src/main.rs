@@ -251,6 +251,8 @@ enum Commands {
 
     /// Show system information
     Info,
+    /// Show acceleration provider information
+    AccelInfo,
 
     /// Garbage collection utilities
     Gc {
@@ -818,6 +820,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
             Ok(())
         }
         Commands::Info => show_system_info(cli).await,
+        Commands::AccelInfo => show_accel_info().await,
         Commands::Gc { gc_command } => execute_gc_command(gc_command).await,
         Commands::Benchmark {
             file,
@@ -1842,6 +1845,39 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
     println!("  version              Show version information");
     println!("  info                 Show this system information");
 
+    Ok(())
+}
+
+#[cfg(feature = "wgpu")]
+async fn show_accel_info() -> Result<()> {
+    println!("Acceleration Provider Info");
+    println!("==========================");
+    if let Some(p) = runmat_accelerate_api::provider() {
+        let info = p.device_info_struct();
+        println!("Device: {} ({})", info.name, info.backend.unwrap_or_default());
+        //
+        #[allow(unused_variables)]
+        let (hits, misses) = p.fused_cache_counters();
+        println!("Fused pipeline cache: hits={}, misses={}", hits, misses);
+        println!(
+            "Reduction defaults: two_pass_threshold={}, workgroup_size={} (overridable via RUNMAT_TWO_PASS_THRESHOLD / RUNMAT_REDUCTION_WG)",
+            p.two_pass_threshold(),
+            p.default_reduction_workgroup_size()
+        );
+        if let Some(ms) = p.last_warmup_millis() {
+            println!("Warmup: last duration ~{} ms", ms);
+        }
+    } else {
+        println!("No acceleration provider registered");
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "wgpu"))]
+async fn show_accel_info() -> Result<()> {
+    println!("Acceleration Provider Info");
+    println!("==========================");
+    println!("This build was compiled without the 'wgpu' feature. No GPU provider available.");
     Ok(())
 }
 

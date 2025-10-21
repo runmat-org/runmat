@@ -204,7 +204,7 @@ fn reductions_mean_min_max_on_device() {
     let t = runmat_builtins::Tensor::new_2d(vec![3.0, 1.0, 4.0, 2.0], 2, 2).unwrap();
     let g = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t)]).unwrap();
 
-    // mean(G) -> gpu handle, then gather ~ average of all elements = (3+1+4+2)/4 = 2.5
+    // mean(G) -> gpu handle, then gather ~ column means [ (3+1)/2, (4+2)/2 ] = [2, 3]
     let m = runmat_runtime::call_builtin("mean", &[g.clone()]).unwrap();
     if let Value::GpuTensor(_) = m {
     } else {
@@ -212,7 +212,7 @@ fn reductions_mean_min_max_on_device() {
     }
     let m_host = runmat_runtime::call_builtin("gather", &[m]).unwrap();
     if let Value::Tensor(tm) = m_host {
-        assert_eq!(tm.data, vec![2.5]);
+        assert_eq!(tm.data, vec![2.0, 3.0]);
     }
 
     // max(G) and min(G)

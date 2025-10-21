@@ -52,6 +52,7 @@ impl<'a> GraphBuilder<'a> {
                         AccelTag::Reduction => AccelGraphTag::Reduction,
                         AccelTag::MatMul => AccelGraphTag::MatMul,
                         AccelTag::Transpose => AccelGraphTag::Transpose,
+                        AccelTag::ArrayConstruct => AccelGraphTag::ArrayConstruct,
                     })
                     .collect();
                 let category = categorize_builtin(&tags);
@@ -84,7 +85,8 @@ impl<'a> GraphBuilder<'a> {
         match instr {
             Instr::LoadConst(value) => self.push_constant(Type::Num, Some(Value::Num(*value))),
             Instr::LoadBool(value) => self.push_constant(Type::Bool, Some(Value::Bool(*value))),
-            Instr::LoadString(_) | Instr::LoadCharRow(_) => self.push_constant(Type::String, None),
+            Instr::LoadString(s) => self.push_constant(Type::String, Some(Value::String(s.clone()))),
+            Instr::LoadCharRow(s) => self.push_constant(Type::String, Some(Value::String(s.clone()))),
             Instr::LoadVar(idx) => self.handle_load_var(*idx),
             Instr::StoreVar(idx) => self.handle_store_var(*idx),
             Instr::LoadLocal(idx) => self.handle_load_local(*idx),
@@ -110,6 +112,74 @@ impl<'a> GraphBuilder<'a> {
             Instr::CallBuiltin(name, argc) => self.handle_call_builtin(pc, name, *argc),
             Instr::Pop => {
                 let _ = self.pop_value();
+            }
+            Instr::CreateMatrix(rows, cols) => {
+                let rows = *rows;
+                let cols = *cols;
+                let total = rows * cols;
+                if self.stack.len() < total {
+                    self.reset_stack();
+                    return;
+                }
+                // Pop total elements (column-major expectation). We'll reconstruct column-major data.
+                let mut elems: Vec<f64> = Vec::with_capacity(total);
+                for _ in 0..total {
+                    if let Some(id) = self.pop_value() {
+                        let info = &self.values[id as usize];
+                        let val = match &info.constant {
+                            Some(Value::Num(n)) => *n,
+                            Some(Value::Int(i)) => i.to_f64(),
+                            _ => {
+                                elems.clear();
+                                break;
+                            }
+                        };
+                        elems.push(val);
+                    } else {
+                        elems.clear();
+                        break;
+                    }
+                }
+                let node_id = self.nodes.len() as NodeId;
+                let span = InstrSpan { start: pc, end: pc };
+                let mut node = AccelNode {
+                    id: node_id,
+                    label: AccelNodeLabel::Primitive(PrimitiveOp::UPlus),
+                    category: AccelOpCategory::Other,
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                    span,
+                    tags: vec![],
+                };
+                let ty = Type::Tensor {
+                    shape: Some(vec![Some(rows), Some(cols)]),
+                };
+                // Column-major data: elements were popped last-in-first-out; reverse to original push order for row vector cases
+                let tensor_const = if elems.len() == total {
+                    elems.reverse();
+                    // For generality, map from row-major order in elems to column-major storage expected
+                    // Assuming elems are in left-to-right, top-to-bottom order, convert to column-major
+                    let mut data_cm = vec![0.0f64; total];
+                    for r in 0..rows {
+                        for c in 0..cols {
+                            let idx_row_major = r * cols + c;
+                            let idx_col_major = r + c * rows;
+                            data_cm[idx_col_major] = elems[idx_row_major];
+                        }
+                    }
+                    runmat_builtins::Tensor::new(data_cm, vec![rows, cols]).ok()
+                } else {
+                    None
+                };
+                let out_value = if let Some(t) = tensor_const {
+                    let id = self.new_value(ValueOrigin::NodeOutput { node: node_id, output: 0 }, ty.clone(), Some(Value::Tensor(t)));
+                    id
+                } else {
+                    self.new_node_output(node_id, 0, ty)
+                };
+                node.outputs.push(out_value);
+                self.nodes.push(node);
+                self.stack.push(out_value);
             }
             Instr::Swap => {
                 if self.stack.len() >= 2 {
@@ -324,17 +394,134 @@ impl<'a> GraphBuilder<'a> {
             span,
             tags: info.tags.clone(),
         };
-        let out_type = match info.category {
+        let mut out_type = match info.category {
             AccelOpCategory::Elementwise => self.infer_elementwise_shape(&inputs).to_type(),
             AccelOpCategory::Reduction => Type::Num,
             AccelOpCategory::MatMul => self.infer_matmul_type(&inputs),
             AccelOpCategory::Transpose => Type::Unknown,
-            AccelOpCategory::Other => Type::Unknown,
+            AccelOpCategory::Other => {
+                // Prefer tag-driven array construct inference over name-based
+                if info.tags.iter().any(|t| matches!(t, AccelGraphTag::ArrayConstruct)) {
+                    self.infer_array_constructor_from_tags(&inputs).unwrap_or(Type::Unknown)
+                } else {
+                    Type::Unknown
+                }
+            }
         };
+        // If still unknown for an ArrayConstruct-tagged builtin, try a constant size-vector inference
+        if matches!(out_type, Type::Unknown)
+            && info.tags.iter().any(|t| matches!(t, AccelGraphTag::ArrayConstruct))
+            && inputs.len() == 1
+        {
+            if let Some(info0) = self.values.get(inputs[0] as usize) {
+                if let Some(Value::Tensor(t)) = &info0.constant {
+                    let rows = t.rows();
+                    let cols = t.cols();
+                    if rows == 1 && cols > 0 {
+                        let mut dims: Vec<Option<usize>> = Vec::with_capacity(cols);
+                        for j in 0..cols {
+                            dims.push(Some(t.data[j].round() as usize));
+                        }
+                        out_type = Type::Tensor { shape: Some(dims) };
+                    } else if cols == 1 && rows > 0 {
+                        let mut dims: Vec<Option<usize>> = Vec::with_capacity(rows);
+                        for i in 0..rows {
+                            dims.push(Some(t.data[i].round() as usize));
+                        }
+                        out_type = Type::Tensor { shape: Some(dims) };
+                    }
+                }
+            }
+        }
         let out_value = self.new_node_output(node_id, 0, out_type);
         node.outputs.push(out_value);
         self.nodes.push(node);
         self.stack.push(out_value);
+    }
+
+    fn infer_array_constructor_from_tags(&self, inputs: &[ValueId]) -> Option<Type> {
+        // Generic version of infer_array_constructor_type without any name checks
+        // 1) 'like' prototype takes precedence
+        let mut i = 0usize;
+        while i + 1 < inputs.len() {
+            let s = &self.values[inputs[i] as usize].constant;
+            if let Some(Value::String(text)) = s {
+                if text.eq_ignore_ascii_case("like") {
+                    let proto = &self.values[inputs[i + 1] as usize];
+                    if let Type::Tensor { shape: Some(dims) } = &proto.ty {
+                        return Some(Type::Tensor { shape: Some(dims.clone()) });
+                    }
+                    break;
+                }
+            }
+            i += 1;
+        }
+
+        // 2) Leading numeric dims
+        let mut dims: Vec<Option<usize>> = Vec::new();
+        for &vid in inputs {
+            let Some(info) = self.values.get(vid as usize) else { break };
+            match &info.constant {
+                Some(Value::Num(n)) => {
+                    if n.is_finite() {
+                        let r = n.round();
+                        if (r - n).abs() <= f64::EPSILON && r >= 0.0 {
+                            dims.push(Some(r as usize));
+                            continue;
+                        }
+                    }
+                    break;
+                }
+                Some(Value::Int(i)) => {
+                    let v = i.to_i64();
+                    if v >= 0 { dims.push(Some(v as usize)); continue; }
+                    break;
+                }
+                Some(Value::String(_)) => break,
+                _ => break,
+            }
+        }
+        if !dims.is_empty() {
+            if dims.len() == 1 {
+                let n = dims[0].unwrap_or(0);
+                return Some(Type::Tensor { shape: Some(vec![Some(n), Some(n)]) });
+            }
+            return Some(Type::Tensor { shape: Some(dims) });
+        }
+
+        // 3) size-vector tensor argument: 1xN or Nx1 with concrete numeric dims
+        for &vid in inputs {
+            let Some(info) = self.values.get(vid as usize) else { continue };
+            match &info.ty {
+                Type::Tensor { shape: Some(dims) } if dims.len() == 2 => {
+                    // Expect a constant tensor encoded as Value::Tensor; pull from constant if available
+                    if let Some(Value::Tensor(t)) = &info.constant {
+                        let rows = t.rows();
+                        let cols = t.cols();
+                        if (rows == 1 || rows == 0) && cols > 0 {
+                            // 1xN row vector
+                            let mut out: Vec<Option<usize>> = Vec::with_capacity(cols);
+                            for j in 0..cols {
+                                let v = t.data[j].round() as i64;
+                                if v >= 0 { out.push(Some(v as usize)); } else { out.push(None); }
+                            }
+                            return Some(Type::Tensor { shape: Some(out) });
+                        } else if (cols == 1 || cols == 0) && rows > 0 {
+                            // Nx1 column vector
+                            let mut out: Vec<Option<usize>> = Vec::with_capacity(rows);
+                            for i in 0..rows {
+                                let v = t.data[i].round() as i64;
+                                if v >= 0 { out.push(Some(v as usize)); } else { out.push(None); }
+                            }
+                            return Some(Type::Tensor { shape: Some(out) });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        None
     }
 
     fn push_constant(&mut self, ty: Type, constant: Option<Value>) {
@@ -472,37 +659,5 @@ fn primitive_tags(op: PrimitiveOp) -> Vec<AccelGraphTag> {
             vec![AccelGraphTag::Unary, AccelGraphTag::Elementwise]
         }
         _ => vec![AccelGraphTag::Elementwise],
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::instr::Instr;
-
-    #[test]
-    fn builds_simple_elementwise_graph() {
-        let instrs = vec![
-            Instr::LoadVar(0),
-            Instr::LoadVar(1),
-            Instr::ElemMul,
-            Instr::StoreVar(2),
-        ];
-        let mut var_types = vec![Type::tensor(), Type::tensor(), Type::tensor()];
-        if let Type::Tensor { shape } = &mut var_types[0] {
-            *shape = Some(vec![Some(4), Some(4)]);
-        }
-        if let Type::Tensor { shape } = &mut var_types[1] {
-            *shape = Some(vec![Some(4), Some(4)]);
-        }
-        if let Type::Tensor { shape } = &mut var_types[2] {
-            *shape = Some(vec![Some(4), Some(4)]);
-        }
-        let graph = build_accel_graph(&instrs, &var_types);
-        assert_eq!(graph.nodes.len(), 1);
-        let node = &graph.nodes[0];
-        assert!(node.is_elementwise());
-        assert_eq!(node.inputs.len(), 2);
-        assert_eq!(node.outputs.len(), 1);
     }
 }

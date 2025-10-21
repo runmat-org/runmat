@@ -14,9 +14,11 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
 title: "sin"
 category: "math/trigonometry"
@@ -108,6 +110,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 register_builtin_fusion_spec!(FUSION_SPEC);
+
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("sin", DOC_MD);
 
 #[runtime_builtin(
     name = "sin",
@@ -267,6 +272,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

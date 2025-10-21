@@ -46,10 +46,12 @@ runmat-builtins = { path = "../crates/runmat-builtins" }
 runmat-snapshot = { path = "../crates/runmat-snapshot" }
 runmat-plot = { path = "../crates/runmat-plot" }
 runmat-accelerate = { path = "../crates/runmat-accelerate" }
+runmat-accelerate-api = { path = "../crates/runmat-accelerate-api" }
 
 [features]
 # GUI plotting features and BLAS/LAPACK (enabled by default)
 default = ["gui", "blas-lapack"]
+wgpu = []
 gui = ["runmat-plot/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
 blas-only = ["runmat-runtime/blas-only"]

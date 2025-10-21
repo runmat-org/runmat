@@ -234,6 +234,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             "reduction" => quote! { runmat_builtins::AccelTag::Reduction },
             "matmul" => quote! { runmat_builtins::AccelTag::MatMul },
             "transpose" => quote! { runmat_builtins::AccelTag::Transpose },
+            "array_construct" => quote! { runmat_builtins::AccelTag::ArrayConstruct },
             _ => quote! {},
         })
         .filter(|ts| !ts.is_empty())

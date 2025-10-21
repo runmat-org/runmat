@@ -9,6 +9,7 @@ license-file = "../LICENSE.md"
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-accelerate = { workspace = true, optional = true }
+runmat-accelerate-api = { path = "../runmat-accelerate-api", optional = true }
 runmat-lexer = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
@@ -18,7 +19,6 @@ log = { workspace = true }
 
 [dev-dependencies]
 runmat-lexer = { workspace = true }
-runmat-accelerate-api = { path = "../runmat-accelerate-api" }
 anyhow = { workspace = true }
 once_cell = "1"
 
@@ -27,4 +27,4 @@ default = ["native-accel"]
 # Enabling this feature also enables the dependency feature on runmat-runtime
 # so the test-only builtins and registry seeders are available.
 test-classes = ["runmat-runtime/test-classes"]
-native-accel = ["runmat-accelerate"]
+native-accel = ["runmat-accelerate", "runmat-accelerate-api"]

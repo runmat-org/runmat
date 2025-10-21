@@ -236,6 +236,51 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("fused_reduction not supported by provider"))
     }
+
+    /// Optionally pre-compile commonly used pipelines to amortize first-dispatch costs.
+    fn warmup(&self) {}
+
+    /// Returns (cache_hits, cache_misses) for fused pipeline cache, if supported.
+    fn fused_cache_counters(&self) -> (u64, u64) {
+        (0, 0)
+    }
+
+    /// Returns the duration of the last provider warmup in milliseconds, if known.
+    fn last_warmup_millis(&self) -> Option<u64> {
+        None
+    }
+
+    /// Default reduction workgroup size the provider prefers.
+    fn default_reduction_workgroup_size(&self) -> u32 {
+        256
+    }
+
+    /// Threshold above which provider will prefer two-pass reduction.
+    fn two_pass_threshold(&self) -> usize {
+        1024
+    }
+
+    /// Fast-path: write a GPU column in a matrix from a GPU vector, returning a new handle.
+    /// Expected: `values.shape == [rows, 1]` (or `[rows]`) and `col_index < cols`.
+    fn scatter_column(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _col_index: usize,
+        _values: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scatter_column not supported by provider"))
+    }
+
+    /// Fast-path: write a GPU row in a matrix from a GPU vector, returning a new handle.
+    /// Expected: `values.shape == [1, cols]` (or `[cols]`) and `row_index < rows`.
+    fn scatter_row(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _row_index: usize,
+        _values: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scatter_row not supported by provider"))
+    }
 }
 
 static mut GLOBAL_PROVIDER: Option<&'static dyn AccelProvider> = None;

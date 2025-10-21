@@ -1,0 +1,11 @@
+
+running 6 tests
+test builtins::array::rand::tests::doc_examples_present ... ok
+test builtins::array::rand::tests::rand_gpu_like_uniform ... ok
+test builtins::array::rand::tests::rand_default_scalar ... ok
+test builtins::array::rand::tests::rand_like_complex_produces_complex_tensor ... ok
+test builtins::array::rand::tests::rand_like_tensor_infers_shape ... ok
+test builtins::array::rand::tests::rand_square_from_single_dimension ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 78 filtered out; finished in 0.00s
+

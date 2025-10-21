@@ -10,9 +10,11 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
 title: "zeros"
 category: "array/creation"
@@ -117,11 +119,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 register_builtin_fusion_spec!(FUSION_SPEC);
 
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("zeros", DOC_MD);
+
 #[runtime_builtin(
     name = "zeros",
     category = "array/creation",
     summary = "Create arrays filled with zeros.",
-    keywords = "zeros,array,logical,gpu,like"
+    keywords = "zeros,array,logical,gpu,like",
+    accel = "array_construct"
 )]
 fn zeros_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedZeros::parse(rest)?;
@@ -143,31 +149,52 @@ enum OutputTemplate {
 impl ParsedZeros {
     fn parse(args: Vec<Value>) -> Result<Self, String> {
         let mut dims: Vec<usize> = Vec::new();
-        let mut template: Option<OutputTemplate> = None;
-        let mut prototype_shape: Option<Vec<usize>> = None;
+        let mut saw_dims_arg = false;
+        let mut shape_source: Option<Vec<usize>> = None;
+        let mut like_proto: Option<Value> = None;
+        let mut class_override: Option<OutputTemplate> = None;
+        let mut implicit_proto: Option<Value> = None;
 
-        let mut i = 0;
-        while i < args.len() {
-            let arg = args[i].clone();
+        let mut idx = 0;
+        while idx < args.len() {
+            let arg = args[idx].clone();
             if let Some(keyword) = keyword_of(&arg) {
                 match keyword.as_str() {
                     "like" => {
-                        let Some(proto) = args.get(i + 1).cloned() else {
+                        if like_proto.is_some() {
+                            return Err("zeros: multiple 'like' specifications are not supported"
+                                .to_string());
+                        }
+                        if class_override.is_some() {
+                            return Err(
+                                "zeros: cannot combine 'like' with other class specifiers"
+                                    .to_string(),
+                            );
+                        }
+                        let Some(proto) = args.get(idx + 1).cloned() else {
                             return Err("zeros: expected prototype after 'like'".to_string());
                         };
-                        template = Some(OutputTemplate::Like(proto.clone()));
-                        prototype_shape = Some(shape_from_value(&proto)?);
-                        i += 2;
+                        like_proto = Some(proto.clone());
+                        if shape_source.is_none() && !saw_dims_arg {
+                            shape_source = Some(shape_from_value(&proto)?);
+                        }
+                        idx += 2;
                         continue;
                     }
                     "logical" => {
-                        template = Some(OutputTemplate::Logical);
-                        i += 1;
+                        if like_proto.is_some() {
+                            return Err("zeros: cannot combine 'like' with 'logical'".to_string());
+                        }
+                        class_override = Some(OutputTemplate::Logical);
+                        idx += 1;
                         continue;
                     }
                     "double" => {
-                        template = Some(OutputTemplate::Double);
-                        i += 1;
+                        if like_proto.is_some() {
+                            return Err("zeros: cannot combine 'like' with 'double'".to_string());
+                        }
+                        class_override = Some(OutputTemplate::Double);
+                        idx += 1;
                         continue;
                     }
                     "single" => {
@@ -182,37 +209,49 @@ impl ParsedZeros {
             }
 
             if let Some(parsed_dims) = extract_dims(&arg)? {
+                saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
                 } else {
                     dims.extend(parsed_dims);
                 }
-                i += 1;
+                idx += 1;
                 continue;
             }
 
-            if template.is_none() {
-                template = Some(OutputTemplate::Like(arg.clone()));
+            if shape_source.is_none() {
+                shape_source = Some(shape_from_value(&arg)?);
             }
-            if prototype_shape.is_none() {
-                prototype_shape = Some(shape_from_value(&arg)?);
+            if implicit_proto.is_none() {
+                implicit_proto = Some(arg.clone());
             }
-            i += 1;
+            idx += 1;
         }
 
-        let shape = if !dims.is_empty() {
-            if dims.len() == 1 {
+        let shape = if saw_dims_arg {
+            if dims.is_empty() {
+                vec![0, 0]
+            } else if dims.len() == 1 {
                 vec![dims[0], dims[0]]
             } else {
                 dims
             }
-        } else if let Some(shape) = prototype_shape {
+        } else if let Some(shape) = shape_source {
             shape
         } else {
             vec![1, 1]
         };
 
-        let template = template.unwrap_or(OutputTemplate::Double);
+        let template = if let Some(proto) = like_proto {
+            OutputTemplate::Like(proto)
+        } else if let Some(spec) = class_override {
+            spec
+        } else if let Some(proto) = implicit_proto {
+            OutputTemplate::Like(proto)
+        } else {
+            OutputTemplate::Double
+        };
+
         Ok(Self { shape, template })
     }
 }
@@ -444,6 +483,64 @@ mod tests {
     }
 
     #[test]
+    fn zeros_like_uses_shape_argument_when_combined_with_like() {
+        let shape_source = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
+        let proto = Tensor::new(vec![7.0, 8.0], vec![1, 2]).unwrap();
+        let args = vec![
+            Value::Tensor(shape_source.clone()),
+            Value::from("like"),
+            Value::Tensor(proto),
+        ];
+        let result = zeros_builtin(args).expect("zeros");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 3]);
+                assert!(t.data.iter().all(|&x| x == 0.0));
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn zeros_like_without_explicit_shape_uses_prototype_shape() {
+        let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let args = vec![Value::from("like"), Value::Tensor(proto)];
+        let result = zeros_builtin(args).expect("zeros");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert!(t.data.iter().all(|&x| x == 0.0));
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn zeros_empty_input_returns_empty_matrix() {
+        let empty = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
+        let result = zeros_builtin(vec![Value::Tensor(empty)]).expect("zeros");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![0, 0]);
+                assert!(t.data.is_empty());
+            }
+            other => panic!("expected empty tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn zeros_conflicting_like_and_logical_is_error() {
+        let proto = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let args = vec![
+            Value::Num(2.0),
+            Value::from("logical"),
+            Value::from("like"),
+            Value::Tensor(proto),
+        ];
+        assert!(zeros_builtin(args).is_err());
+    }
+
+    #[test]
     fn zeros_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -471,6 +568,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -13,9 +13,11 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
 title: "ones"
 category: "array/creation"
@@ -27,7 +29,7 @@ gpu_support:
   reduction: false
   precisions: ["f32", "f64"]
   broadcasting: "none"
-  notes: "Uses provider one-allocation hooks when available; otherwise fills via zero allocation + scalar add or uploads from the host."
+  notes: "Uses provider one-allocation hooks when available; otherwise fills via scalar add or uploads from the host."
 fusion:
   elementwise: false
   reduction: false
@@ -54,9 +56,9 @@ vector, matrix, and N-D forms, including `'like'` and `'logical'` options.
 
 ## GPU Execution
 When the prototype or `'like'` argument is a GPU tensor, RunMat asks the active acceleration
-provider to allocate a one-filled buffer in-place. Providers that do not yet support the dedicated
-hooks fall back to zero allocation plus scalar fill or, as a last resort, upload a host tensor,
-guaranteeing correct behaviour while documenting the extra transfer cost.
+provider to allocate a one-filled buffer. Acceleration providers that do not yet support the dedicated hooks
+fall back to zero-allocation plus scalar fill or, as a last resort, upload a host tensor.
+This guarantees correct behaviour while documenting the extra transfer cost.
 
 ## Examples
 
@@ -120,11 +122,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 register_builtin_fusion_spec!(FUSION_SPEC);
 
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("ones", DOC_MD);
+
 #[runtime_builtin(
     name = "ones",
     category = "array/creation",
     summary = "Create arrays filled with ones.",
-    keywords = "ones,array,logical,gpu,like"
+    keywords = "ones,array,logical,gpu,like",
+    accel = "array_construct"
 )]
 fn ones_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let parsed = ParsedOnes::parse(rest)?;
@@ -146,31 +152,51 @@ enum OutputTemplate {
 impl ParsedOnes {
     fn parse(args: Vec<Value>) -> Result<Self, String> {
         let mut dims: Vec<usize> = Vec::new();
-        let mut template: Option<OutputTemplate> = None;
-        let mut prototype_shape: Option<Vec<usize>> = None;
+        let mut saw_dims_arg = false;
+        let mut shape_source: Option<Vec<usize>> = None;
+        let mut like_proto: Option<Value> = None;
+        let mut class_override: Option<OutputTemplate> = None;
+        let mut implicit_proto: Option<Value> = None;
 
         let mut idx = 0;
         while idx < args.len() {
             let arg = args[idx].clone();
-
             if let Some(keyword) = keyword_of(&arg) {
                 match keyword.as_str() {
                     "like" => {
+                        if like_proto.is_some() {
+                            return Err("ones: multiple 'like' specifications are not supported"
+                                .to_string());
+                        }
+                        if class_override.is_some() {
+                            return Err(
+                                "ones: cannot combine 'like' with other class specifiers"
+                                    .to_string(),
+                            );
+                        }
                         let Some(proto) = args.get(idx + 1).cloned() else {
                             return Err("ones: expected prototype after 'like'".to_string());
                         };
-                        template = Some(OutputTemplate::Like(proto.clone()));
-                        prototype_shape = Some(shape_from_value(&proto)?);
+                        like_proto = Some(proto.clone());
+                        if shape_source.is_none() && !saw_dims_arg {
+                            shape_source = Some(shape_from_value(&proto)?);
+                        }
                         idx += 2;
                         continue;
                     }
                     "logical" => {
-                        template = Some(OutputTemplate::Logical);
+                        if like_proto.is_some() {
+                            return Err("ones: cannot combine 'like' with 'logical'".to_string());
+                        }
+                        class_override = Some(OutputTemplate::Logical);
                         idx += 1;
                         continue;
                     }
                     "double" => {
-                        template = Some(OutputTemplate::Double);
+                        if like_proto.is_some() {
+                            return Err("ones: cannot combine 'like' with 'double'".to_string());
+                        }
+                        class_override = Some(OutputTemplate::Double);
                         idx += 1;
                         continue;
                     }
@@ -186,6 +212,7 @@ impl ParsedOnes {
             }
 
             if let Some(parsed_dims) = extract_dims(&arg)? {
+                saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
                 } else {
@@ -195,28 +222,39 @@ impl ParsedOnes {
                 continue;
             }
 
-            if template.is_none() {
-                template = Some(OutputTemplate::Like(arg.clone()));
+            if shape_source.is_none() {
+                shape_source = Some(shape_from_value(&arg)?);
             }
-            if prototype_shape.is_none() {
-                prototype_shape = Some(shape_from_value(&arg)?);
+            if implicit_proto.is_none() {
+                implicit_proto = Some(arg.clone());
             }
             idx += 1;
         }
 
-        let shape = if !dims.is_empty() {
-            if dims.len() == 1 {
+        let shape = if saw_dims_arg {
+            if dims.is_empty() {
+                vec![0, 0]
+            } else if dims.len() == 1 {
                 vec![dims[0], dims[0]]
             } else {
                 dims
             }
-        } else if let Some(shape) = prototype_shape {
+        } else if let Some(shape) = shape_source {
             shape
         } else {
             vec![1, 1]
         };
 
-        let template = template.unwrap_or(OutputTemplate::Double);
+        let template = if let Some(proto) = like_proto {
+            OutputTemplate::Like(proto)
+        } else if let Some(spec) = class_override {
+            spec
+        } else if let Some(proto) = implicit_proto {
+            OutputTemplate::Like(proto)
+        } else {
+            OutputTemplate::Double
+        };
+
         Ok(Self { shape, template })
     }
 }
@@ -236,8 +274,7 @@ fn ones_double(shape: &[usize]) -> Result<Value, String> {
 
 fn ones_logical(shape: &[usize]) -> Result<Value, String> {
     let len = tensor::element_count(shape);
-    let data = vec![1u8; len];
-    LogicalArray::new(data, shape.to_vec())
+    LogicalArray::new(vec![1u8; len], shape.to_vec())
         .map(Value::LogicalArray)
         .map_err(|e| format!("ones: {e}"))
 }
@@ -271,10 +308,10 @@ fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Str
         }
 
         if let Ok(zero_handle) = provider.zeros(shape) {
-            let filled = provider.scalar_add(&zero_handle, 1.0);
+            let add_result = provider.scalar_add(&zero_handle, 1.0);
             let _ = provider.free(&zero_handle);
-            if let Ok(gpu) = filled {
-                return Ok(Value::GpuTensor(gpu));
+            if let Ok(filled) = add_result {
+                return Ok(Value::GpuTensor(filled));
             }
         }
 
@@ -463,6 +500,20 @@ mod tests {
     }
 
     #[test]
+    fn ones_like_logical_array() {
+        let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
+        let args = vec![Value::LogicalArray(logical)];
+        let result = ones_builtin(args).expect("ones");
+        match result {
+            Value::LogicalArray(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert!(out.data.iter().all(|&x| x == 1));
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn ones_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -490,6 +541,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

@@ -1,8 +1,8 @@
-//! New-style builtin layout. Builtins are organised by category and re-exported from here.
-
+//! New builtin set. Builtins are organised by category and re-exported from this module.
+#[macro_use]
+pub mod common;
 pub mod accel;
 pub mod array;
-pub mod common;
 pub mod introspection;
 pub mod io;
 pub mod logical;

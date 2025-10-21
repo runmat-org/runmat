@@ -13,9 +13,11 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
 title: "sum"
 category: "math/reduction"
@@ -87,7 +89,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[ProviderHook::Reduction {
-        name: "reduce_sum_dim",
+            name: "reduce_sum_dim",
     }],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
@@ -118,6 +120,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 register_builtin_fusion_spec!(FUSION_SPEC);
+
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("sum", DOC_MD);
 
 #[runtime_builtin(
     name = "sum",
@@ -222,7 +227,6 @@ fn sum_gpu(
             }
         }
     } else if nan_mode == ReductionNaN::Omit {
-        // Device path via generic fused reduction with omitnan baked into the shader.
         if let Some(provider) = runmat_accelerate_api::provider() {
             let axis = target_dim.saturating_sub(1);
             if handle.shape.len() == 2 && axis <= 1 {
@@ -233,23 +237,21 @@ fn sum_gpu(
                 } else {
                     (cols, rows, true)
                 };
-                let output_shape =
-                    reduction_shape(&handle.shape, target_dim).unwrap_or_else(|| vec![num_slices]);
+                let output_shape = reduction_shape(&handle.shape, target_dim)
+                    .unwrap_or_else(|| vec![num_slices]);
                 let scalar_ty = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F32 => "f32",
                     runmat_accelerate_api::ProviderPrecision::F64 => "f64",
                 };
-                // Minimal WGSL with omitnan=true
+                // Minimal WGSL with omitnan=true; column-major addressing
                 let mut shader = String::new();
                 shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>; }}\n"));
-                shader
-                    .push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
+                shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
                 shader.push_str("@group(0) @binding(0) var<storage, read> input0: Tensor;\n");
                 shader.push_str("@group(0) @binding(1) var<storage, read_write> output: Tensor;\n");
                 shader.push_str("@group(0) @binding(2) var<uniform> params: MParams;\n\n");
                 shader.push_str("@compute @workgroup_size(256)\n");
                 if axis_is_row {
-                    // Row-wise: one output per row; reduce over columns
                     shader.push_str(
                         "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
                     );
@@ -258,12 +260,9 @@ fn sum_gpu(
                         "  var acc: {scalar_ty} = {}0.0;\n",
                         if scalar_ty == "f64" { "f64(" } else { "" }
                     ));
-                    if scalar_ty == "f64" {
-                        shader.push_str("  // close f64 literal\n");
-                    }
+                    if scalar_ty == "f64" { shader.push_str("  // close f64 literal\n"); }
                     shader.push_str("  var c = lid.x;\n  while (c < params.ncols) {\n    let v = input0.data[row + (c * params.ld)];\n    if (!isNan(v)) { acc = acc + v; }\n    c += 256u;\n  }\n");
                 } else {
-                    // Column-wise: one output per column; reduce over rows
                     shader.push_str(
                         "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
                     );
@@ -272,19 +271,16 @@ fn sum_gpu(
                         "  var acc: {scalar_ty} = {}0.0;\n",
                         if scalar_ty == "f64" { "f64(" } else { "" }
                     ));
-                    if scalar_ty == "f64" {
-                        shader.push_str("  // close f64 literal\n");
-                    }
+                    if scalar_ty == "f64" { shader.push_str("  // close f64 literal\n"); }
                     shader.push_str("  var r = lid.x;\n  while (r < params.nrows) {\n    let v = input0.data[(col * params.ld) + r];\n    if (!isNan(v)) { acc = acc + v; }\n    r += 256u;\n  }\n");
                 }
                 shader.push_str("  var<workgroup> tile: array<f32, 256u>;\n  tile[lid.x] = acc;\n  workgroupBarrier();\n");
                 shader.push_str("  var off = 128u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n");
                 if axis_is_row {
                     shader.push_str("  if (lid.x == 0u) { output.data[row] = tile[0u]; }\n}\n");
-                } else {
+    } else {
                     shader.push_str("  if (lid.x == 0u) { output.data[col] = tile[0u]; }\n}\n");
                 }
-
                 if let Ok(device_result) = provider.fused_reduction(
                     &shader,
                     std::slice::from_ref(&handle),
@@ -297,6 +293,10 @@ fn sum_gpu(
                 }
             }
         }
+        // If provider path failed, fall back to host
+        let gathered = gpu_helpers::gather_tensor(&handle)?;
+        let reduced = reduce_tensor_dim(&gathered, target_dim, nan_mode)?;
+        return Ok(tensor::tensor_into_value(reduced));
     }
 
     let gathered = gpu_helpers::gather_tensor(&handle)?;
@@ -318,7 +318,7 @@ fn reduce_tensor_dim(
         if let Some(shape) = reduction_shape(&tensor.shape, dim) {
             let zeros = vec![0.0; tensor::element_count(&shape)];
             return Tensor::new(zeros, shape).map_err(|e| format!("sum: {e}"));
-        } else {
+    } else {
             return Ok(tensor.clone());
         }
     }
@@ -392,10 +392,10 @@ fn reduce_tensor_dim(
                 ReductionNaN::Omit => {
                     if any_value {
                         sum
-                    } else {
-                        0.0
-                    }
-                }
+            } else {
+                0.0
+            }
+        }
             };
         }
     }
@@ -544,6 +544,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());

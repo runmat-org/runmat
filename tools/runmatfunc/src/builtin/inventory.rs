@@ -57,5 +57,6 @@ fn tag_to_str(tag: &AccelTag) -> String {
         AccelTag::Reduction => "reduction".to_string(),
         AccelTag::MatMul => "matmul".to_string(),
         AccelTag::Transpose => "transpose".to_string(),
+        AccelTag::ArrayConstruct => "array_construct".to_string(),
     }
 }

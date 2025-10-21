@@ -20,6 +20,7 @@ export type Builtin = {
   examples?: { title?: string; code: string }[];
   keywords?: string[];
   internal?: boolean;
+  mdxPath?: string;
 };
 
 export function loadBuiltins(): Builtin[] {

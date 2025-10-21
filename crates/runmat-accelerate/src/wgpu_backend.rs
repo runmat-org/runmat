@@ -7,14 +7,21 @@ use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned, HostTensorView,
     ProviderPrecision, ReduceDimResult,
 };
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+// (no futures/async; synchronous creation with instrumentation)
+use std::time::Instant;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use wgpu::util::DeviceExt;
 
 const WORKGROUP_SIZE: u32 = 256;
 const REDUCE_WORKGROUP_SIZE: u32 = 256;
+const DEFAULT_TWO_PASS_THRESHOLD: usize = 1024;
+const DEFAULT_REDUCTION_WG: u32 = 256;
 const MATMUL_TILE: u32 = 16;
 const MAX_DISPATCH_WORKGROUPS: u32 = 65_535;
 
@@ -341,12 +348,316 @@ pub struct WgpuProvider {
     buffers: Mutex<HashMap<u64, BufferEntry>>,
     next_id: AtomicU64,
     pipelines: WgpuPipelines,
-    device_id: u32,
+    pub device_id: u32,
     precision: NumericPrecision,
     element_size: usize,
+    // Simple pipeline cache for fused kernels keyed by shader hash and layout signature
+    fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
+    // Metrics counters
+    fused_cache_hits: AtomicU64,
+    fused_cache_misses: AtomicU64,
+    last_warmup_millis: AtomicU64,
+    // Tunables
+    reduction_two_pass_threshold: usize,
+    reduction_workgroup_size_default: u32,
+    // Optional on-disk pipeline cache directory (lazy created)
+    pipeline_cache_dir: Option<std::path::PathBuf>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PipelineMeta {
+    label: String,
+    layout_tag: Option<String>,
+    workgroup_size: Option<u32>,
 }
 
 impl WgpuProvider {
+    // (threaded pipeline builder removed)
+
+    fn build_bgl_for_layout_tag(&self, tag: &str) -> Option<wgpu::BindGroupLayout> {
+        // Elementwise: runmat-fusion-layout-<n_inputs>
+        if let Some(rest) = tag.strip_prefix("runmat-fusion-layout-") {
+            if let Ok(n_inputs) = rest.parse::<usize>() {
+                let mut entries = Vec::with_capacity(n_inputs + 2);
+                for i in 0..n_inputs {
+                    entries.push(storage_read_entry(i as u32));
+                }
+                entries.push(storage_read_write_entry(n_inputs as u32));
+                entries.push(uniform_entry((n_inputs + 1) as u32));
+                return Some(self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-fusion-bgl"),
+                    entries: &entries,
+                }));
+            }
+        }
+        // Reductions: single pass and two-pass use the same 3-entry layout
+        match tag {
+            "runmat-reduction-bgl" | "runmat-reduction-p1-bgl" | "runmat-reduction-p2-bgl" => {
+                let entries = [storage_read_entry(0), storage_read_write_entry(1), uniform_entry(2)];
+                return Some(self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-reduction-bgl"),
+                    entries: &entries,
+                }));
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn warmup_from_disk(&self) {
+        let Some(dir) = &self.pipeline_cache_dir else { return; };
+        let Ok(rd) = std::fs::read_dir(dir) else { return; };
+        let mut compiled = 0usize;
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") { continue; }
+            let stem = match path.file_stem().and_then(|s| s.to_str()) { Some(s) => s, None => continue };
+            // Read meta
+            let meta_bytes = match std::fs::read(&path) { Ok(b) => b, Err(_) => continue };
+            let meta: PipelineMeta = match serde_json::from_slice(&meta_bytes) { Ok(m) => m, Err(_) => continue };
+            let layout_tag = match meta.layout_tag.as_deref() { Some(t) => t, None => continue };
+            // Read WGSL
+            let wgsl_path = dir.join(format!("{stem}.wgsl"));
+            let wgsl_bytes = match std::fs::read(&wgsl_path) { Ok(b) => b, Err(_) => continue };
+            let wgsl_str = match std::str::from_utf8(&wgsl_bytes) { Ok(s) => s, Err(_) => continue };
+            // Recreate bind group layout and pipeline layout
+            let bgl = match self.build_bgl_for_layout_tag(layout_tag) { Some(b) => b, None => continue };
+            let pl = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("warmup-pipeline-layout"),
+                bind_group_layouts: &[&bgl],
+                push_constant_ranges: &[],
+            });
+            // Shader module
+            let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("warmup-shader-module"),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl_str)),
+            });
+            // Compute key and create pipeline (which inserts into cache and persists meta)
+            let key = self.compute_pipeline_hash_bytes(&wgsl_bytes, layout_tag, meta.workgroup_size);
+            let pipeline = self.get_or_create_pipeline(
+                key,
+                &pl,
+                &module,
+                "warmup-precompiled-pipeline",
+                Some(&wgsl_bytes),
+                Some(layout_tag),
+                meta.workgroup_size,
+            );
+            // Optional tiny noop pass to nudge driver state (no bindings required)
+            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("warmup-noop-precompiled-enc"),
+            });
+            {
+                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("warmup-noop-precompiled-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&*pipeline);
+            }
+            self.submit(enc);
+            compiled += 1;
+        }
+        if compiled > 0 {
+            log::info!("warmup: precompiled {} pipelines from on-disk cache", compiled);
+        }
+    }
+
+    pub fn try_compile_kernel(&self, label: &str, wgsl_src: &str) -> Result<()> {
+        let t0 = Instant::now();
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&format!("{}-module", label)),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl_src)),
+            });
+        let pl = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(&format!("{}-pl", label)),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
+        let _pipeline = self
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(&format!("{}-pipeline", label)),
+                layout: Some(&pl),
+                module: &module,
+                entry_point: "main",
+            });
+        log::info!(
+            "try_compile_kernel: '{}' compiled in {:.3} ms",
+            label,
+            t0.elapsed().as_secs_f64() * 1000.0
+        );
+        Ok(())
+    }
+
+    pub fn probe_kernel_with_buffers(&self, label: &str, wgsl_src: &str, wg: u32) -> Result<()> {
+        let t0 = Instant::now();
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&format!("{}-module", label)),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl_src)),
+            });
+        let bgl = self
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some(&format!("{}-bgl", label)),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let pl = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(&format!("{}-pl", label)),
+                bind_group_layouts: &[&bgl],
+                push_constant_ranges: &[],
+            });
+        let pipeline = self
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(&format!("{}-pipeline", label)),
+                layout: Some(&pl),
+                module: &module,
+                entry_point: "main",
+            });
+        // tiny buffers
+        let in_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{}-in", label)),
+            contents: bytemuck::cast_slice(&[0.0f32; 4]),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let out_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{}-out", label)),
+            contents: bytemuck::cast_slice(&[0.0f32; 4]),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        });
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{}-bg", label)),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: in_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: out_buf.as_entire_binding() },
+            ],
+        });
+        let mut enc = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(&format!("{}-enc", label)) });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(&format!("{}-pass", label)), timestamp_writes: None });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(1.max(wg / wg), 1, 1);
+        }
+        self.submit(enc);
+        log::info!(
+            "probe_kernel_with_buffers: '{}' compiled+submitted in {:.3} ms",
+            label,
+            t0.elapsed().as_secs_f64() * 1000.0
+        );
+        Ok(())
+    }
+
+    /// Get or create a compute pipeline from cache using a caller-provided hash key.
+    /// The hash should incorporate shader source and any layout/workgroup parameters
+    /// that affect compatibility. This helper unifies cache lookups and creation.
+    fn get_or_create_pipeline(
+        &self,
+        hash_key: u64,
+        pipeline_layout: &wgpu::PipelineLayout,
+        module: &wgpu::ShaderModule,
+        label: &str,
+        persist_wgsl_src: Option<&[u8]>,
+        persist_layout_tag: Option<&str>,
+        persist_workgroup_size: Option<u32>,
+    ) -> Arc<wgpu::ComputePipeline> {
+        if let Some(p) = self
+            .fused_pipeline_cache
+            .try_lock()
+            .ok()
+            .and_then(|guard| guard.get(&hash_key).cloned())
+        {
+            self.fused_cache_hits.fetch_add(1, Ordering::Relaxed);
+            return p;
+        }
+        self.fused_cache_misses.fetch_add(1, Ordering::Relaxed);
+        // Persist WGSL + meta for warmup on next run
+        self.persist_pipeline_meta(hash_key, label, persist_layout_tag, persist_workgroup_size, persist_wgsl_src);
+        let p = Arc::new(self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(label),
+            layout: Some(pipeline_layout),
+            module,
+            entry_point: "main",
+        }));
+        if let Ok(mut guard) = self.fused_pipeline_cache.try_lock() {
+            guard.insert(hash_key, p.clone());
+        }
+        p
+    }
+
+    pub fn compute_pipeline_hash_bytes(
+        &self,
+        shader_bytes: &[u8],
+        layout_tag: &str,
+        workgroup_size: Option<u32>,
+    ) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        shader_bytes.hash(&mut hasher);
+        layout_tag.hash(&mut hasher);
+        if let Some(wg) = workgroup_size {
+            wg.hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    fn persist_pipeline_meta(
+        &self,
+        hash_key: u64,
+        label: &str,
+        layout_tag: Option<&str>,
+        workgroup_size: Option<u32>,
+        wgsl_src: Option<&[u8]>,
+    ) {
+        if let Some(dir) = &self.pipeline_cache_dir {
+            let _ = std::fs::create_dir_all(dir);
+            if let Some(src) = wgsl_src {
+                let wgsl_path = dir.join(format!("{hash_key:016x}.wgsl"));
+                let _ = std::fs::write(&wgsl_path, src);
+            }
+            let meta = PipelineMeta {
+                label: label.to_string(),
+                layout_tag: layout_tag.map(|s| s.to_string()),
+                workgroup_size,
+            };
+            let meta_path = dir.join(format!("{hash_key:016x}.json"));
+            if let Ok(json) = serde_json::to_vec_pretty(&meta) {
+                let _ = std::fs::write(&meta_path, json);
+            }
+        }
+    }
+    // (removed async helper)
     pub fn new(opts: WgpuProviderOptions) -> Result<Self> {
         let instance = wgpu::Instance::default();
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -362,6 +673,16 @@ impl WgpuProvider {
         } else {
             NumericPrecision::F32
         };
+
+        // Tunables with env overrides
+        let two_pass_threshold = std::env::var("RUNMAT_TWO_PASS_THRESHOLD")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_TWO_PASS_THRESHOLD);
+        let reduction_wg_default = std::env::var("RUNMAT_REDUCTION_WG")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(DEFAULT_REDUCTION_WG);
 
         let required_features = match precision {
             NumericPrecision::F64 => wgpu::Features::SHADER_F64,
@@ -397,6 +718,16 @@ impl WgpuProvider {
             ),
         }
 
+        // Choose a cache dir: prefer RUNMAT_PIPELINE_CACHE_DIR, else OS cache dir
+        let cache_dir = if let Ok(custom) = std::env::var("RUNMAT_PIPELINE_CACHE_DIR") {
+            std::path::PathBuf::from(custom)
+        } else if let Some(base) = dirs::cache_dir() {
+            base.join("runmat").join("pipelines").join(format!("device-{}", device_id))
+        } else {
+            // Fallback to local target/tmp
+            std::path::PathBuf::from("target").join("tmp").join(format!("wgpu-pipeline-cache-{}", device_id))
+        };
+
         Ok(Self {
             device,
             queue,
@@ -407,6 +738,13 @@ impl WgpuProvider {
             device_id,
             precision,
             element_size,
+            fused_pipeline_cache: Mutex::new(HashMap::new()),
+            fused_cache_hits: AtomicU64::new(0),
+            fused_cache_misses: AtomicU64::new(0),
+            reduction_two_pass_threshold: two_pass_threshold,
+            reduction_workgroup_size_default: reduction_wg_default,
+            pipeline_cache_dir: Some(cache_dir),
+            last_warmup_millis: AtomicU64::new(0),
         })
     }
 
@@ -501,6 +839,31 @@ impl WgpuProvider {
             return Err(anyhow!("tensor too large for GPU buffer"));
         }
 
+        // Metal workaround: warm up pipeline and poll before first real dispatch to avoid stalls
+        {
+            let mut enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-binary-noop"),
+                });
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-binary-noop-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.binary.pipeline);
+            drop(pass);
+            self.submit(enc);
+        }
+        self.device.poll(wgpu::Maintain::Poll);
+        {
+            let enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-binary-flush-gap"),
+                });
+            self.submit(enc);
+        }
+
         let out_buffer = self.create_storage_buffer(len, "runmat-binary-out");
         let chunk_capacity = (MAX_DISPATCH_WORKGROUPS as usize) * WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
@@ -568,6 +931,31 @@ impl WgpuProvider {
         }
         if len > (u32::MAX as usize) {
             return Err(anyhow!("tensor too large for GPU buffer"));
+        }
+
+        // Metal workaround: warm up pipeline and poll before first real dispatch to avoid stalls
+        {
+            let mut enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-unary-noop"),
+                });
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-unary-noop-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.unary.pipeline);
+            drop(pass);
+            self.submit(enc);
+        }
+        self.device.poll(wgpu::Maintain::Poll);
+        {
+            let enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-unary-flush-gap"),
+                });
+            self.submit(enc);
         }
 
         let chunk_capacity = (MAX_DISPATCH_WORKGROUPS as usize) * WORKGROUP_SIZE as usize;
@@ -724,6 +1112,31 @@ impl WgpuProvider {
             return Err(anyhow!("tensor too large for GPU buffer"));
         }
 
+        // Metal workaround: warm up pipeline and poll before first real dispatch to avoid stalls
+        {
+            let mut enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-transpose-noop"),
+                });
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-transpose-noop-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.transpose.pipeline);
+            drop(pass);
+            self.submit(enc);
+        }
+        self.device.poll(wgpu::Maintain::Poll);
+        {
+            let enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-transpose-flush-gap"),
+                });
+            self.submit(enc);
+        }
+
         let chunk_capacity = (MAX_DISPATCH_WORKGROUPS as usize) * WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
         while offset < len {
@@ -793,6 +1206,31 @@ impl WgpuProvider {
         if len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
         }
+        // Metal workaround: warm up pipeline and poll before first real dispatch to avoid stalls
+        {
+            let mut enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-matmul-noop"),
+                });
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-matmul-noop-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.matmul.pipeline);
+            drop(pass);
+            self.submit(enc);
+        }
+        self.device.poll(wgpu::Maintain::Poll);
+        {
+            let enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-matmul-flush-gap"),
+                });
+            self.submit(enc);
+        }
+
         let params = MatmulParams {
             m: m as u32,
             n: n as u32,
@@ -1073,6 +1511,69 @@ impl WgpuProvider {
             indices: indices_handle,
         })
     }
+
+    fn warmup_internal(&self) {
+        // Preload any pipelines from on-disk cache, then synthesize a few tiny kernels
+        self.warmup_from_disk();
+        let start = std::time::Instant::now();
+        // Compile trivial elementwise and reduction templates to populate cache
+        // Elementwise: minimal passthrough (len is small)
+        let shader = r#"struct Tensor { data: array<f32> };
+struct Params { len: u32, _pad0: u32, _pad1: u32, _pad2: u32 }
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x; if (idx >= params.len) { return; }
+  output.data[idx] = input0.data[idx];
+}
+"#;
+        // Set up a tiny buffer and run fused_elementwise to trigger pipeline creation
+        let view = HostTensorView { data: &[0.0f64; 4], shape: &[4usize] };
+        if let Ok(h) = self.upload(&view) {
+            let _ = self.fused_elementwise(shader, &[h.clone()], &[4], 4);
+            let _ = self.free(&h);
+        }
+
+        // Reduction warmup: single-pass for small reduce_len
+        // Two-pass threshold tuning: keep workgroup 256; vary small nrows
+        let red = r#"struct Tensor { data: array<f32> };
+struct MParams { nrows:u32, ncols:u32, ld:u32, flags:u32 }
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: MParams;
+const OMITNAN: bool = false;
+@compute @workgroup_size(64)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
+  let slice = wid.x; if (slice >= params.ncols) { return; }
+  var acc: f32 = 0.0; var r = lid.x; while (r < params.nrows) {
+    let v = input0.data[(slice * params.ld) + r]; acc = acc + v; r += 64u; }
+  var<workgroup> tile: array<f32,64u>; tile[lid.x] = acc; workgroupBarrier();
+  var off = 32u; loop { if (off==0u){break;} if(lid.x<off){tile[lid.x]=tile[lid.x]+tile[lid.x+off];} workgroupBarrier(); off=off/2u; }
+  if (lid.x==0u) { output.data[slice] = tile[0u]; }
+}
+"#;
+        let view2 = HostTensorView { data: &[1.0f64; 8], shape: &[4usize, 2usize] };
+        if let Ok(h2) = self.upload(&view2) {
+            let _ = self.fused_reduction(red, &[h2.clone()], &[2], 4, 2, 64);
+            let _ = self.free(&h2);
+        }
+        // Additional tiny warmup for a different shader hash size
+        let view3 = HostTensorView { data: &[2.0f64; 16], shape: &[8usize, 2usize] };
+        if let Ok(h3) = self.upload(&view3) {
+            let _ = self.fused_reduction(red, &[h3.clone()], &[2], 8, 2, 64);
+            let _ = self.free(&h3);
+        }
+        let elapsed = start.elapsed();
+        let (hits, misses) = self.fused_cache_counters();
+        log::info!(
+            "WGPU warmup completed in {:?}; fused cache hits={}, misses={}",
+            elapsed, hits, misses
+        );
+        self.last_warmup_millis
+            .store((elapsed.as_secs_f64() * 1000.0) as u64, Ordering::Relaxed);
+    }
 }
 
 impl AccelProvider for WgpuProvider {
@@ -1151,7 +1652,7 @@ impl AccelProvider for WgpuProvider {
         self.device.poll(wgpu::Maintain::Wait);
         rx.recv()
             .map_err(|_| anyhow!("map_async callback dropped"))?
-            .map_err(|e| anyhow!(e))?;
+            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
         let data = slice.get_mapped_range();
         let mut out = vec![0.0f64; entry.len];
         match entry.precision {
@@ -1344,20 +1845,27 @@ impl AccelProvider for WgpuProvider {
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
+        let layout_tag = {
+            let mut tag = String::from("runmat-fusion-layout-");
+            tag.push_str(&inputs.len().to_string());
+            tag
+        };
+        let shader_hash = self.compute_pipeline_hash_bytes(shader.as_bytes(), &layout_tag, Some(WORKGROUP_SIZE));
         let module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("runmat-fusion-shader"),
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader)),
             });
-        let pipeline = self
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("runmat-fusion-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: &module,
-                entry_point: "main",
-            });
+        let pipeline = self.get_or_create_pipeline(
+            shader_hash,
+            &pipeline_layout,
+            &module,
+            "runmat-fusion-pipeline",
+            Some(shader.as_bytes()),
+            Some(&layout_tag),
+            Some(WORKGROUP_SIZE),
+        );
 
         let mut bind_entries = Vec::with_capacity(inputs.len() + 2);
         for (idx, entry) in entries.iter().enumerate() {
@@ -1388,6 +1896,23 @@ impl AccelProvider for WgpuProvider {
             entries: &bind_entries,
         });
 
+        // Warm-up noop pass to mirror reduction path and avoid driver stalls
+        {
+            let mut enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-noop-elementwise"),
+                });
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-noop-pass-elementwise"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&*pipeline);
+            drop(pass);
+            self.submit(enc);
+        }
+        self.device.poll(wgpu::Maintain::Poll);
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1396,8 +1921,9 @@ impl AccelProvider for WgpuProvider {
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-fusion-pass"),
+                timestamp_writes: None,
             });
-            pass.set_pipeline(&pipeline);
+            pass.set_pipeline(&*pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
             let workgroups = dispatch_size(len as u32, WORKGROUP_SIZE);
             if workgroups > 0 {
@@ -1433,19 +1959,28 @@ impl AccelProvider for WgpuProvider {
             ));
         }
 
-        // Decide path: single-pass if reduce_len <= workgroup_size else two-pass
-        if reduce_len as u32 <= workgroup_size {
+        log::info!(
+            "fused_reduction: start reduce_len={} slices={} wg={}",
+            reduce_len, num_slices, workgroup_size
+        );
+        // Allow caller to pass 0 to request provider default WG size
+        let workgroup_size = if workgroup_size == 0 {
+            self.reduction_workgroup_size_default
+        } else {
+            workgroup_size
+        };
+        // Decide path: single-pass if reduce_len <= threshold else two-pass
+        let two_pass = reduce_len > self.reduction_two_pass_threshold as usize;
+        if !two_pass {
+            log::info!("fused_reduction: path single-pass");
             // Single-pass using provided shader
             // Create shader module (label includes hash to aid driver-side caching)
-            let shader_hash = seahash::hash(shader.as_bytes());
-            let label = format!(
-                "runmat-fused-reduction-{}-{:x}",
-                self.device_id, shader_hash
-            );
+            // hash computed via compute_pipeline_hash_bytes below
+            let layout_tag = "runmat-reduction-bgl";
             let module = self
                 .device
                 .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some(&label),
+                    label: Some("runmat-fused-reduction-module"),
                     source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(shader)),
                 });
             let bind_group_layout =
@@ -1465,24 +2000,74 @@ impl AccelProvider for WgpuProvider {
                         bind_group_layouts: &[&bind_group_layout],
                         push_constant_ranges: &[],
                     });
-            let pipeline = self
-                .device
-                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("runmat-reduction-pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &module,
-                    entry_point: "main",
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    cache: None,
-                });
+            // Optional debug: skip pipeline creation/dispatch entirely
+            if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
+                log::info!(
+                    "fused_reduction: RUNMAT_DEBUG_PIPELINE_ONLY set, skipping pipeline+dispatch (single-pass)"
+                );
+                let out_len = num_slices.max(1);
+                let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
+                let handle = self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len);
+                return Ok(handle);
+            }
 
+            // Cache per-shader hash (non-blocking to avoid potential mutex stalls)
+            let key = self.compute_pipeline_hash_bytes(shader.as_bytes(), layout_tag, Some(workgroup_size));
+            let pipeline = self.get_or_create_pipeline(
+                key,
+                &pipeline_layout,
+                &module,
+                "runmat-reduction-pipeline",
+                Some(shader.as_bytes()),
+                Some(layout_tag),
+                Some(workgroup_size),
+            );
+
+            if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
+                log::info!(
+                    "fused_reduction: RUNMAT_DEBUG_PIPELINE_ONLY set, skipping dispatch (single-pass)"
+                );
+                let out_len = num_slices.max(1);
+                let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
+                let handle = self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len);
+                return Ok(handle);
+            }
+
+            // Optional tiny noop compute pass using the pipeline to warm up driver state
+            log::info!("fused_reduction: submitting noop compute pass (single-pass)");
+            {
+                let mut enc = self
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-noop-single-pass"),
+                    });
+                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-noop-pass-single"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&*pipeline);
+                drop(pass);
+                self.submit(enc);
+            }
+            self.device.poll(wgpu::Maintain::Poll);
+
+            // Buffers (ensure device is polled/flushed before allocations to avoid backend stalls)
+            log::info!("fused_reduction: polling device before buffer allocs (single-pass)");
+            self.device.poll(wgpu::Maintain::Poll);
+            let flush_enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-flush-single-pass-gap"),
+                });
+            // Submit empty encoder to force driver to flush any pending work
+            self.submit(flush_enc);
             // Buffers
             let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
             let out_len = num_slices.max(1);
             let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
 
             #[repr(C)]
-            #[derive(Clone, Copy)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
             struct Params {
                 nrows: u32,
                 ncols: u32,
@@ -1502,6 +2087,7 @@ impl AccelProvider for WgpuProvider {
             };
             let params_buffer = Arc::new(self.uniform_buffer(&params, "runmat-reduction-params"));
 
+            log::info!("fused_reduction: creating single-pass bind group");
             let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("runmat-reduction-bg"),
                 layout: &bind_group_layout,
@@ -1520,6 +2106,7 @@ impl AccelProvider for WgpuProvider {
                     },
                 ],
             });
+            log::info!("fused_reduction: single-pass bind group created");
 
             let mut encoder = self
                 .device
@@ -1531,11 +2118,15 @@ impl AccelProvider for WgpuProvider {
                     label: Some("runmat-reduction-pass"),
                     timestamp_writes: None,
                 });
-                pass.set_pipeline(&pipeline);
+                pass.set_pipeline(&*pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups((num_slices as u32).max(1), 1, 1);
+                let groups = (num_slices as u32).max(1);
+                log::info!("fused_reduction: dispatch groups=({},1,1)", groups);
+                pass.dispatch_workgroups(groups, 1, 1);
             }
+            log::info!("fused_reduction: submitting (single-pass)");
             self.submit(encoder);
+            log::info!("fused_reduction: single-pass submitted");
 
             let handle = self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len);
             return Ok(handle);
@@ -1552,33 +2143,49 @@ impl AccelProvider for WgpuProvider {
             0u32
         };
         let chunks = ((reduce_len as u32) + workgroup_size - 1) / workgroup_size;
+        log::info!(
+            "fused_reduction: two-pass params chunks={} partials_len={}",
+            chunks,
+            num_slices.max(1) * (chunks as usize)
+        );
         let partials_len = num_slices.max(1) * (chunks as usize);
 
         // Pass 1 shader: each (slice, chunk) reduces up to workgroup_size elements
         let pass1 = format!(
-            "struct Tensor {{ data: array<{st}>; }}\nstruct P1Params {{ nrows:u32,ncols:u32,ld:u32,flags:u32,chunks:u32 }}\n@group(0) @binding(0) var<storage,read> input0: Tensor;\n@group(0) @binding(1) var<storage,read_write> partials: Tensor;\n@group(0) @binding(2) var<uniform> params: P1Params;\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x; let chunk = wid.y;\n  if (slice >= params.ncols || chunk >= params.chunks) {{ return; }}\n  let start = chunk * {wg}; let end = min(params.nrows, start + {wg});\n  var acc: {st} = {zero};\n  var i = start + lid.x;\n  loop {{ if (i >= end) {{ break; }} let v = input0.data[(slice * params.ld) + i]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} i += {wg}; }}\n  var<workgroup> tile: array<f32,{wg}>; tile[lid.x] = acc; workgroupBarrier();\n  var off = {half}; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ partials.data[(slice * params.chunks) + chunk] = {cast}tile[0u]; }}\n}}",
+            "struct Tensor {{ data: array<{st}> }};\nstruct P1Params {{ nrows:u32,ncols:u32,ld:u32,flags:u32,chunks:u32 }}\n@group(0) @binding(0) var<storage,read> input0: Tensor;\n@group(0) @binding(1) var<storage,read_write> partials: Tensor;\n@group(0) @binding(2) var<uniform> params: P1Params;\nvar<workgroup> tile: array<f32,{wg}>;\nfn isNan(x: {st}) -> bool {{ return x != x; }}\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x; let chunk = wid.y;\n  if (slice >= params.ncols || chunk >= params.chunks) {{ return; }}\n  let start = chunk * {wg}u; let end = min(params.nrows, start + {wg}u);\n  var acc: {st} = {zero};\n  var i = start + lid.x;\n  loop {{ if (i >= end) {{ break; }} let v = input0.data[(slice * params.ld) + i]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} i += {wg}u; }}\n  tile[lid.x] = acc; workgroupBarrier();\n  var off: u32 = {half}u; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ partials.data[(slice * params.chunks) + chunk] = {cast}tile[0u]; }}\n}}",
             st=scalar_ty, wg=workgroup_size, half=workgroup_size/2, zero=if scalar_ty=="f64" { "f64(0.0)" } else { "0.0" }, cast=if scalar_ty=="f64" { "f64(" } else { "" }
         );
 
         // Pass 2 shader: each slice reduces across chunks
         let pass2 = format!(
-            "struct Tensor {{ data: array<{st}>; }}\nstruct P2Params {{ ncols:u32,chunks:u32,flags:u32 }}\n@group(0) @binding(0) var<storage,read> partials: Tensor;\n@group(0) @binding(1) var<storage,read_write> output: Tensor;\n@group(0) @binding(2) var<uniform> params: P2Params;\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x; if (slice >= params.ncols) {{ return; }}\n  var acc: {st} = {zero}; var c = lid.x;\n  loop {{ if (c >= params.chunks) {{ break; }} let v = partials.data[(slice * params.chunks) + c]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} c += {wg}; }}\n  var<workgroup> tile: array<f32,{wg}>; tile[lid.x] = acc; workgroupBarrier();\n  var off = {half}; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ output.data[slice] = {cast}tile[0u]; }}\n}}",
+            "struct Tensor {{ data: array<{st}> }};\nstruct P2Params {{ ncols:u32,chunks:u32,flags:u32 }}\n@group(0) @binding(0) var<storage,read> partials: Tensor;\n@group(0) @binding(1) var<storage,read_write> output: Tensor;\n@group(0) @binding(2) var<uniform> params: P2Params;\nvar<workgroup> tile: array<f32,{wg}>;\nfn isNan(x: {st}) -> bool {{ return x != x; }}\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x; if (slice >= params.ncols) {{ return; }}\n  var acc: {st} = {zero}; var c = lid.x;\n  loop {{ if (c >= params.chunks) {{ break; }} let v = partials.data[(slice * params.chunks) + c]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} c += {wg}u; }}\n  tile[lid.x] = acc; workgroupBarrier();\n  var off: u32 = {half}u; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ output.data[slice] = {cast}tile[0u]; }}\n}}",
             st=scalar_ty, wg=workgroup_size, half=workgroup_size/2, zero=if scalar_ty=="f64" { "f64(0.0)" } else { "0.0" }, cast=if scalar_ty=="f64" { "f64(" } else { "" }
         );
 
         // Create pipelines
+        let m1_t0 = std::time::Instant::now();
         let m1 = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("runmat-reduction-pass1"),
-                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(pass1)),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(pass1.clone())),
             });
+        log::info!(
+            "fused_reduction: pass1 module created in {:.3} ms",
+            m1_t0.elapsed().as_secs_f64() * 1000.0
+        );
+        let m2_t0 = std::time::Instant::now();
         let m2 = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("runmat-reduction-pass2"),
-                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(pass2)),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(pass2.clone())),
             });
+        log::info!(
+            "fused_reduction: pass2 module created in {:.3} ms",
+            m2_t0.elapsed().as_secs_f64() * 1000.0
+        );
+        log::info!("fused_reduction: creating BGL1");
         let bgl1 = self
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1589,6 +2196,7 @@ impl AccelProvider for WgpuProvider {
                     uniform_entry(2),
                 ],
             });
+        log::info!("fused_reduction: creating BGL2");
         let bgl2 = self
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1599,6 +2207,7 @@ impl AccelProvider for WgpuProvider {
                     uniform_entry(2),
                 ],
             });
+        log::info!("fused_reduction: creating pipeline layout PL1");
         let pl1 = self
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1606,6 +2215,7 @@ impl AccelProvider for WgpuProvider {
                 bind_group_layouts: &[&bgl1],
                 push_constant_ranges: &[],
             });
+        log::info!("fused_reduction: creating pipeline layout PL2");
         let pl2 = self
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1613,35 +2223,100 @@ impl AccelProvider for WgpuProvider {
                 bind_group_layouts: &[&bgl2],
                 push_constant_ranges: &[],
             });
-        let p1 = self
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("runmat-reduction-pass1"),
-                layout: Some(&pl1),
-                module: &m1,
-                entry_point: "main",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                cache: None,
-            });
-        let p2 = self
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("runmat-reduction-pass2"),
-                layout: Some(&pl2),
-                module: &m2,
-                entry_point: "main",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                cache: None,
-            });
 
+        // Optional debug: skip pipeline creation/dispatch entirely (two-pass)
+        if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
+            log::info!(
+                "fused_reduction: RUNMAT_DEBUG_PIPELINE_ONLY set, skipping pipeline+dispatch (two-pass)"
+            );
+            let out_len = num_slices.max(1);
+            let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
+            return Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len));
+        }
+        // keys computed via compute_pipeline_hash_bytes below
+        // Build pass2 first
+        let p2_key = self.compute_pipeline_hash_bytes(pass2.as_bytes(), "runmat-reduction-p2-bgl", Some(workgroup_size));
+        let pipeline_p2 = self.get_or_create_pipeline(
+            p2_key,
+            &pl2,
+            &m2,
+            "runmat-reduction-pass2",
+            Some(pass2.as_bytes()),
+            Some("runmat-reduction-p2-bgl"),
+            Some(workgroup_size),
+        );
+        // After pass2 pipeline is ready, poll and flush before pass1 to avoid stalls on some drivers
+        log::info!("fused_reduction: polling device before pass1 pipeline");
+        self.device.poll(wgpu::Maintain::Poll);
+        let flush_enc = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-flush-before-pass1"),
+            });
+        self.submit(flush_enc);
+
+        // Insert a tiny noop compute submit to warm up driver state after pass2 pipeline
+        log::info!("fused_reduction: submitting noop compute pass after pass2 pipeline");
+        {
+            let mut enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-noop-after-pass2"),
+                });
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-noop-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&*pipeline_p2);
+            drop(pass);
+            self.submit(enc);
+        }
+        self.device.poll(wgpu::Maintain::Poll);
+
+        let p1_key = self.compute_pipeline_hash_bytes(pass1.as_bytes(), "runmat-reduction-p1-bgl", Some(workgroup_size));
+        let pipeline_p1 = self.get_or_create_pipeline(
+            p1_key,
+            &pl1,
+            &m1,
+            "runmat-reduction-pass1",
+            Some(pass1.as_bytes()),
+            Some("runmat-reduction-p1-bgl"),
+            Some(workgroup_size),
+        );
+
+        // (debug guard moved earlier)
+
+        // Buffers (ensure device is polled before allocations to avoid backend stalls)
+        log::info!("fused_reduction: polling device before buffer allocs (two-pass)");
+        self.device.poll(wgpu::Maintain::Poll);
         // Buffers
+        log::info!(
+            "fused_reduction: creating two-pass buffers partials_len={} out_len={}",
+            partials_len,
+            num_slices.max(1)
+        );
+        log::info!("fused_reduction: retrieving input buffer 0");
         let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
+        log::info!("fused_reduction: input buffer retrieved");
         let partials_buffer = self.create_storage_buffer(partials_len, "runmat-reduction-partials");
+        log::info!("fused_reduction: partials buffer created (len={})", partials_len);
         let out_buffer = self.create_storage_buffer(num_slices.max(1), "runmat-reduction-out");
+        log::info!(
+            "fused_reduction: out buffer created (len={})",
+            num_slices.max(1)
+        );
 
         // Uniforms
         #[repr(C)]
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Params {
+            nrows: u32,
+            ncols: u32,
+            ld: u32,
+            flags: u32,
+        }
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
         struct P1 {
             nrows: u32,
             ncols: u32,
@@ -1650,7 +2325,7 @@ impl AccelProvider for WgpuProvider {
             chunks: u32,
         }
         #[repr(C)]
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
         struct P2 {
             ncols: u32,
             chunks: u32,
@@ -1668,10 +2343,15 @@ impl AccelProvider for WgpuProvider {
             chunks,
             flags,
         };
+        log::info!("fused_reduction: creating pass1 uniform buffer");
         let p1_buf = Arc::new(self.uniform_buffer(&p1, "runmat-reduction-p1-params"));
+        log::info!("fused_reduction: pass1 uniform buffer created");
+        log::info!("fused_reduction: creating pass2 uniform buffer");
         let p2_buf = Arc::new(self.uniform_buffer(&p2u, "runmat-reduction-p2-params"));
+        log::info!("fused_reduction: pass2 uniform buffer created");
 
         // Bind groups
+        log::info!("fused_reduction: creating pass1 bind group");
         let bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("runmat-reduction-p1-bg"),
             layout: &bgl1,
@@ -1690,6 +2370,8 @@ impl AccelProvider for WgpuProvider {
                 },
             ],
         });
+        log::info!("fused_reduction: pass1 bind group created");
+        log::info!("fused_reduction: creating pass2 bind group");
         let bg2 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("runmat-reduction-p2-bg"),
             layout: &bgl2,
@@ -1708,6 +2390,7 @@ impl AccelProvider for WgpuProvider {
                 },
             ],
         });
+        log::info!("fused_reduction: pass2 bind group created");
 
         // Dispatch two passes
         let mut encoder = self
@@ -1720,22 +2403,218 @@ impl AccelProvider for WgpuProvider {
                 label: Some("runmat-reduction-pass1"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&p1);
+            pass.set_pipeline(&*pipeline_p1);
             pass.set_bind_group(0, &bg1, &[]);
-            pass.dispatch_workgroups((num_slices as u32).max(1), chunks.max(1), 1);
+            let g0 = (num_slices as u32).max(1);
+            let g1 = chunks.max(1);
+            log::info!("fused_reduction: pass1 dispatch groups=({}, {}, 1)", g0, g1);
+            pass.dispatch_workgroups(g0, g1, 1);
         }
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-reduction-pass2"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&p2);
+            pass.set_pipeline(&*pipeline_p2);
             pass.set_bind_group(0, &bg2, &[]);
-            pass.dispatch_workgroups((num_slices as u32).max(1), 1, 1);
+            let g0 = (num_slices as u32).max(1);
+            log::info!("fused_reduction: pass2 dispatch groups=({}, 1, 1)", g0);
+            pass.dispatch_workgroups(g0, 1, 1);
         }
+        log::info!("fused_reduction: submitting (two-pass)");
         self.submit(encoder);
+        log::info!("fused_reduction: two-pass submitted");
 
         Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), num_slices.max(1)))
+    }
+
+    fn warmup(&self) {
+        self.warmup_internal();
+    }
+
+    fn fused_cache_counters(&self) -> (u64, u64) {
+        (
+            self.fused_cache_hits.load(Ordering::Relaxed),
+            self.fused_cache_misses.load(Ordering::Relaxed),
+        )
+    }
+
+    fn default_reduction_workgroup_size(&self) -> u32 {
+        self.reduction_workgroup_size_default
+    }
+
+    fn two_pass_threshold(&self) -> usize {
+        self.reduction_two_pass_threshold
+    }
+
+    fn scatter_column(
+        &self,
+        matrix: &GpuTensorHandle,
+        col_index: usize,
+        values: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let m_entry = self.get_entry(matrix)?;
+        if m_entry.shape.len() != 2 {
+            return Err(anyhow!("scatter_column: only 2D tensors supported"));
+        }
+        let rows = m_entry.shape[0];
+        let cols = m_entry.shape[1];
+        if col_index >= cols {
+            return Err(anyhow!("scatter_column: column index out of bounds"));
+        }
+        let v_entry = self.get_entry(values)?;
+        let v_rows = if v_entry.shape.len() == 1 {
+            v_entry.shape[0]
+        } else if v_entry.shape.len() == 2 {
+            v_entry.shape[0]
+        } else {
+            return Err(anyhow!("scatter_column: values must be vector or [rows,1]"));
+        };
+        if v_rows != rows {
+            return Err(anyhow!("scatter_column: length mismatch"));
+        }
+
+        // Simple kernel: copy values into matrix column j
+        let shader = r#"struct T { data: array<f32> };
+@group(0) @binding(0) var<storage, read> V: T;
+@group(0) @binding(1) var<storage, read> M: T;
+@group(0) @binding(2) var<storage, read_write> Out: T;
+struct P { rows:u32, cols:u32, j:u32 }
+@group(0) @binding(3) var<uniform> Pm: P;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let r = gid.x; if (r >= Pm.rows) { return; }
+  let dst = r + Pm.j * Pm.rows;
+  Out.data[dst] = V.data[r];
+}
+"#;
+        // Reuse fused_elementwise-like dispatch: build BGL with 3 storage + 1 uniform
+        let out_buffer = self.create_storage_buffer(rows * cols, "runmat-scatter-col-out");
+        // Copy input matrix into out first (blit kernel or copy pass)
+        {
+            let mut enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-scatter-col-copy") });
+            enc.copy_buffer_to_buffer(
+                m_entry.buffer.as_ref(), 0,
+                out_buffer.as_ref(), 0,
+                (rows * cols * self.element_size) as u64,
+            );
+            self.submit(enc);
+        }
+        let bgl = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("runmat-scatter-col-bgl"),
+            entries: &[
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+        });
+        let pl = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("runmat-scatter-col-pl"),
+            bind_group_layouts: &[&bgl],
+            push_constant_ranges: &[],
+        });
+        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("runmat-scatter-col-module"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(shader)),
+        });
+        let key = self.compute_pipeline_hash_bytes(shader.as_bytes(), "runmat-scatter-col-bgl", Some(256));
+        let pipeline = self.get_or_create_pipeline(key, &pl, &module, "runmat-scatter-col", Some(shader.as_bytes()), Some("runmat-scatter-col-bgl"), Some(256));
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Pm { rows: u32, cols: u32, j: u32 }
+        let params = Pm { rows: rows as u32, cols: cols as u32, j: col_index as u32 };
+        let pbuf = self.uniform_buffer(&params, "runmat-scatter-col-params");
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("runmat-scatter-col-bg"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: v_entry.buffer.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: m_entry.buffer.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: out_buffer.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: pbuf.as_entire_binding() },
+            ],
+        });
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-scatter-col-enc") });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("runmat-scatter-col-pass"), timestamp_writes: None });
+            pass.set_pipeline(&*pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            let groups = dispatch_size(rows as u32, 256);
+            if groups > 0 { pass.dispatch_workgroups(groups, 1, 1); }
+        }
+        self.submit(enc);
+        Ok(self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols))
+    }
+
+    fn scatter_row(
+        &self,
+        matrix: &GpuTensorHandle,
+        row_index: usize,
+        values: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let m_entry = self.get_entry(matrix)?;
+        if m_entry.shape.len() != 2 { return Err(anyhow!("scatter_row: only 2D tensors supported")); }
+        let rows = m_entry.shape[0];
+        let cols = m_entry.shape[1];
+        if row_index >= rows { return Err(anyhow!("scatter_row: row index out of bounds")); }
+        let v_entry = self.get_entry(values)?;
+        let v_cols = if v_entry.shape.len() == 1 { v_entry.shape[0] } else if v_entry.shape.len() == 2 { v_entry.shape[1] } else { return Err(anyhow!("scatter_row: values must be vector or [1,cols]")); };
+        if v_cols != cols { return Err(anyhow!("scatter_row: length mismatch")); }
+
+        let shader = r#"struct T { data: array<f32> };
+@group(0) @binding(0) var<storage, read> V: T;
+@group(0) @binding(1) var<storage, read> M: T;
+@group(0) @binding(2) var<storage, read_write> Out: T;
+struct P { rows:u32, cols:u32, i:u32 }
+@group(0) @binding(3) var<uniform> Pm: P;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let c = gid.x; if (c >= Pm.cols) { return; }
+  let dst = Pm.i + c * Pm.rows;
+  Out.data[dst] = V.data[c];
+}
+"#;
+        let out_buffer = self.create_storage_buffer(rows * cols, "runmat-scatter-row-out");
+        {
+            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-scatter-row-copy") });
+            enc.copy_buffer_to_buffer(m_entry.buffer.as_ref(), 0, out_buffer.as_ref(), 0, (rows * cols * self.element_size) as u64);
+            self.submit(enc);
+        }
+        let bgl = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("runmat-scatter-row-bgl"), entries: &[
+            storage_read_entry(0), storage_read_entry(1), storage_read_write_entry(2), uniform_entry(3)
+        ]});
+        let pl = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("runmat-scatter-row-pl"), bind_group_layouts: &[&bgl], push_constant_ranges: &[] });
+        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("runmat-scatter-row-module"), source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(shader)) });
+        let key = self.compute_pipeline_hash_bytes(shader.as_bytes(), "runmat-scatter-row-bgl", Some(256));
+        let pipeline = self.get_or_create_pipeline(key, &pl, &module, "runmat-scatter-row", Some(shader.as_bytes()), Some("runmat-scatter-row-bgl"), Some(256));
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Pm { rows: u32, cols: u32, i: u32 }
+        let params = Pm { rows: rows as u32, cols: cols as u32, i: row_index as u32 };
+        let pbuf = self.uniform_buffer(&params, "runmat-scatter-row-params");
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("runmat-scatter-row-bg"), layout: &bgl, entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: v_entry.buffer.as_ref().as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: m_entry.buffer.as_ref().as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: out_buffer.as_ref().as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: pbuf.as_entire_binding() },
+        ] });
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-scatter-row-enc") });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("runmat-scatter-row-pass"), timestamp_writes: None });
+            pass.set_pipeline(&*pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            let groups = dispatch_size(cols as u32, 256);
+            if groups > 0 { pass.dispatch_workgroups(groups, 1, 1); }
+        }
+        self.submit(enc);
+        Ok(self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols))
+    }
+
+    fn last_warmup_millis(&self) -> Option<u64> {
+        Some(self.last_warmup_millis.load(Ordering::Relaxed))
     }
 }
 
@@ -2038,6 +2917,8 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+fn isNan(x: f64) -> bool { return x != x; }
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
@@ -2077,6 +2958,8 @@ struct Params {
 @group(0) @binding(0) var<storage, read> A: Tensor;
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
+
+fn isNan(x: f32) -> bool { return x != x; }
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -2120,6 +3003,8 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+fn isNan(x: f64) -> bool { return x != x; }
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local = gid.x;
@@ -2152,6 +3037,8 @@ struct Params {
 @group(0) @binding(0) var<storage, read> A: Tensor;
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
+
+fn isNan(x: f32) -> bool { return x != x; }
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -2424,6 +3311,8 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+fn isNan(x: f64) -> bool { return x != x; }
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
@@ -2432,27 +3321,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             return;
         }
         var acc: f64 = 0.0;
+        var saw_nan: bool = false;
         for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
             let linear = r + idx * params.rows;
-            acc = acc + InBuf.data[linear];
+            let v = InBuf.data[linear];
+            if isNan(v) {
+                saw_nan = true;
+            } else {
+                acc = acc + v;
+            }
         }
-        if params.op == 1u {
-            acc = acc / f64(params.rows);
+        if saw_nan {
+            OutBuf.data[idx] = f64(0.0) / f64(0.0);
+        } else {
+            if params.op == 1u { acc = acc / f64(params.rows); }
+            OutBuf.data[idx] = acc;
         }
-        OutBuf.data[idx] = acc;
     } else {
         if idx >= params.rows {
             return;
         }
         var acc: f64 = 0.0;
+        var saw_nan: bool = false;
         for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
             let linear = idx + c * params.rows;
-            acc = acc + InBuf.data[linear];
+            let v = InBuf.data[linear];
+            if isNan(v) {
+                saw_nan = true;
+            } else {
+                acc = acc + v;
+            }
         }
-        if params.op == 1u {
-            acc = acc / f64(params.cols);
+        if saw_nan {
+            OutBuf.data[idx] = f64(0.0) / f64(0.0);
+        } else {
+            if params.op == 1u { acc = acc / f64(params.cols); }
+            OutBuf.data[idx] = acc;
         }
-        OutBuf.data[idx] = acc;
     }
 }
 "#;
@@ -2473,6 +3378,8 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+fn isNan(x: f32) -> bool { return x != x; }
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
@@ -2481,27 +3388,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             return;
         }
         var acc: f32 = 0.0;
+        var saw_nan: bool = false;
         for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
             let linear = r + idx * params.rows;
-            acc = acc + InBuf.data[linear];
+            let v = InBuf.data[linear];
+            if isNan(v) {
+                saw_nan = true;
+            } else {
+                acc = acc + v;
+            }
         }
-        if params.op == 1u {
-            acc = acc / f32(params.rows);
+        if saw_nan {
+            OutBuf.data[idx] = f32(0.0) / f32(0.0);
+        } else {
+            if params.op == 1u { acc = acc / f32(params.rows); }
+            OutBuf.data[idx] = acc;
         }
-        OutBuf.data[idx] = acc;
     } else {
         if idx >= params.rows {
             return;
         }
         var acc: f32 = 0.0;
+        var saw_nan: bool = false;
         for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
             let linear = idx + c * params.rows;
-            acc = acc + InBuf.data[linear];
+            let v = InBuf.data[linear];
+            if isNan(v) {
+                saw_nan = true;
+            } else {
+                acc = acc + v;
+            }
         }
-        if params.op == 1u {
-            acc = acc / f32(params.cols);
+        if saw_nan {
+            OutBuf.data[idx] = f32(0.0) / f32(0.0);
+        } else {
+            if params.op == 1u { acc = acc / f32(params.cols); }
+            OutBuf.data[idx] = acc;
         }
-        OutBuf.data[idx] = acc;
     }
 }
 "#;

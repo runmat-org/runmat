@@ -197,3 +197,25 @@ macro_rules! register_builtin_fusion_spec {
         }
     };
 }
+
+// Documentation text inventory (only populated when doc_export feature is enabled)
+pub struct DocTextInventory {
+    pub name: &'static str,
+    pub text: &'static str,
+}
+
+inventory::collect!(DocTextInventory);
+
+pub fn builtin_doc_texts() -> impl Iterator<Item = &'static DocTextInventory> {
+    inventory::iter::<DocTextInventory>().into_iter()
+}
+
+#[macro_export]
+macro_rules! register_builtin_doc_text {
+    ($name:expr, $text:expr) => {
+        #[cfg(feature = "doc_export")]
+        inventory::submit! {
+            $crate::builtins::common::spec::DocTextInventory { name: $name, text: $text }
+        }
+    };
+}

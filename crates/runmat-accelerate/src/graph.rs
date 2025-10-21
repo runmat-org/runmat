@@ -128,6 +128,7 @@ pub enum AccelGraphTag {
     Reduction,
     MatMul,
     Transpose,
+    ArrayConstruct,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

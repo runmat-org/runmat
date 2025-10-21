@@ -5187,6 +5187,7 @@ dependencies = [
  "openssl",
  "openssl-sys",
  "runmat-accelerate",
+ "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",
@@ -5214,6 +5215,7 @@ version = "0.0.3"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "dirs 5.0.1",
  "env_logger 0.11.8",
  "log",
  "once_cell",
@@ -5224,6 +5226,7 @@ dependencies = [
  "runmat-runtime",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "wgpu",
 ]
@@ -5434,6 +5437,7 @@ dependencies = [
  "runmat-plot",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tokio",
 ]
 

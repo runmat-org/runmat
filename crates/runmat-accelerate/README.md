@@ -85,3 +85,25 @@ info = gpuDevice();
 %          vendor: 'RunMat'
 %      backend: 'inprocess'
 ```
+
+### Reduction tuning and defaults
+- Defaults used by the WGPU provider (subject to device variation):
+  - two-pass threshold: 1024 elements per slice
+  - reduction workgroup size: 256
+- Environment overrides:
+  - `RUNMAT_TWO_PASS_THRESHOLD=<usize>`
+  - `RUNMAT_REDUCTION_WG=<u32>`
+- Selection logic:
+  - Single-pass when `reduce_len <= threshold`, otherwise two-pass (partials + second-stage reduce).
+  - Fusion and builtin paths honor provider defaults automatically; call sites may pass `wg=0` to use provider defaults.
+- Sweep to tune for your device with the `wgpu_profile` binary:
+  - Quick sweep: `cargo run -p runmat-accelerate --bin wgpu_profile --features wgpu -- --only-reduce-sweep --reduce-sweep --quick`
+  - Force single-pass: `RUNMAT_TWO_PASS_THRESHOLD=1000000 cargo run -p runmat-accelerate --bin wgpu_profile --features wgpu -- --only-reduce-sweep --reduce-sweep`
+  - Force two-pass: `RUNMAT_TWO_PASS_THRESHOLD=1 cargo run -p runmat-accelerate --bin wgpu_profile --features wgpu -- --only-reduce-sweep --reduce-sweep`
+
+### Pipeline cache and warmup
+- The provider caches compute pipelines by shader hash and layout to reduce first-dispatch latency.
+- A brief warmup compiles common kernels during provider initialization.
+- Cache metrics (hits/misses) are accessible via `runmat_accelerate::provider_cache_stats()` (when built with `wgpu`) and are printed by `wgpu_profile` after a sweep.
+- On-disk persistence: cache metadata (`.json`) and shader WGSL (`.wgsl`) are persisted under the OS cache directory or `RUNMAT_PIPELINE_CACHE_DIR` (fallback `target/tmp`).
+- Warmup precompiles pipelines from disk when available; `runmat accel-info` prints the last warmup duration in milliseconds.

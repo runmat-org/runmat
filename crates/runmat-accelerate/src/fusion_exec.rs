@@ -202,13 +202,18 @@ pub fn execute_reduction(
         .generate_reduction_wgsl(scalar_ty)
         .ok_or_else(|| anyhow!("fusion: reduction WGSL generation failed"))?;
 
+    let wg = if workgroup_size == 0 {
+        provider.default_reduction_workgroup_size()
+    } else {
+        workgroup_size
+    };
     let output = provider.fused_reduction(
         &shader,
         &handles,
         &output_shape,
         reduce_len,
         num_slices,
-        workgroup_size,
+        wg,
     )?;
     fusion_residency::mark(&output);
 
@@ -223,29 +228,17 @@ pub fn execute_reduction(
 
 fn infer_output_shape(
     group: &crate::fusion::FusionGroup,
-    len: usize,
-    inputs: &[GpuTensorHandle],
+    _len: usize,
+    _inputs: &[GpuTensorHandle],
 ) -> Result<Vec<usize>> {
     if let ShapeInfo::Tensor(dims) = &group.shape {
         if !dims.is_empty() {
-            let mut resolved = Vec::with_capacity(dims.len());
-            for (idx, dim) in dims.iter().enumerate() {
-                if let Some(v) = dim {
-                    resolved.push(*v);
-                } else if let Some(first) = inputs.first() {
-                    resolved.push(*first.shape.get(idx).unwrap_or(&1));
-                } else {
-                    resolved.push(1);
-                }
-            }
+            let resolved: Vec<usize> = dims
+                .iter()
+                .map(|d| d.unwrap_or(1))
+                .collect();
             return Ok(resolved);
         }
     }
-    // Fallback: preserve the shape of the first non-empty input (avoids scalars/constants)
-    for handle in inputs {
-        if !handle.shape.is_empty() {
-            return Ok(handle.shape.clone());
-        }
-    }
-    Ok(vec![len, 1])
+    Err(anyhow::anyhow!("fusion: unknown output shape"))
 }

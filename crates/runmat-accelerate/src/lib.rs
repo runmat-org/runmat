@@ -199,6 +199,13 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
                         info.vendor,
                         backend
                     );
+                    // Warmup to amortize first-dispatch costs
+                    provider.warmup();
+                    let (hits, misses) = provider.fused_cache_counters();
+                    log::info!(
+                        "RunMat Accelerate: fused pipeline cache after warmup - hits: {}, misses: {}",
+                        hits, misses
+                    );
                 }
                 Err(err) => {
                     log::warn!(
@@ -233,6 +240,29 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
 /// Initialize the acceleration provider using default options.
 pub fn initialize_acceleration_provider() {
     initialize_acceleration_provider_with(&AccelerateInitOptions::default());
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "wgpu")]
+    use crate::wgpu_backend;
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn elementwise_hash_varies_with_arity() {
+        wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default()).expect("wgpu provider");
+        let p = wgpu_backend::ensure_wgpu_provider().unwrap().unwrap();
+        let wg = 256u32;
+        let h2 = p.compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-2", Some(wg));
+        let h3 = p.compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-3", Some(wg));
+        assert_ne!(h2, h3, "hash should differ with input arity");
+    }
+}
+
+/// Return fused pipeline cache statistics if the active provider exposes them.
+#[cfg(feature = "wgpu")]
+pub fn provider_cache_stats() -> Option<(u64, u64)> {
+    runmat_accelerate_api::provider().map(|p| p.fused_cache_counters())
 }
 
 /// High-level device kind. Concrete selection is provided by backend.

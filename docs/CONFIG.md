@@ -339,6 +339,24 @@ All `RUSTMAT_*` variables map onto the above fields. Notable ones:
 
 Boolean parsing accepts `1/0`, `true/false`, `yes/no`, `on/off`, `enable/disable`.
 
+### Acceleration provider (RunMat Accelerate)
+
+Provider-specific env vars are read by the WGPU backend and fusion code:
+
+- `RUNMAT_TWO_PASS_THRESHOLD` (usize)
+  - Controls when two-pass reductions are used (per-slice length threshold).
+  - Default: `1024`.
+- `RUNMAT_REDUCTION_WG` (u32)
+  - Default reduction workgroup size when call sites opt into provider default
+    (passing 0). Default: `256`.
+- `RUNMAT_DEBUG_PIPELINE_ONLY` (bool)
+  - If set, provider may compile pipelines and skip buffer/dispatch paths to
+    isolate driver issues during development.
+- `RUNMAT_PIPELINE_CACHE_DIR` (path)
+  - Overrides the on-disk pipeline cache directory. Defaults to the OS cache
+    directory (e.g., `$XDG_CACHE_HOME/runmat/pipelines` or platform equivalent),
+    falling back to `target/tmp/wgpu-pipeline-cache-<device>`.
+
 ## Precedence & merging
 
 1. Start from built-in defaults.

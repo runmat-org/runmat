@@ -882,6 +882,7 @@ pub enum AccelTag {
     Reduction,
     MatMul,
     Transpose,
+    ArrayConstruct,
 }
 
 /// Simple builtin function definition using the unified type system
