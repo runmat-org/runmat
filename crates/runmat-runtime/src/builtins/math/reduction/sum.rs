@@ -612,4 +612,27 @@ mod tests {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn sum_wgpu_dim1_matches_cpu() {
+        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
+            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        );
+        // Host tensor
+        let t = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
+        let cpu = sum_host(Value::Tensor(t.clone()), Some(1), ReductionNaN::Include).unwrap();
+        // Upload and run on GPU
+        let view = runmat_accelerate_api::HostTensorView { data: &t.data, shape: &t.shape };
+        let h = runmat_accelerate_api::provider().unwrap().upload(&view).unwrap();
+        let gpu = sum_gpu(h, Some(1), ReductionNaN::Include).unwrap();
+        let gathered = test_support::gather(gpu).expect("gather");
+        match (cpu, gathered) {
+            (Value::Tensor(ct), gt) => {
+                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.data, ct.data);
+            }
+            _ => panic!("unexpected shapes"),
+        }
+    }
 }

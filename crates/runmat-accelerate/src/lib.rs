@@ -19,6 +19,7 @@ pub mod fusion_residency;
 pub mod graph;
 pub mod native_auto;
 pub mod simple_provider;
+pub mod backend;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_backend;
 pub use fusion::*;

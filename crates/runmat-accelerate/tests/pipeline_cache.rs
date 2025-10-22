@@ -58,8 +58,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let cache_dir = std::env::var("RUNMAT_PIPELINE_CACHE_DIR")
         .map(std::path::PathBuf::from)
         .ok()
-        .or_else(|| dirs::cache_dir().map(|b| b.join("runmat").join("pipelines").join(format!("device-{}", p.device_id))))
-        .unwrap_or_else(|| std::path::PathBuf::from("target").join("tmp").join(format!("wgpu-pipeline-cache-{}", p.device_id)));
+        .or_else(|| dirs::cache_dir().map(|b| b.join("runmat").join("pipelines").join(format!("device-{}", p.device_id()))))
+        .unwrap_or_else(|| std::path::PathBuf::from("target").join("tmp").join(format!("wgpu-pipeline-cache-{}", p.device_id())));
     let wgsl_path = cache_dir.join(format!("{:016x}.wgsl", key));
     let json_path = cache_dir.join(format!("{:016x}.json", key));
     assert!(wgsl_path.exists(), "expected wgsl persisted at {:?}", wgsl_path);

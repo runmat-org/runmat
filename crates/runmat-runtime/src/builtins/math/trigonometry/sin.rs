@@ -349,4 +349,31 @@ mod tests {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn sin_wgpu_matches_cpu_elementwise() {
+        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
+            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        );
+        let t = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
+        let cpu = sin_real(Value::Tensor(t.clone())).unwrap();
+        let view = runmat_accelerate_api::HostTensorView { data: &t.data, shape: &t.shape };
+        let h = runmat_accelerate_api::provider().unwrap().upload(&view).unwrap();
+        let gpu = sin_gpu(h).unwrap();
+        let gathered = test_support::gather(gpu).expect("gather");
+        match (cpu, gathered) {
+            (Value::Tensor(ct), gt) => {
+                assert_eq!(gt.shape, ct.shape);
+                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+                };
+                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                    assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
+                }
+            }
+            _ => panic!("unexpected shapes"),
+        }
+    }
 }

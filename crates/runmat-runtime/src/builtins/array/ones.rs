@@ -651,4 +651,41 @@ mod tests {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ones_wgpu_like_and_gather() {
+        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
+            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        );
+        // Build GPU prototype via gpuArray
+        let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
+        let g = crate::call_builtin("gpuArray", &[Value::Tensor(proto)]).expect("gpuArray");
+        let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("like"), g];
+        let result = ones_builtin(args).expect("ones like gpu");
+        match result {
+            Value::GpuTensor(h) => {
+                let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
+                assert_eq!(gathered.shape, vec![2, 2]);
+                assert!(gathered.data.iter().all(|&x| x == 1.0));
+            }
+            other => panic!("expected gpu tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ones_wgpu_fusion_with_sin_and_sum() {
+        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
+            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        );
+        // Create ones on GPU (2x2), then sin, then sum along dim=1
+        let args = vec![Value::Num(2.0), Value::Num(2.0)];
+        let o = ones_builtin(args).expect("ones");
+        let s = crate::call_builtin("sin", &[o]).expect("sin");
+        let summed = crate::call_builtin("sum", &[s, Value::Num(1.0)]).expect("sum");
+        // Gather and validate shapes; values are deterministic for sin(1)
+        let gathered = test_support::gather(summed).expect("gather");
+        assert_eq!(gathered.shape, vec![1, 2]);
+    }
 }

@@ -671,4 +671,39 @@ mod tests {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
     }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn rand_wgpu_like_uniform_and_gather() {
+        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
+            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        );
+        // Create a GPU prototype and request rand like it
+        let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
+        let view = runmat_accelerate_api::HostTensorView { data: &tensor.data, shape: &tensor.shape };
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let handle = provider.upload(&view).expect("upload");
+        let result = rand_like(&Value::GpuTensor(handle), &[2, 2]).expect("rand like gpu");
+        match result {
+            Value::GpuTensor(h) => {
+                let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather to host");
+                assert_eq!(gathered.shape, vec![2, 2]);
+                for v in gathered.data { assert!(v >= 0.0 && v < 1.0); }
+            }
+            other => panic!("expected gpu tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn rand_wgpu_fusion_then_sin_then_sum() {
+        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
+            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        );
+        let r = rand_double(&[2, 2]).expect("rand");
+        let s = crate::call_builtin("sin", &[r]).expect("sin");
+        let summed = crate::call_builtin("sum", &[s, Value::Num(1.0)]).expect("sum");
+        let gathered = test_support::gather(summed).expect("gather");
+        assert_eq!(gathered.shape, vec![1, 2]);
+    }
 }
