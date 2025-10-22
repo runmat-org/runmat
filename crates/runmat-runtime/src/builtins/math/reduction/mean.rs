@@ -576,8 +576,8 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn mean_wgpu_dim1_matches_cpu() {
-        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
-            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let t = Tensor::new(vec![1.0, 4.0, 2.0, 6.0], vec![2, 2]).unwrap();
         let cpu = mean_host(Value::Tensor(t.clone()), Some(1), ReductionNaN::Include).unwrap();

@@ -20,8 +20,6 @@ pub mod graph;
 pub mod native_auto;
 pub mod simple_provider;
 pub mod backend;
-#[cfg(feature = "wgpu")]
-pub mod wgpu_backend;
 pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
@@ -180,7 +178,7 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
                 AccelerateProviderPreference::Auto | AccelerateProviderPreference::Wgpu
             )
         {
-            let wgpu_options = wgpu_backend::WgpuProviderOptions {
+            let wgpu_options = backend::wgpu::provider::WgpuProviderOptions {
                 power_preference: match options.wgpu_power_preference {
                     AccelPowerPreference::Auto => PowerPreference::HighPerformance,
                     AccelPowerPreference::HighPerformance => PowerPreference::HighPerformance,
@@ -189,7 +187,7 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
                 force_fallback_adapter: options.wgpu_force_fallback_adapter,
             };
 
-            match wgpu_backend::register_wgpu_provider(wgpu_options) {
+            match backend::wgpu::provider::register_wgpu_provider(wgpu_options) {
                 Ok(provider) => {
                     registered = true;
                     let info = provider.device_info_struct();
@@ -246,7 +244,7 @@ pub fn initialize_acceleration_provider() {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "wgpu")]
-    use crate::wgpu_backend;
+    use crate::backend::wgpu::provider as wgpu_backend;
 
     #[test]
     #[cfg(feature = "wgpu")]

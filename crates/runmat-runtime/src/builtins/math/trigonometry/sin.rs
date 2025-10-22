@@ -353,8 +353,8 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn sin_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
-            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let t = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
         let cpu = sin_real(Value::Tensor(t.clone())).unwrap();

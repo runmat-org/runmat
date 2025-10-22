@@ -483,8 +483,8 @@ impl WgpuProvider {
     }
 }
 
-// Delegated methods extending the active provider in `wgpu_backend.rs`
-impl crate::wgpu_backend::WgpuProvider {
+// Internal exec methods for WgpuProvider
+impl WgpuProvider {
     pub(crate) fn fused_elementwise_exec(
         &self,
         shader: &str,

@@ -1,5 +1,5 @@
 #[cfg(feature = "wgpu")]
-use runmat_accelerate::wgpu_backend::{self, WgpuProviderOptions};
+use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::HostTensorView;
 
@@ -7,7 +7,7 @@ use runmat_accelerate_api::HostTensorView;
 #[test]
 fn pipeline_cache_meta_and_hits_increase_on_second_run() {
     // Initialize provider
-    let _ = wgpu_backend::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu provider");
+    let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu provider");
     let provider = runmat_accelerate_api::provider().expect("provider");
 
     // Small matrix and simple elementwise fuse (add) via fused_elementwise path
@@ -52,7 +52,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Warmup-from-disk smoke: ensure meta/wgsl were persisted; simulate a new process by
     // recomputing the hash and checking that files exist. We cannot reinitialize the provider
     // in-process here, so this simply validates that persistence occurred.
-    let p = wgpu_backend::ensure_wgpu_provider().unwrap().unwrap();
+    let p = provider::ensure_wgpu_provider().unwrap().unwrap();
     let layout_tag = format!("runmat-fusion-layout-{}", 1);
     let key = p.compute_pipeline_hash_bytes(shader.as_bytes(), &layout_tag, Some(256));
     let cache_dir = std::env::var("RUNMAT_PIPELINE_CACHE_DIR")

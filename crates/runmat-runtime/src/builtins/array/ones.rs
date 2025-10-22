@@ -655,8 +655,8 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn ones_wgpu_like_and_gather() {
-        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
-            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         // Build GPU prototype via gpuArray
         let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
@@ -676,8 +676,8 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn ones_wgpu_fusion_with_sin_and_sum() {
-        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
-            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         // Create ones on GPU (2x2), then sin, then sum along dim=1
         let args = vec![Value::Num(2.0), Value::Num(2.0)];

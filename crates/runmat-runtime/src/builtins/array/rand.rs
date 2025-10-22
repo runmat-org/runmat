@@ -675,8 +675,8 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn rand_wgpu_like_uniform_and_gather() {
-        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
-            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         // Create a GPU prototype and request rand like it
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
@@ -697,8 +697,8 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn rand_wgpu_fusion_then_sin_then_sum() {
-        let _ = runmat_accelerate::wgpu_backend::register_wgpu_provider(
-            runmat_accelerate::wgpu_backend::WgpuProviderOptions::default(),
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let r = rand_double(&[2, 2]).expect("rand");
         let s = crate::call_builtin("sin", &[r]).expect("sin");

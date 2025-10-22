@@ -8,7 +8,7 @@ use log::info;
 #[cfg(feature = "wgpu")]
 use runmat_accelerate::provider_cache_stats;
 #[cfg(feature = "wgpu")]
-use runmat_accelerate::wgpu_backend::{self, WgpuProviderOptions};
+use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView};
 use serde::Serialize;
 #[cfg(feature = "wgpu")]
@@ -81,7 +81,7 @@ fn main() -> Result<()> {
     {
         if kernel_probe {
             info!("kernel-probe: compiling minimal kernels to triage Metal pipeline creation");
-            let prov = runmat_accelerate::wgpu_backend::ensure_wgpu_provider()?;
+            let prov = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()?;
             if let Some(p) = prov {
                 // no bindings
                 let _ = p.try_compile_kernel("noop-1", "@compute @workgroup_size(1) fn main() {}");
@@ -411,14 +411,14 @@ fn setup_wgpu_provider() -> Result<()> {
         force_fallback_adapter: false,
     };
 
-    match wgpu_backend::register_wgpu_provider(high_perf) {
+    match provider::register_wgpu_provider(high_perf) {
         Ok(_) => return Ok(()),
         Err(err_hp) => {
             let fallback_opts = WgpuProviderOptions {
                 power_preference: PowerPreference::LowPower,
                 force_fallback_adapter: true,
             };
-            match wgpu_backend::register_wgpu_provider(fallback_opts) {
+            match provider::register_wgpu_provider(fallback_opts) {
                 Ok(_) => {
                     info!("Using fallback GPU adapter after {:?}", err_hp);
                     Ok(())
