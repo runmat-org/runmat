@@ -12,7 +12,7 @@
 
 | Completed | Path                | Name(s)                                     | Purpose                       | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                         |
 |-----------|---------------------|---------------------------------------------|-------------------------------|-----|--------|------------------|-----------------------------------------------|
-|           | acceleration/gpu    | gpuArray, gather, gpuDevice, gpuInfo        | Move to/from device; query device | ✓   | P      | —                | Residency-aware; gpuArray/gather. |
+|     ✅     | acceleration/gpu    | gpuArray, gather, gpuDevice, gpuInfo        | Move to/from device; query device | ✓   | P      | —                | Residency-aware; gpuArray/gather. |
 |           | acceleration/gpu    | arrayfun                                    | Elementwise map on GPU        | ✓   | E      | —                | Provider hook (unary_map) + fusion inline constants. |
 |           | acceleration/gpu    | pagefun                                     | Batched page-wise ops         | ✓   | P      | —                | Maps batched BLAS/FFT when present. |
 
