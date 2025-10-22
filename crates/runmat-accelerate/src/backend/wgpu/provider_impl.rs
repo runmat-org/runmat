@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 use anyhow::{anyhow, Result};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use log::info;
@@ -12,20 +11,13 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, Mutex};
 use wgpu::util::DeviceExt;
 
-use crate::backend::wgpu::bindings::{storage_read_entry, storage_read_write_entry, uniform_entry};
 use crate::backend::wgpu::cache::{key as cache_key, persist as cache_persist};
 use crate::backend::wgpu::config::{
-    WORKGROUP_SIZE, REDUCE_WORKGROUP_SIZE, DEFAULT_TWO_PASS_THRESHOLD, DEFAULT_REDUCTION_WG,
-    MATMUL_TILE, MAX_DISPATCH_WORKGROUPS,
-};
-use crate::backend::wgpu::params::{
-    LenOpParams, ScalarParamsF64, ScalarParamsF32, FusionParams, TransposeParams, MatmulParams,
-    ReduceGlobalParams, ReduceDimParams,
+    DEFAULT_TWO_PASS_THRESHOLD, DEFAULT_REDUCTION_WG,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::types::{
-    BinaryOpCode, DimReduceExtrema, DimReduceOp, GlobalReduceOp, NumericPrecision, ScalarOpCode,
-    UnaryOpCode,
+    NumericPrecision,
 };
 
 #[derive(Clone, Debug)]
@@ -75,10 +67,7 @@ impl WgpuProvider {
     pub(crate) fn device_ref(&self) -> &wgpu::Device { &self.device }
     pub(crate) fn queue_ref(&self) -> &wgpu::Queue { &self.queue }
 
-    #[allow(dead_code)]
-    fn build_bgl_for_layout_tag(&self, tag: &str) -> Option<wgpu::BindGroupLayout> {
-        crate::backend::wgpu::bindings::build_bgl_for_layout_tag(&self.device, tag)
-    }
+    // removed unused helper build_bgl_for_layout_tag; call bindings::build_bgl_for_layout_tag directly where needed
 
     fn warmup_from_disk(&self) {
         crate::backend::wgpu::warmup::warmup_from_disk(
@@ -320,167 +309,6 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
     }
 
-    // --- Ops implementations (delegating dispatch to backend::wgpu::dispatch) ---
-    // Keep all method bodies as-is (copied from wgpu_backend.rs)
-    // Due to length, the full implementations are retained without modification
-
-    // --- migrated from wgpu_backend.rs ---
-    fn transpose_impl(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry(a)?;
-        if entry.shape.len() != 2 { return Err(anyhow!("transpose: only 2D tensors supported")); }
-        let rows = entry.shape[0];
-        let cols = entry.shape[1];
-        let len = entry.len;
-        let out_shape = vec![cols, rows];
-        let out_buffer = self.create_storage_buffer(len, "runmat-transpose-out");
-        if len == 0 { return Ok(self.register_existing_buffer(out_buffer, out_shape, len)); }
-        if len > (u32::MAX as usize) { return Err(anyhow!("tensor too large for GPU buffer")); }
-        {
-            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-transpose-noop") });
-            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("runmat-transpose-noop-pass"), timestamp_writes: None });
-            pass.set_pipeline(&self.pipelines.transpose.pipeline);
-            drop(pass); self.submit(enc);
-        }
-        self.device.poll(wgpu::Maintain::Poll);
-        {
-            let enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-transpose-flush-gap") });
-            self.submit(enc);
-        }
-        let chunk_capacity = (MAX_DISPATCH_WORKGROUPS as usize) * WORKGROUP_SIZE as usize;
-        let mut offset = 0usize;
-        while offset < len {
-            let remaining = len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = TransposeParams { rows: rows as u32, cols: cols as u32, len: chunk_len as u32, offset: offset as u32 };
-            let params_buffer = self.uniform_buffer(&params, "runmat-transpose-params");
-            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("runmat-transpose-bind"), layout: &self.pipelines.transpose.layout, entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: entry.buffer.as_ref().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: out_buffer.as_ref().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: params_buffer.as_entire_binding() },
-            ]});
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(chunk_len as u32, WORKGROUP_SIZE);
-            crate::backend::wgpu::dispatch::transpose::run(&self.device, &self.queue, &self.pipelines.transpose.pipeline, &bg, groups);
-            offset += chunk_len;
-        }
-        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
-    }
-
-    fn matmul_impl(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let entry_a = self.get_entry(a)?; let entry_b = self.get_entry(b)?;
-        if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 { return Err(anyhow!("matmul: only 2D tensors supported")); }
-        let (m, k_a) = (entry_a.shape[0], entry_a.shape[1]); let (k_b, n) = (entry_b.shape[0], entry_b.shape[1]);
-        if k_a != k_b { return Err(anyhow!("matmul: inner dimensions must match")); }
-        let out_shape = vec![m, n]; let len = m * n; let out_buffer = self.create_storage_buffer(len, "runmat-matmul-out");
-        if len == 0 { return Ok(self.register_existing_buffer(out_buffer, out_shape, len)); }
-        {
-            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-matmul-noop") });
-            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("runmat-matmul-noop-pass"), timestamp_writes: None });
-            pass.set_pipeline(&self.pipelines.matmul.pipeline); drop(pass); self.submit(enc);
-        }
-        self.device.poll(wgpu::Maintain::Poll);
-        {
-            let enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-matmul-flush-gap") });
-            self.submit(enc);
-        }
-        let params = MatmulParams { m: m as u32, n: n as u32, k: k_a as u32, lda: entry_a.shape[0] as u32, ldb: entry_b.shape[0] as u32, ldc: m as u32, _pad: [0, 0] };
-        let params_buffer = self.uniform_buffer(&params, "runmat-matmul-params");
-        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("runmat-matmul-bind"), layout: &self.pipelines.matmul.layout, entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: entry_a.buffer.as_ref().as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: entry_b.buffer.as_ref().as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: out_buffer.as_ref().as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: params_buffer.as_entire_binding() },
-        ]});
-        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n as u32, MATMUL_TILE);
-        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, MATMUL_TILE);
-        crate::backend::wgpu::dispatch::matmul::run(&self.device, &self.queue, &self.pipelines.matmul.pipeline, &bg, groups_x, groups_y);
-        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
-    }
-
-    fn scatter_column(
-        &self,
-        matrix: &GpuTensorHandle,
-        col_index: usize,
-        values: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
-        let m_entry = self.get_entry(matrix)?;
-        if m_entry.shape.len() != 2 { return Err(anyhow!("scatter_column: only 2D tensors supported")); }
-        let rows = m_entry.shape[0];
-        let cols = m_entry.shape[1];
-        if col_index >= cols { return Err(anyhow!("scatter_column: column index out of bounds")); }
-        let v_entry = self.get_entry(values)?;
-        let v_rows = if v_entry.shape.len() == 1 { v_entry.shape[0] } else if v_entry.shape.len() == 2 { v_entry.shape[0] } else { return Err(anyhow!("scatter_column: values must be vector or [rows,1]")); };
-        if v_rows != rows { return Err(anyhow!("scatter_column: length mismatch")); }
-
-        let shader = crate::backend::wgpu::shaders::scatter::SCATTER_COL_SHADER_F32;
-        let out_buffer = self.create_storage_buffer(rows * cols, "runmat-scatter-col-out");
-        {
-            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-scatter-col-copy") });
-            enc.copy_buffer_to_buffer(m_entry.buffer.as_ref(), 0, out_buffer.as_ref(), 0, (rows * cols * self.element_size) as u64);
-            self.submit(enc);
-        }
-        let bgl = crate::backend::wgpu::bindings::build_scatter_col_bgl(&self.device);
-        let pl = crate::backend::wgpu::pipelines::create_pipeline_layout(&self.device, "runmat-scatter-col-pl", &bgl);
-        let module = crate::backend::wgpu::pipelines::create_shader_module(&self.device, "runmat-scatter-col-module", shader);
-        let key = self.compute_pipeline_hash_bytes(shader.as_bytes(), "runmat-scatter-col-bgl", Some(256));
-        let pipeline = self.get_or_create_pipeline(key, &pl, &module, "runmat-scatter-col", Some(shader.as_bytes()), Some("runmat-scatter-col-bgl"), Some(256));
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Pm { rows: u32, cols: u32, j: u32 }
-        let params = Pm { rows: rows as u32, cols: cols as u32, j: col_index as u32 };
-        let pbuf = self.uniform_buffer(&params, "runmat-scatter-col-params");
-        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runmat-scatter-col-bg"), layout: &bgl, entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: v_entry.buffer.as_ref().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: m_entry.buffer.as_ref().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: out_buffer.as_ref().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: pbuf.as_entire_binding() },
-            ],
-        });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(rows as u32, 256);
-        crate::backend::wgpu::dispatch::scatter::run(&self.device, &self.queue, &pipeline, &bg, groups);
-        Ok(self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols))
-    }
-
-    fn scatter_row(
-        &self,
-        matrix: &GpuTensorHandle,
-        row_index: usize,
-        values: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
-        let m_entry = self.get_entry(matrix)?;
-        if m_entry.shape.len() != 2 { return Err(anyhow!("scatter_row: only 2D tensors supported")); }
-        let rows = m_entry.shape[0]; let cols = m_entry.shape[1];
-        if row_index >= rows { return Err(anyhow!("scatter_row: row index out of bounds")); }
-        let v_entry = self.get_entry(values)?;
-        let v_cols = if v_entry.shape.len() == 1 { v_entry.shape[0] } else if v_entry.shape.len() == 2 { v_entry.shape[1] } else { return Err(anyhow!("scatter_row: values must be vector or [1,cols]")); };
-        if v_cols != cols { return Err(anyhow!("scatter_row: length mismatch")); }
-        let shader = crate::backend::wgpu::shaders::scatter::SCATTER_ROW_SHADER_F32;
-        let out_buffer = self.create_storage_buffer(rows * cols, "runmat-scatter-row-out");
-        {
-            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-scatter-row-copy") });
-            enc.copy_buffer_to_buffer(m_entry.buffer.as_ref(), 0, out_buffer.as_ref(), 0, (rows * cols * self.element_size) as u64);
-            self.submit(enc);
-        }
-        let bgl = crate::backend::wgpu::bindings::build_scatter_row_bgl(&self.device);
-        let pl = crate::backend::wgpu::pipelines::create_pipeline_layout(&self.device, "runmat-scatter-row-pl", &bgl);
-        let module = crate::backend::wgpu::pipelines::create_shader_module(&self.device, "runmat-scatter-row-module", shader);
-        let key = self.compute_pipeline_hash_bytes(shader.as_bytes(), "runmat-scatter-row-bgl", Some(256));
-        let pipeline = self.get_or_create_pipeline(key, &pl, &module, "runmat-scatter-row", Some(shader.as_bytes()), Some("runmat-scatter-row-bgl"), Some(256));
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Pm { rows: u32, cols: u32, i: u32 }
-        let params = Pm { rows: rows as u32, cols: cols as u32, i: row_index as u32 };
-        let pbuf = self.uniform_buffer(&params, "runmat-scatter-row-params");
-        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("runmat-scatter-row-bg"), layout: &bgl, entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: v_entry.buffer.as_ref().as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: m_entry.buffer.as_ref().as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: out_buffer.as_ref().as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: pbuf.as_entire_binding() },
-        ] });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(cols as u32, 256);
-        crate::backend::wgpu::dispatch::scatter::run(&self.device, &self.queue, &pipeline, &bg, groups);
-        Ok(self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols))
-    }
 }
 
 // Internal exec methods for WgpuProvider
@@ -995,51 +823,6 @@ impl WgpuProvider {
         let indices_handle = self.register_existing_buffer(indices_buffer, out_shape, out_len);
         Ok(ReduceDimResult { values: values_handle, indices: indices_handle })
     }
-
-    pub(crate) fn upload_exec(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
-        let len = host.data.len();
-        let shape = host.shape.to_vec();
-        let buffer = if len == 0 { self.create_storage_buffer(0, "runmat-upload-empty") } else {
-            match self.precision() {
-                runmat_accelerate_api::ProviderPrecision::F64 => {
-                    let contents = cast_slice(host.data);
-                    Arc::new(self.device_ref().create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("runmat-upload-buffer"), contents, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC }))
-                }
-                _ => {
-                    let data_f32: Vec<f32> = host.data.iter().map(|v| *v as f32).collect();
-                    let contents = cast_slice(&data_f32);
-                    Arc::new(self.device_ref().create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("runmat-upload-buffer"), contents, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC }))
-                }
-            }
-        };
-        Ok(self.register_existing_buffer(buffer, shape, len))
-    }
-
-    pub(crate) fn download_exec(&self, h: &GpuTensorHandle) -> Result<HostTensorOwned> {
-        let entry = self.get_entry(h)?;
-        if entry.len == 0 { return Ok(HostTensorOwned { data: Vec::new(), shape: entry.shape }); }
-        let size_bytes = (entry.len * self.element_size) as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor { label: Some("runmat-download-staging"), size: size_bytes, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let mut encoder = self.device_ref().create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("runmat-download-encoder") });
-        encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, size_bytes);
-        self.submit(encoder);
-        let slice = staging.slice(..);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
-        self.device_ref().poll(wgpu::Maintain::Wait);
-        rx.recv().map_err(|_| anyhow!("map_async callback dropped"))?.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let data = slice.get_mapped_range();
-        let mut out = vec![0.0f64; entry.len];
-        match entry.precision {
-            crate::backend::wgpu::types::NumericPrecision::F64 => { out.copy_from_slice(cast_slice(&data)); }
-            crate::backend::wgpu::types::NumericPrecision::F32 => { let f32_slice: &[f32] = cast_slice(&data); for (dst, src) in out.iter_mut().zip(f32_slice.iter()) { *dst = *src as f64; } }
-        }
-        drop(data);
-        staging.unmap();
-        Ok(HostTensorOwned { data: out, shape: entry.shape })
-    }
-
-    // free/device_info execs not needed; façade retains these minimal impls
 }
 
 impl AccelProvider for WgpuProvider {
@@ -1085,7 +868,6 @@ impl AccelProvider for WgpuProvider {
     fn reduce_mean(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         // Mean over all elements: compute via single-pass sum then divide by len
         let sum_handle = self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
-        let entry = self.get_entry(&sum_handle)?;
         let total_elems: usize = self.get_entry(a)?.len.max(1);
         let scalar = 1.0 / (total_elems as f64);
         let out = self.scalar_op_exec(crate::backend::wgpu::types::ScalarOpCode::Mul, &sum_handle, scalar)?;

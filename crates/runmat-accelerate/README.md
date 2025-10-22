@@ -48,7 +48,7 @@ R = gather(H);        % bring results back to host
 
 ### Native acceleration
 
-RunMat will power native acceleration for RunMat. It lets users avoid needing to use the gpuArray/gather builtins and instead use the native acceleration API:
+RunMat Accelerate powers native acceleration for RunMat. It lets users avoid needing to use the gpuArray/gather builtins and instead use the native acceleration API:
 
 ```matlab
 % Example: Large matrix multiplication and elementwise operations
@@ -61,7 +61,7 @@ B = randn(10000, 10000);
 %   S = sum(H, 2);
 %   R = gather(S);
 
-% With RunMat accelerate, the planner can transparently move data to the GPU
+% With RunMat Accelerate, the planner can transparently move data to the GPU
 % and back as needed, so you can just write:
 H = A .* B;           % Planner may choose GPU for large ops
 S = sum(H, 2);        % Fused and executed on device if beneficial

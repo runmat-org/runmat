@@ -43,6 +43,8 @@ struct BuiltinOut {
     slug: String,
     category: Vec<String>,
     summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     status: String,
     signatures: Vec<BuiltinSignatureOut>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -253,11 +255,22 @@ fn main() {
             }
         }
 
+        // Derive description from frontmatter override or first sentence(s) of first paragraph
+        let description = {
+            let override_desc = front.and_then(|fm| yaml_get_string(fm, "description"));
+            if let Some(d) = override_desc { Some(d) } else {
+                doc_text_body
+                    .get(&name)
+                    .and_then(|body| extract_description_from_body(body))
+            }
+        };
+
         let entry = grouped.entry(slug.clone()).or_insert_with(|| BuiltinOut {
             name: name.clone(),
             slug: slug.clone(),
             category: Vec::new(),
             summary: summary.clone().unwrap_or_default(),
+            description: description.clone(),
             status: status.clone(),
             signatures: Vec::new(),
             errors: errors.clone(),
@@ -273,6 +286,9 @@ fn main() {
             if let Some(s) = summary {
                 entry.summary = s;
             }
+        }
+        if entry.description.is_none() {
+            entry.description = description.clone();
         }
         if entry.errors.is_none() {
             entry.errors = errors;
@@ -340,6 +356,71 @@ fn parse_frontmatter_and_body(doc: &str) -> Option<(YamlValue, String)> {
     );
     let body = body_start.map(|idx| doc[idx..].to_string()).unwrap_or_default();
     Some((front_v, body))
+}
+
+fn extract_description_from_body(body: &str) -> Option<String> {
+    // Find first non-empty paragraph that is not a heading, code fence, list or blockquote
+    let mut in_fence = false;
+    let mut para_lines: Vec<String> = Vec::new();
+    for line in body.lines() {
+        let t = line.trim();
+        if t.starts_with("```") { in_fence = !in_fence; continue; }
+        if in_fence { continue; }
+        if t.is_empty() {
+            if !para_lines.is_empty() { break; }
+            continue;
+        }
+        let is_heading = t.starts_with('#');
+        let is_blockquote = t.starts_with('>');
+        let is_list = t.starts_with("- ") || t.starts_with("* ") ||
+            t.chars().take_while(|c| c.is_ascii_digit()).count() > 0 && t.contains('.');
+        if is_heading || is_blockquote || is_list { continue; }
+        para_lines.push(t.to_string());
+    }
+    if para_lines.is_empty() { return None; }
+    let paragraph = para_lines.join(" ");
+    let sentences = split_sentences(&paragraph);
+    if sentences.is_empty() { return None; }
+    // Prefer 1–2 sentences up to ~200 chars
+    let mut out = String::new();
+    for s in sentences {
+        if out.is_empty() { out.push_str(&s); } else if out.len() + 1 + s.len() <= 200 { out.push(' '); out.push_str(&s); } else { break; }
+        if out.len() >= 120 { break; }
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn split_sentences(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let ch = bytes[i] as char;
+        current.push(ch);
+        let is_end = ch == '.' || ch == '!' || ch == '?';
+        if is_end {
+            // Lookahead
+            let next = bytes.get(i + 1).map(|b| *b as char);
+            // Abbreviation/decimal heuristics
+            let prev = bytes.get(i.saturating_sub(1)).map(|b| *b as char).unwrap_or(' ');
+            let next_is_space = matches!(next, Some(' ') | Some('\n') | None);
+            let prev_is_digit = prev.is_ascii_digit();
+            let next_is_digit = bytes.get(i + 1).map(|b| (*b as char).is_ascii_digit()).unwrap_or(false);
+            let tail = current.trim_end();
+            let abbrev = tail.ends_with("e.g.") || tail.ends_with("i.e.") || tail.ends_with("etc.") || tail.ends_with("vs.") || tail.ends_with("Mr.") || tail.ends_with("Dr.") || tail.ends_with("Prof.") || tail.ends_with("No.") || tail.ends_with("Fig.") || tail.ends_with("Eq.") || tail.ends_with("al.") || tail.ends_with("approx.");
+            let decimal = prev_is_digit && next_is_digit;
+            if next_is_space && !abbrev && !decimal {
+                out.push(current.trim().to_string());
+                current.clear();
+                // skip following space
+                if matches!(next, Some(' ')) { i += 1; }
+            }
+        }
+        i += 1;
+    }
+    if !current.trim().is_empty() { out.push(current.trim().to_string()); }
+    out
 }
 
 fn yaml_get_string(v: &YamlValue, key: &str) -> Option<String> {

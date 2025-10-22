@@ -247,11 +247,22 @@ impl NativeAutoOffload {
         }
     }
 
-    fn promote_unary(&self, _op: UnaryOp, v: &Value) -> Result<Value> {
+    fn promote_unary(&self, op: UnaryOp, v: &Value) -> Result<Value> {
         if !self.enabled {
             return Ok(v.clone());
         }
-        let threshold = self.thresholds.unary_min_elems;
+        let elems = value_len(v).unwrap_or(0);
+        let base = self.thresholds.unary_min_elems;
+        let use_gpu = match op {
+            UnaryOp::Transpose => self
+                .should_gpu_transpose(elems)
+                .unwrap_or(elems >= base),
+            UnaryOp::Generic => elems >= base,
+        };
+        if use_gpu {
+            log_promotion(|| format!("Unary offload accepted ({:?}, {} elems)", op, elems));
+        }
+        let threshold = if use_gpu { 1 } else { base };
         self.promote_tensor_if_large(v, threshold)
     }
 
@@ -386,6 +397,16 @@ impl NativeAutoOffload {
         let cpu_cost = self.thresholds.cpu_matmul_per_flop * flops as f64;
         profile_cost_model()
             .and_then(|model| model.estimate_matmul_flops(flops))
+            .map(|gpu| gpu.as_secs_f64() * 0.95 < cpu_cost)
+    }
+
+    fn should_gpu_transpose(&self, elements: usize) -> Option<bool> {
+        if elements == 0 {
+            return Some(false);
+        }
+        let cpu_cost = self.thresholds.cpu_elem_per_elem * elements as f64;
+        profile_cost_model()
+            .and_then(|model| model.estimate_transpose(elements))
             .map(|gpu| gpu.as_secs_f64() * 0.95 < cpu_cost)
     }
 }
@@ -700,34 +721,18 @@ where
     Ok(start.elapsed())
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, Debug)]
 struct ProfileDurationSummary {
     #[serde(default)]
     avg_ms: f64,
-    #[serde(default)]
-    min_ms: f64,
-    #[serde(default)]
-    max_ms: f64,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, Debug)]
 struct ProfileReport {
-    name: String,
     category: String,
     #[serde(default)]
-    detail: String,
-    #[serde(default)]
     input_shapes: Vec<Vec<usize>>,
-    #[serde(default)]
-    iterations: usize,
-    upload_ms: ProfileDurationSummary,
-    compute_ms: ProfileDurationSummary,
-    download_ms: ProfileDurationSummary,
     total_ms: ProfileDurationSummary,
-    #[serde(default)]
-    notes: Vec<String>,
 }
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -828,7 +833,6 @@ impl ProfileCostModel {
         self.matmul.and_then(|model| model.estimate(flops as f64))
     }
 
-    #[allow(dead_code)]
     fn estimate_transpose(&self, elements: usize) -> Option<Duration> {
         self.transpose
             .and_then(|model| model.estimate(elements as f64))

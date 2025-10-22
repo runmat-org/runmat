@@ -5,8 +5,6 @@
 //! - Support multiple backends via features (CUDA, ROCm, Metal, Vulkan, OpenCL, wgpu).
 //! - Allow zero-copy interop with `runmat-builtins::Matrix` where possible.
 //! - Defer actual kernel authoring to backend crates/modules; this crate defines traits and wiring.
-//!
-//! This is scaffolding only; implementations will land after interpreter/JIT semantics are complete.
 
 use once_cell::sync::Lazy;
 use runmat_builtins::{Tensor, Value};
@@ -167,62 +165,61 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
         return;
     }
 
-    #[allow(unused_mut)]
-    let mut registered = false;
-
-    #[cfg(feature = "wgpu")]
-    {
-        if !registered
-            && matches!(
+    let registered = {
+        #[cfg(feature = "wgpu")]
+        {
+            let mut reg = false;
+            if matches!(
                 options.provider,
                 AccelerateProviderPreference::Auto | AccelerateProviderPreference::Wgpu
-            )
-        {
-            let wgpu_options = backend::wgpu::provider::WgpuProviderOptions {
-                power_preference: match options.wgpu_power_preference {
-                    AccelPowerPreference::Auto => PowerPreference::HighPerformance,
-                    AccelPowerPreference::HighPerformance => PowerPreference::HighPerformance,
-                    AccelPowerPreference::LowPower => PowerPreference::LowPower,
-                },
-                force_fallback_adapter: options.wgpu_force_fallback_adapter,
-            };
+            ) {
+                let wgpu_options = backend::wgpu::provider::WgpuProviderOptions {
+                    power_preference: match options.wgpu_power_preference {
+                        AccelPowerPreference::Auto => PowerPreference::HighPerformance,
+                        AccelPowerPreference::HighPerformance => PowerPreference::HighPerformance,
+                        AccelPowerPreference::LowPower => PowerPreference::LowPower,
+                    },
+                    force_fallback_adapter: options.wgpu_force_fallback_adapter,
+                };
 
-            match backend::wgpu::provider::register_wgpu_provider(wgpu_options) {
-                Ok(provider) => {
-                    registered = true;
-                    let info = provider.device_info_struct();
-                    let backend = info.backend.as_deref().unwrap_or("unknown");
-                    log::info!(
-                        "RunMat Accelerate: using WGPU provider {} (vendor: {}, backend: {})",
-                        info.name,
-                        info.vendor,
-                        backend
-                    );
-                    // Warmup to amortize first-dispatch costs
-                    provider.warmup();
-                    let (hits, misses) = provider.fused_cache_counters();
-                    log::info!(
-                        "RunMat Accelerate: fused pipeline cache after warmup - hits: {}, misses: {}",
-                        hits, misses
-                    );
-                }
-                Err(err) => {
-                    log::warn!(
-                        "RunMat Accelerate: failed to initialize WGPU provider, falling back: {err}"
-                    );
+                match backend::wgpu::provider::register_wgpu_provider(wgpu_options) {
+                    Ok(provider) => {
+                        reg = true;
+                        let info = provider.device_info_struct();
+                        let backend = info.backend.as_deref().unwrap_or("unknown");
+                        log::info!(
+                            "RunMat Accelerate: using WGPU provider {} (vendor: {}, backend: {})",
+                            info.name,
+                            info.vendor,
+                            backend
+                        );
+                        // Warmup to amortize first-dispatch costs
+                        provider.warmup();
+                        let (hits, misses) = provider.fused_cache_counters();
+                        log::info!(
+                            "RunMat Accelerate: fused pipeline cache after warmup - hits: {}, misses: {}",
+                            hits, misses
+                        );
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "RunMat Accelerate: failed to initialize WGPU provider, falling back: {err}"
+                        );
+                    }
                 }
             }
+            reg
         }
-    }
-
-    #[cfg(not(feature = "wgpu"))]
-    {
-        if matches!(options.provider, AccelerateProviderPreference::Wgpu) {
-            log::warn!(
-                "RunMat Accelerate: WGPU provider requested but crate built without 'wgpu' feature"
-            );
+        #[cfg(not(feature = "wgpu"))]
+        {
+            if matches!(options.provider, AccelerateProviderPreference::Wgpu) {
+                log::warn!(
+                    "RunMat Accelerate: WGPU provider requested but crate built without 'wgpu' feature"
+                );
+            }
+            false
         }
-    }
+    };
 
     if !registered {
         if options.allow_inprocess_fallback
