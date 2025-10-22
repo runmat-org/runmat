@@ -139,7 +139,7 @@ If you call `sum(A)`, where `A` is an array, the result is a new array of the sa
 You can use the `dim` argument to specify the dimension along which to compute the sum. For example, `sum(A, 2)` will return a 2x1 matrix with the sum of each row.
 
 ## See Also
-[prod](./prod), [mean](./mean), [cumsum](./cumsum), [gpuArray](../accel/gpu_array), [gather](../accel/gather)
+[prod](./prod), [mean](./mean), [cumsum](./cumsum), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `sum` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/sum.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/sum.rs)

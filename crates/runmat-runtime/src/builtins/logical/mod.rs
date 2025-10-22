@@ -1,3 +1,5 @@
 //! Logical builtins placeholder module.
 
-pub mod placeholder {}
+pub mod rel;
+pub mod bit;
+pub mod tests;

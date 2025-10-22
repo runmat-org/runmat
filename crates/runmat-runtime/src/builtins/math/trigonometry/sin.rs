@@ -140,7 +140,7 @@ Yes, by default, `sin` creates dense double-precision arrays unless you explicit
 If you call `sin(A)`, where `A` is an array, the result is a new array of the same shape as `A` with the sine of each element. For example, if `A` is a 2x3 matrix, `sin(A)` will return a 2x3 matrix with the sine of each element.
 
 ## See Also
-[cos](./cos), [tan](./tan), [gpuArray](../accel/gpu_array), [gather](../accel/gather)
+[cos](./cos), [tan](./tan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `sin` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs)

@@ -1,7 +1,7 @@
 //! New builtin set. Builtins are organised by category and re-exported from this module.
 #[macro_use]
 pub mod common;
-pub mod accel;
+pub mod acceleration;
 pub mod array;
 pub mod introspection;
 pub mod io;

@@ -5,7 +5,6 @@ use runmat_macros::runtime_builtin;
 
 pub mod dispatcher;
 
-pub mod accel;
 pub mod arrays;
 pub mod builtins;
 pub mod comparison;

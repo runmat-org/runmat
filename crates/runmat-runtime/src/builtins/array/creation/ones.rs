@@ -1,4 +1,7 @@
-//! MATLAB-compatible `zeros` builtin with GPU-aware semantics.
+//! MATLAB-compatible `ones` builtin with GPU-aware semantics.
+//!
+//! Mirrors MATLAB's `ones` semantics across scalar, vector, matrix, and N-D
+//! invocations, including `'like'` prototypes, logical outputs, and GPU residency.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
@@ -16,17 +19,17 @@ use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
-title: "zeros"
+title: "ones"
 category: "array/creation"
-keywords: ["zeros", "array", "logical", "gpu", "like"]
-summary: "Create arrays filled with zeros with MATLAB-compatible semantics."
+keywords: ["ones", "array", "logical", "gpu", "like"]
+summary: "Create arrays filled with ones with MATLAB-compatible semantics."
 references: []
 gpu_support:
   elementwise: false
   reduction: false
   precisions: ["f32", "f64"]
   broadcasting: "none"
-  notes: "Uses provider zero-allocation hooks when available; otherwise falls back to uploading a host tensor."
+  notes: "Uses provider one-allocation hooks when available; otherwise fills via scalar add or uploads from the host."
 fusion:
   elementwise: false
   reduction: false
@@ -34,84 +37,85 @@ fusion:
   constants: "inline"
 requires_feature: null
 tested:
-  unit: "builtins::array::zeros::tests"
-  integration: "builtins::array::zeros::tests::zeros_gpu_like_alloc"
+  unit: "builtins::array::ones::tests"
+  integration: "builtins::array::ones::tests::ones_gpu_like_alloc"
 ---
 
-# What does the `zeros` function do in MATLAB / RunMat?
-`zeros` creates arrays filled with zeros. It mirrors MATLAB semantics across the scalar,
+# What does the `ones` function do in MATLAB / RunMat?
+`ones` creates arrays filled with ones. It mirrors MATLAB semantics across the scalar,
 vector, matrix, and N-D forms, including `'like'` and `'logical'` options.
 
-## How does the `zeros` function behave in MATLAB / RunMat?
-- `zeros()` returns the scalar `0`.
-- `zeros(n)` returns an `n × n` double array.
-- `zeros(m, n, ...)` returns a dense double array with the requested dimensions.
-- `zeros(sz)` accepts a size vector (row or column) and returns an array with `prod(sz)` elements arranged using MATLAB column-major ordering.
-- `zeros(A)` returns an array of zeros with the same size (and device residency) as `A`.
-- `zeros(___, 'logical')` returns a logical array instead of double precision.
-- `zeros(___, 'like', prototype)` matches the device residency and numeric/logical flavour of `prototype`.
+## How does the `ones` function behave in MATLAB / RunMat?
+- `ones()` returns the scalar `1`.
+- `ones(n)` returns an `n × n` double array.
+- `ones(m, n, ...)` returns a dense double array with the requested dimensions.
+- `ones(sz)` accepts a size vector (row or column) and returns an array with `prod(sz)` elements arranged using MATLAB column-major ordering.
+- `ones(A)` returns an array of ones with the same size (and device residency) as `A`.
+- `ones(___, 'logical')` returns a logical array instead of double precision (all elements set to `true`).
+- `ones(___, 'like', prototype)` matches the device residency and numeric/logical flavour of `prototype`.
 
-## `zeros` Function GPU Execution Behaviour
+## `ones` Function GPU Execution Behaviour
 When the prototype or `'like'` argument is a GPU tensor, RunMat asks the active acceleration
-provider to allocate a zero-filled buffer in-place. Providers that do not yet support the zero
-allocation hooks automatically fall back to uploading a host zero tensor, guaranteeing correct
-behaviour at the cost of an extra transfer.
+provider to allocate a one-filled buffer. Acceleration providers that do not yet support the dedicated hooks
+fall back to zero-allocation plus scalar fill or, as a last resort, upload a host tensor.
+This guarantees correct behaviour.
 
-## Examples of using the `zeros` function in MATLAB / RunMat
+## Examples of using the `ones` function in MATLAB / RunMat
 
-### Creating a 2x3 matrix of zeros
+### Creating a 3x3 matrix of ones
 
 ```matlab
-A = zeros(2, 3);
+B = ones(3);
 ```
 
 Expected output:
 
 ```matlab
-A = [0 0 0; 0 0 0];
+B = [1 1 1; 1 1 1; 1 1 1];
 ```
 
-### Creating a 4x1 logical matrix of zeros
+### Creating a 4x1 logical matrix of ones
 
 ```matlab
-mask = zeros(4, 1, 'logical');
+mask = ones(4, 1, 'logical');
 ```
+
 Expected output:
 
 ```matlab
-mask = [0 0 0 0];
+mask = [1 1 1 1];
 ```
 
-### Creating a 128x128 matrix of zeros on a GPU
+### Creating a 64x64 matrix of ones on a GPU
 
 In RunMat:
 
 ```
-H = zeros(128, 128);
+H = ones(64, 64);
 ```
 
 In MathWorks MATLAB (supported in RunMat as well):
 
 ```matlab
-H = gpuArray(zeros(128, 128));
+H = gpuArray(ones(64, 64));
 
 % OR:
 
-G = gpuArray(rand(128, 128));
-H = zeros(128, 128, 'like', G);
+G = gpuArray(rand(64, 64));
+H = ones(64, 64, 'like', G);
 ```
 
 In both cases, the expected output is:
 
 ```matlab
-H = [0 0 0 ... 0; 0 0 0 ... 0; ...; 0 0 0 ... 0];
+H = [1 1 1 ... 1; 1 1 1 ... 1; ...; 1 1 1 ... 1];
 ```
 
 ## GPU residency in RunMat (Do I need `gpuArray`?)
 
 You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB). 
 
-In RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the above example, the result of the `zeros` call will already be on the GPU when the fusion planner has detected a net benefit to operating the fused expression it is part of on the GPU.
+In RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the above example, the result of the `ones` call will already be on the GPU when the fusion planner has detected a net benefit to operating the fused expression it is part of on the GPU.
 
 To preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.
 
@@ -119,75 +123,75 @@ Since MathWorks MATLAB does not have a fusion planner, and they kept their paral
 
 ## FAQ
 
-### When should I use the `zeros` function?
+### When should I use the `ones` function?
 
-Use `zeros` whenever you need to create arrays pre-filled with the value `0`, such as for initializing weights, creating masks, or testing other algorithms. Preallocating with `zeros` ensures correct type and shape throughout your code and helps prevent bugs caused by uninitialized arrays.
+Use `ones` whenever you need to create arrays pre-filled with the value `1`, such as for initializing weights, creating masks, or testing other algorithms. Preallocating with `ones` ensures correct type and shape throughout your code and helps prevent bugs caused by uninitialized arrays.
 
-### Does `zeros` produce double arrays by default?
+### Does `ones` produce double arrays by default?
 
-Yes, by default, `zeros` creates dense double-precision arrays unless you explicitly specify a type such as `'logical'` or use the `'like'` argument to match a prototype array.
+Yes, by default, `ones` creates dense double-precision arrays unless you explicitly specify a type such as `'logical'` or use the `'like'` argument to match a prototype array.
 
-### What does `zeros(n)` return?
+### What does `ones(n)` return?
 
-`zeros(n)` returns an `n × n` dense double-precision matrix filled with zeros. For example, `zeros(3)` yields a 3-by-3 matrix of all zeros.
+`ones(n)` returns an `n × n` dense double-precision matrix filled with ones. For example, `ones(3)` yields a 3-by-3 matrix of all ones.
 
-### How do I create a logical array of zeros?
+### How do I create a logical array of ones?
 
-Pass `'logical'` as the last argument:
+Pass `'logical'` as the last argument:  
 ```matlab
-mask = zeros(5, 1, 'logical');
+mask = ones(5, 1, 'logical');
 ```
-This produces a 5x1 logical array, i.e., all elements have value `false` (`0` in binary).
+This produces a 5x1 logical array, i.e., all elements have value `true` (`1` in binary).
 
 ### How do I match the type and device residency of an existing array?
 
-Use the `'like', prototype` syntax:
+Use the `'like', prototype` syntax:  
 ```matlab
 A = gpuArray(rand(2,2));
-B = zeros(2, 2, 'like', A);
+B = ones(2, 2, 'like', A);
 ```
 `B` will be a GPU array with the same type and shape as `A`.
 
-### Can I create N-dimensional arrays with zeros?
+### Can I create N-dimensional arrays with ones?
 
-Yes! Pass more than two dimension arguments (or a size vector):
+Yes! Pass more than two dimension arguments (or a size vector):  
 ```matlab
-T = zeros(2, 3, 4);
+T = ones(2, 3, 4);
 ```
-This creates a 2×3×4 tensor of zeros.
+This creates a 2×3×4 tensor of ones.
 
-### How does `zeros(A)` behave?
+### How does `ones(A)` behave?
 
-If you call `zeros(A)`, where `A` is an array, the result is a new array of zeros with the same shape as `A`.
+If you call `ones(A)`, where `A` is an array, the result is a new array of ones with the same shape as `A`.
 
 ### Is the output always dense?
 
-Yes. `zeros` always produces a dense array. For sparse matrices of zeros, use `sparse` with appropriate arguments.
+Yes. `ones` always produces a dense array. For sparse matrices of ones, use `sparse` with appropriate arguments.
 
-### What if I call `zeros` with no arguments?
+### What if I call `ones` with no arguments?
 
-`zeros()` returns the scalar value `0`.
+`ones()` returns the scalar value `1`.
 
-### Can I use `zeros` to preallocate arrays for later assignment?
+### Can I use `ones` to preallocate arrays for later assignment?
 
-Absolutely. Preallocating with `zeros` (or `ones`) and then filling in values is a recommended practice for efficiency and code clarity when the final values are known to overwrite the initial zeros.
+Absolutely. Preallocating with `ones` (or `zeros`) and then filling in values is a recommended practice for efficiency and code clarity when the final values are known to overwrite the initial ones.
 
 ## See Also
-[ones](./ones), [eye](./eye), [gpuArray](../accel/gpu_array), [gather](../accel/gather)
+[zeros](./zeros), [eye](./eye), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 
 ## Source & Feedback
-- The full source code for the implementation of the `zeros` function is available at: [`crates/runmat-runtime/src/builtins/array/zeros.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/zeros.rs)
+- The full source code for the implementation of the `ones` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/ones.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/ones.rs)
 - Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "zeros",
+    name: "ones",
     op_kind: GpuOpKind::Custom("generator"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[
-        ProviderHook::Custom("zeros"),
-        ProviderHook::Custom("zeros_like"),
+        ProviderHook::Custom("ones"),
+        ProviderHook::Custom("ones_like"),
     ],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
@@ -195,50 +199,50 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Allocates device zeros when providers expose dedicated hooks; otherwise falls back to host upload.",
+    notes: "Allocates device ones when providers expose dedicated hooks; otherwise falls back to scalar fill or host upload.",
 };
 
 register_builtin_gpu_spec!(GPU_SPEC);
 
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "zeros",
+    name: "ones",
     shape: ShapeRequirements::Any,
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let zero = match ctx.scalar_ty {
-                ScalarType::F32 => "0.0".to_string(),
-                ScalarType::F64 => "f64(0.0)".to_string(),
-                ScalarType::I32 => "0".to_string(),
-                ScalarType::Bool => "false".to_string(),
+            let literal = match ctx.scalar_ty {
+                ScalarType::F32 => "1.0".to_string(),
+                ScalarType::F64 => "f64(1.0)".to_string(),
+                ScalarType::I32 => "1".to_string(),
+                ScalarType::Bool => "true".to_string(),
             };
-            Ok(zero)
+            Ok(literal)
         },
     }),
     reduction: None,
     emits_nan: false,
-    notes: "Fusion planner materialises zeros as literal constants; providers may substitute inexpensive fill kernels.",
+    notes: "Fusion planner materialises ones as inline literals; providers may substitute inexpensive fill kernels.",
 };
 
 register_builtin_fusion_spec!(FUSION_SPEC);
 
 #[cfg(feature = "doc_export")]
-register_builtin_doc_text!("zeros", DOC_MD);
+register_builtin_doc_text!("ones", DOC_MD);
 
 #[runtime_builtin(
-    name = "zeros",
+    name = "ones",
     category = "array/creation",
-    summary = "Create arrays filled with zeros.",
-    keywords = "zeros,array,logical,gpu,like",
+    summary = "Create arrays filled with ones.",
+    keywords = "ones,array,logical,gpu,like",
     accel = "array_construct"
 )]
-fn zeros_builtin(rest: Vec<Value>) -> Result<Value, String> {
-    let parsed = ParsedZeros::parse(rest)?;
+fn ones_builtin(rest: Vec<Value>) -> Result<Value, String> {
+    let parsed = ParsedOnes::parse(rest)?;
     build_output(parsed)
 }
 
-struct ParsedZeros {
+struct ParsedOnes {
     shape: Vec<usize>,
     template: OutputTemplate,
 }
@@ -250,7 +254,7 @@ enum OutputTemplate {
     Like(Value),
 }
 
-impl ParsedZeros {
+impl ParsedOnes {
     fn parse(args: Vec<Value>) -> Result<Self, String> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
@@ -266,17 +270,17 @@ impl ParsedZeros {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err("zeros: multiple 'like' specifications are not supported"
+                            return Err("ones: multiple 'like' specifications are not supported"
                                 .to_string());
                         }
                         if class_override.is_some() {
                             return Err(
-                                "zeros: cannot combine 'like' with other class specifiers"
+                                "ones: cannot combine 'like' with other class specifiers"
                                     .to_string(),
                             );
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err("zeros: expected prototype after 'like'".to_string());
+                            return Err("ones: expected prototype after 'like'".to_string());
                         };
                         like_proto = Some(proto.clone());
                         if shape_source.is_none() && !saw_dims_arg {
@@ -287,7 +291,7 @@ impl ParsedZeros {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err("zeros: cannot combine 'like' with 'logical'".to_string());
+                            return Err("ones: cannot combine 'like' with 'logical'".to_string());
                         }
                         class_override = Some(OutputTemplate::Logical);
                         idx += 1;
@@ -295,7 +299,7 @@ impl ParsedZeros {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err("zeros: cannot combine 'like' with 'double'".to_string());
+                            return Err("ones: cannot combine 'like' with 'double'".to_string());
                         }
                         class_override = Some(OutputTemplate::Double);
                         idx += 1;
@@ -303,11 +307,11 @@ impl ParsedZeros {
                     }
                     "single" => {
                         return Err(
-                            "zeros: single precision output is not implemented yet".to_string()
+                            "ones: single precision output is not implemented yet".to_string()
                         );
                     }
                     other => {
-                        return Err(format!("zeros: unrecognised option '{other}'"));
+                        return Err(format!("ones: unrecognised option '{other}'"));
                     }
                 }
             }
@@ -360,61 +364,76 @@ impl ParsedZeros {
     }
 }
 
-fn build_output(parsed: ParsedZeros) -> Result<Value, String> {
+fn build_output(parsed: ParsedOnes) -> Result<Value, String> {
     match parsed.template {
-        OutputTemplate::Double => zeros_double(&parsed.shape),
-        OutputTemplate::Logical => zeros_logical(&parsed.shape),
-        OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape),
+        OutputTemplate::Double => ones_double(&parsed.shape),
+        OutputTemplate::Logical => ones_logical(&parsed.shape),
+        OutputTemplate::Like(proto) => ones_like(&proto, &parsed.shape),
     }
 }
 
-fn zeros_double(shape: &[usize]) -> Result<Value, String> {
-    let tensor = tensor::zeros(shape)?;
+fn ones_double(shape: &[usize]) -> Result<Value, String> {
+    let tensor = tensor::ones(shape)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn zeros_logical(shape: &[usize]) -> Result<Value, String> {
-    Ok(Value::LogicalArray(LogicalArray::zeros(shape.to_vec())))
+fn ones_logical(shape: &[usize]) -> Result<Value, String> {
+    let len = tensor::element_count(shape);
+    LogicalArray::new(vec![1u8; len], shape.to_vec())
+        .map(Value::LogicalArray)
+        .map_err(|e| format!("ones: {e}"))
 }
 
-fn zeros_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
+fn ones_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
     match proto {
-        Value::LogicalArray(_) | Value::Bool(_) => zeros_logical(shape),
+        Value::LogicalArray(_) | Value::Bool(_) => ones_logical(shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
-            let tensor = ComplexTensor::zeros(shape.to_vec());
-            Ok(Value::ComplexTensor(tensor))
+            let len = tensor::element_count(shape);
+            let data = vec![(1.0, 0.0); len];
+            ComplexTensor::new(data, shape.to_vec())
+                .map(Value::ComplexTensor)
+                .map_err(|e| format!("ones: {e}"))
         }
-        Value::GpuTensor(handle) => zeros_like_gpu(handle, shape),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => zeros_double(shape),
-        Value::CharArray(_) | Value::Cell(_) => zeros_double(shape),
-        _ => zeros_double(shape),
+        Value::GpuTensor(handle) => ones_like_gpu(handle, shape),
+        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => ones_double(shape),
+        Value::CharArray(_) | Value::Cell(_) => ones_double(shape),
+        _ => ones_double(shape),
     }
 }
 
-fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
+fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let attempt = if handle.shape == shape {
-            provider.zeros_like(handle)
+            provider.ones_like(handle)
         } else {
-            provider.zeros(shape)
+            provider.ones(shape)
         };
         if let Ok(gpu) = attempt {
             return Ok(Value::GpuTensor(gpu));
         }
 
-        let host = tensor::zeros(shape)?;
-        let view = HostTensorView {
-            data: &host.data,
-            shape: &host.shape,
-        };
-        if let Ok(gpu) = provider.upload(&view) {
-            return Ok(Value::GpuTensor(gpu));
+        if let Ok(zero_handle) = provider.zeros(shape) {
+            let add_result = provider.scalar_add(&zero_handle, 1.0);
+            let _ = provider.free(&zero_handle);
+            if let Ok(filled) = add_result {
+                return Ok(Value::GpuTensor(filled));
+            }
+        }
+
+        if let Ok(host) = tensor::ones(shape) {
+            let view = HostTensorView {
+                data: &host.data,
+                shape: &host.shape,
+            };
+            if let Ok(gpu) = provider.upload(&view) {
+                return Ok(Value::GpuTensor(gpu));
+            }
         }
     }
 
     let gathered = crate::dispatcher::gather_if_needed(&Value::GpuTensor(handle.clone()))
-        .map_err(|e| format!("zeros: {e}"))?;
-    zeros_like(&gathered, shape)
+        .map_err(|e| format!("ones: {e}"))?;
+    ones_like(&gathered, shape)
 }
 
 fn keyword_of(value: &Value) -> Option<String> {
@@ -434,7 +453,7 @@ fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
         Value::Int(i) => {
             let dim = i.to_i64();
             if dim < 0 {
-                return Err("zeros: matrix dimensions must be non-negative".to_string());
+                return Err("ones: matrix dimensions must be non-negative".to_string());
             }
             Ok(Some(vec![dim as usize]))
         }
@@ -447,14 +466,14 @@ fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
 
 fn parse_numeric_dimension(n: f64) -> Result<usize, String> {
     if !n.is_finite() {
-        return Err("zeros: dimensions must be finite".to_string());
+        return Err("ones: dimensions must be finite".to_string());
     }
     if n < 0.0 {
-        return Err("zeros: matrix dimensions must be non-negative".to_string());
+        return Err("ones: matrix dimensions must be non-negative".to_string());
     }
     let rounded = n.round();
     if (rounded - n).abs() > f64::EPSILON {
-        return Err("zeros: dimensions must be integers".to_string());
+        return Err("ones: dimensions must be integers".to_string());
     }
     Ok(rounded as usize)
 }
@@ -476,8 +495,7 @@ fn dims_from_tensor(tensor: &Tensor) -> Result<Option<Vec<usize>>, String> {
     Ok(Some(dims))
 }
 
-fn dims_from_logical(logical: &LogicalArray) -> Result<Option<Vec<usize>>, String> {
-    let _ = logical;
+fn dims_from_logical(_logical: &LogicalArray) -> Result<Option<Vec<usize>>, String> {
     Ok(None)
 }
 
@@ -490,7 +508,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
         Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
-        other => Err(format!("zeros: unsupported prototype {other:?}")),
+        other => Err(format!("ones: unsupported prototype {other:?}")),
     }
 }
 
@@ -500,42 +518,42 @@ mod tests {
     use crate::builtins::common::test_support;
 
     #[test]
-    fn zeros_default_scalar() {
-        let result = zeros_builtin(Vec::new()).expect("zeros");
-        assert_eq!(result, Value::Num(0.0));
+    fn ones_default_scalar() {
+        let result = ones_builtin(Vec::new()).expect("ones");
+        assert_eq!(result, Value::Num(1.0));
     }
 
     #[test]
-    fn zeros_square_from_single_dimension() {
+    fn ones_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = ones_builtin(args).expect("ones");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
+                assert!(t.data.iter().all(|&x| x == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
     }
 
     #[test]
-    fn zeros_rectangular_from_dims() {
+    fn ones_rectangular_from_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = ones_builtin(args).expect("ones");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 4]);
-                assert_eq!(t.data.len(), 8);
+                assert!(t.data.iter().all(|&x| x == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
     }
 
     #[test]
-    fn zeros_from_size_vector() {
+    fn ones_from_size_vector() {
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = ones_builtin(args).expect("ones");
         match result {
             Value::Tensor(t) => assert_eq!(t.shape, vec![2, 3]),
             other => panic!("expected tensor, got {other:?}"),
@@ -543,109 +561,65 @@ mod tests {
     }
 
     #[test]
-    fn zeros_logical_output() {
+    fn ones_logical_output() {
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("logical")];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = ones_builtin(args).expect("ones");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![2, 2]);
-                assert!(logical.data.iter().all(|&x| x == 0));
+                assert!(logical.data.iter().all(|&x| x == 1));
             }
             other => panic!("expected logical array, got {other:?}"),
         }
     }
 
     #[test]
-    fn zeros_like_tensor_infers_shape() {
+    fn ones_like_tensor_infers_shape() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = ones_builtin(args).expect("ones");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
+                assert!(t.data.iter().all(|&x| x == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
     }
 
     #[test]
-    fn zeros_like_complex_scalar() {
+    fn ones_like_complex_scalar() {
         let args = vec![
             Value::Num(3.0),
             Value::from("like"),
             Value::Complex(1.0, 2.0),
         ];
-        let result = zeros_builtin(args).expect("zeros");
+        let result = ones_builtin(args).expect("ones");
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert!(t.data.iter().all(|&(re, im)| re == 0.0 && im == 0.0));
+                assert!(t.data.iter().all(|&(re, im)| (re, im) == (1.0, 0.0)));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
 
     #[test]
-    fn zeros_like_uses_shape_argument_when_combined_with_like() {
-        let shape_source = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let proto = Tensor::new(vec![7.0, 8.0], vec![1, 2]).unwrap();
-        let args = vec![
-            Value::Tensor(shape_source.clone()),
-            Value::from("like"),
-            Value::Tensor(proto),
-        ];
-        let result = zeros_builtin(args).expect("zeros");
+    fn ones_like_logical_array() {
+        let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
+        let args = vec![Value::LogicalArray(logical)];
+        let result = ones_builtin(args).expect("ones");
         match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
+            Value::LogicalArray(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert!(out.data.iter().all(|&x| x == 1));
             }
-            other => panic!("expected tensor, got {other:?}"),
+            other => panic!("expected logical array, got {other:?}"),
         }
     }
 
     #[test]
-    fn zeros_like_without_explicit_shape_uses_prototype_shape() {
-        let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let args = vec![Value::from("like"), Value::Tensor(proto)];
-        let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn zeros_empty_input_returns_empty_matrix() {
-        let empty = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
-        let result = zeros_builtin(vec![Value::Tensor(empty)]).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
-            }
-            other => panic!("expected empty tensor, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn zeros_conflicting_like_and_logical_is_error() {
-        let proto = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
-        let args = vec![
-            Value::Num(2.0),
-            Value::from("logical"),
-            Value::from("like"),
-            Value::Tensor(proto),
-        ];
-        assert!(zeros_builtin(args).is_err());
-    }
-
-    #[test]
-    fn zeros_gpu_like_alloc() {
+    fn ones_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
@@ -659,12 +633,12 @@ mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = zeros_builtin(args).expect("zeros");
+            let result = ones_builtin(args).expect("ones");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape, vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
-                    assert!(gathered.data.iter().all(|&x| x == 0.0));
+                    assert!(gathered.data.iter().all(|&x| x == 1.0));
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -676,5 +650,42 @@ mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ones_wgpu_like_and_gather() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        // Build GPU prototype via gpuArray
+        let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
+        let g = crate::call_builtin("gpuArray", &[Value::Tensor(proto)]).expect("gpuArray");
+        let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("like"), g];
+        let result = ones_builtin(args).expect("ones like gpu");
+        match result {
+            Value::GpuTensor(h) => {
+                let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
+                assert_eq!(gathered.shape, vec![2, 2]);
+                assert!(gathered.data.iter().all(|&x| x == 1.0));
+            }
+            other => panic!("expected gpu tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ones_wgpu_fusion_with_sin_and_sum() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        // Create ones on GPU (2x2), then sin, then sum along dim=1
+        let args = vec![Value::Num(2.0), Value::Num(2.0)];
+        let o = ones_builtin(args).expect("ones");
+        let s = crate::call_builtin("sin", &[o]).expect("sin");
+        let summed = crate::call_builtin("sum", &[s, Value::Num(1.0)]).expect("sum");
+        // Gather and validate shapes; values are deterministic for sin(1)
+        let gathered = test_support::gather(summed).expect("gather");
+        assert_eq!(gathered.shape, vec![1, 2]);
     }
 }
