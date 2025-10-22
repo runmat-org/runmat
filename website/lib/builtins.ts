@@ -15,6 +15,7 @@ export type Builtin = {
   slug: string;
   category: string[];
   summary: string;
+  description?: string;
   signatures: BuiltinSignature[];
   errors?: string[];
   examples?: { title?: string; code: string }[];

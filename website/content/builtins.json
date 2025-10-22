@@ -1058,13 +1058,13 @@
           "x"
         ],
         "inTypes": [
-          "any"
+          "string"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "any"
+          "double"
         ],
         "nargin": {
           "min": 0,
@@ -1080,13 +1080,13 @@
           "x"
         ],
         "inTypes": [
-          "string"
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "double"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -1354,13 +1354,13 @@
           "x"
         ],
         "inTypes": [
-          "double"
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "double"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -1376,13 +1376,13 @@
           "x"
         ],
         "inTypes": [
-          "any"
+          "double"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "any"
+          "double"
         ],
         "nargin": {
           "min": 0,
@@ -1795,6 +1795,28 @@
     "signatures": [
       {
         "in": [
+          "x"
+        ],
+        "inTypes": [
+          "string"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
           "x",
           "y"
         ],
@@ -1811,28 +1833,6 @@
         "nargin": {
           "min": 0,
           "max": 2
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "string"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
         },
         "nargout": {
           "min": 0,
@@ -3103,24 +3103,6 @@
     "status": "implemented",
     "signatures": [
       {
-        "in": [],
-        "inTypes": [],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 0
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
         "in": [
           "x"
         ],
@@ -3136,6 +3118,24 @@
         "nargin": {
           "min": 0,
           "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
         },
         "nargout": {
           "min": 0,
@@ -3155,24 +3155,6 @@
     "status": "implemented",
     "signatures": [
       {
-        "in": [],
-        "inTypes": [],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 0
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
         "in": [
           "x"
         ],
@@ -3188,6 +3170,24 @@
         "nargin": {
           "min": 0,
           "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [],
+        "inTypes": [],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 0
         },
         "nargout": {
           "min": 0,
@@ -3598,6 +3598,7 @@
       "math/reduction"
     ],
     "summary": "Average elements of scalars, vectors, matrices, or N-D tensors.",
+    "description": "`mean(x)` computes the arithmetic mean of scalars, vectors, matrices, and higher-dimensional tensors. When no dimension is supplied, the reduction runs along the first non-singleton dimension.",
     "status": "implemented",
     "signatures": [
       {
@@ -4046,6 +4047,7 @@
       "array/creation"
     ],
     "summary": "Create arrays filled with ones.",
+    "description": "`ones` creates arrays filled with ones. It mirrors MATLAB semantics across the scalar, vector, matrix, and N-D forms, including `'like'` and `'logical'` options.",
     "status": "implemented",
     "signatures": [
       {
@@ -4970,6 +4972,7 @@
       "array/creation"
     ],
     "summary": "Uniform random numbers on (0, 1).",
+    "description": "`rand` produces uniformly distributed pseudorandom numbers over the open interval (0, 1).",
     "status": "implemented",
     "signatures": [
       {
@@ -5584,6 +5587,7 @@
       "math/trigonometry"
     ],
     "summary": "Sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    "description": "`y = sin(x)` computes the sine of every element in `x`, with angles specified in radians.",
     "status": "implemented",
     "signatures": [
       {
@@ -5774,13 +5778,13 @@
           "x"
         ],
         "inTypes": [
-          "double"
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "double"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -5796,13 +5800,13 @@
           "x"
         ],
         "inTypes": [
-          "any"
+          "double"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "any"
+          "double"
         ],
         "nargin": {
           "min": 0,
@@ -6006,7 +6010,7 @@
           "out"
         ],
         "outTypes": [
-          "logical"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -6030,7 +6034,7 @@
           "out"
         ],
         "outTypes": [
-          "any"
+          "logical"
         ],
         "nargin": {
           "min": 0,
@@ -6517,6 +6521,7 @@
       "math/reduction"
     ],
     "summary": "Sum elements of scalars, vectors, matrices, or N-D tensors.",
+    "description": "`sum(x)` adds together elements of scalars, vectors, matrices, and higher-dimensional tensors. When no dimension is supplied, the reduction runs along the first non-singleton dimension.",
     "status": "implemented",
     "signatures": [
       {
@@ -7009,6 +7014,7 @@
       "array/creation"
     ],
     "summary": "Create arrays filled with zeros.",
+    "description": "`zeros` creates arrays filled with zeros. It mirrors MATLAB semantics across the scalar, vector, matrix, and N-D forms, including `'like'` and `'logical'` options.",
     "status": "implemented",
     "signatures": [
       {
