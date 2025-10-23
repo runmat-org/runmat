@@ -1,5 +1,5 @@
 //! MATLAB-compatible `sum` builtin with GPU-aware semantics for RunMat.
-//!
+
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
