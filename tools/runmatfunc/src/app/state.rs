@@ -263,6 +263,30 @@ impl AppContext {
             }
         }
 
+        // Completion pass: resolve any placeholders and fully implement argument handling
+        if use_codex && codex_available && outcome.success {
+            let complete_prompt = format!(
+                "Within the builtin '{}', eliminate any remaining placeholders and complete the implementation: (1) search changed files and immediate dependencies for TODO, FIXME, unimplemented!, todo!(), panic(\\\"unimplemented\\\"), \\\"for later\\\", \\\"next revision\\\" and replace with working code or proper error paths that match MATLAB semantics; (2) ensure the full argument matrix supported by the spec is implemented (positional, keyword-like strings, size vectors, dtype/logical toggles, 'like' prototype, GPU residency cases); (3) add or extend unit + #[cfg(feature=\\\"wgpu\\\")] tests to cover all supported argument forms and edge cases (including error conditions); (4) ensure DOC_MD frontmatter 'tested' paths reflect unit/integration tests; (5) keep CPU/GPU parity. Apply changes via apply_patch, then stop.",
+                ctx.builtin.name
+            );
+            let complete_tail = Some(
+                "References: crates/runmat-runtime/Library.md (argument expectations) and crates/runmat-runtime/BUILTIN_PACKAGING.md. Use existing good builtins (sum, mean, sin, zeros/ones/rand) as templates for argument parsing patterns and tests.",
+            );
+            let _ = crate::codex::session::run_authoring_with_extra(
+                &ctx,
+                resolved_model.clone(),
+                complete_prompt.as_str(),
+                complete_tail,
+            );
+            // Re-run tests to validate completion of argument handling and removal of placeholders
+            match workspace_tests::run_builtin_tests(&ctx, &self.config) {
+                Ok(new_outcome) => {
+                    outcome = new_outcome;
+                }
+                Err(err) => println!("[runmatfunc] test execution error after completion pass: {err}"),
+            }
+        }
+
         // Documentation quality pass: ask Codex to ensure DOC_MD quality matches existing good builtins
         if use_codex && codex_available && outcome.success {
             let doc_prompt = "Review and improve the DOC_MD for this builtin to match the tone, structure, and completeness of the best existing builtins under crates/runmat-runtime/src/builtins. Ensure: (1) headlines and sections match the style of the best existing builtins; (2) GPU Execution section reflects provider hooks and fusion residency; (3) realistic, runnable Examples; (4) See Also with correct names. Note that the headings have been selected carefully for SEO and communication purposes, so please do not change them. If anything is missing or inconsistent, update DOC_MD via apply_patch. Then stop.";
