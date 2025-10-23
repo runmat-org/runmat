@@ -1,5 +1,5 @@
 //! MATLAB-compatible `sum` builtin with GPU-aware semantics for RunMat.
-//! 
+//!
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -149,7 +149,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[ProviderHook::Reduction {
-            name: "reduce_sum_dim",
+        name: "reduce_sum_dim",
     }],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
@@ -297,8 +297,8 @@ fn sum_gpu(
                 } else {
                     (cols, rows, true)
                 };
-                let output_shape = reduction_shape(&handle.shape, target_dim)
-                    .unwrap_or_else(|| vec![num_slices]);
+                let output_shape =
+                    reduction_shape(&handle.shape, target_dim).unwrap_or_else(|| vec![num_slices]);
                 let scalar_ty = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F32 => "f32",
                     runmat_accelerate_api::ProviderPrecision::F64 => "f64",
@@ -306,7 +306,8 @@ fn sum_gpu(
                 // Minimal WGSL with omitnan=true; column-major addressing
                 let mut shader = String::new();
                 shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>; }}\n"));
-                shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
+                shader
+                    .push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
                 shader.push_str("@group(0) @binding(0) var<storage, read> input0: Tensor;\n");
                 shader.push_str("@group(0) @binding(1) var<storage, read_write> output: Tensor;\n");
                 shader.push_str("@group(0) @binding(2) var<uniform> params: MParams;\n\n");
@@ -320,7 +321,9 @@ fn sum_gpu(
                         "  var acc: {scalar_ty} = {}0.0;\n",
                         if scalar_ty == "f64" { "f64(" } else { "" }
                     ));
-                    if scalar_ty == "f64" { shader.push_str("  // close f64 literal\n"); }
+                    if scalar_ty == "f64" {
+                        shader.push_str("  // close f64 literal\n");
+                    }
                     shader.push_str("  var c = lid.x;\n  while (c < params.ncols) {\n    let v = input0.data[row + (c * params.ld)];\n    if (!isNan(v)) { acc = acc + v; }\n    c += 256u;\n  }\n");
                 } else {
                     shader.push_str(
@@ -331,14 +334,16 @@ fn sum_gpu(
                         "  var acc: {scalar_ty} = {}0.0;\n",
                         if scalar_ty == "f64" { "f64(" } else { "" }
                     ));
-                    if scalar_ty == "f64" { shader.push_str("  // close f64 literal\n"); }
+                    if scalar_ty == "f64" {
+                        shader.push_str("  // close f64 literal\n");
+                    }
                     shader.push_str("  var r = lid.x;\n  while (r < params.nrows) {\n    let v = input0.data[(col * params.ld) + r];\n    if (!isNan(v)) { acc = acc + v; }\n    r += 256u;\n  }\n");
                 }
                 shader.push_str("  var<workgroup> tile: array<f32, 256u>;\n  tile[lid.x] = acc;\n  workgroupBarrier();\n");
                 shader.push_str("  var off = 128u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n");
                 if axis_is_row {
                     shader.push_str("  if (lid.x == 0u) { output.data[row] = tile[0u]; }\n}\n");
-    } else {
+                } else {
                     shader.push_str("  if (lid.x == 0u) { output.data[col] = tile[0u]; }\n}\n");
                 }
                 if let Ok(device_result) = provider.fused_reduction(
@@ -378,7 +383,7 @@ fn reduce_tensor_dim(
         if let Some(shape) = reduction_shape(&tensor.shape, dim) {
             let zeros = vec![0.0; tensor::element_count(&shape)];
             return Tensor::new(zeros, shape).map_err(|e| format!("sum: {e}"));
-    } else {
+        } else {
             return Ok(tensor.clone());
         }
     }
@@ -452,10 +457,10 @@ fn reduce_tensor_dim(
                 ReductionNaN::Omit => {
                     if any_value {
                         sum
-            } else {
-                0.0
-            }
-        }
+                    } else {
+                        0.0
+                    }
+                }
             };
         }
     }
@@ -620,8 +625,14 @@ mod tests {
         let t = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let cpu = sum_host(Value::Tensor(t.clone()), Some(1), ReductionNaN::Include).unwrap();
         // Upload and run on GPU
-        let view = runmat_accelerate_api::HostTensorView { data: &t.data, shape: &t.shape };
-        let h = runmat_accelerate_api::provider().unwrap().upload(&view).unwrap();
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &t.data,
+            shape: &t.shape,
+        };
+        let h = runmat_accelerate_api::provider()
+            .unwrap()
+            .upload(&view)
+            .unwrap();
         let gpu = sum_gpu(h, Some(1), ReductionNaN::Include).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {

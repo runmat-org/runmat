@@ -85,8 +85,12 @@ impl<'a> GraphBuilder<'a> {
         match instr {
             Instr::LoadConst(value) => self.push_constant(Type::Num, Some(Value::Num(*value))),
             Instr::LoadBool(value) => self.push_constant(Type::Bool, Some(Value::Bool(*value))),
-            Instr::LoadString(s) => self.push_constant(Type::String, Some(Value::String(s.clone()))),
-            Instr::LoadCharRow(s) => self.push_constant(Type::String, Some(Value::String(s.clone()))),
+            Instr::LoadString(s) => {
+                self.push_constant(Type::String, Some(Value::String(s.clone())))
+            }
+            Instr::LoadCharRow(s) => {
+                self.push_constant(Type::String, Some(Value::String(s.clone())))
+            }
             Instr::LoadVar(idx) => self.handle_load_var(*idx),
             Instr::StoreVar(idx) => self.handle_store_var(*idx),
             Instr::LoadLocal(idx) => self.handle_load_local(*idx),
@@ -172,7 +176,14 @@ impl<'a> GraphBuilder<'a> {
                     None
                 };
                 let out_value = if let Some(t) = tensor_const {
-                    let id = self.new_value(ValueOrigin::NodeOutput { node: node_id, output: 0 }, ty.clone(), Some(Value::Tensor(t)));
+                    let id = self.new_value(
+                        ValueOrigin::NodeOutput {
+                            node: node_id,
+                            output: 0,
+                        },
+                        ty.clone(),
+                        Some(Value::Tensor(t)),
+                    );
                     id
                 } else {
                     self.new_node_output(node_id, 0, ty)
@@ -401,8 +412,13 @@ impl<'a> GraphBuilder<'a> {
             AccelOpCategory::Transpose => Type::Unknown,
             AccelOpCategory::Other => {
                 // Prefer tag-driven array construct inference over name-based
-                if info.tags.iter().any(|t| matches!(t, AccelGraphTag::ArrayConstruct)) {
-                    self.infer_array_constructor_from_tags(&inputs).unwrap_or(Type::Unknown)
+                if info
+                    .tags
+                    .iter()
+                    .any(|t| matches!(t, AccelGraphTag::ArrayConstruct))
+                {
+                    self.infer_array_constructor_from_tags(&inputs)
+                        .unwrap_or(Type::Unknown)
                 } else {
                     Type::Unknown
                 }
@@ -410,7 +426,10 @@ impl<'a> GraphBuilder<'a> {
         };
         // If still unknown for an ArrayConstruct-tagged builtin, try a constant size-vector inference
         if matches!(out_type, Type::Unknown)
-            && info.tags.iter().any(|t| matches!(t, AccelGraphTag::ArrayConstruct))
+            && info
+                .tags
+                .iter()
+                .any(|t| matches!(t, AccelGraphTag::ArrayConstruct))
             && inputs.len() == 1
         {
             if let Some(info0) = self.values.get(inputs[0] as usize) {
@@ -449,7 +468,9 @@ impl<'a> GraphBuilder<'a> {
                 if text.eq_ignore_ascii_case("like") {
                     let proto = &self.values[inputs[i + 1] as usize];
                     if let Type::Tensor { shape: Some(dims) } = &proto.ty {
-                        return Some(Type::Tensor { shape: Some(dims.clone()) });
+                        return Some(Type::Tensor {
+                            shape: Some(dims.clone()),
+                        });
                     }
                     break;
                 }
@@ -460,7 +481,9 @@ impl<'a> GraphBuilder<'a> {
         // 2) Leading numeric dims
         let mut dims: Vec<Option<usize>> = Vec::new();
         for &vid in inputs {
-            let Some(info) = self.values.get(vid as usize) else { break };
+            let Some(info) = self.values.get(vid as usize) else {
+                break;
+            };
             match &info.constant {
                 Some(Value::Num(n)) => {
                     if n.is_finite() {
@@ -474,7 +497,10 @@ impl<'a> GraphBuilder<'a> {
                 }
                 Some(Value::Int(i)) => {
                     let v = i.to_i64();
-                    if v >= 0 { dims.push(Some(v as usize)); continue; }
+                    if v >= 0 {
+                        dims.push(Some(v as usize));
+                        continue;
+                    }
                     break;
                 }
                 Some(Value::String(_)) => break,
@@ -484,14 +510,18 @@ impl<'a> GraphBuilder<'a> {
         if !dims.is_empty() {
             if dims.len() == 1 {
                 let n = dims[0].unwrap_or(0);
-                return Some(Type::Tensor { shape: Some(vec![Some(n), Some(n)]) });
+                return Some(Type::Tensor {
+                    shape: Some(vec![Some(n), Some(n)]),
+                });
             }
             return Some(Type::Tensor { shape: Some(dims) });
         }
 
         // 3) size-vector tensor argument: 1xN or Nx1 with concrete numeric dims
         for &vid in inputs {
-            let Some(info) = self.values.get(vid as usize) else { continue };
+            let Some(info) = self.values.get(vid as usize) else {
+                continue;
+            };
             match &info.ty {
                 Type::Tensor { shape: Some(dims) } if dims.len() == 2 => {
                     // Expect a constant tensor encoded as Value::Tensor; pull from constant if available
@@ -503,7 +533,11 @@ impl<'a> GraphBuilder<'a> {
                             let mut out: Vec<Option<usize>> = Vec::with_capacity(cols);
                             for j in 0..cols {
                                 let v = t.data[j].round() as i64;
-                                if v >= 0 { out.push(Some(v as usize)); } else { out.push(None); }
+                                if v >= 0 {
+                                    out.push(Some(v as usize));
+                                } else {
+                                    out.push(None);
+                                }
                             }
                             return Some(Type::Tensor { shape: Some(out) });
                         } else if (cols == 1 || cols == 0) && rows > 0 {
@@ -511,7 +545,11 @@ impl<'a> GraphBuilder<'a> {
                             let mut out: Vec<Option<usize>> = Vec::with_capacity(rows);
                             for i in 0..rows {
                                 let v = t.data[i].round() as i64;
-                                if v >= 0 { out.push(Some(v as usize)); } else { out.push(None); }
+                                if v >= 0 {
+                                    out.push(Some(v as usize));
+                                } else {
+                                    out.push(None);
+                                }
                             }
                             return Some(Type::Tensor { shape: Some(out) });
                         }

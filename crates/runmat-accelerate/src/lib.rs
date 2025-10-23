@@ -11,13 +11,13 @@ use runmat_builtins::{Tensor, Value};
 use std::path::PathBuf;
 use std::sync::RwLock;
 
+pub mod backend;
 pub mod fusion;
 pub mod fusion_exec;
 pub mod fusion_residency;
 pub mod graph;
 pub mod native_auto;
 pub mod simple_provider;
-pub mod backend;
 pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
@@ -246,7 +246,8 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn elementwise_hash_varies_with_arity() {
-        wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default()).expect("wgpu provider");
+        wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
+            .expect("wgpu provider");
         let p = wgpu_backend::ensure_wgpu_provider().unwrap().unwrap();
         let wg = 256u32;
         let h2 = p.compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-2", Some(wg));

@@ -19,19 +19,33 @@ pub fn submit(device: &wgpu::Device, queue: &wgpu::Queue, enc: wgpu::CommandEnco
 }
 
 pub fn dispatch_groups(groups: u32) -> u32 {
-    if groups == 0 { 0 } else { groups.max(1) }
+    if groups == 0 {
+        0
+    } else {
+        groups.max(1)
+    }
 }
 
 pub fn dispatch_size(elements: u32, workgroup: u32) -> u32 {
-    if elements == 0 { 0 } else { ((elements + workgroup - 1) / workgroup).max(1) }
+    if elements == 0 {
+        0
+    } else {
+        ((elements + workgroup - 1) / workgroup).max(1)
+    }
 }
 
 pub fn dispatch_size_reduce(elements: u32, workgroup: u32) -> u32 {
-    if elements == 0 { 0 } else { ((elements + workgroup * 2 - 1) / (workgroup * 2)).max(1) }
+    if elements == 0 {
+        0
+    } else {
+        ((elements + workgroup * 2 - 1) / (workgroup * 2)).max(1)
+    }
 }
 
 pub fn dispatch_size_dim(elements: u32, tile: u32) -> u32 {
-    if elements == 0 { 0 } else { ((elements + tile - 1) / tile).max(1) }
+    if elements == 0 {
+        0
+    } else {
+        ((elements + tile - 1) / tile).max(1)
+    }
 }
-
-

@@ -38,5 +38,3 @@ impl WgpuMetrics {
         self.last_warmup_millis.load(Ordering::Relaxed)
     }
 }
-
-

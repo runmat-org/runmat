@@ -271,10 +271,8 @@ impl ParsedOnes {
                                 .to_string());
                         }
                         if class_override.is_some() {
-                            return Err(
-                                "ones: cannot combine 'like' with other class specifiers"
-                                    .to_string(),
-                            );
+                            return Err("ones: cannot combine 'like' with other class specifiers"
+                                .to_string());
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
                             return Err("ones: expected prototype after 'like'".to_string());

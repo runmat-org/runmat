@@ -207,14 +207,8 @@ pub fn execute_reduction(
     } else {
         workgroup_size
     };
-    let output = provider.fused_reduction(
-        &shader,
-        &handles,
-        &output_shape,
-        reduce_len,
-        num_slices,
-        wg,
-    )?;
+    let output =
+        provider.fused_reduction(&shader, &handles, &output_shape, reduce_len, num_slices, wg)?;
     fusion_residency::mark(&output);
 
     for input in prepared {
@@ -233,10 +227,7 @@ fn infer_output_shape(
 ) -> Result<Vec<usize>> {
     if let ShapeInfo::Tensor(dims) = &group.shape {
         if !dims.is_empty() {
-            let resolved: Vec<usize> = dims
-                .iter()
-                .map(|d| d.unwrap_or(1))
-                .collect();
+            let resolved: Vec<usize> = dims.iter().map(|d| d.unwrap_or(1)).collect();
             return Ok(resolved);
         }
     }

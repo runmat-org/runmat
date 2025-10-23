@@ -254,9 +254,7 @@ impl NativeAutoOffload {
         let elems = value_len(v).unwrap_or(0);
         let base = self.thresholds.unary_min_elems;
         let use_gpu = match op {
-            UnaryOp::Transpose => self
-                .should_gpu_transpose(elems)
-                .unwrap_or(elems >= base),
+            UnaryOp::Transpose => self.should_gpu_transpose(elems).unwrap_or(elems >= base),
             UnaryOp::Generic => elems >= base,
         };
         if use_gpu {

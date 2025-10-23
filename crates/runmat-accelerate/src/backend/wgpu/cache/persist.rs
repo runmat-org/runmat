@@ -30,5 +30,3 @@ pub fn persist_pipeline_meta(
         let _ = std::fs::write(&meta_path, json);
     }
 }
-
-

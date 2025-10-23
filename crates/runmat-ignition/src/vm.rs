@@ -294,7 +294,10 @@ pub fn interpret_with_vars(
                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                     match &v {
                         Value::GpuTensor(h) => {
-                            eprintln!("LoadVar pc={} var={} => GpuTensor shape={:?}", pc, i, h.shape);
+                            eprintln!(
+                                "LoadVar pc={} var={} => GpuTensor shape={:?}",
+                                pc, i, h.shape
+                            );
                         }
                         Value::Tensor(t) => {
                             eprintln!("LoadVar pc={} var={} => Tensor shape={:?}", pc, i, t.shape);
@@ -303,7 +306,7 @@ pub fn interpret_with_vars(
                     }
                 }
                 stack.push(v)
-            },
+            }
             Instr::StoreVar(i) => {
                 let val = stack
                     .pop()
@@ -311,7 +314,10 @@ pub fn interpret_with_vars(
                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                     match &val {
                         Value::GpuTensor(h) => {
-                            eprintln!("StoreVar pc={} var={} := GpuTensor shape={:?}", pc, i, h.shape);
+                            eprintln!(
+                                "StoreVar pc={} var={} := GpuTensor shape={:?}",
+                                pc, i, h.shape
+                            );
                         }
                         Value::Tensor(t) => {
                             eprintln!("StoreVar pc={} var={} := Tensor shape={:?}", pc, i, t.shape);
@@ -4169,9 +4175,7 @@ pub fn interpret_with_vars(
                                             Value::Tensor(idx_t) => {
                                                 let len = idx_t.shape.iter().product::<usize>();
                                                 if len == total {
-                                                    for (i, &val) in
-                                                        idx_t.data.iter().enumerate()
-                                                    {
+                                                    for (i, &val) in idx_t.data.iter().enumerate() {
                                                         if val != 0.0 {
                                                             idxs.push(i + 1);
                                                         }
@@ -4693,8 +4697,9 @@ pub fn interpret_with_vars(
                                             for c in 0..cols {
                                                 let src_off = c * rows;
                                                 let dst_off = c * new_rows;
-                                                new_data[dst_off..dst_off + rows]
-                                                    .copy_from_slice(&t.data[src_off..src_off + rows]);
+                                                new_data[dst_off..dst_off + rows].copy_from_slice(
+                                                    &t.data[src_off..src_off + rows],
+                                                );
                                             }
                                             t.data = new_data;
                                             t.shape = vec![new_rows, new_cols];
@@ -4741,7 +4746,8 @@ pub fn interpret_with_vars(
                                             let mut new_data = vec![0.0f64; new_rows * new_cols];
                                             for c in 0..cols {
                                                 for r in 0..rows {
-                                                    new_data[r + c * new_rows] = t.data[r + c * rows];
+                                                    new_data[r + c * new_rows] =
+                                                        t.data[r + c * rows];
                                                 }
                                             }
                                             t.data = new_data;
@@ -4915,7 +4921,10 @@ pub fn interpret_with_vars(
                             let cols = h.shape.get(1).copied().unwrap_or(1);
                             // Build minimal selectors using handle shape for 'end'
                             #[derive(Clone)]
-                            enum Sel { Colon, Scalar(usize) }
+                            enum Sel {
+                                Colon,
+                                Scalar(usize),
+                            }
                             #[allow(unused_assignments)]
                             let mut num_iter_fast = 0usize;
                             let sel0;
@@ -4928,10 +4937,9 @@ pub fn interpret_with_vars(
                             } else if is_end0 {
                                 sel0 = Sel::Scalar(rows);
                             } else {
-                                let v = numeric.get(num_iter_fast).ok_or(mex(
-                                    "MissingNumericIndex",
-                                    "missing numeric index",
-                                ))?;
+                                let v = numeric
+                                    .get(num_iter_fast)
+                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                                 num_iter_fast += 1;
                                 let n: f64 = v.try_into()?;
                                 if n < 1.0 {
@@ -4947,10 +4955,9 @@ pub fn interpret_with_vars(
                             } else if is_end1 {
                                 sel1 = Sel::Scalar(cols);
                             } else {
-                                let v = numeric.get(num_iter_fast).ok_or(mex(
-                                    "MissingNumericIndex",
-                                    "missing numeric index",
-                                ))?;
+                                let v = numeric
+                                    .get(num_iter_fast)
+                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                                 let n: f64 = v.try_into()?;
                                 if n < 1.0 {
                                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -4968,7 +4975,9 @@ pub fn interpret_with_vars(
                                             vh.shape[0]
                                         } else if vh.shape.len() == 2 {
                                             vh.shape[0]
-                                        } else { 0 };
+                                        } else {
+                                            0
+                                        };
                                         if v_rows == rows {
                                             if let Some(p) = runmat_accelerate_api::provider() {
                                                 match p.scatter_column(&h, j0, vh) {
@@ -4994,7 +5003,9 @@ pub fn interpret_with_vars(
                                             vh.shape[0]
                                         } else if vh.shape.len() == 2 {
                                             vh.shape[1]
-                                        } else { 0 };
+                                        } else {
+                                            0
+                                        };
                                         if v_cols == cols {
                                             if let Some(p) = runmat_accelerate_api::provider() {
                                                 match p.scatter_row(&h, i0, vh) {
@@ -5189,8 +5200,9 @@ pub fn interpret_with_vars(
                                             for c in 0..cols {
                                                 let src_off = c * rows;
                                                 let dst_off = c * new_rows;
-                                                new_data[dst_off..dst_off + rows]
-                                                    .copy_from_slice(&t.data[src_off..src_off + rows]);
+                                                new_data[dst_off..dst_off + rows].copy_from_slice(
+                                                    &t.data[src_off..src_off + rows],
+                                                );
                                             }
                                             t.data = new_data;
                                             t.shape = vec![new_rows, new_cols];
@@ -5225,11 +5237,9 @@ pub fn interpret_with_vars(
                                             data: &t.data,
                                             shape: &t.shape,
                                         };
-                                        let new_h = provider
-                                            .upload(&view)
-                                            .map_err(|e| format!(
-                                                "reupload after slice assign: {e}"
-                                            ))?;
+                                        let new_h = provider.upload(&view).map_err(|e| {
+                                            format!("reupload after slice assign: {e}")
+                                        })?;
                                         stack.push(Value::GpuTensor(new_h));
                                         bench_end("StoreSlice2D.fast_col", __b);
                                         pc += 1;
@@ -5245,7 +5255,8 @@ pub fn interpret_with_vars(
                                             let mut new_data = vec![0.0f64; new_rows * new_cols];
                                             for c in 0..cols {
                                                 for r in 0..rows {
-                                                    new_data[r + c * new_rows] = t.data[r + c * rows];
+                                                    new_data[r + c * new_rows] =
+                                                        t.data[r + c * rows];
                                                 }
                                             }
                                             t.data = new_data;
@@ -5280,11 +5291,9 @@ pub fn interpret_with_vars(
                                             data: &t.data,
                                             shape: &t.shape,
                                         };
-                                        let new_h = provider
-                                            .upload(&view)
-                                            .map_err(|e| format!(
-                                                "reupload after slice assign: {e}"
-                                            ))?;
+                                        let new_h = provider.upload(&view).map_err(|e| {
+                                            format!("reupload after slice assign: {e}")
+                                        })?;
                                         stack.push(Value::GpuTensor(new_h));
                                         bench_end("StoreSlice2D.fast_row", __b);
                                         pc += 1;
@@ -5383,9 +5392,7 @@ pub fn interpret_with_vars(
                                 };
                                 let new_h = provider
                                     .upload(&view)
-                                    .map_err(|e| format!(
-                                        "reupload after slice assign: {e}"
-                                    ))?;
+                                    .map_err(|e| format!("reupload after slice assign: {e}"))?;
                                 stack.push(Value::GpuTensor(new_h));
                             } else {
                                 loop {
@@ -5431,9 +5438,7 @@ pub fn interpret_with_vars(
                                 };
                                 let new_h = provider
                                     .upload(&view)
-                                    .map_err(|e| format!(
-                                        "reupload after slice assign: {e}"
-                                    ))?;
+                                    .map_err(|e| format!("reupload after slice assign: {e}"))?;
                                 stack.push(Value::GpuTensor(new_h));
                             }
                         }
@@ -6064,9 +6069,15 @@ pub fn interpret_with_vars(
                 #[cfg(feature = "native-accel")]
                 clear_residency(&base);
                 // If base is not assignable but rhs is, swap them to handle reversed emission order
-                let base_assignable = matches!(base, Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_));
+                let base_assignable = matches!(
+                    base,
+                    Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_)
+                );
                 if !base_assignable
-                    && matches!(rhs, Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_))
+                    && matches!(
+                        rhs,
+                        Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_)
+                    )
                 {
                     let tmp = base;
                     base = rhs;
@@ -6360,7 +6371,11 @@ pub fn interpret_with_vars(
                             if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
                                 let (st, sp) = range_params[rp_iter];
                                 rp_iter += 1;
-                                let step_i = if sp >= 0.0 { sp as i64 } else { -(sp.abs() as i64) };
+                                let step_i = if sp >= 0.0 {
+                                    sp as i64
+                                } else {
+                                    -(sp.abs() as i64)
+                                };
                                 selectors.push(Sel::Range {
                                     start: st as i64,
                                     step: step_i,
@@ -6430,7 +6445,11 @@ pub fn interpret_with_vars(
                                 Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
                                 Sel::Scalar(i) => vec![*i],
                                 Sel::Indices(v) => v.clone(),
-                                Sel::Range { start, step, end_off } => {
+                                Sel::Range {
+                                    start,
+                                    step,
+                                    end_off,
+                                } => {
                                     let mut v = Vec::new();
                                     let mut cur = *start;
                                     let end_i = (dim_len as i64) - *end_off;
@@ -6440,13 +6459,17 @@ pub fn interpret_with_vars(
                                     }
                                     if stp > 0 {
                                         while cur <= end_i {
-                                            if cur < 1 || cur > dim_len as i64 { break; }
+                                            if cur < 1 || cur > dim_len as i64 {
+                                                break;
+                                            }
                                             v.push(cur as usize);
                                             cur += stp;
                                         }
                                     } else {
                                         while cur >= end_i {
-                                            if cur < 1 || cur > dim_len as i64 { break; }
+                                            if cur < 1 || cur > dim_len as i64 {
+                                                break;
+                                            }
                                             v.push(cur as usize);
                                             cur += stp;
                                         }
@@ -6467,38 +6490,64 @@ pub fn interpret_with_vars(
                         }
                         let selection_empty = per_dim_indices.iter().any(|v| v.is_empty());
                         if selection_empty {
-                            let view = runmat_accelerate_api::HostTensorView { data: &t.data, shape: &t.shape };
-                            let new_h = provider.upload(&view).map_err(|e| format!("reupload after range-end assign: {e}"))?;
+                            let view = runmat_accelerate_api::HostTensorView {
+                                data: &t.data,
+                                shape: &t.shape,
+                            };
+                            let new_h = provider
+                                .upload(&view)
+                                .map_err(|e| format!("reupload after range-end assign: {e}"))?;
                             stack.push(Value::GpuTensor(new_h));
                         } else {
                             // Build broadcasting view for RHS with per-dimension shape
                             enum RhsView {
                                 Scalar(f64),
-                                Tensor { data: Vec<f64>, shape: Vec<usize>, strides: Vec<usize> },
+                                Tensor {
+                                    data: Vec<f64>,
+                                    shape: Vec<usize>,
+                                    strides: Vec<usize>,
+                                },
                             }
                             let rhs_view = match rhs {
                                 Value::Num(n) => RhsView::Scalar(n),
                                 Value::Tensor(rt) => {
-                                    if rt.data.is_empty() { vm_bail!("shape mismatch for slice assign".into()); }
+                                    if rt.data.is_empty() {
+                                        vm_bail!("shape mismatch for slice assign".into());
+                                    }
                                     // Normalize RHS shape to dims by padding with ones or validating extra dims are ones
                                     let mut rshape = rt.shape.clone();
-                                    if rshape.len() < dims { rshape.resize(dims, 1); }
+                                    if rshape.len() < dims {
+                                        rshape.resize(dims, 1);
+                                    }
                                     if rshape.len() > dims {
-                                        if rshape.iter().skip(dims).any(|&s| s != 1) { vm_bail!("shape mismatch for slice assign".into()); }
+                                        if rshape.iter().skip(dims).any(|&s| s != 1) {
+                                            vm_bail!("shape mismatch for slice assign".into());
+                                        }
                                         rshape.truncate(dims);
                                     }
                                     // Validate broadcasting compatibility
                                     for d in 0..dims {
                                         let out_len = per_dim_indices[d].len();
                                         let rhs_len = rshape[d];
-                                        if !(rhs_len == 1 || rhs_len == out_len) { vm_bail!("shape mismatch for slice assign".into()); }
+                                        if !(rhs_len == 1 || rhs_len == out_len) {
+                                            vm_bail!("shape mismatch for slice assign".into());
+                                        }
                                     }
                                     // Build column-major strides for RHS
                                     let mut rstrides = vec![0usize; dims];
                                     let mut racc = 1usize;
-                                    for d in 0..dims { rstrides[d] = racc; racc *= rshape[d]; }
-                                    if racc != rt.data.len() { vm_bail!("shape mismatch for slice assign".into()); }
-                                    RhsView::Tensor { data: rt.data, shape: rshape, strides: rstrides }
+                                    for d in 0..dims {
+                                        rstrides[d] = racc;
+                                        racc *= rshape[d];
+                                    }
+                                    if racc != rt.data.len() {
+                                        vm_bail!("shape mismatch for slice assign".into());
+                                    }
+                                    RhsView::Tensor {
+                                        data: rt.data,
+                                        shape: rshape,
+                                        strides: rstrides,
+                                    }
                                 }
                                 _ => vm_bail!("rhs must be numeric or tensor".into()),
                             };
@@ -6507,7 +6556,9 @@ pub fn interpret_with_vars(
                             let mut pos_maps: Vec<HashMap<usize, usize>> = Vec::with_capacity(dims);
                             for dim_idxs in per_dim_indices.iter().take(dims) {
                                 let mut m: HashMap<usize, usize> = HashMap::new();
-                                for (p, &idx) in dim_idxs.iter().enumerate() { m.insert(idx, p); }
+                                for (p, &idx) in dim_idxs.iter().enumerate() {
+                                    m.insert(idx, p);
+                                }
                                 pos_maps.push(m);
                             }
                             // Iterate selection cartesian and scatter
@@ -6517,39 +6568,68 @@ pub fn interpret_with_vars(
                                 let dims = lists.len();
                                 let mut idx = vec![0usize; dims];
                                 loop {
-                                    let cur: Vec<usize> = (0..dims).map(|d| lists[d][idx[d]]).collect();
+                                    let cur: Vec<usize> =
+                                        (0..dims).map(|d| lists[d][idx[d]]).collect();
                                     f(&cur);
                                     let mut d = 0usize;
                                     while d < dims {
                                         idx[d] += 1;
-                                        if idx[d] < lists[d].len() { break; }
+                                        if idx[d] < lists[d].len() {
+                                            break;
+                                        }
                                         idx[d] = 0;
                                         d += 1;
                                     }
-                                    if d == dims { break; }
+                                    if d == dims {
+                                        break;
+                                    }
                                 }
                             }
                             cartesian2(&per_dim_indices, |multi| {
-                                if err_opt.is_some() { return; }
+                                if err_opt.is_some() {
+                                    return;
+                                }
                                 let mut lin = 0usize;
-                                for d in 0..dims { let i0 = multi[d] - 1; lin += i0 * strides[d]; }
+                                for d in 0..dims {
+                                    let i0 = multi[d] - 1;
+                                    lin += i0 * strides[d];
+                                }
                                 match &rhs_view {
                                     RhsView::Scalar(val) => t.data[lin] = *val,
-                                    RhsView::Tensor { data, shape, strides: rstrides } => {
+                                    RhsView::Tensor {
+                                        data,
+                                        shape,
+                                        strides: rstrides,
+                                    } => {
                                         let mut rlin = 0usize;
                                         for d in 0..dims {
                                             let rhs_len = shape[d];
-                                            let pos_in_dim = if rhs_len == 1 { 0 } else { *pos_maps[d].get(&multi[d]).unwrap_or(&0) };
+                                            let pos_in_dim = if rhs_len == 1 {
+                                                0
+                                            } else {
+                                                *pos_maps[d].get(&multi[d]).unwrap_or(&0)
+                                            };
                                             rlin += pos_in_dim * rstrides[d];
                                         }
-                                        if rlin >= data.len() { err_opt = Some("shape mismatch for slice assign".to_string()); return; }
+                                        if rlin >= data.len() {
+                                            err_opt =
+                                                Some("shape mismatch for slice assign".to_string());
+                                            return;
+                                        }
                                         t.data[lin] = data[rlin];
                                     }
                                 }
                             });
-                            if let Some(e) = err_opt { vm_bail!(e); }
-                            let view = runmat_accelerate_api::HostTensorView { data: &t.data, shape: &t.shape };
-                            let new_h = provider.upload(&view).map_err(|e| format!("reupload after range-end assign: {e}"))?;
+                            if let Some(e) = err_opt {
+                                vm_bail!(e);
+                            }
+                            let view = runmat_accelerate_api::HostTensorView {
+                                data: &t.data,
+                                shape: &t.shape,
+                            };
+                            let new_h = provider
+                                .upload(&view)
+                                .map_err(|e| format!("reupload after range-end assign: {e}"))?;
                             stack.push(Value::GpuTensor(new_h));
                         }
                     }
@@ -6915,7 +6995,9 @@ pub fn interpret_with_vars(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 // We will determine indices relative to the base location to avoid RHS temporaries interfering
                 // Select the correct base: scan from top for the first assignable container (Object/Tensor/GpuTensor)
-                let assignable = |v: &Value| matches!(v, Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_));
+                let assignable = |v: &Value| {
+                    matches!(v, Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_))
+                };
                 let base_idx_opt = (0..stack.len()).rev().find(|&j| assignable(&stack[j]));
                 let base_pos = if let Some(j) = base_idx_opt {
                     j
@@ -6970,7 +7052,9 @@ pub fn interpret_with_vars(
                     let mut kk = stack.len();
                     while kk > 0 && scan_limit > 0 {
                         let idx = kk - 1;
-                        if assignable(&stack[idx]) { break; }
+                        if assignable(&stack[idx]) {
+                            break;
+                        }
                         if let Ok(v) = (&stack[idx]).try_into() as Result<f64, _> {
                             numeric_above.push((idx, v as usize));
                         }
@@ -6983,7 +7067,9 @@ pub fn interpret_with_vars(
                             let (j_idx, j_val) = numeric_above[w];
                             let (i_idx, i_val) = numeric_above[w - 1];
                             let fits = match (rows_opt, cols_opt) {
-                                (Some(r), Some(c)) => i_val >= 1 && i_val <= r && j_val >= 1 && j_val <= c,
+                                (Some(r), Some(c)) => {
+                                    i_val >= 1 && i_val <= r && j_val >= 1 && j_val <= c
+                                }
                                 _ => true,
                             };
                             if fits {
@@ -7038,19 +7124,29 @@ pub fn interpret_with_vars(
                             match rhs {
                                 Value::Num(x) => Ok(*x),
                                 Value::Tensor(t2) => {
-                                    if t2.data.len() == 1 { Ok(t2.data[0]) } else { Err("RHS must be scalar".to_string()) }
+                                    if t2.data.len() == 1 {
+                                        Ok(t2.data[0])
+                                    } else {
+                                        Err("RHS must be scalar".to_string())
+                                    }
                                 }
                                 Value::GpuTensor(h2) => {
                                     let total = h2.shape.iter().copied().product::<usize>();
-                                    if total != 1 { return Err("RHS must be scalar".to_string()); }
+                                    if total != 1 {
+                                        return Err("RHS must be scalar".to_string());
+                                    }
                                     if let Some(p) = runmat_accelerate_api::provider() {
-                                        let host = p.download(h2).map_err(|e| format!("gather rhs: {e}"))?;
+                                        let host = p
+                                            .download(h2)
+                                            .map_err(|e| format!("gather rhs: {e}"))?;
                                         Ok(host.data[0])
                                     } else {
                                         Err("No acceleration provider registered".to_string())
                                     }
                                 }
-                                _ => rhs.try_into().map_err(|_| "RHS must be numeric".to_string()),
+                                _ => rhs
+                                    .try_into()
+                                    .map_err(|_| "RHS must be numeric".to_string()),
                             }
                         };
                         // 1D linear or 2D scalar assignment only for now
@@ -7106,15 +7202,25 @@ pub fn interpret_with_vars(
                             match rhs {
                                 Value::Num(x) => Ok(*x),
                                 Value::Tensor(t2) => {
-                                    if t2.data.len() == 1 { Ok(t2.data[0]) } else { Err("RHS must be scalar".to_string()) }
+                                    if t2.data.len() == 1 {
+                                        Ok(t2.data[0])
+                                    } else {
+                                        Err("RHS must be scalar".to_string())
+                                    }
                                 }
                                 Value::GpuTensor(h2) => {
                                     let total = h2.shape.iter().copied().product::<usize>();
-                                    if total != 1 { return Err("RHS must be scalar".to_string()); }
-                                    let host2 = provider.download(h2).map_err(|e| format!("gather rhs: {e}"))?;
+                                    if total != 1 {
+                                        return Err("RHS must be scalar".to_string());
+                                    }
+                                    let host2 = provider
+                                        .download(h2)
+                                        .map_err(|e| format!("gather rhs: {e}"))?;
                                     Ok(host2.data[0])
                                 }
-                                _ => rhs.try_into().map_err(|_| "RHS must be numeric".to_string()),
+                                _ => rhs
+                                    .try_into()
+                                    .map_err(|_| "RHS must be numeric".to_string()),
                             }
                         };
                         if indices.len() == 1 {
@@ -8219,7 +8325,10 @@ fn try_execute_fusion_group(
             } else {
                 log::debug!(
                     "fusion reduction: resolved shape rows={} cols={} axis={} constants={:?}",
-                    r, c, axis, plan.constants
+                    r,
+                    c,
+                    axis,
+                    plan.constants
                 );
             }
             if axis == 0 {
@@ -8230,7 +8339,10 @@ fn try_execute_fusion_group(
         };
         log::debug!(
             "fusion reduction: axis={} reduce_len={} num_slices={} constants={:?}",
-            axis, reduce_len, num_slices, plan.constants
+            axis,
+            reduce_len,
+            num_slices,
+            plan.constants
         );
         // If shape derivation failed (1x1) but inputs/consumed suggest a larger tensor, skip fusion
         let looks_wrong = reduce_len == 1 && num_slices == 1 && {

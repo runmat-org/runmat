@@ -13,12 +13,16 @@ const TRANSPOSE_SHADER_F64: &str = crate::backend::wgpu::shaders::transpose::TRA
 const TRANSPOSE_SHADER_F32: &str = crate::backend::wgpu::shaders::transpose::TRANSPOSE_SHADER_F32;
 const MATMUL_SHADER_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F64;
 const MATMUL_SHADER_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F32;
-const REDUCE_GLOBAL_SHADER_F64: &str = crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F64;
-const REDUCE_GLOBAL_SHADER_F32: &str = crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F32;
+const REDUCE_GLOBAL_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F64;
+const REDUCE_GLOBAL_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F32;
 const REDUCE_DIM_SHADER_F64: &str = crate::backend::wgpu::shaders::reduction::REDUCE_DIM_SHADER_F64;
 const REDUCE_DIM_SHADER_F32: &str = crate::backend::wgpu::shaders::reduction::REDUCE_DIM_SHADER_F32;
-const REDUCE_DIM_MINMAX_SHADER_F64: &str = crate::backend::wgpu::shaders::reduction::REDUCE_DIM_MINMAX_SHADER_F64;
-const REDUCE_DIM_MINMAX_SHADER_F32: &str = crate::backend::wgpu::shaders::reduction::REDUCE_DIM_MINMAX_SHADER_F32;
+const REDUCE_DIM_MINMAX_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::reduction::REDUCE_DIM_MINMAX_SHADER_F64;
+const REDUCE_DIM_MINMAX_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::reduction::REDUCE_DIM_MINMAX_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -212,7 +216,11 @@ fn create_pipeline(
     PipelineBundle { pipeline, layout }
 }
 
-pub fn create_pipeline_layout(device: &wgpu::Device, label: &str, bgl: &wgpu::BindGroupLayout) -> wgpu::PipelineLayout {
+pub fn create_pipeline_layout(
+    device: &wgpu::Device,
+    label: &str,
+    bgl: &wgpu::BindGroupLayout,
+) -> wgpu::PipelineLayout {
     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(label),
         bind_group_layouts: &[bgl],
@@ -226,5 +234,3 @@ pub fn create_shader_module(device: &wgpu::Device, label: &str, wgsl: &str) -> w
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(wgsl)),
     })
 }
-
-

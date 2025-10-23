@@ -1854,7 +1854,11 @@ async fn show_accel_info() -> Result<()> {
     println!("==========================");
     if let Some(p) = runmat_accelerate_api::provider() {
         let info = p.device_info_struct();
-        println!("Device: {} ({})", info.name, info.backend.unwrap_or_default());
+        println!(
+            "Device: {} ({})",
+            info.name,
+            info.backend.unwrap_or_default()
+        );
         //
         #[allow(unused_variables)]
         let (hits, misses) = p.fused_cache_counters();

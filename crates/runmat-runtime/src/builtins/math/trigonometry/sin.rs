@@ -354,8 +354,14 @@ mod tests {
         );
         let t = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
         let cpu = sin_real(Value::Tensor(t.clone())).unwrap();
-        let view = runmat_accelerate_api::HostTensorView { data: &t.data, shape: &t.shape };
-        let h = runmat_accelerate_api::provider().unwrap().upload(&view).unwrap();
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &t.data,
+            shape: &t.shape,
+        };
+        let h = runmat_accelerate_api::provider()
+            .unwrap()
+            .upload(&view)
+            .unwrap();
         let gpu = sin_gpu(h).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {

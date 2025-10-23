@@ -577,8 +577,14 @@ mod tests {
         );
         let t = Tensor::new(vec![1.0, 4.0, 2.0, 6.0], vec![2, 2]).unwrap();
         let cpu = mean_host(Value::Tensor(t.clone()), Some(1), ReductionNaN::Include).unwrap();
-        let view = runmat_accelerate_api::HostTensorView { data: &t.data, shape: &t.shape };
-        let h = runmat_accelerate_api::provider().unwrap().upload(&view).unwrap();
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &t.data,
+            shape: &t.shape,
+        };
+        let h = runmat_accelerate_api::provider()
+            .unwrap()
+            .upload(&view)
+            .unwrap();
         let gpu = mean_gpu(h, Some(1), ReductionNaN::Include).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {

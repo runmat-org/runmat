@@ -50,5 +50,3 @@ pub enum DimReduceExtrema {
     Min = 0,
     Max = 1,
 }
-
-

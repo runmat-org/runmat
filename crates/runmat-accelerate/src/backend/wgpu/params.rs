@@ -78,5 +78,3 @@ pub struct ReduceDimParams {
     pub dim: u32,
     pub op: u32,
 }
-
-

@@ -1,6 +1,10 @@
 use super::common::submit;
 
-pub fn warmup_noop_single(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::ComputePipeline) {
+pub fn warmup_noop_single(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &wgpu::ComputePipeline,
+) {
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("runmat-noop-single-pass"),
     });
@@ -14,7 +18,11 @@ pub fn warmup_noop_single(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: 
     submit(device, queue, enc);
 }
 
-pub fn warmup_noop_after_pass2(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::ComputePipeline) {
+pub fn warmup_noop_after_pass2(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &wgpu::ComputePipeline,
+) {
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("runmat-noop-after-pass2"),
     });
@@ -83,6 +91,3 @@ pub fn run_two_pass(
     }
     submit(device, queue, enc);
 }
-
-
-

@@ -1,5 +1,9 @@
 pub fn build_two_pass_shaders(scalar_ty: &str, wg: u32) -> (String, String) {
-    let zero = if scalar_ty == "f64" { "f64(0.0)" } else { "0.0" };
+    let zero = if scalar_ty == "f64" {
+        "f64(0.0)"
+    } else {
+        "0.0"
+    };
     let cast = if scalar_ty == "f64" { "f64(" } else { "" };
     let half = wg / 2;
     let pass1 = format!(
@@ -348,5 +352,3 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }
 "#;
-
-

@@ -24,5 +24,3 @@ pub fn ensure_wgpu_provider() -> Result<Option<&'static WgpuProvider>> {
         }
     }
 }
-
-

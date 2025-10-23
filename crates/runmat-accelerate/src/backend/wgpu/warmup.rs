@@ -23,8 +23,12 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
     ) -> Arc<wgpu::ComputePipeline>,
     FNoop: Fn(&wgpu::ComputePipeline),
 {
-    let Some(dir) = cache_dir else { return; };
-    let Ok(rd) = std::fs::read_dir(dir) else { return; };
+    let Some(dir) = cache_dir else {
+        return;
+    };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut compiled = 0usize;
     for entry in rd.flatten() {
         let path = entry.path();
@@ -83,11 +87,18 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
         compiled += 1;
     }
     if compiled > 0 {
-        log::info!("warmup: precompiled {} pipelines from on-disk cache", compiled);
+        log::info!(
+            "warmup: precompiled {} pipelines from on-disk cache",
+            compiled
+        );
     }
 }
 
-pub fn noop_after_create(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::ComputePipeline) {
+pub fn noop_after_create(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &wgpu::ComputePipeline,
+) {
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("warmup-noop-precompiled-enc"),
     });
@@ -101,5 +112,3 @@ pub fn noop_after_create(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &
     queue.submit(Some(enc.finish()));
     device.poll(wgpu::Maintain::Wait);
 }
-
-

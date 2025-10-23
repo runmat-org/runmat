@@ -269,7 +269,9 @@ impl ParsedRand {
                         continue;
                     }
                     "single" => {
-                        return Err("rand: single precision output is not implemented yet".to_string());
+                        return Err(
+                            "rand: single precision output is not implemented yet".to_string()
+                        );
                     }
                     other => {
                         return Err(format!("rand: unrecognised option '{other}'"));
@@ -335,9 +337,11 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
     match proto {
         Value::GpuTensor(handle) => rand_like_gpu(handle, shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => rand_complex(shape),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => {
-            rand_double(shape)
-        }
+        Value::Tensor(_)
+        | Value::Num(_)
+        | Value::Int(_)
+        | Value::Bool(_)
+        | Value::LogicalArray(_) => rand_double(shape),
         Value::CharArray(_) | Value::Cell(_) => rand_double(shape),
         other => Err(format!("rand: unsupported prototype {other:?}")),
     }
@@ -674,7 +678,10 @@ mod tests {
         );
         // Create a GPU prototype and request rand like it
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
-        let view = runmat_accelerate_api::HostTensorView { data: &tensor.data, shape: &tensor.shape };
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
         let provider = runmat_accelerate_api::provider().unwrap();
         let handle = provider.upload(&view).expect("upload");
         let result = rand_like(&Value::GpuTensor(handle), &[2, 2]).expect("rand like gpu");
@@ -682,7 +689,9 @@ mod tests {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather to host");
                 assert_eq!(gathered.shape, vec![2, 2]);
-                for v in gathered.data { assert!(v >= 0.0 && v < 1.0); }
+                for v in gathered.data {
+                    assert!(v >= 0.0 && v < 1.0);
+                }
             }
             other => panic!("expected gpu tensor, got {other:?}"),
         }

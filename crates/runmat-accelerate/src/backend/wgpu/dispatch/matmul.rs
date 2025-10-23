@@ -22,5 +22,3 @@ pub fn run(
     }
     submit(device, queue, enc);
 }
-
-

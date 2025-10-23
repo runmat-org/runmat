@@ -270,10 +270,8 @@ impl ParsedZeros {
                                 .to_string());
                         }
                         if class_override.is_some() {
-                            return Err(
-                                "zeros: cannot combine 'like' with other class specifiers"
-                                    .to_string(),
-                            );
+                            return Err("zeros: cannot combine 'like' with other class specifiers"
+                                .to_string());
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
                             return Err("zeros: expected prototype after 'like'".to_string());

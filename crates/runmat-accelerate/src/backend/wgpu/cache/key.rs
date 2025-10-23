@@ -14,5 +14,3 @@ pub fn compute_pipeline_hash_bytes(
     }
     hasher.finish()
 }
-
-

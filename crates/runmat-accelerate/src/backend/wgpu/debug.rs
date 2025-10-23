@@ -81,19 +81,32 @@ pub fn probe_kernel_with_buffers(
     let out_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(&format!("{}-out", label)),
         contents: bytemuck::cast_slice(&[0.0f32; 4]),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
     });
     let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(&format!("{}-bg", label)),
         layout: &bgl,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: in_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: out_buf.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: in_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: out_buf.as_entire_binding(),
+            },
         ],
     });
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(&format!("{}-enc", label)) });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(&format!("{}-enc", label)),
+    });
     {
-        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(&format!("{}-pass", label)), timestamp_writes: None });
+        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(&format!("{}-pass", label)),
+            timestamp_writes: None,
+        });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bg, &[]);
         pass.dispatch_workgroups(1.max(wg / wg), 1, 1);
@@ -106,5 +119,3 @@ pub fn probe_kernel_with_buffers(
         t0.elapsed().as_secs_f64() * 1000.0
     );
 }
-
-

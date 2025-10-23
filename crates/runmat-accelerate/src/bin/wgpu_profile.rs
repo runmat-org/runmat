@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context, Result};
 use log::info;
 #[cfg(feature = "wgpu")]
-use runmat_accelerate::provider_cache_stats;
-#[cfg(feature = "wgpu")]
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
+#[cfg(feature = "wgpu")]
+use runmat_accelerate::provider_cache_stats;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView};
 use serde::Serialize;
 #[cfg(feature = "wgpu")]
@@ -234,7 +234,8 @@ fn main() -> Result<()> {
             "starting reduction sweep (quick={}, max_secs={:?})",
             quick, sweep_max_secs
         );
-        let sweep_reports = run_reduction_sweep(provider, quick, sweep_max_secs, sweep_first, wg_override)?;
+        let sweep_reports =
+            run_reduction_sweep(provider, quick, sweep_max_secs, sweep_first, wg_override)?;
         info!("reduction sweep produced {} reports", sweep_reports.len());
         reports.extend(sweep_reports);
 
@@ -252,15 +253,25 @@ fn main() -> Result<()> {
 
     if do_fused {
         info!("starting fused elementwise→reduction sweep");
-        let fused_reports = run_fused_elementwise_reduction_sweep(provider, quick, sweep_max_secs, sweep_first, wg_override)?;
+        let fused_reports = run_fused_elementwise_reduction_sweep(
+            provider,
+            quick,
+            sweep_max_secs,
+            sweep_first,
+            wg_override,
+        )?;
         info!("fused sweep produced {} reports", fused_reports.len());
         reports.extend(fused_reports);
     }
 
     if do_fused_wgsl {
         info!("starting fused WGSL (single-kernel sin→sum) sweep");
-        let fused_wgsl_reports = run_fused_wgsl_sweep(provider, quick, sweep_max_secs, sweep_first, wg_override)?;
-        info!("fused WGSL sweep produced {} reports", fused_wgsl_reports.len());
+        let fused_wgsl_reports =
+            run_fused_wgsl_sweep(provider, quick, sweep_max_secs, sweep_first, wg_override)?;
+        info!(
+            "fused WGSL sweep produced {} reports",
+            fused_wgsl_reports.len()
+        );
         reports.extend(fused_wgsl_reports);
     }
 
@@ -313,8 +324,13 @@ fn run_fused_elementwise_reduction_sweep(
                 }
                 let iters = if quick { 3 } else { 6 };
                 let wg_use = wg_override.unwrap_or(wg);
-                info!("fused-sweep enqueue rows={} cols={} wg={} iters={}", rows, cols, wg_use, iters);
-                out.push(run_fused_elementwise_reduction_case(provider, rows, cols, wg_use, iters)?);
+                info!(
+                    "fused-sweep enqueue rows={} cols={} wg={} iters={}",
+                    rows, cols, wg_use, iters
+                );
+                out.push(run_fused_elementwise_reduction_case(
+                    provider, rows, cols, wg_use, iters,
+                )?);
                 if sweep_first {
                     break 'outer;
                 }
@@ -348,7 +364,11 @@ fn run_fused_elementwise_reduction_case(
 
         // CPU fused reference: sin(A) then sum along dim=1
         let cpu_start = Instant::now();
-        let cpu_sin = Matrix { rows, cols, data: base.data.iter().map(|v| v.sin()).collect() };
+        let cpu_sin = Matrix {
+            rows,
+            cols,
+            data: base.data.iter().map(|v| v.sin()).collect(),
+        };
         let _cpu_ref = cpu_reduce_sum_dim(&cpu_sin, 1);
         let cpu_time = cpu_start.elapsed();
 
@@ -536,7 +556,14 @@ fn run_fused_wgsl_case(
         );
 
         let compute_start = Instant::now();
-        let _ = provider.fused_reduction(&shader, &[handle_matrix.clone()], &[cols], rows, cols, wg_size)?;
+        let _ = provider.fused_reduction(
+            &shader,
+            &[handle_matrix.clone()],
+            &[cols],
+            rows,
+            cols,
+            wg_size,
+        )?;
         let compute_time = compute_start.elapsed();
         let (_out_matrix, download_time) = download_matrix(provider, &handle_matrix)?;
         provider.free(&handle_matrix)?;
@@ -565,7 +592,10 @@ fn run_fused_wgsl_case(
     Ok(CaseReport {
         name: format!("fused_wgsl_sin_sum_{}x{}_wg{}", rows, cols, wg_size),
         category: "fused_wgsl".to_string(),
-        detail: format!("single-kernel WGSL sin→sum rows {}x{} wg {}", rows, cols, wg_size),
+        detail: format!(
+            "single-kernel WGSL sin→sum rows {}x{} wg {}",
+            rows, cols, wg_size
+        ),
         input_shapes: vec![(rows, cols)],
         iterations: samples,
         upload_ms: DurationSummary::from_stats(&upload_stats, samples),
@@ -778,7 +808,10 @@ fn run_reduction_sweep_case(
             iter, warmup, rows, cols, wg_size
         );
         let (handle_matrix, upload_time) = upload_matrix(provider, &matrix)?;
-        info!("    upload done: {:.3} ms", upload_time.as_secs_f64() * 1000.0);
+        info!(
+            "    upload done: {:.3} ms",
+            upload_time.as_secs_f64() * 1000.0
+        );
 
         // Dispatch via fused_reduction; we directly use provider for fair timing.
         // Minimal single-pass WGSL to test pipeline creation on Metal: no workgroup memory/barriers.
@@ -790,9 +823,19 @@ fn run_reduction_sweep_case(
         );
         // GPU compute timing
         let compute_start = Instant::now();
-        let _ = provider.fused_reduction(&shader, &[handle_matrix.clone()], &[cols], rows, cols, wg_size)?;
+        let _ = provider.fused_reduction(
+            &shader,
+            &[handle_matrix.clone()],
+            &[cols],
+            rows,
+            cols,
+            wg_size,
+        )?;
         let compute_time = compute_start.elapsed();
-        info!("    compute done: {:.3} ms", compute_time.as_secs_f64() * 1000.0);
+        info!(
+            "    compute done: {:.3} ms",
+            compute_time.as_secs_f64() * 1000.0
+        );
         let (_, download_time) = download_matrix(provider, &handle_matrix)?; // just to measure path; not used
         provider.free(&handle_matrix)?;
         info!(
@@ -804,7 +847,10 @@ fn run_reduction_sweep_case(
         let cpu_start = Instant::now();
         let _cpu_ref = cpu_reduce_sum_dim(&matrix, 1);
         let cpu_time = cpu_start.elapsed();
-        info!("    cpu sum(dim=1) done: {:.3} ms", cpu_time.as_secs_f64() * 1000.0);
+        info!(
+            "    cpu sum(dim=1) done: {:.3} ms",
+            cpu_time.as_secs_f64() * 1000.0
+        );
 
         if !warmup {
             upload_stats.record(upload_time);
@@ -821,7 +867,9 @@ fn run_reduction_sweep_case(
     let samples = iterations.saturating_sub(1).max(1);
     let total_stats = TimeStats {
         total: upload_stats.total + compute_stats.total + download_stats.total,
-        min: upload_stats.min.min(compute_stats.min.min(download_stats.min)),
+        min: upload_stats
+            .min
+            .min(compute_stats.min.min(download_stats.min)),
         max: upload_stats.max + compute_stats.max + download_stats.max,
     };
 
@@ -877,8 +925,13 @@ fn run_reduction_sweep(
                 // 3 iterations in quick mode (1 warmup + 2 samples), 6 in full
                 let iters = if quick { 3 } else { 6 };
                 let wg_use = wg_override.unwrap_or(wg);
-                info!("reduce-sweep enqueue rows={} cols={} wg={} iters={}", rows, cols, wg_use, iters);
-                out.push(run_reduction_sweep_case(provider, rows, cols, wg_use, iters)?);
+                info!(
+                    "reduce-sweep enqueue rows={} cols={} wg={} iters={}",
+                    rows, cols, wg_use, iters
+                );
+                out.push(run_reduction_sweep_case(
+                    provider, rows, cols, wg_use, iters,
+                )?);
                 if sweep_first {
                     break 'outer;
                 }

@@ -7,11 +7,11 @@ pub mod gpu_helpers;
 pub mod spec;
 pub mod tensor;
 
+pub use crate::register_builtin_doc_text;
 pub use crate::register_builtin_fusion_spec;
 pub use crate::register_builtin_gpu_spec;
-pub use spec::DocTextInventory;
 pub use spec::builtin_doc_texts;
-pub use crate::register_builtin_doc_text;
+pub use spec::DocTextInventory;
 
 #[cfg(test)]
 pub mod test_support;
