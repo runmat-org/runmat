@@ -223,7 +223,7 @@ impl AppContext {
             }
         }
 
-        // Final polish pass: ask Codex to re-check against BUILTIN_PACKAGING.md and fix any gaps, then test again
+        // Polish pass: ask Codex to re-check against BUILTIN_PACKAGING.md and fix any gaps, then test again
         if use_codex && codex_available && outcome.success {
             let polish = "Re-check the implementation against the Builtin Packaging template. Paste the entire template and ensure all required sections (DOC_MD, GPU/Fusion specs, tests, error semantics) are present and correct. Apply changes via apply_patch when necessary. Then stop.";
             let tail = Some("Template is included above in references: crates/runmat-runtime/BUILTIN_PACKAGING.md");
@@ -233,12 +233,33 @@ impl AppContext {
                 polish,
                 tail,
             );
-            // Re-run tests one last time
+            // Re-run tests
             match workspace_tests::run_builtin_tests(&ctx, &self.config) {
                 Ok(new_outcome) => {
                     outcome = new_outcome;
                 }
                 Err(err) => println!("[runmatfunc] test execution error after polish: {err}"),
+            }
+        }
+
+        // WGPU provider integration pass: ensure provider hooks and wiring are complete and tested
+        if use_codex && codex_available && outcome.success {
+            let wgpu_prompt = "Ensure the WGPU provider backend is fully implemented and wired for this builtin: (1) implement or extend provider hooks in crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs matching GPU_SPEC provider_hooks; (2) add dispatch and shader wiring as needed under crates/runmat-accelerate/src/backend/wgpu/{dispatch,shaders,params,types}; (3) add #[cfg(feature=\"wgpu\")] tests in the builtin module verifying GPU parity (use provider registration helper); (4) if you add WGPU-only tests, set requires_feature: 'wgpu' in the DOC_MD frontmatter so runmatfunc can run with the correct Cargo features; (5) keep CPU semantics identical; (6) re-run tests until all pass. Apply changes via apply_patch.";
+            let wgpu_tail = Some(
+                "References: crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs, .../dispatch, .../shaders, and existing GPU tests in builtins (e.g., math/reduction/{sum,mean}.rs and math/trigonometry/sin.rs). Match GPU_SPEC.provider_hooks for this builtin and ensure provider methods exist and are invoked.",
+            );
+            let _ = crate::codex::session::run_authoring_with_extra(
+                &ctx,
+                resolved_model.clone(),
+                wgpu_prompt,
+                wgpu_tail,
+            );
+            // Re-run tests to validate provider wiring (DOC_MD may set requires_feature: wgpu)
+            match workspace_tests::run_builtin_tests(&ctx, &self.config) {
+                Ok(new_outcome) => {
+                    outcome = new_outcome;
+                }
+                Err(err) => println!("[runmatfunc] test execution error after WGPU pass: {err}"),
             }
         }
 

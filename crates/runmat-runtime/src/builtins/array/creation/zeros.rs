@@ -19,7 +19,7 @@ pub const DOC_MD: &str = r#"---
 title: "zeros"
 category: "array/creation"
 keywords: ["zeros", "array", "logical", "gpu", "like"]
-summary: "Create arrays filled with zeros with MATLAB-compatible semantics."
+summary: "Create arrays filled with zeros within the MATLAB language."
 references: []
 gpu_support:
   elementwise: false
@@ -39,7 +39,7 @@ tested:
 ---
 
 # What does the `zeros` function do in MATLAB / RunMat?
-`zeros` creates arrays filled with zeros. It mirrors MATLAB semantics across the scalar,
+`zeros` creates arrays filled with zeros. RunMat mirrors MATLAB semantics across the scalar,
 vector, matrix, and N-D forms, including `'like'` and `'logical'` options.
 
 ## How does the `zeros` function behave in MATLAB / RunMat?

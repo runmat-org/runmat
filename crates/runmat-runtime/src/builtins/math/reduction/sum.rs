@@ -1,8 +1,5 @@
-//! Elementwise and reduction sum builtin for RunMat.
-//!
-//! This implementation mirrors MATLAB semantics, including optional `'omitnan'` handling,
-//! tiered GPU execution through RunMat Accelerate, and fusion metadata for the native planner.
-
+//! MATLAB-compatible `sum` builtin with GPU-aware semantics for RunMat.
+//! 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;

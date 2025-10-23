@@ -1,8 +1,4 @@
-//! Elementwise sine builtin for RunMat.
-//!
-//! Provides MATLAB-compatible behaviour for scalars, tensors, complex numbers,
-//! logical arrays, and GPU-resident tensors, including rich documentation and
-//! metadata for the Accelerate planner.
+//! MATLAB-compatible `sin` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};

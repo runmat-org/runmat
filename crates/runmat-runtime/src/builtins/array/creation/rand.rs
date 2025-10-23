@@ -1,10 +1,4 @@
-//! MATLAB-compatible `rand` builtin with GPU-aware semantics.
-//!
-//! Implements uniform random number generation over (0, 1) with support for
-//! MATLAB's scalar, vector, matrix, N-D, and `'like'` invocation forms. When a
-//! GPU prototype is supplied, the builtin dispatches to acceleration provider
-//! hooks and transparently falls back to host sampling if the provider lacks a
-//! dedicated implementation.
+//! MATLAB-compatible `rand` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
@@ -25,7 +19,7 @@ pub const DOC_MD: &str = r#"---
 title: "rand"
 category: "array/creation"
 keywords: ["rand", "random", "uniform", "gpu", "like"]
-summary: "Uniform random numbers on (0, 1) with MATLAB-compatible semantics."
+summary: "Uniform random numbers on (0, 1) within the MATLAB language."
 references: []
 gpu_support:
   elementwise: false

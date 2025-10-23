@@ -1,8 +1,4 @@
-//! Column-major mean reduction builtin for RunMat.
-//!
-//! Provides MATLAB-compatible behaviour, including optional `'omitnan'`
-//! handling, GPU-aware execution via RunMat Accelerate, and fusion/GPU
-//! metadata for the native planner.
+//! MATLAB-compatible `mean` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};

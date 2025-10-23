@@ -1,7 +1,4 @@
-//! MATLAB-compatible `ones` builtin with GPU-aware semantics.
-//!
-//! Mirrors MATLAB's `ones` semantics across scalar, vector, matrix, and N-D
-//! invocations, including `'like'` prototypes, logical outputs, and GPU residency.
+//! MATLAB-compatible `ones` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
@@ -22,7 +19,7 @@ pub const DOC_MD: &str = r#"---
 title: "ones"
 category: "array/creation"
 keywords: ["ones", "array", "logical", "gpu", "like"]
-summary: "Create arrays filled with ones with MATLAB-compatible semantics."
+summary: "Create arrays filled with ones within the MATLAB language."
 references: []
 gpu_support:
   elementwise: false
@@ -42,7 +39,7 @@ tested:
 ---
 
 # What does the `ones` function do in MATLAB / RunMat?
-`ones` creates arrays filled with ones. It mirrors MATLAB semantics across the scalar,
+`ones` creates arrays filled with ones. RunMat mirrors MATLAB semantics across the scalar,
 vector, matrix, and N-D forms, including `'like'` and `'logical'` options.
 
 ## How does the `ones` function behave in MATLAB / RunMat?
