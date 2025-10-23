@@ -18,3 +18,5 @@ core.*
 # Generated website content
 website/content/builtins.json
 website/content/builtins-mdx/
+
+artifacts/
