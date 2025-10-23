@@ -105,3 +105,8 @@ crates/runmat-runtime/
 ## Legacy Module Cleanup
 - Legacy modules are located in `crates/runmat-runtime/src/builtins/*.rs` (e.g. not in a subdirectory).
 - Once you are finished authoring a module, search the legacy modules for any legacy implementations of the function and remove them, and clean up any references to them in the codebase.
+
+## Note for Tensor Residency
+- For creation builtins that may be the start of a fused expression, ensure both the CPU and GPU paths are implemented and tested, allowing the fusion planner to allocate tensors on the GPU if it is profitable to do so from the start. This is particularly important for builtins that create tensors that are used in subsequent operations, such as `eye`, `zeros`, `ones`, `rand`, `randn`, etc.
+- If there are hooks and/or changes that need to be made to the Fusion planner to support this, make them.
+- Make sure both paths are tested to ensure they produce the same result.
