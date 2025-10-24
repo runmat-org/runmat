@@ -6,18 +6,16 @@ pub fn run(
     pipeline: &wgpu::ComputePipeline,
     bind_group: &wgpu::BindGroup,
     workgroups_x: u32,
-    encoder_label: &str,
-    pass_label: &str,
+    label: &str,
 ) {
     if workgroups_x == 0 {
         return;
     }
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some(encoder_label),
-    });
+    let mut enc =
+        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some(pass_label),
+            label: Some(label),
             timestamp_writes: None,
         });
         pass.set_pipeline(pipeline);

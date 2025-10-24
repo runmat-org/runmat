@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +86,51 @@ pub trait AccelProvider: Send + Sync {
         self.zeros(&prototype.shape)
     }
 
+    /// Allocate a tensor filled with a constant value on the device.
+    fn fill(&self, shape: &[usize], value: f64) -> anyhow::Result<GpuTensorHandle> {
+        if value == 0.0 {
+            return self.zeros(shape);
+        }
+        if let Ok(base) = self.zeros(shape) {
+            match self.scalar_add(&base, value) {
+                Ok(out) => {
+                    let _ = self.free(&base);
+                    return Ok(out);
+                }
+                Err(_) => {
+                    let _ = self.free(&base);
+                }
+            }
+        }
+        let len: usize = shape.iter().copied().product();
+        let data = vec![value; len];
+        let view = HostTensorView { data: &data, shape };
+        self.upload(&view)
+    }
+
+    /// Allocate a tensor filled with a constant value, matching a prototype's residency.
+    fn fill_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        value: f64,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        if value == 0.0 {
+            return self.zeros_like(prototype);
+        }
+        if let Ok(base) = self.zeros_like(prototype) {
+            match self.scalar_add(&base, value) {
+                Ok(out) => {
+                    let _ = self.free(&base);
+                    return Ok(out);
+                }
+                Err(_) => {
+                    let _ = self.free(&base);
+                }
+            }
+        }
+        self.fill(&prototype.shape, value)
+    }
+
     /// Allocate a one-initialised tensor matching the prototype tensor.
     fn ones_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         self.ones(&prototype.shape)
@@ -100,6 +146,26 @@ pub trait AccelProvider: Send + Sync {
         self.eye(&prototype.shape)
     }
 
+    /// Construct a diagonal matrix from a vector-like tensor. `offset` matches MATLAB semantics.
+    fn diag_from_vector(
+        &self,
+        _vector: &GpuTensorHandle,
+        _offset: isize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "diag_from_vector not supported by provider"
+        ))
+    }
+
+    /// Extract a diagonal from a matrix-like tensor. The result is always a column vector.
+    fn diag_extract(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _offset: isize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("diag_extract not supported by provider"))
+    }
+
     /// Allocate a tensor filled with random values drawn from U(0, 1).
     fn random_uniform(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("random_uniform not supported by provider"))
@@ -110,7 +176,57 @@ pub trait AccelProvider: Send + Sync {
         self.random_uniform(&prototype.shape)
     }
 
+    /// Allocate a tensor filled with standard normal (mean 0, stddev 1) random values.
+    fn random_normal(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("random_normal not supported by provider"))
+    }
+
+    /// Allocate a tensor of standard normal values matching a prototype's shape.
+    fn random_normal_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        self.random_normal(&prototype.shape)
+    }
+
+    /// Allocate a tensor filled with random integers over an inclusive range.
+    fn random_integer_range(
+        &self,
+        _lower: i64,
+        _upper: i64,
+        _shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "random_integer_range not supported by provider"
+        ))
+    }
+
+    /// Allocate a random integer tensor matching the prototype shape.
+    fn random_integer_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        lower: i64,
+        upper: i64,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.random_integer_range(lower, upper, &prototype.shape)
+    }
+
+    /// Allocate a random permutation of 1..=n, returning the first k elements.
+    fn random_permutation(&self, _n: usize, _k: usize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow!("random_permutation not supported by provider"))
+    }
+
+    /// Allocate a random permutation matching the prototype residency.
+    fn random_permutation_like(
+        &self,
+        _prototype: &GpuTensorHandle,
+        n: usize,
+        k: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.random_permutation(n, k)
+    }
+
     // Optional operator hooks (default to unsupported)
+    fn linspace(&self, _start: f64, _stop: f64, _count: usize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("linspace not supported by provider"))
+    }
     fn elem_add(
         &self,
         _a: &GpuTensorHandle,

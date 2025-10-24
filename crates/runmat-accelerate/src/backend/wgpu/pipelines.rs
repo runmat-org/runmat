@@ -25,6 +25,28 @@ const REDUCE_DIM_MINMAX_SHADER_F32: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_DIM_MINMAX_SHADER_F32;
 const EYE_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::EYE_SHADER_F64;
 const EYE_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::EYE_SHADER_F32;
+const FILL_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::FILL_SHADER_F64;
+const FILL_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::FILL_SHADER_F32;
+const LINSPACE_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::LINSPACE_SHADER_F64;
+const LINSPACE_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::LINSPACE_SHADER_F32;
+const RANDOM_INT_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F64;
+const RANDOM_INT_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F32;
+const RANDOM_UNIFORM_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_UNIFORM_SHADER_F64;
+const RANDOM_UNIFORM_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_UNIFORM_SHADER_F32;
+const RANDOM_NORMAL_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_NORMAL_SHADER_F64;
+const RANDOM_NORMAL_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_NORMAL_SHADER_F32;
+const RANDPERM_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDPERM_SHADER_F64;
+const RANDPERM_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDPERM_SHADER_F32;
+const DIAG_FROM_VECTOR_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::diag::DIAG_FROM_VECTOR_SHADER_F64;
+const DIAG_FROM_VECTOR_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::diag::DIAG_FROM_VECTOR_SHADER_F32;
+const DIAG_EXTRACT_SHADER_F64: &str = crate::backend::wgpu::shaders::diag::DIAG_EXTRACT_SHADER_F64;
+const DIAG_EXTRACT_SHADER_F32: &str = crate::backend::wgpu::shaders::diag::DIAG_EXTRACT_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -41,6 +63,14 @@ pub struct WgpuPipelines {
     pub reduce_dim_sum_mean: PipelineBundle,
     pub reduce_dim_minmax: PipelineBundle,
     pub eye: PipelineBundle,
+    pub fill: PipelineBundle,
+    pub linspace: PipelineBundle,
+    pub random_int: PipelineBundle,
+    pub random_uniform: PipelineBundle,
+    pub random_normal: PipelineBundle,
+    pub randperm: PipelineBundle,
+    pub diag_from_vector: PipelineBundle,
+    pub diag_extract: PipelineBundle,
 }
 
 impl WgpuPipelines {
@@ -188,6 +218,110 @@ impl WgpuPipelines {
             },
         );
 
+        let fill = create_pipeline(
+            device,
+            "runmat-fill-layout",
+            "runmat-fill-shader",
+            "runmat-fill-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => FILL_SHADER_F64,
+                NumericPrecision::F32 => FILL_SHADER_F32,
+            },
+        );
+
+        let linspace = create_pipeline(
+            device,
+            "runmat-linspace-layout",
+            "runmat-linspace-shader",
+            "runmat-linspace-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => LINSPACE_SHADER_F64,
+                NumericPrecision::F32 => LINSPACE_SHADER_F32,
+            },
+        );
+
+        let random_int = create_pipeline(
+            device,
+            "runmat-random-int-layout",
+            "runmat-random-int-shader",
+            "runmat-random-int-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDOM_INT_SHADER_F64,
+                NumericPrecision::F32 => RANDOM_INT_SHADER_F32,
+            },
+        );
+
+        let random_uniform = create_pipeline(
+            device,
+            "runmat-random-uniform-layout",
+            "runmat-random-uniform-shader",
+            "runmat-random-uniform-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDOM_UNIFORM_SHADER_F64,
+                NumericPrecision::F32 => RANDOM_UNIFORM_SHADER_F32,
+            },
+        );
+
+        let random_normal = create_pipeline(
+            device,
+            "runmat-random-normal-layout",
+            "runmat-random-normal-shader",
+            "runmat-random-normal-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDOM_NORMAL_SHADER_F64,
+                NumericPrecision::F32 => RANDOM_NORMAL_SHADER_F32,
+            },
+        );
+
+        let randperm = create_pipeline(
+            device,
+            "runmat-randperm-layout",
+            "runmat-randperm-shader",
+            "runmat-randperm-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDPERM_SHADER_F64,
+                NumericPrecision::F32 => RANDPERM_SHADER_F32,
+            },
+        );
+
+        let diag_from_vector = create_pipeline(
+            device,
+            "runmat-diag-vec-layout",
+            "runmat-diag-vec-shader",
+            "runmat-diag-vec-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => DIAG_FROM_VECTOR_SHADER_F64,
+                NumericPrecision::F32 => DIAG_FROM_VECTOR_SHADER_F32,
+            },
+        );
+
+        let diag_extract = create_pipeline(
+            device,
+            "runmat-diag-extract-layout",
+            "runmat-diag-extract-shader",
+            "runmat-diag-extract-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => DIAG_EXTRACT_SHADER_F64,
+                NumericPrecision::F32 => DIAG_EXTRACT_SHADER_F32,
+            },
+        );
+
         Self {
             binary,
             unary,
@@ -198,6 +332,14 @@ impl WgpuPipelines {
             reduce_dim_sum_mean,
             reduce_dim_minmax,
             eye,
+            linspace,
+            random_int,
+            random_uniform,
+            random_normal,
+            randperm,
+            diag_from_vector,
+            diag_extract,
+            fill,
         }
     }
 }

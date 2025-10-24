@@ -91,3 +91,106 @@ pub struct EyeParams {
     pub _pad0: u32,
     pub _pad1: u32,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FillParamsF64 {
+    pub value: f64,
+    pub len: u32,
+    pub _pad: [u32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FillParamsF32 {
+    pub value: f32,
+    pub len: u32,
+    pub _pad: [u32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct DiagFromVectorParams {
+    pub len: u32,
+    pub size: u32,
+    pub offset: i32,
+    pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct DiagExtractParams {
+    pub rows: u32,
+    pub cols: u32,
+    pub offset: i32,
+    pub diag_len: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct LinspaceParamsF64 {
+    pub start: f64,
+    pub step: f64,
+    pub stop: f64,
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+    pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct LinspaceParamsF32 {
+    pub start: f32,
+    pub step: f32,
+    pub stop: f32,
+    pub _pad0: f32,
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+    pub _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandomIntParamsF64 {
+    pub lower: f64,
+    pub upper: f64,
+    pub span: f64,
+    pub span_minus_one: f64,
+    pub offset: u32,
+    pub chunk: u32,
+    pub seed: u32,
+    pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandomIntParamsF32 {
+    pub lower: f32,
+    pub upper: f32,
+    pub span: f32,
+    pub span_minus_one: f32,
+    pub offset: u32,
+    pub chunk: u32,
+    pub seed: u32,
+    pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandomScalarParams {
+    pub offset: u32,
+    pub chunk: u32,
+    pub seed: u32,
+    pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandPermParams {
+    pub n: u32,
+    pub k: u32,
+    pub seed: u32,
+    pub _pad: u32,
+}

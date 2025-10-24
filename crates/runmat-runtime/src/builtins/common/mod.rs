@@ -4,6 +4,8 @@
 //! can depend on without reaching back into the legacy runtime modules.
 
 pub mod gpu_helpers;
+pub mod random;
+pub mod random_args;
 pub mod spec;
 pub mod tensor;
 

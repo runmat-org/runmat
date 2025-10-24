@@ -1,4 +1,5 @@
 pub mod creation;
+pub mod diag;
 pub mod elementwise;
 pub mod matmul;
 pub mod reduction;

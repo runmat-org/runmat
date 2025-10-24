@@ -178,7 +178,7 @@ Providers with dedicated identity allocation avoid host involvement entirely. Pr
 hook fall back to a single host upload, which is still efficient for typical sizes.
 
 ## See Also
-[zeros](./zeros), [ones](./ones), [diag](../shape/diag), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[zeros](./zeros), [ones](./ones), [diag](./diag), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 
 ## Source & Feedback
 - The full source code for the implementation of the `eye` function is available at: [`crates/runmat-runtime/src/builtins/array/creation/eye.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/eye.rs)
@@ -699,11 +699,7 @@ mod tests {
 
     #[test]
     fn eye_like_bool_produces_logical() {
-        let args = vec![
-            Value::Num(3.0),
-            Value::from("like"),
-            Value::Bool(true),
-        ];
+        let args = vec![Value::Num(3.0), Value::from("like"), Value::Bool(true)];
         let result = eye_builtin(args).expect("eye");
         match result {
             Value::LogicalArray(logical) => {

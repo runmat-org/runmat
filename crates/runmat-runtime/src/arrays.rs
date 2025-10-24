@@ -6,42 +6,6 @@
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-/// Generate linearly spaced vector
-/// linspace(x1, x2, n) generates n points between x1 and x2 (inclusive)
-#[runtime_builtin(
-    name = "linspace",
-    category = "array/creation",
-    summary = "Linearly spaced vector.",
-    examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
-    keywords = "linspace,range,vector"
-)]
-fn linspace_builtin(x1: f64, x2: f64, n: i32) -> Result<Tensor, String> {
-    if n < 1 {
-        return Err("Number of points must be positive".to_string());
-    }
-
-    if n == 1 {
-        return Tensor::new_2d(vec![x2], 1, 1);
-    }
-
-    let n_usize = n as usize;
-    let mut data = Vec::with_capacity(n_usize);
-
-    if n == 2 {
-        data.push(x1);
-        data.push(x2);
-    } else {
-        let step = (x2 - x1) / ((n - 1) as f64);
-        for i in 0..n_usize {
-            data.push(x1 + (i as f64) * step);
-        }
-        // Ensure the last point is exactly x2 to avoid floating point errors
-        data[n_usize - 1] = x2;
-    }
-
-    Tensor::new_2d(data, 1, n_usize)
-}
-
 /// Generate logarithmically spaced vector
 /// logspace(a, b, n) generates n points between 10^a and 10^b
 #[runtime_builtin(
@@ -69,65 +33,6 @@ fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Tensor, String> {
     }
 
     Tensor::new_2d(data, 1, n_usize)
-}
-
-/// Generate matrix filled with specific value
-/// fill(value, m, n) creates an m×n matrix filled with value
-#[runtime_builtin(name = "fill")]
-fn fill_builtin(value: f64, m: i32, n: i32) -> Result<Tensor, String> {
-    if m < 0 || n < 0 {
-        return Err("Matrix dimensions must be non-negative".to_string());
-    }
-
-    let rows = m as usize;
-    let cols = n as usize;
-    let data = vec![value; rows * cols];
-
-    Tensor::new_2d(data, rows, cols)
-}
-
-/// Generate random matrix with normal distribution (mean=0, std=1)
-/// randn(m, n) creates an m×n matrix of normally distributed random numbers
-#[runtime_builtin(name = "randn")]
-fn randn_builtin(m: i32, n: i32) -> Result<Tensor, String> {
-    if m < 0 || n < 0 {
-        return Err("Matrix dimensions must be non-negative".to_string());
-    }
-
-    let rows = m as usize;
-    let cols = n as usize;
-    let total_elements = rows * cols;
-
-    // Simple approximation of normal distribution using central limit theorem
-    // Generate 12 uniform random numbers and sum them, then subtract 6
-    // This approximates a normal distribution with mean=0, std=1
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-
-    static SEED: OnceLock<Mutex<u64>> = OnceLock::new();
-    let seed_mutex = SEED.get_or_init(|| Mutex::new(1));
-
-    let mut data = Vec::with_capacity(total_elements);
-
-    for _ in 0..total_elements {
-        let mut seed_guard = seed_mutex
-            .lock()
-            .map_err(|_| "Failed to acquire RNG lock")?;
-        let mut sum = 0.0;
-
-        // Generate 12 uniform random numbers using linear congruential generator
-        for _ in 0..12 {
-            *seed_guard = seed_guard.wrapping_mul(1103515245).wrapping_add(12345);
-            let uniform = ((*seed_guard >> 16) & 0x7fff) as f64 / 32768.0;
-            sum += uniform;
-        }
-
-        // Apply central limit theorem transformation: N(0,1) ≈ sum(12 uniform) - 6
-        let normal_val = sum - 6.0;
-        data.push(normal_val);
-    }
-
-    Tensor::new_2d(data, rows, cols)
 }
 
 /// Get the length of the largest dimension of a matrix
@@ -236,40 +141,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_linspace() {
-        let result = linspace_builtin(0.0, 10.0, 11).unwrap();
-        assert_eq!(result.cols, 11);
-        assert_eq!(result.rows, 1);
-        assert!((result.data[0] - 0.0).abs() < f64::EPSILON);
-        assert!((result.data[10] - 10.0).abs() < f64::EPSILON);
-        assert!((result.data[5] - 5.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_linspace_single_point() {
-        let result = linspace_builtin(5.0, 10.0, 1).unwrap();
-        assert_eq!(result.cols, 1);
-        assert_eq!(result.data[0], 10.0);
-    }
-
-    #[test]
     fn test_logspace() {
         let result = logspace_builtin(1.0, 3.0, 3).unwrap();
         assert_eq!(result.cols, 3);
         assert!((result.data[0] - 10.0).abs() < f64::EPSILON);
         assert!((result.data[1] - 100.0).abs() < f64::EPSILON);
         assert!((result.data[2] - 1000.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_fill() {
-        let result = fill_builtin(std::f64::consts::PI, 2, 2).unwrap();
-        assert_eq!(result.rows, 2);
-        assert_eq!(result.cols, 2);
-        assert!(result
-            .data
-            .iter()
-            .all(|&x| (x - std::f64::consts::PI).abs() < f64::EPSILON));
     }
 
     #[test]
@@ -288,7 +165,6 @@ mod tests {
 
     #[test]
     fn test_error_cases() {
-        assert!(linspace_builtin(0.0, 1.0, -1).is_err());
         assert!(range_builtin(1.0, 0.0, 5.0).is_err());
     }
 }

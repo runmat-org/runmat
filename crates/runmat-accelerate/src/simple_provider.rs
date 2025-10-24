@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView, ProviderPrecision,
@@ -27,6 +27,17 @@ fn next_uniform(state: &mut u64) -> f64 {
     *state = state.wrapping_mul(MULTIPLIER).wrapping_add(INCREMENT);
     let bits = *state >> SHIFT;
     (bits as f64) * SCALE
+}
+
+fn next_normal_pair(state: &mut u64) -> (f64, f64) {
+    let mut u1 = next_uniform(state);
+    if u1 <= 0.0 {
+        u1 = f64::MIN_POSITIVE;
+    }
+    let u2 = next_uniform(state);
+    let radius = (-2.0 * u1.ln()).sqrt();
+    let angle = 2.0 * std::f64::consts::PI * u2;
+    (radius * angle.cos(), radius * angle.sin())
 }
 
 pub struct InProcessProvider {
@@ -112,6 +123,83 @@ fn identity_data(shape: &[usize]) -> Vec<f64> {
     data
 }
 
+fn offset_abs(offset: isize) -> usize {
+    if offset >= 0 {
+        offset as usize
+    } else {
+        let magnitude = -(offset as i128);
+        magnitude as usize
+    }
+}
+
+fn diag_matrix_size(len: usize, offset: isize) -> Result<(usize, usize)> {
+    let shift = offset_abs(offset);
+    let size = len
+        .checked_add(shift)
+        .ok_or_else(|| anyhow!("diag: result dimension exceeds limits"))?;
+    let total = size
+        .checked_mul(size)
+        .ok_or_else(|| anyhow!("diag: result size exceeds limits"))?;
+    Ok((size, total))
+}
+
+fn diagonal_length(rows: usize, cols: usize, offset: isize) -> usize {
+    if rows == 0 || cols == 0 {
+        return 0;
+    }
+    if offset >= 0 {
+        let shift = offset as usize;
+        if shift >= cols {
+            0
+        } else {
+            rows.min(cols - shift)
+        }
+    } else {
+        let shift = offset_abs(offset);
+        if shift >= rows {
+            0
+        } else {
+            (rows - shift).min(cols)
+        }
+    }
+}
+
+fn diagonal_target_index(idx: usize, offset: isize) -> (usize, usize) {
+    if offset >= 0 {
+        (idx, idx + offset as usize)
+    } else {
+        (idx + offset_abs(offset), idx)
+    }
+}
+
+fn diagonal_source_index(idx: usize, offset: isize) -> (usize, usize) {
+    if offset >= 0 {
+        (idx, idx + offset as usize)
+    } else {
+        (idx + offset_abs(offset), idx)
+    }
+}
+
+fn ensure_diag_shape(label: &str, shape: &[usize]) -> Result<()> {
+    if shape.len() > 2 && shape.iter().skip(2).any(|&d| d != 1) {
+        Err(anyhow!("{label}: input must be 2-D"))
+    } else {
+        Ok(())
+    }
+}
+
+fn rows_cols(shape: &[usize]) -> (usize, usize) {
+    match shape.len() {
+        0 => (1, 1),
+        1 => (shape[0], 1),
+        _ => (shape[0], shape[1]),
+    }
+}
+
+fn is_vector_like(rows: usize, cols: usize, dims: usize) -> bool {
+    rows == 1 || cols == 1 || dims <= 1
+}
+
 impl AccelProvider for InProcessProvider {
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
@@ -158,6 +246,72 @@ impl AccelProvider for InProcessProvider {
             memory_bytes: None,
             backend: Some("inprocess".to_string()),
         }
+    }
+
+    fn diag_from_vector(&self, vector: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
+        ensure_diag_shape("diag", &vector.shape)?;
+        let (rows, cols) = rows_cols(&vector.shape);
+        ensure!(
+            is_vector_like(rows, cols, vector.shape.len()),
+            "diag: input must be a vector"
+        );
+
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&vector.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id))?
+        };
+        let len = data.len();
+        let (size, total) = diag_matrix_size(len, offset)?;
+        let mut out = vec![0.0; total];
+        for (idx, &value) in data.iter().enumerate() {
+            let (row, col) = diagonal_target_index(idx, offset);
+            if row < size && col < size {
+                out[row + col * size] = value;
+            }
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: vec![size, size],
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn diag_extract(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
+        ensure_diag_shape("diag", &matrix.shape)?;
+        let (rows, cols) = rows_cols(&matrix.shape);
+        ensure!(
+            !is_vector_like(rows, cols, matrix.shape.len()),
+            "diag: matrix input required"
+        );
+        let diag_len = diagonal_length(rows, cols, offset);
+        if diag_len == 0 {
+            return self.zeros(&[0, 1]);
+        }
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("diag: unknown buffer {}", matrix.buffer_id))?
+        };
+        let mut out = Vec::with_capacity(diag_len);
+        for idx in 0..diag_len {
+            let (row, col) = diagonal_source_index(idx, offset);
+            let linear = row + col * rows;
+            out.push(*data.get(linear).unwrap_or(&0.0));
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: vec![diag_len, 1],
+            device_id: 0,
+            buffer_id: id,
+        })
     }
 
     fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -209,6 +363,32 @@ impl AccelProvider for InProcessProvider {
         self.eye(&prototype.shape)
     }
 
+    fn linspace(&self, start: f64, stop: f64, count: usize) -> Result<GpuTensorHandle> {
+        let data = if count == 0 {
+            Vec::new()
+        } else if count == 1 {
+            vec![stop]
+        } else {
+            let step = (stop - start) / ((count - 1) as f64);
+            let mut seq = Vec::with_capacity(count);
+            for idx in 0..count {
+                seq.push(start + (idx as f64) * step);
+            }
+            if let Some(last) = seq.last_mut() {
+                *last = stop;
+            }
+            seq
+        };
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, data);
+        Ok(GpuTensorHandle {
+            shape: vec![1, count],
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
     fn random_uniform(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
         let mut data = vec![0.0; len];
@@ -227,6 +407,124 @@ impl AccelProvider for InProcessProvider {
             device_id: 0,
             buffer_id: id,
         })
+    }
+
+    fn random_normal(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let len: usize = shape.iter().copied().product();
+        let mut data = Vec::with_capacity(len);
+        if len > 0 {
+            let mut guard = rng_state().lock().unwrap();
+            while data.len() < len {
+                let (z0, z1) = next_normal_pair(&mut *guard);
+                data.push(z0);
+                if data.len() < len {
+                    data.push(z1);
+                }
+            }
+        }
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, data);
+        Ok(GpuTensorHandle {
+            shape: shape.to_vec(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn random_integer_range(
+        &self,
+        lower: i64,
+        upper: i64,
+        shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        ensure!(lower <= upper, "lower bound must be <= upper bound");
+        let span_i128 = (upper as i128)
+            .checked_sub(lower as i128)
+            .and_then(|delta| delta.checked_add(1))
+            .ok_or_else(|| anyhow!("integer range overflow"))?;
+        ensure!(span_i128 > 0, "integer range must be non-empty");
+        ensure!(
+            span_i128 <= (1i128 << 53),
+            "integer range exceeds 2^53 and cannot be represented exactly"
+        );
+        let span = span_i128 as u64;
+
+        let len: usize = shape.iter().copied().product();
+        let mut data = Vec::with_capacity(len);
+        if span == 1 {
+            data.resize(len, lower as f64);
+        } else if len > 0 {
+            let mut guard = rng_state().lock().unwrap();
+            let span_f64 = span as f64;
+            for _ in 0..len {
+                let mut offset = (next_uniform(&mut *guard) * span_f64).floor() as u64;
+                if offset >= span {
+                    offset = span - 1;
+                }
+                let value = (lower as i128 + offset as i128) as f64;
+                data.push(value);
+            }
+        }
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, data);
+        Ok(GpuTensorHandle {
+            shape: shape.to_vec(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn random_permutation(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
+        ensure!(k <= n, "randperm: K must satisfy 0 <= K <= N");
+        let k = k.min(n);
+        let mut values: Vec<f64> = if n == 0 {
+            Vec::new()
+        } else {
+            (1..=n).map(|v| v as f64).collect()
+        };
+
+        if k > 0 {
+            let mut guard = rng_state().lock().unwrap();
+            for i in 0..k {
+                let span = n - i;
+                if span == 0 {
+                    break;
+                }
+                let mut u = next_uniform(&mut *guard);
+                if u >= 1.0 {
+                    u = 0.9999999999999999;
+                }
+                let mut offset = (u * span as f64).floor() as usize;
+                if offset >= span {
+                    offset = span - 1;
+                }
+                let j = i + offset;
+                values.swap(i, j);
+            }
+        }
+
+        if values.len() > k {
+            values.truncate(k);
+        }
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, values);
+        Ok(GpuTensorHandle {
+            shape: vec![1, k],
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn random_permutation_like(
+        &self,
+        _prototype: &GpuTensorHandle,
+        n: usize,
+        k: usize,
+    ) -> Result<GpuTensorHandle> {
+        self.random_permutation(n, k)
     }
 
     fn elem_add(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {

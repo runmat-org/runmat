@@ -2988,44 +2988,7 @@ fn permute_builtin(a: Value, order: Value) -> Result<Value, String> {
     ))
 }
 
-// -------- Linear algebra helpers: diag, triu, tril --------
-
-#[runmat_macros::runtime_builtin(name = "diag")]
-fn diag_builtin(a: Value) -> Result<Value, String> {
-    match a {
-        Value::Tensor(t) => {
-            let rows = t.rows();
-            let cols = t.cols();
-            if rows == 1 || cols == 1 {
-                // Vector -> diagonal matrix
-                let n = rows.max(cols);
-                let mut data = vec![0.0; n * n];
-                for (i, slot) in data.iter_mut().enumerate().step_by(n + 1).take(n) {
-                    // Map linear i on diagonal to source index
-                    let idx = i / (n + 1);
-                    let val = t.data[idx];
-                    *slot = val;
-                }
-                Ok(Value::Tensor(
-                    runmat_builtins::Tensor::new(data, vec![n, n])
-                        .map_err(|e| format!("diag: {e}"))?,
-                ))
-            } else {
-                // Matrix -> main diagonal as column vector
-                let n = rows.min(cols);
-                let mut data = vec![0.0; n];
-                for (i, slot) in data.iter_mut().enumerate().take(n) {
-                    *slot = t.data[i + i * rows];
-                }
-                Ok(Value::Tensor(
-                    runmat_builtins::Tensor::new(data, vec![n, 1])
-                        .map_err(|e| format!("diag: {e}"))?,
-                ))
-            }
-        }
-        _ => Err("diag: expected tensor".to_string()),
-    }
-}
+// -------- Linear algebra helpers: triu, tril --------
 
 #[runmat_macros::runtime_builtin(name = "triu")]
 fn triu_builtin(a: Value) -> Result<Value, String> {
@@ -3367,7 +3330,7 @@ fn repmat_nd_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     ))
 }
 
-// linspace and meshgrid are defined in arrays.rs; avoid duplicates here
+// meshgrid is defined in arrays.rs; avoid duplicates here
 
 // -------- Vararg string/IO builtins: sprintf, fprintf, disp, warning --------
 
