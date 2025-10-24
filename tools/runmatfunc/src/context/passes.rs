@@ -46,7 +46,9 @@ fn packaging_extra() -> String {
 
 fn wgpu_extra() -> String {
     let mut s = String::new();
-    s.push_str("Ensure the WGPU provider backend is fully implemented and wired for this builtin: ");
+    s.push_str(
+        "Ensure the WGPU provider backend is fully implemented and wired for this builtin: ",
+    );
     s.push_str("(1) implement or extend provider hooks in crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs matching GPU_SPEC provider_hooks; ");
     s.push_str("(2) add dispatch and shader wiring as needed under crates/runmat-accelerate/src/backend/wgpu/{dispatch,shaders,params,types}; ");
     s.push_str("(3) add #[cfg(feature=\\\"wgpu\\\")] tests in the builtin module verifying GPU parity (use provider registration helper); ");

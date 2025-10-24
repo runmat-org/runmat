@@ -71,30 +71,6 @@ fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Tensor, String> {
     Tensor::new_2d(data, 1, n_usize)
 }
 
-/// Generate identity matrix
-/// eye(n) creates an n×n identity matrix
-#[runtime_builtin(
-    name = "eye",
-    category = "array/creation",
-    summary = "Identity matrix.",
-    examples = "I = eye(3)",
-    related = "zeros,ones"
-)]
-fn eye_builtin(n: i32) -> Result<Tensor, String> {
-    if n < 0 {
-        return Err("Matrix size must be non-negative".to_string());
-    }
-    let n_usize = n as usize;
-    let mut data = vec![0.0; n_usize * n_usize];
-
-    // Set diagonal elements to 1
-    for i in 0..n_usize {
-        data[i * n_usize + i] = 1.0;
-    }
-
-    Tensor::new_2d(data, n_usize, n_usize)
-}
-
 /// Generate matrix filled with specific value
 /// fill(value, m, n) creates an m×n matrix filled with value
 #[runtime_builtin(name = "fill")]
@@ -286,20 +262,6 @@ mod tests {
     }
 
     #[test]
-    fn test_eye() {
-        let result = eye_builtin(3).unwrap();
-        assert_eq!(result.rows, 3);
-        assert_eq!(result.cols, 3);
-        // Check diagonal elements
-        assert_eq!(result.data[0], 1.0); // (0,0)
-        assert_eq!(result.data[4], 1.0); // (1,1)
-        assert_eq!(result.data[8], 1.0); // (2,2)
-                                         // Check off-diagonal elements
-        assert_eq!(result.data[1], 0.0); // (0,1)
-        assert_eq!(result.data[3], 0.0); // (1,0)
-    }
-
-    #[test]
     fn test_fill() {
         let result = fill_builtin(std::f64::consts::PI, 2, 2).unwrap();
         assert_eq!(result.rows, 2);
@@ -327,7 +289,6 @@ mod tests {
     #[test]
     fn test_error_cases() {
         assert!(linspace_builtin(0.0, 1.0, -1).is_err());
-        assert!(eye_builtin(-1).is_err());
         assert!(range_builtin(1.0, 0.0, 5.0).is_err());
     }
 }

@@ -78,3 +78,16 @@ pub struct ReduceDimParams {
     pub dim: u32,
     pub op: u32,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct EyeParams {
+    pub rows: u32,
+    pub cols: u32,
+    pub diag_len: u32,
+    pub slices: u32,
+    pub stride_slice: u32,
+    pub diag_total: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}

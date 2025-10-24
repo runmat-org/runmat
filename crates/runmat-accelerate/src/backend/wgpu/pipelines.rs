@@ -23,6 +23,8 @@ const REDUCE_DIM_MINMAX_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_DIM_MINMAX_SHADER_F64;
 const REDUCE_DIM_MINMAX_SHADER_F32: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_DIM_MINMAX_SHADER_F32;
+const EYE_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::EYE_SHADER_F64;
+const EYE_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::EYE_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -38,6 +40,7 @@ pub struct WgpuPipelines {
     pub reduce_global: PipelineBundle,
     pub reduce_dim_sum_mean: PipelineBundle,
     pub reduce_dim_minmax: PipelineBundle,
+    pub eye: PipelineBundle,
 }
 
 impl WgpuPipelines {
@@ -173,6 +176,18 @@ impl WgpuPipelines {
             },
         );
 
+        let eye = create_pipeline(
+            device,
+            "runmat-eye-layout",
+            "runmat-eye-shader",
+            "runmat-eye-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => EYE_SHADER_F64,
+                NumericPrecision::F32 => EYE_SHADER_F32,
+            },
+        );
+
         Self {
             binary,
             unary,
@@ -182,6 +197,7 @@ impl WgpuPipelines {
             reduce_global,
             reduce_dim_sum_mean,
             reduce_dim_minmax,
+            eye,
         }
     }
 }

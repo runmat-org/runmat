@@ -47,6 +47,71 @@ impl Default for InProcessProvider {
     }
 }
 
+fn normalize_shape(shape: &[usize]) -> Vec<usize> {
+    match shape.len() {
+        0 => vec![1, 1],
+        1 => {
+            let n = shape[0];
+            vec![n, n]
+        }
+        _ => shape.to_vec(),
+    }
+}
+
+fn compute_strides(shape: &[usize]) -> Vec<usize> {
+    let mut strides = Vec::with_capacity(shape.len());
+    let mut stride = 1usize;
+    for &dim in shape {
+        strides.push(stride);
+        stride = stride.saturating_mul(dim);
+    }
+    strides
+}
+
+fn identity_data(shape: &[usize]) -> Vec<f64> {
+    let shape = normalize_shape(shape);
+    let total: usize = shape.iter().copied().product();
+    let mut data = vec![0.0; total];
+    if shape.is_empty() {
+        return data;
+    }
+    let rows = shape[0];
+    let cols = shape[1];
+    let diag_len = rows.min(cols);
+    if diag_len == 0 {
+        return data;
+    }
+    let strides = compute_strides(&shape);
+    let extra_dims = &shape[2..];
+    let extra_count = if extra_dims.is_empty() {
+        1
+    } else {
+        extra_dims.iter().copied().product()
+    };
+    let mut coords = vec![0usize; shape.len()];
+    for mut extra_idx in 0..extra_count {
+        for (offset, size) in extra_dims.iter().copied().enumerate() {
+            let dim = offset + 2;
+            if size == 0 {
+                coords[dim] = 0;
+                continue;
+            }
+            coords[dim] = extra_idx % size;
+            extra_idx /= size;
+        }
+        for diag in 0..diag_len {
+            coords[0] = diag;
+            coords[1] = diag;
+            let mut linear = 0usize;
+            for (dim, &coord) in coords.iter().enumerate() {
+                linear += coord * strides[dim];
+            }
+            data[linear] = 1.0;
+        }
+    }
+    data
+}
+
 impl AccelProvider for InProcessProvider {
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
@@ -125,6 +190,23 @@ impl AccelProvider for InProcessProvider {
 
     fn ones_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.ones(&prototype.shape)
+    }
+
+    fn eye(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let shape = normalize_shape(shape);
+        let data = identity_data(&shape);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard = registry().lock().unwrap();
+        guard.insert(id, data);
+        Ok(GpuTensorHandle {
+            shape,
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn eye_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.eye(&prototype.shape)
     }
 
     fn random_uniform(&self, shape: &[usize]) -> Result<GpuTensorHandle> {

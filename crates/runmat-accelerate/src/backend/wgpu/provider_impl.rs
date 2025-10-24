@@ -57,6 +57,22 @@ struct BufferEntry {
     precision: NumericPrecision,
 }
 
+fn normalize_eye_shape(shape: &[usize]) -> Vec<usize> {
+    match shape.len() {
+        0 => vec![1, 1],
+        1 => {
+            let n = shape[0];
+            vec![n, n]
+        }
+        _ => shape.to_vec(),
+    }
+}
+
+fn product_checked(dims: &[usize]) -> Option<usize> {
+    dims.iter()
+        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+}
+
 impl WgpuProvider {
     pub fn device_id(&self) -> u32 {
         self.device_id
@@ -1176,6 +1192,104 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(out_buffer, out_shape, len))
     }
 
+    pub(crate) fn eye_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let normalized = normalize_eye_shape(shape);
+        if normalized.len() < 2 {
+            return Err(anyhow!("eye: expected at least 2 dimensions"));
+        }
+        let total_len = product_checked(&normalized)
+            .ok_or_else(|| anyhow!("eye: tensor size exceeds GPU limits"))?;
+        let out_buffer = self.create_storage_buffer(total_len, "runmat-eye-out");
+        if total_len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, normalized, total_len));
+        }
+
+        let rows = normalized[0];
+        let cols = normalized[1];
+        let diag_len = rows.min(cols);
+        if diag_len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, normalized, total_len));
+        }
+        let slice_stride = rows
+            .checked_mul(cols)
+            .ok_or_else(|| anyhow!("eye: matrix slice exceeds GPU limits"))?;
+        let slices = if normalized.len() <= 2 {
+            1usize
+        } else {
+            product_checked(&normalized[2..])
+                .ok_or_else(|| anyhow!("eye: slice count exceeds GPU limits"))?
+        };
+        let diag_total = diag_len
+            .checked_mul(slices)
+            .ok_or_else(|| anyhow!("eye: diagonal count exceeds GPU limits"))?;
+        if diag_total == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, normalized, total_len));
+        }
+        if rows > (u32::MAX as usize)
+            || cols > (u32::MAX as usize)
+            || slice_stride > (u32::MAX as usize)
+            || diag_total > (u32::MAX as usize)
+        {
+            return Err(anyhow!("eye: dimensions exceed GPU dispatch limits"));
+        }
+
+        {
+            let mut enc =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-eye-noop"),
+                    });
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-eye-noop-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.eye.pipeline);
+            drop(pass);
+            self.submit(enc);
+        }
+
+        let params = crate::backend::wgpu::params::EyeParams {
+            rows: rows as u32,
+            cols: cols as u32,
+            diag_len: diag_len as u32,
+            slices: slices as u32,
+            stride_slice: slice_stride as u32,
+            diag_total: diag_total as u32,
+            _pad0: 0,
+            _pad1: 0,
+        };
+        let params_buffer = self.uniform_buffer(&params, "runmat-eye-params");
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-eye-bind"),
+                layout: &self.pipelines.eye.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            diag_total as u32,
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+        );
+        crate::backend::wgpu::dispatch::creation::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.eye.pipeline,
+            &bind_group,
+            workgroups,
+        );
+
+        Ok(self.register_existing_buffer(out_buffer, normalized, total_len))
+    }
+
     pub(crate) fn binary_op_exec(
         &self,
         op: crate::backend::wgpu::types::BinaryOpCode,
@@ -1672,6 +1786,14 @@ impl AccelProvider for WgpuProvider {
             NumericPrecision::F32 => ProviderPrecision::F32,
             NumericPrecision::F64 => ProviderPrecision::F64,
         }
+    }
+
+    fn eye(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        self.eye_exec(shape)
+    }
+
+    fn eye_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.eye_exec(&prototype.shape)
     }
 
     fn elem_add(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {

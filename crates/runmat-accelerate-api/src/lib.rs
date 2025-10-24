@@ -90,6 +90,16 @@ pub trait AccelProvider: Send + Sync {
         self.ones(&prototype.shape)
     }
 
+    /// Allocate an identity tensor with ones along the leading diagonal of the first two axes.
+    fn eye(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("eye not supported by provider"))
+    }
+
+    /// Allocate an identity tensor matching the prototype tensor's shape.
+    fn eye_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        self.eye(&prototype.shape)
+    }
+
     /// Allocate a tensor filled with random values drawn from U(0, 1).
     fn random_uniform(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("random_uniform not supported by provider"))

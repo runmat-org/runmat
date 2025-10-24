@@ -241,7 +241,10 @@ impl AppContext {
                     outcome = new_outcome;
                 }
                 Err(err) => {
-                    println!("[runmatfunc] test execution error after {} pass: {err}", pass.name);
+                    println!(
+                        "[runmatfunc] test execution error after {} pass: {err}",
+                        pass.name
+                    );
                     break;
                 }
             }

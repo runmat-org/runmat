@@ -47,7 +47,11 @@ pub fn run_builtin_headless(
                 None,
             )? {
                 test_outcome = tests::run_builtin_tests(&authoring_ctx, config)?;
-                passes.push(PassRecord { name: pass.name.to_string(), codex_summary: Some(summary.summary), passed: test_outcome.success });
+                passes.push(PassRecord {
+                    name: pass.name.to_string(),
+                    codex_summary: Some(summary.summary),
+                    passed: test_outcome.success,
+                });
                 if !test_outcome.success {
                     break;
                 }
