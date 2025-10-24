@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::app::config::AppConfig;
 use crate::codex::client::{self, CodexResponse};
 use crate::codex::session;
-use crate::codex::transcript::Transcript;
+use crate::codex::transcript::{PassRecord, Transcript};
 use crate::context::gather;
 use crate::workspace::tests::{self, TestOutcome};
 
@@ -33,13 +33,34 @@ pub fn run_builtin_headless(
         None
     };
 
-    let test_outcome = tests::run_builtin_tests(&authoring_ctx, config)?;
+    let mut test_outcome = tests::run_builtin_tests(&authoring_ctx, config)?;
+
+    // Multi-pass flow: packaging -> WGPU -> completion -> docs (only when codex used and tests ok)
+    let mut passes: Vec<PassRecord> = Vec::new();
+    if use_codex && codex_available && test_outcome.success {
+        for pass in crate::context::passes::PASS_ORDER {
+            let extra = (pass.build)(&authoring_ctx);
+            if let Some(summary) = session::run_authoring_with_extra(
+                &authoring_ctx,
+                resolved_model.clone(),
+                &extra,
+                None,
+            )? {
+                test_outcome = tests::run_builtin_tests(&authoring_ctx, config)?;
+                passes.push(PassRecord { name: pass.name.to_string(), codex_summary: Some(summary.summary), passed: test_outcome.success });
+                if !test_outcome.success {
+                    break;
+                }
+            }
+        }
+    }
 
     let transcript = Transcript::from_run(
         &authoring_ctx,
         resolved_model,
         codex_summary.as_ref().map(|resp| resp.summary.clone()),
         &test_outcome,
+        passes,
     );
 
     let transcript_dir = config.transcripts_dir();

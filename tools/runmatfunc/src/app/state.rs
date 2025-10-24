@@ -223,86 +223,27 @@ impl AppContext {
             }
         }
 
-        // Polish pass: ask Codex to re-check against BUILTIN_PACKAGING.md and fix any gaps, then test again
-        if use_codex && codex_available && outcome.success {
-            let polish = "Re-check the implementation against the Builtin Packaging template. Paste the entire template and ensure all required sections (DOC_MD, GPU/Fusion specs, tests, error semantics) are present and correct. Apply changes via apply_patch when necessary. Then stop.";
-            let tail = Some("Template is included above in references: crates/runmat-runtime/BUILTIN_PACKAGING.md");
-            let _ = crate::codex::session::run_authoring_with_extra(
-                &ctx,
-                resolved_model.clone(),
-                polish,
-                tail,
-            );
-            // Re-run tests
-            match workspace_tests::run_builtin_tests(&ctx, &self.config) {
-                Ok(new_outcome) => {
-                    outcome = new_outcome;
-                }
-                Err(err) => println!("[runmatfunc] test execution error after polish: {err}"),
+        // Polish/WGPU/Completion/Docs passes driven by centralized prompt builders
+        for pass in crate::context::passes::PASS_ORDER {
+            if !(use_codex && codex_available && outcome.success) {
+                break;
             }
-        }
-
-        // WGPU provider integration pass: ensure provider hooks and wiring are complete and tested
-        if use_codex && codex_available && outcome.success {
-            let wgpu_prompt = "Ensure the WGPU provider backend is fully implemented and wired for this builtin: (1) implement or extend provider hooks in crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs matching GPU_SPEC provider_hooks; (2) add dispatch and shader wiring as needed under crates/runmat-accelerate/src/backend/wgpu/{dispatch,shaders,params,types}; (3) add #[cfg(feature=\"wgpu\")] tests in the builtin module verifying GPU parity (use provider registration helper); (4) if you add WGPU-only tests, set requires_feature: 'wgpu' in the DOC_MD frontmatter so runmatfunc can run with the correct Cargo features; (5) keep CPU semantics identical; (6) re-run tests until all pass. Apply changes via apply_patch.";
-            let wgpu_tail = Some(
-                "References: crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs, .../dispatch, .../shaders, and existing GPU tests in builtins (e.g., math/reduction/{sum,mean}.rs and math/trigonometry/sin.rs). Match GPU_SPEC.provider_hooks for this builtin and ensure provider methods exist and are invoked.",
-            );
+            let extra = (pass.build)(&ctx);
             let _ = crate::codex::session::run_authoring_with_extra(
                 &ctx,
                 resolved_model.clone(),
-                wgpu_prompt,
-                wgpu_tail,
+                &extra,
+                None,
             );
-            // Re-run tests to validate provider wiring (DOC_MD may set requires_feature: wgpu)
+            // Re-run tests after each pass
             match workspace_tests::run_builtin_tests(&ctx, &self.config) {
                 Ok(new_outcome) => {
                     outcome = new_outcome;
                 }
-                Err(err) => println!("[runmatfunc] test execution error after WGPU pass: {err}"),
-            }
-        }
-
-        // Completion pass: resolve any placeholders and fully implement argument handling
-        if use_codex && codex_available && outcome.success {
-            let complete_prompt = format!(
-                "Within the builtin '{}', eliminate any remaining placeholders and complete the implementation: (1) search changed files and immediate dependencies for TODO, FIXME, unimplemented!, todo!(), panic(\\\"unimplemented\\\"), \\\"for later\\\", \\\"next revision\\\" and replace with working code or proper error paths that match MATLAB semantics; (2) ensure the full argument matrix supported by the spec is implemented (positional, keyword-like strings, size vectors, dtype/logical toggles, 'like' prototype, GPU residency cases); (3) add or extend unit + #[cfg(feature=\\\"wgpu\\\")] tests to cover all supported argument forms and edge cases (including error conditions); (4) ensure DOC_MD frontmatter 'tested' paths reflect unit/integration tests; (5) keep CPU/GPU parity. Apply changes via apply_patch, then stop.",
-                ctx.builtin.name
-            );
-            let complete_tail = Some(
-                "References: crates/runmat-runtime/Library.md (argument expectations) and crates/runmat-runtime/BUILTIN_PACKAGING.md. Use existing good builtins (sum, mean, sin, zeros/ones/rand) as templates for argument parsing patterns and tests.",
-            );
-            let _ = crate::codex::session::run_authoring_with_extra(
-                &ctx,
-                resolved_model.clone(),
-                complete_prompt.as_str(),
-                complete_tail,
-            );
-            // Re-run tests to validate completion of argument handling and removal of placeholders
-            match workspace_tests::run_builtin_tests(&ctx, &self.config) {
-                Ok(new_outcome) => {
-                    outcome = new_outcome;
+                Err(err) => {
+                    println!("[runmatfunc] test execution error after {} pass: {err}", pass.name);
+                    break;
                 }
-                Err(err) => println!("[runmatfunc] test execution error after completion pass: {err}"),
-            }
-        }
-
-        // Documentation quality pass: ask Codex to ensure DOC_MD quality matches existing good builtins
-        if use_codex && codex_available && outcome.success {
-            let doc_prompt = "Review and improve the DOC_MD for this builtin to match the tone, structure, and completeness of the best existing builtins under crates/runmat-runtime/src/builtins. Ensure: (1) headlines and sections match the style of the best existing builtins; (2) GPU Execution section reflects provider hooks and fusion residency; (3) realistic, runnable Examples; (4) See Also with correct names. Note that the headings have been selected carefully for SEO and communication purposes, so please do not change them. If anything is missing or inconsistent, update DOC_MD via apply_patch. Then stop.";
-            let doc_tail = Some("For reference, browse good copies in crates/runmat-runtime/src/builtins (e.g., math/reduction/sum.rs, math/reduction/mean.rs, math/trigonometry/sin.rs, array/zeros.rs/ones.rs/rand.rs). Keep changes scoped to DOC_MD unless code/docs mismatch requires minor fixes.");
-            let _ = crate::codex::session::run_authoring_with_extra(
-                &ctx,
-                resolved_model.clone(),
-                doc_prompt,
-                doc_tail,
-            );
-            // Re-run tests to ensure doc changes didn't regress behavior (some tests parse DOC_MD examples)
-            match workspace_tests::run_builtin_tests(&ctx, &self.config) {
-                Ok(new_outcome) => {
-                    outcome = new_outcome;
-                }
-                Err(err) => println!("[runmatfunc] test execution error after doc pass: {err}"),
             }
         }
 
