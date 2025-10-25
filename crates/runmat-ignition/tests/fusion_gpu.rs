@@ -3,9 +3,9 @@ use once_cell::sync::OnceCell;
 use runmat_accelerate::fusion_residency;
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned, HostTensorView,
-    ProviderPrecision,
+    ProviderPrecision, UniqueOptions, UniqueResult,
 };
-use runmat_builtins::Value;
+use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
 use runmat_hir::lower;
 use runmat_ignition::vm::interpret_function;
@@ -130,6 +130,21 @@ impl AccelProvider for TestProvider {
             }
             _ => bail!("reduce_sum_dim: only dims 0 or 1 supported in test provider"),
         }
+    }
+
+    fn unique(
+        &self,
+        handle: &GpuTensorHandle,
+        options: &UniqueOptions,
+    ) -> anyhow::Result<UniqueResult> {
+        let (data, shape) = self.pull(handle)?;
+        let tensor =
+            Tensor::new(data, shape).map_err(|e| anyhow!("unique (test provider): {e}"))?;
+        runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
+            tensor, options,
+        )
+        .and_then(|eval| eval.into_numeric_unique_result())
+        .map_err(|e| anyhow!("unique (test provider): {e}"))
     }
 
     fn fused_elementwise(

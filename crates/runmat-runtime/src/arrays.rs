@@ -35,45 +35,6 @@ fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Tensor, String> {
     Tensor::new_2d(data, 1, n_usize)
 }
 
-/// Get the length of the largest dimension of a matrix
-/// length(X) returns the size of the largest dimension of matrix X
-#[runtime_builtin(name = "length")]
-fn length_builtin(matrix: Tensor) -> Result<f64, String> {
-    Ok(matrix.rows().max(matrix.cols()) as f64)
-}
-
-/// Generate range vector
-/// range(start, step, stop) creates a vector from start to stop with given step
-#[runtime_builtin(name = "range")]
-fn range_builtin(start: f64, step: f64, stop: f64) -> Result<Tensor, String> {
-    if step == 0.0 {
-        return Err("Step size cannot be zero".to_string());
-    }
-
-    if (step > 0.0 && start > stop) || (step < 0.0 && start < stop) {
-        // Empty range
-        return Tensor::new_2d(vec![], 1, 0);
-    }
-
-    let mut data = Vec::new();
-    let mut current = start;
-
-    if step > 0.0 {
-        while current <= stop + f64::EPSILON {
-            data.push(current);
-            current += step;
-        }
-    } else {
-        while current >= stop - f64::EPSILON {
-            data.push(current);
-            current += step;
-        }
-    }
-
-    let len = data.len();
-    Tensor::new_2d(data, 1, len)
-}
-
 /// Generate meshgrid for 2D plotting
 /// [X, Y] = meshgrid(x, y) creates 2D coordinate arrays
 #[runtime_builtin(name = "meshgrid")]
@@ -147,24 +108,5 @@ mod tests {
         assert!((result.data[0] - 10.0).abs() < f64::EPSILON);
         assert!((result.data[1] - 100.0).abs() < f64::EPSILON);
         assert!((result.data[2] - 1000.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_range() {
-        let result = range_builtin(1.0, 1.0, 5.0).unwrap();
-        assert_eq!(result.cols, 5);
-        assert_eq!(result.data, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
-    }
-
-    #[test]
-    fn test_range_negative_step() {
-        let result = range_builtin(5.0, -1.0, 1.0).unwrap();
-        assert_eq!(result.cols, 5);
-        assert_eq!(result.data, vec![5.0, 4.0, 3.0, 2.0, 1.0]);
-    }
-
-    #[test]
-    fn test_error_cases() {
-        assert!(range_builtin(1.0, 0.0, 5.0).is_err());
     }
 }

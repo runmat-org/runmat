@@ -11,6 +11,16 @@ const SCALAR_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::SCAL
 const SCALAR_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F32;
 const TRANSPOSE_SHADER_F64: &str = crate::backend::wgpu::shaders::transpose::TRANSPOSE_SHADER_F64;
 const TRANSPOSE_SHADER_F32: &str = crate::backend::wgpu::shaders::transpose::TRANSPOSE_SHADER_F32;
+const PERMUTE_SHADER_F64: &str = crate::backend::wgpu::shaders::permute::PERMUTE_SHADER_F64;
+const PERMUTE_SHADER_F32: &str = crate::backend::wgpu::shaders::permute::PERMUTE_SHADER_F32;
+const FLIP_SHADER_F64: &str = crate::backend::wgpu::shaders::flip::FLIP_SHADER_F64;
+const FLIP_SHADER_F32: &str = crate::backend::wgpu::shaders::flip::FLIP_SHADER_F32;
+const CIRCSHIFT_SHADER_F64: &str = crate::backend::wgpu::shaders::circshift::CIRCSHIFT_SHADER_F64;
+const CIRCSHIFT_SHADER_F32: &str = crate::backend::wgpu::shaders::circshift::CIRCSHIFT_SHADER_F32;
+const REPMAT_SHADER_F64: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F64;
+const REPMAT_SHADER_F32: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F32;
+const KRON_SHADER_F64: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F64;
+const KRON_SHADER_F32: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F32;
 const MATMUL_SHADER_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F64;
 const MATMUL_SHADER_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F32;
 const REDUCE_GLOBAL_SHADER_F64: &str =
@@ -47,6 +57,12 @@ const DIAG_FROM_VECTOR_SHADER_F32: &str =
     crate::backend::wgpu::shaders::diag::DIAG_FROM_VECTOR_SHADER_F32;
 const DIAG_EXTRACT_SHADER_F64: &str = crate::backend::wgpu::shaders::diag::DIAG_EXTRACT_SHADER_F64;
 const DIAG_EXTRACT_SHADER_F32: &str = crate::backend::wgpu::shaders::diag::DIAG_EXTRACT_SHADER_F32;
+const FIND_SHADER_F64: &str = crate::backend::wgpu::shaders::find::FIND_SHADER_F64;
+const FIND_SHADER_F32: &str = crate::backend::wgpu::shaders::find::FIND_SHADER_F32;
+const TRIL_SHADER_F64: &str = crate::backend::wgpu::shaders::tril::TRIL_SHADER_F64;
+const TRIL_SHADER_F32: &str = crate::backend::wgpu::shaders::tril::TRIL_SHADER_F32;
+const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F64;
+const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -58,6 +74,13 @@ pub struct WgpuPipelines {
     pub unary: PipelineBundle,
     pub scalar: PipelineBundle,
     pub transpose: PipelineBundle,
+    pub permute: PipelineBundle,
+    pub flip: PipelineBundle,
+    pub circshift: PipelineBundle,
+    pub tril: PipelineBundle,
+    pub triu: PipelineBundle,
+    pub repmat: PipelineBundle,
+    pub kron: PipelineBundle,
     pub matmul: PipelineBundle,
     pub reduce_global: PipelineBundle,
     pub reduce_dim_sum_mean: PipelineBundle,
@@ -71,6 +94,7 @@ pub struct WgpuPipelines {
     pub randperm: PipelineBundle,
     pub diag_from_vector: PipelineBundle,
     pub diag_extract: PipelineBundle,
+    pub find: PipelineBundle,
 }
 
 impl WgpuPipelines {
@@ -137,6 +161,119 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => TRANSPOSE_SHADER_F64,
                 NumericPrecision::F32 => TRANSPOSE_SHADER_F32,
+            },
+        );
+
+        let permute = create_pipeline(
+            device,
+            "runmat-permute-layout",
+            "runmat-permute-shader",
+            "runmat-permute-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => PERMUTE_SHADER_F64,
+                NumericPrecision::F32 => PERMUTE_SHADER_F32,
+            },
+        );
+
+        let flip = create_pipeline(
+            device,
+            "runmat-flip-layout",
+            "runmat-flip-shader",
+            "runmat-flip-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FLIP_SHADER_F64,
+                NumericPrecision::F32 => FLIP_SHADER_F32,
+            },
+        );
+
+        let tril = create_pipeline(
+            device,
+            "runmat-tril-layout",
+            "runmat-tril-shader",
+            "runmat-tril-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => TRIL_SHADER_F64,
+                NumericPrecision::F32 => TRIL_SHADER_F32,
+            },
+        );
+
+        let triu = create_pipeline(
+            device,
+            "runmat-triu-layout",
+            "runmat-triu-shader",
+            "runmat-triu-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => TRIU_SHADER_F64,
+                NumericPrecision::F32 => TRIU_SHADER_F32,
+            },
+        );
+
+        let circshift = create_pipeline(
+            device,
+            "runmat-circshift-layout",
+            "runmat-circshift-shader",
+            "runmat-circshift-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => CIRCSHIFT_SHADER_F64,
+                NumericPrecision::F32 => CIRCSHIFT_SHADER_F32,
+            },
+        );
+
+        let repmat = create_pipeline(
+            device,
+            "runmat-repmat-layout",
+            "runmat-repmat-shader",
+            "runmat-repmat-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => REPMAT_SHADER_F64,
+                NumericPrecision::F32 => REPMAT_SHADER_F32,
+            },
+        );
+
+        let kron = create_pipeline(
+            device,
+            "runmat-kron-layout",
+            "runmat-kron-shader",
+            "runmat-kron-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => KRON_SHADER_F64,
+                NumericPrecision::F32 => KRON_SHADER_F32,
             },
         );
 
@@ -322,16 +459,44 @@ impl WgpuPipelines {
             },
         );
 
+        let find = create_pipeline(
+            device,
+            "runmat-find-layout",
+            "runmat-find-shader",
+            "runmat-find-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                storage_read_write_entry(3),
+                storage_read_write_entry(4),
+                storage_read_write_entry(5),
+                uniform_entry(6),
+            ],
+            match precision {
+                NumericPrecision::F64 => FIND_SHADER_F64,
+                NumericPrecision::F32 => FIND_SHADER_F32,
+            },
+        );
+
         Self {
             binary,
             unary,
             scalar,
             transpose,
+            permute,
+            flip,
+            tril,
+            triu,
+            circshift,
+            repmat,
+            kron,
             matmul,
             reduce_global,
             reduce_dim_sum_mean,
             reduce_dim_minmax,
             eye,
+            fill,
             linspace,
             random_int,
             random_uniform,
@@ -339,7 +504,7 @@ impl WgpuPipelines {
             randperm,
             diag_from_vector,
             diag_extract,
-            fill,
+            find,
         }
     }
 }

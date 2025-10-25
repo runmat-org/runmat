@@ -1,8 +1,13 @@
+use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView, ProviderPrecision,
+    AccelProvider, FindDirection, GpuTensorHandle, HostTensorOwned, HostTensorView,
+    ProviderFindResult, ProviderPrecision, SetdiffOptions, SetdiffResult, SortComparison,
+    SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
+use runmat_builtins::Tensor;
+use runmat_runtime::builtins::array::sorting_sets::unique;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -50,6 +55,16 @@ impl InProcessProvider {
             next_id: AtomicU64::new(1),
         }
     }
+
+    fn allocate_tensor(&self, data: Vec<f64>, shape: Vec<usize>) -> GpuTensorHandle {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, data);
+        GpuTensorHandle {
+            shape,
+            device_id: 0,
+            buffer_id: id,
+        }
+    }
 }
 
 impl Default for InProcessProvider {
@@ -77,6 +92,414 @@ fn compute_strides(shape: &[usize]) -> Vec<usize> {
         stride = stride.saturating_mul(dim);
     }
     strides
+}
+
+fn product(shape: &[usize]) -> usize {
+    shape.iter().copied().product()
+}
+
+fn permute_data(data: &[f64], shape: &[usize], order: &[usize]) -> Result<(Vec<f64>, Vec<usize>)> {
+    ensure!(!order.is_empty(), "permute: order must not be empty");
+    let rank = order.len();
+    ensure!(
+        shape.len() <= rank,
+        "permute: order length must be at least the number of dimensions"
+    );
+    let mut seen = vec![false; rank];
+    for &dim in order {
+        ensure!(dim < rank, "permute: invalid dimension index {}", dim + 1);
+        ensure!(
+            !seen[dim],
+            "permute: duplicate dimension index {} encountered",
+            dim + 1
+        );
+        seen[dim] = true;
+    }
+    ensure!(
+        seen.iter().all(|v| *v),
+        "permute: order must include every dimension exactly once"
+    );
+
+    let mut src_shape = shape.to_vec();
+    if src_shape.len() < rank {
+        src_shape.extend(std::iter::repeat(1).take(rank - src_shape.len()));
+    }
+
+    let total = product(&src_shape);
+    ensure!(
+        total == data.len(),
+        "permute: shape/product mismatch ({} vs {})",
+        total,
+        data.len()
+    );
+
+    let mut dst_shape = vec![0usize; rank];
+    for (dst_dim, &src_dim) in order.iter().enumerate() {
+        dst_shape[dst_dim] = src_shape[src_dim];
+    }
+
+    let src_strides = compute_strides(&src_shape);
+    let dst_total = product(&dst_shape);
+    let mut out = vec![0.0f64; dst_total];
+    let mut dst_coords = vec![0usize; rank];
+    let mut src_coords = vec![0usize; rank];
+
+    for dst_index in 0..dst_total {
+        let mut rem = dst_index;
+        for (dim, &size) in dst_shape.iter().enumerate() {
+            if size == 0 {
+                dst_coords[dim] = 0;
+            } else {
+                dst_coords[dim] = rem % size;
+                rem /= size;
+            }
+        }
+        for (dst_dim, &src_dim) in order.iter().enumerate() {
+            src_coords[src_dim] = dst_coords[dst_dim];
+        }
+        let mut src_index = 0usize;
+        for (dim, &coord) in src_coords.iter().enumerate() {
+            src_index += coord * src_strides[dim];
+        }
+        out[dst_index] = data[src_index];
+    }
+
+    Ok((out, dst_shape))
+}
+
+fn flip_data(data: &[f64], shape: &[usize], axes: &[usize]) -> Result<Vec<f64>> {
+    if axes.is_empty() || data.is_empty() {
+        return Ok(data.to_vec());
+    }
+    let mut ext_shape = shape.to_vec();
+    if let Some(max_dim) = axes.iter().copied().max() {
+        let needed = max_dim + 1;
+        if needed > ext_shape.len() {
+            ext_shape.extend(std::iter::repeat(1).take(needed - ext_shape.len()));
+        }
+    }
+    let total = product(&ext_shape);
+    ensure!(
+        total == data.len(),
+        "flip: shape/product mismatch ({} vs {})",
+        total,
+        data.len()
+    );
+    let mut flip_flags = vec![false; ext_shape.len()];
+    for &axis in axes {
+        if axis < flip_flags.len() {
+            flip_flags[axis] = !flip_flags[axis];
+        }
+    }
+    if !flip_flags.iter().any(|&flag| flag) {
+        return Ok(data.to_vec());
+    }
+    let mut out = Vec::with_capacity(total);
+    for idx in 0..total {
+        let mut coords = unravel_index(idx, &ext_shape);
+        for (axis, flag) in flip_flags.iter().enumerate() {
+            if *flag && ext_shape[axis] > 1 {
+                coords[axis] = ext_shape[axis] - 1 - coords[axis];
+            }
+        }
+        let src_idx = ravel_index(&coords, &ext_shape);
+        out.push(data[src_idx]);
+    }
+    Ok(out)
+}
+
+fn tril_data(data: &[f64], shape: &[usize], offset: isize) -> Result<Vec<f64>> {
+    if data.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
+    let plane = rows.saturating_mul(cols);
+    if plane == 0 {
+        ensure!(
+            data.is_empty(),
+            "tril: shape/product mismatch ({} vs {})",
+            0,
+            data.len()
+        );
+        return Ok(Vec::new());
+    }
+    let pages = if shape.len() <= 2 {
+        1usize
+    } else {
+        shape[2..].iter().product::<usize>()
+    };
+    if pages == 0 {
+        ensure!(
+            data.is_empty(),
+            "tril: shape/product mismatch ({} vs {})",
+            0,
+            data.len()
+        );
+        return Ok(Vec::new());
+    }
+    let expected = plane
+        .checked_mul(pages)
+        .ok_or_else(|| anyhow!("tril: dimension product overflow"))?;
+    ensure!(
+        expected == data.len(),
+        "tril: shape/product mismatch ({} vs {})",
+        expected,
+        data.len()
+    );
+    let mut out = data.to_vec();
+    for page in 0..pages {
+        let base = page * plane;
+        for col in 0..cols {
+            let col_base = base + col * rows;
+            for row in 0..rows {
+                if (row as isize) - (col as isize) < -offset {
+                    out[col_base + row] = 0.0;
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn triu_data(data: &[f64], shape: &[usize], offset: isize) -> Result<Vec<f64>> {
+    if data.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
+    let plane = rows.saturating_mul(cols);
+    if plane == 0 {
+        ensure!(
+            data.is_empty(),
+            "triu: shape/product mismatch ({} vs {})",
+            0,
+            data.len()
+        );
+        return Ok(Vec::new());
+    }
+    let pages = if shape.len() <= 2 {
+        1usize
+    } else {
+        shape[2..].iter().product::<usize>()
+    };
+    if pages == 0 {
+        ensure!(
+            data.is_empty(),
+            "triu: shape/product mismatch ({} vs {})",
+            0,
+            data.len()
+        );
+        return Ok(Vec::new());
+    }
+    let expected = plane
+        .checked_mul(pages)
+        .ok_or_else(|| anyhow!("triu: dimension product overflow"))?;
+    ensure!(
+        expected == data.len(),
+        "triu: shape/product mismatch ({} vs {})",
+        expected,
+        data.len()
+    );
+    let mut out = data.to_vec();
+    for page in 0..pages {
+        let base = page * plane;
+        for col in 0..cols {
+            let col_base = base + col * rows;
+            for row in 0..rows {
+                let diff = (col as isize) - (row as isize);
+                if diff < offset {
+                    out[col_base + row] = 0.0;
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn circshift_data(data: &[f64], shape: &[usize], shifts: &[isize]) -> Result<Vec<f64>> {
+    ensure!(
+        shape.len() == shifts.len(),
+        "circshift: shift vector length must match tensor rank"
+    );
+    let mut total = 1usize;
+    for &dim in shape {
+        total = total
+            .checked_mul(dim)
+            .ok_or_else(|| anyhow!("circshift: requested output exceeds maximum size"))?;
+    }
+    ensure!(
+        total == data.len(),
+        "circshift: shape/product mismatch ({} vs {})",
+        total,
+        data.len()
+    );
+    if data.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut normalized = Vec::with_capacity(shape.len());
+    for (len, &shift) in shape.iter().zip(shifts.iter()) {
+        if *len <= 1 {
+            normalized.push(0usize);
+            continue;
+        }
+        let len_isize = *len as isize;
+        let mut value = shift % len_isize;
+        if value < 0 {
+            value += len_isize;
+        }
+        normalized.push(value as usize);
+    }
+    if normalized.iter().all(|&s| s == 0) {
+        return Ok(data.to_vec());
+    }
+
+    let strides = compute_strides(shape);
+    let mut out = vec![0.0f64; data.len()];
+    for idx in 0..data.len() {
+        let coords = unravel_index(idx, shape);
+        let mut src_idx = 0usize;
+        for (axis, &coord) in coords.iter().enumerate() {
+            let len = shape[axis];
+            let stride = strides[axis];
+            if len <= 1 || normalized[axis] == 0 {
+                src_idx += coord * stride;
+            } else {
+                let shift = normalized[axis] % len;
+                let src_coord = (coord + len - shift) % len;
+                src_idx += src_coord * stride;
+            }
+        }
+        out[idx] = data[src_idx];
+    }
+    Ok(out)
+}
+
+fn unravel_index(mut index: usize, shape: &[usize]) -> Vec<usize> {
+    let mut coords = Vec::with_capacity(shape.len());
+    for &extent in shape {
+        if extent == 0 {
+            coords.push(0);
+        } else {
+            coords.push(index % extent);
+            index /= extent;
+        }
+    }
+    coords
+}
+
+fn ravel_index(coords: &[usize], shape: &[usize]) -> usize {
+    let mut index = 0usize;
+    let mut stride = 1usize;
+    for (coord, extent) in coords.iter().zip(shape.iter()) {
+        if *extent > 0 {
+            index += coord * stride;
+            stride *= extent;
+        }
+    }
+    index
+}
+
+fn checked_total(shape: &[usize]) -> Result<usize> {
+    shape.iter().try_fold(1usize, |acc, dim| {
+        acc.checked_mul(*dim)
+            .ok_or_else(|| anyhow!("repmat: requested output exceeds maximum size"))
+    })
+}
+
+fn repmat_numeric(data: &[f64], shape: &[usize], reps: &[usize]) -> Result<(Vec<f64>, Vec<usize>)> {
+    ensure!(
+        !reps.is_empty(),
+        "repmat: replication factors must be specified"
+    );
+    let orig_rank = if shape.is_empty() { 1 } else { shape.len() };
+    let rank = if reps.len() == 1 {
+        orig_rank.max(2)
+    } else {
+        orig_rank.max(reps.len())
+    };
+
+    let mut base_shape = vec![1usize; rank];
+    for (idx, &dim) in shape.iter().enumerate() {
+        if idx < rank {
+            base_shape[idx] = dim;
+        }
+    }
+
+    let mut factors = vec![1usize; rank];
+    if reps.len() == 1 {
+        factors.fill(reps[0]);
+    } else {
+        for (idx, &factor) in reps.iter().enumerate() {
+            if idx < rank {
+                factors[idx] = factor;
+            }
+        }
+    }
+
+    let mut new_shape = Vec::with_capacity(rank);
+    for i in 0..rank {
+        let scaled = base_shape[i]
+            .checked_mul(factors[i])
+            .ok_or_else(|| anyhow!("repmat: requested output exceeds maximum size"))?;
+        new_shape.push(scaled);
+    }
+
+    let orig_total = checked_total(&base_shape)?;
+    ensure!(
+        orig_total == data.len() || (orig_total == 0 && data.is_empty()),
+        "repmat: internal shape mismatch (expected {} elements, found {})",
+        orig_total,
+        data.len()
+    );
+
+    let new_total = checked_total(&new_shape)?;
+    if new_total == 0 {
+        return Ok((Vec::new(), new_shape));
+    }
+
+    let strides = compute_strides(&base_shape);
+    let mut out = Vec::with_capacity(new_total);
+    for idx in 0..new_total {
+        let mut rem = idx;
+        let mut src_index = 0usize;
+        for dim in 0..rank {
+            let dim_size = new_shape[dim];
+            let coord = rem % dim_size;
+            rem /= dim_size;
+            let base = base_shape[dim];
+            let orig_coord = if base == 0 { 0 } else { coord % base };
+            src_index += orig_coord * strides[dim];
+        }
+        out.push(data[src_index]);
+    }
+    Ok((out, new_shape))
+}
+
+fn coerce_sub2ind_value(value: f64, dim_number: usize, dim_size: usize) -> Result<usize> {
+    if !value.is_finite() {
+        return Err(anyhow!(
+            "sub2ind: subscript in dimension {} must be finite",
+            dim_number
+        ));
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return Err(anyhow!(
+            "sub2ind: subscript in dimension {} must be an integer",
+            dim_number
+        ));
+    }
+    if rounded < 1.0 || rounded > dim_size as f64 {
+        return Err(anyhow!(
+            "sub2ind: subscript {} exceeds dimension {} (size {})",
+            rounded as isize,
+            dim_number,
+            dim_size
+        ));
+    }
+    Ok(rounded as usize)
 }
 
 fn identity_data(shape: &[usize]) -> Vec<f64> {
@@ -248,6 +671,36 @@ impl AccelProvider for InProcessProvider {
         }
     }
 
+    fn sort_rows(
+        &self,
+        handle: &GpuTensorHandle,
+        columns: &[SortRowsColumnSpec],
+        comparison: SortComparison,
+    ) -> Result<SortResult> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("sortrows: unknown buffer {}", handle.buffer_id))?
+        };
+        let SortRowsHostOutputs {
+            values,
+            indices,
+            indices_shape,
+        } = sort_rows_host(&data, &handle.shape, columns, comparison)?;
+        Ok(SortResult {
+            values: HostTensorOwned {
+                data: values,
+                shape: handle.shape.clone(),
+            },
+            indices: HostTensorOwned {
+                data: indices,
+                shape: indices_shape,
+            },
+        })
+    }
+
     fn diag_from_vector(&self, vector: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &vector.shape)?;
         let (rows, cols) = rows_cols(&vector.shape);
@@ -312,6 +765,30 @@ impl AccelProvider for InProcessProvider {
             device_id: 0,
             buffer_id: id,
         })
+    }
+
+    fn tril(&self, handle: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("tril: unknown tensor handle {}", handle.buffer_id))?
+        };
+        let masked = tril_data(&data, &handle.shape, offset)?;
+        Ok(self.allocate_tensor(masked, handle.shape.clone()))
+    }
+
+    fn triu(&self, handle: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("triu: unknown tensor handle {}", handle.buffer_id))?
+        };
+        let masked = triu_data(&data, &handle.shape, offset)?;
+        Ok(self.allocate_tensor(masked, handle.shape.clone()))
     }
 
     fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -881,6 +1358,106 @@ impl AccelProvider for InProcessProvider {
             buffer_id: id,
         })
     }
+    fn permute(&self, handle: &GpuTensorHandle, order: &[usize]) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .ok_or_else(|| anyhow!("permute: unknown tensor handle {}", handle.buffer_id))?
+                .clone()
+        };
+        let (permuted, new_shape) = permute_data(&data, &handle.shape, order)?;
+        Ok(self.allocate_tensor(permuted, new_shape))
+    }
+
+    fn flip(&self, handle: &GpuTensorHandle, axes: &[usize]) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .ok_or_else(|| anyhow!("flip: unknown tensor handle {}", handle.buffer_id))?
+                .clone()
+        };
+        let flipped = flip_data(&data, &handle.shape, axes)?;
+        Ok(self.allocate_tensor(flipped, handle.shape.clone()))
+    }
+
+    fn circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .ok_or_else(|| anyhow!("circshift: unknown tensor handle {}", handle.buffer_id))?
+                .clone()
+        };
+        let mut shape = handle.shape.clone();
+        if shifts.len() > shape.len() {
+            shape.extend(std::iter::repeat(1).take(shifts.len() - shape.len()));
+        }
+        let mut full_shifts = vec![0isize; shape.len()];
+        for (idx, &shift) in shifts.iter().enumerate() {
+            if idx < full_shifts.len() {
+                full_shifts[idx] = shift;
+            }
+        }
+        let rotated = circshift_data(&data, &shape, &full_shifts)?;
+        Ok(self.allocate_tensor(rotated, shape))
+    }
+
+    fn unique(&self, handle: &GpuTensorHandle, options: &UniqueOptions) -> Result<UniqueResult> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .ok_or_else(|| anyhow!("unique: unknown tensor handle {}", handle.buffer_id))?
+                .clone()
+        };
+        let tensor = Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("unique: {e}"))?;
+        unique::unique_numeric_from_tensor(tensor, options)
+            .and_then(|eval| eval.into_numeric_unique_result())
+            .map_err(|e| anyhow!("{e}"))
+    }
+
+    fn setdiff(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        options: &SetdiffOptions,
+    ) -> Result<SetdiffResult> {
+        let data_a = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("setdiff: unknown tensor handle {}", a.buffer_id))?
+        };
+        let data_b = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&b.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("setdiff: unknown tensor handle {}", b.buffer_id))?
+        };
+        let tensor_a = Tensor::new(data_a, a.shape.clone()).map_err(|e| anyhow!("setdiff: {e}"))?;
+        let tensor_b = Tensor::new(data_b, b.shape.clone()).map_err(|e| anyhow!("setdiff: {e}"))?;
+        runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
+            tensor_a, tensor_b, options,
+        )
+        .and_then(|eval| eval.into_numeric_setdiff_result())
+        .map_err(|e| anyhow!("setdiff: {e}"))
+    }
+
+    fn repmat(&self, handle: &GpuTensorHandle, reps: &[usize]) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .ok_or_else(|| anyhow!("repmat: unknown tensor handle {}", handle.buffer_id))?
+                .clone()
+        };
+        let (tiled, shape) = repmat_numeric(&data, &handle.shape, reps)?;
+        Ok(self.allocate_tensor(tiled, shape))
+    }
 
     fn reduce_sum(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let guard = registry().lock().unwrap();
@@ -1172,6 +1749,83 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn find(
+        &self,
+        a: &GpuTensorHandle,
+        limit: Option<usize>,
+        direction: FindDirection,
+    ) -> Result<ProviderFindResult> {
+        let shape = a.shape.clone();
+        let row_extent = shape.first().copied().unwrap_or(1).max(1);
+        let (indices, rows, cols, values) = {
+            let guard = registry().lock().unwrap();
+            let data = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let total = data.len();
+            let cap = match direction {
+                FindDirection::First => limit.unwrap_or(total),
+                FindDirection::Last => limit.unwrap_or(1),
+            }
+            .min(total);
+
+            let mut indices = Vec::new();
+            let mut rows_out = Vec::new();
+            let mut cols_out = Vec::new();
+            let mut values_out = Vec::new();
+
+            if cap == 0 || total == 0 {
+                (indices, rows_out, cols_out, values_out)
+            } else {
+                match direction {
+                    FindDirection::First => {
+                        for idx in 0..total {
+                            let value = data[idx];
+                            if value != 0.0 {
+                                indices.push((idx + 1) as f64);
+                                rows_out.push(((idx % row_extent) + 1) as f64);
+                                cols_out.push(((idx / row_extent) + 1) as f64);
+                                values_out.push(value);
+                                if indices.len() >= cap {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    FindDirection::Last => {
+                        for idx in (0..total).rev() {
+                            let value = data[idx];
+                            if value != 0.0 {
+                                indices.push((idx + 1) as f64);
+                                rows_out.push(((idx % row_extent) + 1) as f64);
+                                cols_out.push(((idx / row_extent) + 1) as f64);
+                                values_out.push(value);
+                                if indices.len() >= cap {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                (indices, rows_out, cols_out, values_out)
+            }
+        };
+
+        let count = indices.len();
+        let shape_out = vec![count, 1];
+        let linear = self.allocate_tensor(indices, shape_out.clone());
+        let rows_handle = self.allocate_tensor(rows, shape_out.clone());
+        let cols_handle = self.allocate_tensor(cols, shape_out.clone());
+        let values_handle = self.allocate_tensor(values, shape_out);
+
+        Ok(ProviderFindResult {
+            linear,
+            rows: rows_handle,
+            cols: cols_handle,
+            values: Some(values_handle),
+        })
+    }
+
     fn matmul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         // Only support 2D shapes for reference provider
         if a.shape.len() != 2 || b.shape.len() != 2 {
@@ -1206,6 +1860,87 @@ impl AccelProvider for InProcessProvider {
         guard2.insert(id, out);
         Ok(GpuTensorHandle {
             shape: vec![ar, bc],
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn sub2ind(
+        &self,
+        dims: &[usize],
+        strides: &[usize],
+        inputs: &[&GpuTensorHandle],
+        scalar_mask: &[bool],
+        len: usize,
+        output_shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        if inputs.len() != dims.len() || inputs.len() != scalar_mask.len() {
+            return Err(anyhow::anyhow!(
+                "sub2ind: expected {} subscripts for {} dimensions",
+                dims.len(),
+                dims.len()
+            ));
+        }
+        let expected_len: usize = output_shape.iter().copied().product();
+        if expected_len != len {
+            return Err(anyhow::anyhow!(
+                "sub2ind: output shape does not match subscript sizes"
+            ));
+        }
+        if len == 0 {
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            registry().lock().unwrap().insert(id, Vec::new());
+            return Ok(GpuTensorHandle {
+                shape: output_shape.to_vec(),
+                device_id: 0,
+                buffer_id: id,
+            });
+        }
+
+        let mut host_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
+        {
+            let guard = registry().lock().unwrap();
+            for handle in inputs {
+                let data = guard
+                    .get(&handle.buffer_id)
+                    .ok_or_else(|| anyhow::anyhow!("sub2ind: unknown buffer {}", handle.buffer_id))?
+                    .clone();
+                host_values.push(data);
+            }
+        }
+
+        let mut output = Vec::with_capacity(len);
+        for idx in 0..len {
+            let mut offset: usize = 0;
+            for (dim_index, ((&dim_size, &stride), data)) in dims
+                .iter()
+                .zip(strides.iter())
+                .zip(host_values.iter())
+                .enumerate()
+            {
+                let raw = if scalar_mask[dim_index] {
+                    *data.get(0).unwrap_or(&0.0)
+                } else {
+                    data[idx]
+                };
+                let coerced = coerce_sub2ind_value(raw, dim_index + 1, dim_size)?;
+                let term = coerced
+                    .checked_sub(1)
+                    .and_then(|base| base.checked_mul(stride))
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("sub2ind: computed index exceeds platform limits")
+                    })?;
+                offset = offset.checked_add(term).ok_or_else(|| {
+                    anyhow::anyhow!("sub2ind: computed index exceeds platform limits")
+                })?;
+            }
+            output.push((offset + 1) as f64);
+        }
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, output);
+        Ok(GpuTensorHandle {
+            shape: output_shape.to_vec(),
             device_id: 0,
             buffer_id: id,
         })

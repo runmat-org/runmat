@@ -6,6 +6,7 @@
 pub mod gpu_helpers;
 pub mod random;
 pub mod random_args;
+pub mod shape;
 pub mod spec;
 pub mod tensor;
 

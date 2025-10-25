@@ -381,7 +381,8 @@ struct RandomScalarParams {
 
 const LCG_MULT: u32 = 1664525u;
 const LCG_INC: u32 = 1013904223u;
-const INV_POW53: f64 = 1.0 / 9007199254740992.0;
+const INV_U32: f32 = 1.0 / 4294967296.0;
+const ALMOST_ONE: f32 = 0.99999994;
 
 fn lcg_next(state: ptr<function, u32>) -> u32 {
     let x = (*state) * LCG_MULT + LCG_INC;
@@ -390,10 +391,9 @@ fn lcg_next(state: ptr<function, u32>) -> u32 {
 }
 
 fn uniform_f32(state: ptr<function, u32>) -> f32 {
-    let hi = lcg_next(state) >> 5u;
-    let lo = lcg_next(state) >> 6u;
-    let combined = f64(hi) * 67108864.0 + f64(lo);
-    return f32(combined * INV_POW53);
+    let bits = lcg_next(state);
+    let sample = (f32(bits) + 0.5) * INV_U32;
+    return min(sample, ALMOST_ONE);
 }
 
 @compute @workgroup_size(256)
@@ -404,10 +404,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let global_idx = params.offset + idx;
     var state = (params.seed ^ global_idx) | 1u;
-    var u = uniform_f32(&state);
-    if u >= f32(1.0) {
-        u = f32(0.99999994);
-    }
+    let u = uniform_f32(&state);
     Out.data[global_idx] = u;
 }
 "#;
@@ -483,9 +480,10 @@ struct RandomScalarParams {
 
 const LCG_MULT: u32 = 1664525u;
 const LCG_INC: u32 = 1013904223u;
-const INV_POW53: f64 = 1.0 / 9007199254740992.0;
+const INV_U32: f32 = 1.0 / 4294967296.0;
 const TWO_PI: f32 = 6.2831855;
 const MIN_UNIFORM: f32 = 1.0e-8;
+const ALMOST_ONE: f32 = 0.99999994;
 
 fn lcg_next(state: ptr<function, u32>) -> u32 {
     let x = (*state) * LCG_MULT + LCG_INC;
@@ -494,10 +492,9 @@ fn lcg_next(state: ptr<function, u32>) -> u32 {
 }
 
 fn uniform_f32(state: ptr<function, u32>) -> f32 {
-    let hi = lcg_next(state) >> 5u;
-    let lo = lcg_next(state) >> 6u;
-    let combined = f64(hi) * 67108864.0 + f64(lo);
-    return f32(combined * INV_POW53);
+    let bits = lcg_next(state);
+    let sample = (f32(bits) + 0.5) * INV_U32;
+    return clamp(sample, MIN_UNIFORM, ALMOST_ONE);
 }
 
 @compute @workgroup_size(256)
@@ -508,10 +505,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let global_idx = params.offset + idx;
     var state = (params.seed ^ global_idx) | 1u;
-    var u1 = uniform_f32(&state);
-    if u1 <= MIN_UNIFORM {
-        u1 = MIN_UNIFORM;
-    }
+    let u1 = uniform_f32(&state);
     let u2 = uniform_f32(&state);
     let radius = sqrt(-2.0 * log(u1));
     let angle = TWO_PI * u2;
@@ -637,6 +631,7 @@ struct RandPermParams {
 };
 
 const ALMOST_ONE: f32 = 0.99999994;
+const INV_U32: f32 = 1.0 / 4294967296.0;
 
 fn lcg_next(state: ptr<function, u32>) -> u32 {
     let next = (*state) * 1664525u + 1013904223u;
@@ -645,10 +640,12 @@ fn lcg_next(state: ptr<function, u32>) -> u32 {
 }
 
 fn uniform_f32(state: ptr<function, u32>) -> f32 {
-    let hi = lcg_next(state) >> 5u;
-    let lo = lcg_next(state) >> 6u;
-    let combined = f64(hi) * 67108864.0 + f64(lo);
-    return f32(combined * (1.0 / 9007199254740992.0));
+    let bits = lcg_next(state);
+    let sample = (f32(bits) + 0.5) * INV_U32;
+    if sample >= 1.0 {
+        return ALMOST_ONE;
+    }
+    return sample;
 }
 
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;

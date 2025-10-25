@@ -18,6 +18,7 @@ pub mod fusion_residency;
 pub mod graph;
 pub mod native_auto;
 pub mod simple_provider;
+mod sortrows_host;
 pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{

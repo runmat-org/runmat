@@ -2661,66 +2661,223 @@ pub fn interpret_with_vars(
                 args.reverse();
                 // Special-case for 'find' to support [i,j,v] = find(A)
                 if name == "find" && !args.is_empty() {
-                    match &args[0] {
-                        Value::Tensor(t) => {
-                            let rows = *t.shape.first().unwrap_or(&1);
-                            let _cols = *t.shape.get(1).unwrap_or(&1);
-                            let mut lin_idx: Vec<usize> = Vec::new();
-                            for (k, &v) in t.data.iter().enumerate() {
-                                if v != 0.0 {
-                                    lin_idx.push(k + 1);
-                                }
-                            }
-                            if out_count <= 1 {
-                                let data: Vec<f64> = lin_idx.iter().map(|&k| k as f64).collect();
-                                let tens =
-                                    runmat_builtins::Tensor::new(data, vec![lin_idx.len(), 1])
-                                        .map_err(|e| format!("find: {e}"))?;
-                                stack.push(Value::Tensor(tens));
-                                for _ in 1..out_count {
-                                    stack.push(Value::Num(0.0));
-                                }
-                            } else {
-                                let mut rows_out: Vec<f64> = Vec::with_capacity(lin_idx.len());
-                                let mut cols_out: Vec<f64> = Vec::with_capacity(lin_idx.len());
-                                for &k in &lin_idx {
-                                    let k0 = k - 1;
-                                    let r = (k0 % rows) + 1;
-                                    let c = (k0 / rows) + 1;
-                                    rows_out.push(r as f64);
-                                    cols_out.push(c as f64);
-                                }
-                                let r_t =
-                                    runmat_builtins::Tensor::new(rows_out, vec![lin_idx.len(), 1])
-                                        .map_err(|e| format!("find: {e}"))?;
-                                let c_t =
-                                    runmat_builtins::Tensor::new(cols_out, vec![lin_idx.len(), 1])
-                                        .map_err(|e| format!("find: {e}"))?;
-                                stack.push(Value::Tensor(r_t));
-                                if out_count >= 2 {
-                                    stack.push(Value::Tensor(c_t));
-                                }
-                                if out_count >= 3 {
-                                    let mut vals: Vec<f64> = Vec::with_capacity(lin_idx.len());
-                                    for &k in &lin_idx {
-                                        vals.push(t.data[k - 1]);
-                                    }
-                                    let v_t =
-                                        runmat_builtins::Tensor::new(vals, vec![lin_idx.len(), 1])
-                                            .map_err(|e| format!("find: {e}"))?;
-                                    stack.push(Value::Tensor(v_t));
-                                }
-                                // pad beyond 3 if requested
-                                if out_count > 3 {
-                                    for _ in 3..out_count {
-                                        stack.push(Value::Num(0.0));
-                                    }
-                                }
-                            }
-                            continue;
-                        }
-                        _ => { /* fallthrough to generic */ }
+                    let eval = match runmat_runtime::builtins::array::indexing::find::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
                     }
+                    if out_count <= 1 {
+                        let linear = match eval.linear_value() {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(linear);
+                        for _ in 1..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    } else {
+                        let rows = match eval.row_value() {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(rows);
+                        let cols = match eval.column_value() {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(cols);
+                        if out_count >= 3 {
+                            let vals = match eval.values_value() {
+                                Ok(v) => v,
+                                Err(err) => vm_bail!(err),
+                            };
+                            stack.push(vals);
+                        }
+                        if out_count > 3 {
+                            for _ in 3..out_count {
+                                stack.push(Value::Num(0.0));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if name == "sort" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::array::sorting_sets::sort::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (sorted, indices) = eval.into_values();
+                    stack.push(sorted);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "sortrows" && !args.is_empty() {
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::sortrows::evaluate(
+                            args[0].clone(),
+                            &args[1..],
+                        ) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (sorted, indices) = eval.into_values();
+                    stack.push(sorted);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "ismember" && args.len() >= 2 {
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::ismember::evaluate(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        ) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_mask_value());
+                        continue;
+                    }
+                    let (mask, loc) = eval.into_pair();
+                    stack.push(mask);
+                    stack.push(loc);
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "intersect" && args.len() >= 2 {
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::intersect::evaluate(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        ) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_values_value());
+                        continue;
+                    }
+                    if out_count == 2 {
+                        let (values, ia) = eval.into_pair();
+                        stack.push(values);
+                        stack.push(ia);
+                        continue;
+                    }
+                    let (values, ia, ib) = eval.into_triple();
+                    stack.push(values);
+                    stack.push(ia);
+                    stack.push(ib);
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "union" && args.len() >= 2 {
+                    let eval = match runmat_runtime::builtins::array::sorting_sets::union::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        &args[2..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_values_value());
+                        continue;
+                    }
+                    if out_count == 2 {
+                        let (values, ia) = eval.into_pair();
+                        stack.push(values);
+                        stack.push(ia);
+                        continue;
+                    }
+                    let (values, ia, ib) = eval.into_triple();
+                    stack.push(values);
+                    stack.push(ia);
+                    stack.push(ib);
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "unique" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::array::sorting_sets::unique::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_values_value());
+                        continue;
+                    }
+                    if out_count == 2 {
+                        let (values, ia) = eval.into_pair();
+                        stack.push(values);
+                        stack.push(ia);
+                        continue;
+                    }
+                    let (values, ia, ic) = eval.into_triple();
+                    stack.push(values);
+                    stack.push(ia);
+                    stack.push(ic);
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
                 }
                 match call_builtin(&name, &args) {
                     Ok(v) => match v {

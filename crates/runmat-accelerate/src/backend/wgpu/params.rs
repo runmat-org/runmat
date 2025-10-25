@@ -40,6 +40,79 @@ pub struct FusionParams {
     pub _pad2: u32,
 }
 
+pub const PERMUTE_MAX_RANK: usize = 8;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PermuteParams {
+    pub len: u32,
+    pub offset: u32,
+    pub rank: u32,
+    pub _pad: u32,
+    pub src_shape: [u32; PERMUTE_MAX_RANK],
+    pub dst_shape: [u32; PERMUTE_MAX_RANK],
+    pub order: [u32; PERMUTE_MAX_RANK],
+    pub src_strides: [u32; PERMUTE_MAX_RANK],
+}
+
+pub const FLIP_MAX_RANK: usize = PERMUTE_MAX_RANK;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FlipParams {
+    pub len: u32,
+    pub offset: u32,
+    pub rank: u32,
+    pub _pad: u32,
+    pub shape: [u32; FLIP_MAX_RANK],
+    pub strides: [u32; FLIP_MAX_RANK],
+    pub flags: [u32; FLIP_MAX_RANK],
+}
+
+pub const CIRCSHIFT_MAX_RANK: usize = PERMUTE_MAX_RANK;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CircshiftParams {
+    pub len: u32,
+    pub offset: u32,
+    pub rank: u32,
+    pub _pad: u32,
+    pub shape: [u32; CIRCSHIFT_MAX_RANK],
+    pub strides: [u32; CIRCSHIFT_MAX_RANK],
+    pub shifts: [u32; CIRCSHIFT_MAX_RANK],
+}
+
+pub const REPMAT_MAX_RANK: usize = PERMUTE_MAX_RANK;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RepmatParams {
+    pub len: u32,
+    pub offset: u32,
+    pub rank: u32,
+    pub _pad: u32,
+    pub base_shape: [u32; REPMAT_MAX_RANK],
+    pub new_shape: [u32; REPMAT_MAX_RANK],
+    pub base_strides: [u32; REPMAT_MAX_RANK],
+}
+
+pub const KRON_MAX_RANK: usize = PERMUTE_MAX_RANK;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct KronParams {
+    pub len: u32,
+    pub offset: u32,
+    pub rank: u32,
+    pub _pad: u32,
+    pub shape_a: [u32; KRON_MAX_RANK],
+    pub shape_b: [u32; KRON_MAX_RANK],
+    pub shape_out: [u32; KRON_MAX_RANK],
+    pub stride_a: [u32; KRON_MAX_RANK],
+    pub stride_b: [u32; KRON_MAX_RANK],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct TransposeParams {
@@ -193,4 +266,43 @@ pub struct RandPermParams {
     pub k: u32,
     pub seed: u32,
     pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FindParams {
+    pub len: u32,
+    pub limit: u32,
+    pub rows: u32,
+    pub direction: u32,
+    pub include_values: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct TrilParams {
+    pub len: u32,
+    pub start: u32,
+    pub rows: u32,
+    pub cols: u32,
+    pub plane: u32,
+    pub diag_offset: i32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct TriuParams {
+    pub len: u32,
+    pub start: u32,
+    pub rows: u32,
+    pub cols: u32,
+    pub plane: u32,
+    pub diag_offset: i32,
+    pub _pad0: u32,
+    pub _pad1: u32,
 }

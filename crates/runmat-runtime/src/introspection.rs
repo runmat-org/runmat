@@ -1,100 +1,15 @@
+use crate::builtins::common::shape::{value_ndims, value_numel};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-fn tensor_from_dims(dims: Vec<usize>) -> Result<Value, String> {
-    // Return as a 1xN row vector (double)
-    let len = dims.len();
-    let data: Vec<f64> = dims.into_iter().map(|d| d as f64).collect();
-    Ok(Value::Tensor(Tensor::new_2d(data, 1, len)?))
-}
-
-fn dims_of_value(v: &Value) -> Vec<usize> {
-    match v {
-        Value::Tensor(t) => {
-            if t.shape.is_empty() {
-                vec![1, 1]
-            } else if t.shape.len() == 1 {
-                vec![1, t.shape[0]]
-            } else {
-                t.shape.clone()
-            }
-        }
-        Value::LogicalArray(la) => {
-            if la.shape.is_empty() {
-                vec![1, 1]
-            } else if la.shape.len() == 1 {
-                vec![1, la.shape[0]]
-            } else {
-                la.shape.clone()
-            }
-        }
-        Value::StringArray(sa) => {
-            if sa.shape.is_empty() {
-                vec![1, 1]
-            } else if sa.shape.len() == 1 {
-                vec![1, sa.shape[0]]
-            } else {
-                sa.shape.clone()
-            }
-        }
-        Value::CharArray(ca) => vec![ca.rows, ca.cols],
-        // Scalars and other values treated as 1x1
-        _ => vec![1, 1],
-    }
-}
-
-fn numel_of_value(v: &Value) -> usize {
-    match v {
-        Value::Tensor(t) => t.data.len(),
-        Value::LogicalArray(la) => la.data.len(),
-        Value::StringArray(sa) => sa.data.len(),
-        Value::CharArray(ca) => ca.rows * ca.cols,
-        Value::Cell(ca) => ca.data.len(),
-        // Scalars and objects
-        _ => 1,
-    }
-}
-
-fn ndims_of_value(v: &Value) -> usize {
-    let dims = dims_of_value(v);
-    // The MATLAB language returns at least 2 for arrays/scalars
-    if dims.len() < 2 {
-        2
-    } else {
-        dims.len()
-    }
-}
-
-#[runtime_builtin(name = "size")]
-fn size_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
-    if rest.is_empty() {
-        let dims = dims_of_value(&a);
-        return tensor_from_dims(dims);
-    }
-    let mut dims = dims_of_value(&a);
-    let dim: f64 = (&rest[0]).try_into()?;
-    let d = if dim < 1.0 { 1usize } else { dim as usize };
-    if dims.len() < 2 {
-        dims.resize(2, 1);
-    }
-    let out = if d == 0 {
-        1.0
-    } else if d <= dims.len() {
-        dims[d - 1] as f64
-    } else {
-        1.0
-    };
-    Ok(Value::Num(out))
-}
-
 #[runtime_builtin(name = "numel")]
 fn numel_builtin(a: Value) -> Result<f64, String> {
-    Ok(numel_of_value(&a) as f64)
+    Ok(value_numel(&a) as f64)
 }
 
 #[runtime_builtin(name = "ndims")]
 fn ndims_builtin(a: Value) -> Result<f64, String> {
-    Ok(ndims_of_value(&a) as f64)
+    Ok(value_ndims(&a) as f64)
 }
 
 #[runtime_builtin(name = "isempty")]
@@ -265,52 +180,4 @@ fn strcmpi_builtin(a: Value, b: Value) -> Result<bool, String> {
     let sb = extract_scalar_string(&b)
         .ok_or_else(|| "strcmpi: expected string/char scalar inputs".to_string())?;
     Ok(sa.eq_ignore_ascii_case(&sb))
-}
-
-fn set_from_strings(v: &Value) -> Result<Vec<String>, String> {
-    match v {
-        Value::StringArray(sa) => Ok(sa.data.clone()),
-        Value::Cell(ca) => {
-            let mut out = Vec::new();
-            for p in &ca.data {
-                let elem = &**p;
-                if let Some(s) = extract_scalar_string(elem) {
-                    out.push(s);
-                }
-            }
-            Ok(out)
-        }
-        Value::String(s) => Ok(vec![s.clone()]),
-        Value::CharArray(ca) => Ok(vec![ca.data.iter().collect()]),
-        _ => Err("ismember: expected set to be string array or cell of strings".to_string()),
-    }
-}
-
-#[runtime_builtin(name = "ismember")]
-fn ismember_strings(a: Value, set: Value) -> Result<Value, String> {
-    let set_vec = set_from_strings(&set)?;
-    match a {
-        Value::String(s) => Ok(Value::Bool(set_vec.iter().any(|x| x == &s))),
-        Value::CharArray(ca) => {
-            let s: String = ca.data.iter().collect();
-            Ok(Value::Bool(set_vec.iter().any(|x| x == &s)))
-        }
-        Value::StringArray(sa) => {
-            let mask: Vec<f64> = sa
-                .data
-                .iter()
-                .map(|s| {
-                    if set_vec.iter().any(|x| x == s) {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                })
-                .collect();
-            // Return a row vector 1xN
-            let out = Tensor::new_2d(mask, 1, sa.data.len())?;
-            Ok(Value::Tensor(out))
-        }
-        _ => Err("ismember: expected string or string array as first argument".to_string()),
-    }
 }

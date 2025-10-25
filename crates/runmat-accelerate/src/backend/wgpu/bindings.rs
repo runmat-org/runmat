@@ -70,6 +70,58 @@ pub fn build_bgl_for_layout_tag(device: &wgpu::Device, tag: &str) -> Option<wgpu
                 }),
             );
         }
+        "runmat-repmat-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-repmat-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-flip-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-flip-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-tril-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-tril-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-triu-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-triu-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
         _ => {}
     }
     None
@@ -109,5 +161,33 @@ pub fn build_scatter_row_bgl(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             storage_read_write_entry(2),
             uniform_entry(3),
         ],
+    })
+}
+
+pub fn build_sub2ind_bgl(device: &wgpu::Device, n_inputs: usize) -> wgpu::BindGroupLayout {
+    let mut entries = Vec::with_capacity(n_inputs + 3);
+    for i in 0..n_inputs {
+        entries.push(storage_read_entry(i as u32));
+    }
+    entries.push(storage_read_write_entry(n_inputs as u32));
+    entries.push(storage_read_write_entry((n_inputs + 1) as u32));
+    entries.push(uniform_entry((n_inputs + 2) as u32));
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("runmat-sub2ind-bgl"),
+        entries: &entries,
+    })
+}
+
+pub fn build_ind2sub_bgl(device: &wgpu::Device, n_outputs: usize) -> wgpu::BindGroupLayout {
+    let mut entries = Vec::with_capacity(n_outputs + 3);
+    entries.push(storage_read_entry(0));
+    for i in 0..n_outputs {
+        entries.push(storage_read_write_entry((i + 1) as u32));
+    }
+    entries.push(storage_read_write_entry((n_outputs + 1) as u32));
+    entries.push(uniform_entry((n_outputs + 2) as u32));
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("runmat-ind2sub-bgl"),
+        entries: &entries,
     })
 }

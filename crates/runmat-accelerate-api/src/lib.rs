@@ -44,9 +44,144 @@ pub struct ReduceDimResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FindDirection {
+    First,
+    Last,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderFindResult {
+    pub linear: GpuTensorHandle,
+    pub rows: GpuTensorHandle,
+    pub cols: GpuTensorHandle,
+    pub values: Option<GpuTensorHandle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderPrecision {
     F32,
     F64,
+}
+
+/// Sort direction used by acceleration providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SortOrder {
+    Ascend,
+    Descend,
+}
+
+/// Comparison strategy applied during sorting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SortComparison {
+    Auto,
+    Real,
+    Abs,
+}
+
+/// Host-resident outputs returned by provider-backed sort operations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SortResult {
+    pub values: HostTensorOwned,
+    pub indices: HostTensorOwned,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SortRowsColumnSpec {
+    pub index: usize,
+    pub order: SortOrder,
+}
+
+/// Ordering applied by provider-backed `unique` operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UniqueOrder {
+    Sorted,
+    Stable,
+}
+
+/// Occurrence selection for provider-backed `unique` operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UniqueOccurrence {
+    First,
+    Last,
+}
+
+/// Options controlling provider-backed `unique` operations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UniqueOptions {
+    pub rows: bool,
+    pub order: UniqueOrder,
+    pub occurrence: UniqueOccurrence,
+}
+
+/// Host-resident outputs returned by provider-backed `unique` operations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UniqueResult {
+    pub values: HostTensorOwned,
+    pub ia: HostTensorOwned,
+    pub ic: HostTensorOwned,
+}
+
+/// Ordering applied by provider-backed `union` operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UnionOrder {
+    Sorted,
+    Stable,
+}
+
+/// Options controlling provider-backed `union` operations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnionOptions {
+    pub rows: bool,
+    pub order: UnionOrder,
+}
+
+/// Host-resident outputs returned by provider-backed `union` operations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnionResult {
+    pub values: HostTensorOwned,
+    pub ia: HostTensorOwned,
+    pub ib: HostTensorOwned,
+}
+
+/// Ordering applied by provider-backed `setdiff` operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SetdiffOrder {
+    Sorted,
+    Stable,
+}
+
+/// Options controlling provider-backed `setdiff` operations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetdiffOptions {
+    pub rows: bool,
+    pub order: SetdiffOrder,
+}
+
+/// Host-resident outputs returned by provider-backed `setdiff` operations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetdiffResult {
+    pub values: HostTensorOwned,
+    pub ia: HostTensorOwned,
+}
+
+/// Options controlling provider-backed `ismember` operations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IsMemberOptions {
+    pub rows: bool,
+}
+
+/// Host-resident logical output returned by providers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HostLogicalOwned {
+    pub data: Vec<u8>,
+    pub shape: Vec<usize>,
+}
+
+/// Host-resident outputs returned by provider-backed `ismember` operations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IsMemberResult {
+    pub mask: HostLogicalOwned,
+    pub loc: HostTensorOwned,
 }
 
 /// Device/provider interface that backends implement and register into the runtime layer
@@ -164,6 +299,16 @@ pub trait AccelProvider: Send + Sync {
         _offset: isize,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("diag_extract not supported by provider"))
+    }
+
+    /// Apply a lower-triangular mask to the first two dimensions of a tensor.
+    fn tril(&self, _matrix: &GpuTensorHandle, _offset: isize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow!("tril not supported by provider"))
+    }
+
+    /// Apply an upper-triangular mask to the first two dimensions of a tensor.
+    fn triu(&self, _matrix: &GpuTensorHandle, _offset: isize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow!("triu not supported by provider"))
     }
 
     /// Allocate a tensor filled with random values drawn from U(0, 1).
@@ -294,6 +439,23 @@ pub trait AccelProvider: Send + Sync {
     fn scalar_div(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scalar_div not supported by provider"))
     }
+    fn sort_dim(
+        &self,
+        _a: &GpuTensorHandle,
+        _dim: usize,
+        _order: SortOrder,
+        _comparison: SortComparison,
+    ) -> anyhow::Result<SortResult> {
+        Err(anyhow::anyhow!("sort_dim not supported by provider"))
+    }
+    fn sort_rows(
+        &self,
+        _a: &GpuTensorHandle,
+        _columns: &[SortRowsColumnSpec],
+        _comparison: SortComparison,
+    ) -> anyhow::Result<SortResult> {
+        Err(anyhow::anyhow!("sort_rows not supported by provider"))
+    }
     fn matmul(
         &self,
         _a: &GpuTensorHandle,
@@ -303,6 +465,79 @@ pub trait AccelProvider: Send + Sync {
     }
     fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("transpose not supported by provider"))
+    }
+    /// Reorder tensor dimensions according to `order`, expressed as zero-based indices.
+    fn permute(
+        &self,
+        _handle: &GpuTensorHandle,
+        _order: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("permute not supported by provider"))
+    }
+    fn flip(&self, _handle: &GpuTensorHandle, _axes: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("flip not supported by provider"))
+    }
+    fn circshift(
+        &self,
+        _handle: &GpuTensorHandle,
+        _shifts: &[isize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("circshift not supported by provider"))
+    }
+    fn unique(
+        &self,
+        _handle: &GpuTensorHandle,
+        _options: &UniqueOptions,
+    ) -> anyhow::Result<UniqueResult> {
+        Err(anyhow::anyhow!("unique not supported by provider"))
+    }
+    fn union(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+        _options: &UnionOptions,
+    ) -> anyhow::Result<UnionResult> {
+        Err(anyhow::anyhow!("union not supported by provider"))
+    }
+    fn setdiff(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+        _options: &SetdiffOptions,
+    ) -> anyhow::Result<SetdiffResult> {
+        Err(anyhow::anyhow!("setdiff not supported by provider"))
+    }
+    fn ismember(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+        _options: &IsMemberOptions,
+    ) -> anyhow::Result<IsMemberResult> {
+        Err(anyhow::anyhow!("ismember not supported by provider"))
+    }
+    fn reshape(
+        &self,
+        handle: &GpuTensorHandle,
+        new_shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let mut updated = handle.clone();
+        updated.shape = new_shape.to_vec();
+        Ok(updated)
+    }
+    /// Concatenate the provided tensors along the 1-based dimension `dim`.
+    fn cat(&self, _dim: usize, _inputs: &[GpuTensorHandle]) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cat not supported by provider"))
+    }
+    fn repmat(
+        &self,
+        _handle: &GpuTensorHandle,
+        _reps: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("repmat not supported by provider"))
+    }
+    /// Compute the Kronecker product of two tensors, matching MATLAB semantics.
+    fn kron(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("kron not supported by provider"))
     }
     fn reduce_sum(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_sum not supported by provider"))
@@ -331,6 +566,15 @@ pub trait AccelProvider: Send + Sync {
     }
     fn reduce_max_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<ReduceDimResult> {
         Err(anyhow::anyhow!("reduce_max_dim not supported by provider"))
+    }
+
+    fn find(
+        &self,
+        _a: &GpuTensorHandle,
+        _limit: Option<usize>,
+        _direction: FindDirection,
+    ) -> anyhow::Result<ProviderFindResult> {
+        Err(anyhow::anyhow!("find not supported by provider"))
     }
 
     fn fused_elementwise(
@@ -406,6 +650,36 @@ pub trait AccelProvider: Send + Sync {
         _values: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scatter_row not supported by provider"))
+    }
+
+    fn sub2ind(
+        &self,
+        _dims: &[usize],
+        _strides: &[usize],
+        _inputs: &[&GpuTensorHandle],
+        _scalar_mask: &[bool],
+        _len: usize,
+        _output_shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("sub2ind not supported by provider"))
+    }
+
+    /// Returns true if the provider offers a device-side `ind2sub` implementation.
+    fn supports_ind2sub(&self) -> bool {
+        false
+    }
+
+    /// Convert linear indices into per-dimension subscripts on the device.
+    fn ind2sub(
+        &self,
+        _dims: &[usize],
+        _strides: &[usize],
+        _indices: &GpuTensorHandle,
+        _total: usize,
+        _len: usize,
+        _output_shape: &[usize],
+    ) -> anyhow::Result<Vec<GpuTensorHandle>> {
+        Err(anyhow::anyhow!("ind2sub not supported by provider"))
     }
 }
 
