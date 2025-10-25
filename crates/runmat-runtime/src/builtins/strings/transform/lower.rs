@@ -1,0 +1,457 @@
+//! MATLAB-compatible `lower` builtin with GPU-aware semantics for RunMat.
+
+use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_macros::runtime_builtin;
+
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+};
+use crate::builtins::strings::common::{char_row_to_string_slice, lowercase_preserving_missing};
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
+use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+
+#[cfg(feature = "doc_export")]
+pub const DOC_MD: &str = r#"---
+title: "lower"
+category: "strings/transform"
+keywords: ["lower", "lowercase", "convert to lowercase", "string case", "character arrays"]
+summary: "Convert strings, character arrays, and cell arrays of character vectors to lowercase."
+references:
+  - https://www.mathworks.com/help/matlab/ref/lower.html
+gpu_support:
+  elementwise: false
+  reduction: false
+  precisions: []
+  broadcasting: "none"
+  notes: "Runs on the CPU; if any element lives on the GPU, RunMat gathers it before converting."
+fusion:
+  elementwise: false
+  reduction: false
+  max_inputs: 1
+  constants: "inline"
+requires_feature: null
+tested:
+  unit: "builtins::strings::transform::lower::tests"
+  integration: "builtins::strings::transform::lower::tests::lower_cell_array_mixed_content"
+---
+
+# What does the `lower` function do in MATLAB / RunMat?
+`lower(text)` converts every alphabetic character in `text` to lowercase. It accepts string scalars,
+string arrays, character arrays, and cell arrays of character vectors, mirroring MATLAB behaviour.
+Non-alphabetic characters are returned unchanged.
+
+## How does the `lower` function behave in MATLAB / RunMat?
+- String inputs stay as strings. String arrays preserve their size, orientation, and missing values.
+- Character arrays are processed row by row. The result remains a rectangular char array; if any row
+  grows after lowercasing (for example because `'İ'` expands), the array widens and shorter rows are padded with spaces.
+- Cell arrays must contain string scalars or character vectors. The result is a cell array of the same size
+  with each element converted to lowercase, and other types raise MATLAB-compatible errors.
+- Missing string scalars (`string(missing)`) remain missing and are returned as `<missing>`.
+- Inputs that are numeric, logical, structs, or GPU tensors raise MATLAB-compatible type errors.
+
+## `lower` Function GPU Execution Behaviour
+`lower` executes on the CPU. When the input (or any nested element) resides on the GPU, RunMat gathers it
+to host memory before performing the conversion so results remain identical to MATLAB. Providers do not
+need to implement custom kernels for this builtin.
+
+## GPU residency in RunMat (Do I need `gpuArray`?)
+RunMat automatically keeps string data on the host for now. If text originates from GPU-based computations
+(for example as numeric code points stored on the device), `lower` gathers those values before applying the
+transformation, so you never need to call `gpuArray` explicitly for this builtin.
+
+## Examples of using the `lower` function in MATLAB / RunMat
+
+### Convert A String Scalar To Lowercase
+```matlab
+txt = "RunMat";
+result = lower(txt);
+```
+Expected output:
+```matlab
+result = "runmat"
+```
+
+### Lowercase Each Element Of A String Array
+```matlab
+labels = ["NORTH" "South"; "EaSt" "WEST"];
+lowered = lower(labels);
+```
+Expected output:
+```matlab
+lowered = 2×2 string
+    "north"    "south"
+    "east"     "west"
+```
+
+### Lowercase Character Array Rows While Preserving Shape
+```matlab
+animals = char("CAT", "DOGE");
+result = lower(animals);
+```
+Expected output:
+```matlab
+result =
+
+  2×4 char array
+
+    'cat '
+    'doge'
+```
+
+### Lowercase A Cell Array Of Character Vectors
+```matlab
+C = {'HELLO', 'World'};
+out = lower(C);
+```
+Expected output:
+```matlab
+out = 1×2 cell array
+    {'hello'}    {'world'}
+```
+
+### Keep Missing Strings As Missing
+```matlab
+vals = string(["DATA" "<missing>" "GPU"]);
+converted = lower(vals);
+```
+Expected output:
+```matlab
+converted = 1×3 string
+    "data"    <missing>    "gpu"
+```
+
+### Lowercase Text Stored On A GPU Input
+```matlab
+codes = gpuArray(uint16('RUNMAT'));
+txt = char(gather(codes));
+result = lower(txt);
+```
+Expected output:
+```matlab
+result = 'runmat'
+```
+
+## FAQ
+
+### Does `lower` change non-alphabetic characters?
+No. Digits, punctuation, whitespace, and symbols remain untouched. Only alphabetic code points that have
+distinct lowercase forms are converted.
+
+### What happens to character array dimensions?
+RunMat lowers each row independently and pads with spaces when a lowercase mapping increases the row length.
+This mirrors MATLAB’s behaviour so the result always has rectangular dimensions.
+
+### Can I pass numeric arrays to `lower`?
+No. Passing numeric, logical, or struct inputs raises a MATLAB-compatible error. Convert the data to a string
+or character array first (for example with `string` or `char`).
+
+### How are missing strings handled?
+Missing string scalars remain `<missing>` and are returned unchanged. This matches MATLAB’s handling of
+missing values in text processing functions.
+
+### Will `lower` ever execute on the GPU?
+Not today. The builtin gathers GPU-resident data automatically and performs the conversion on the CPU so the
+results match MATLAB exactly. Providers may add device-side kernels in the future, but the behaviour will stay
+compatible.
+
+## See Also
+[upper](./upper), [string](../core/string), [char](../core/char), [regexprep](../regex/regexprep), [strcmpi](../search/strcmpi)
+
+## Source & Feedback
+- Implementation: [`crates/runmat-runtime/src/builtins/strings/transform/lower.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/lower.rs)
+- Found an issue? Please [open a GitHub issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
+"#;
+
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "lower",
+    op_kind: GpuOpKind::Custom("string-transform"),
+    supported_precisions: &[],
+    broadcast: BroadcastSemantics::None,
+    provider_hooks: &[],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::GatherImmediately,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes:
+        "Executes on the CPU; GPU-resident inputs are gathered to host memory before conversion.",
+};
+
+register_builtin_gpu_spec!(GPU_SPEC);
+
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "lower",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
+};
+
+register_builtin_fusion_spec!(FUSION_SPEC);
+
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("lower", DOC_MD);
+
+const ARG_TYPE_ERROR: &str =
+    "lower: first argument must be a string array, character array, or cell array of character vectors";
+const CELL_ELEMENT_ERROR: &str =
+    "lower: cell array elements must be string scalars or character vectors";
+
+#[runtime_builtin(
+    name = "lower",
+    category = "strings/transform",
+    summary = "Convert strings, character arrays, and cell arrays of character vectors to lowercase.",
+    keywords = "lower,lowercase,strings,character array,text",
+    accel = "sink"
+)]
+fn lower_builtin(value: Value) -> Result<Value, String> {
+    let gathered = gather_if_needed(&value).map_err(|e| format!("lower: {e}"))?;
+    match gathered {
+        Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text))),
+        Value::StringArray(array) => lower_string_array(array),
+        Value::CharArray(array) => lower_char_array(array),
+        Value::Cell(cell) => lower_cell_array(cell),
+        _ => Err(ARG_TYPE_ERROR.to_string()),
+    }
+}
+
+fn lower_string_array(array: StringArray) -> Result<Value, String> {
+    let StringArray { data, shape, .. } = array;
+    let lowered = data
+        .into_iter()
+        .map(lowercase_preserving_missing)
+        .collect::<Vec<_>>();
+    let lowered_array = StringArray::new(lowered, shape).map_err(|e| format!("lower: {e}"))?;
+    Ok(Value::StringArray(lowered_array))
+}
+
+fn lower_char_array(array: CharArray) -> Result<Value, String> {
+    let CharArray { data, rows, cols } = array;
+    if rows == 0 || cols == 0 {
+        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+    }
+
+    let mut lowered_rows = Vec::with_capacity(rows);
+    let mut target_cols = cols;
+    for row in 0..rows {
+        let text = char_row_to_string_slice(&data, cols, row).to_lowercase();
+        let len = text.chars().count();
+        target_cols = target_cols.max(len);
+        lowered_rows.push(text);
+    }
+
+    let mut lowered_data = Vec::with_capacity(rows * target_cols);
+    for row_text in lowered_rows {
+        let mut chars: Vec<char> = row_text.chars().collect();
+        if chars.len() < target_cols {
+            chars.resize(target_cols, ' ');
+        }
+        lowered_data.extend(chars.into_iter());
+    }
+
+    CharArray::new(lowered_data, rows, target_cols)
+        .map(Value::CharArray)
+        .map_err(|e| format!("lower: {e}"))
+}
+
+fn lower_cell_array(cell: CellArray) -> Result<Value, String> {
+    let CellArray { data, rows, cols } = cell;
+    let mut lowered_values = Vec::with_capacity(rows * cols);
+    for row in 0..rows {
+        for col in 0..cols {
+            let idx = row * cols + col;
+            let lowered = lower_cell_element(&data[idx])?;
+            lowered_values.push(lowered);
+        }
+    }
+    make_cell(lowered_values, rows, cols).map_err(|e| format!("lower: {e}"))
+}
+
+fn lower_cell_element(value: &Value) -> Result<Value, String> {
+    match value {
+        Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text.clone()))),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(
+            lowercase_preserving_missing(sa.data[0].clone()),
+        )),
+        Value::CharArray(ca) if ca.rows <= 1 => lower_char_array(ca.clone()),
+        Value::CharArray(_) => Err(CELL_ELEMENT_ERROR.to_string()),
+        _ => Err(CELL_ELEMENT_ERROR.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(feature = "doc_export")]
+    use crate::builtins::common::test_support;
+
+    #[test]
+    fn lower_string_scalar_value() {
+        let result = lower_builtin(Value::String("RunMat".into())).expect("lower");
+        assert_eq!(result, Value::String("runmat".into()));
+    }
+
+    #[test]
+    fn lower_string_array_preserves_shape() {
+        let array = StringArray::new(
+            vec![
+                "GPU".into(),
+                "ACCEL".into(),
+                "<missing>".into(),
+                "MiXeD".into(),
+            ],
+            vec![2, 2],
+        )
+        .unwrap();
+        let result = lower_builtin(Value::StringArray(array)).expect("lower");
+        match result {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![2, 2]);
+                assert_eq!(
+                    sa.data,
+                    vec![
+                        String::from("gpu"),
+                        String::from("accel"),
+                        String::from("<missing>"),
+                        String::from("mixed")
+                    ]
+                );
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_char_array_multiple_rows() {
+        let data: Vec<char> = vec!['C', 'A', 'T', 'D', 'O', 'G'];
+        let array = CharArray::new(data, 2, 3).unwrap();
+        let result = lower_builtin(Value::CharArray(array)).expect("lower");
+        match result {
+            Value::CharArray(ca) => {
+                assert_eq!(ca.rows, 2);
+                assert_eq!(ca.cols, 3);
+                assert_eq!(ca.data, vec!['c', 'a', 't', 'd', 'o', 'g']);
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_char_vector_handles_padding() {
+        let array = CharArray::new_row("HELLO ");
+        let result = lower_builtin(Value::CharArray(array)).expect("lower");
+        match result {
+            Value::CharArray(ca) => {
+                assert_eq!(ca.rows, 1);
+                assert_eq!(ca.cols, 6);
+                let expected: Vec<char> = "hello ".chars().collect();
+                assert_eq!(ca.data, expected);
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_char_array_unicode_expansion_extends_width() {
+        let data: Vec<char> = vec!['İ', 'A'];
+        let array = CharArray::new(data, 1, 2).unwrap();
+        let result = lower_builtin(Value::CharArray(array)).expect("lower");
+        match result {
+            Value::CharArray(ca) => {
+                assert_eq!(ca.rows, 1);
+                assert_eq!(ca.cols, 3);
+                let expected: Vec<char> = vec!['i', '\u{307}', 'a'];
+                assert_eq!(ca.data, expected);
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_cell_array_mixed_content() {
+        let cell = CellArray::new(
+            vec![
+                Value::CharArray(CharArray::new_row("RUN")),
+                Value::String("Mat".into()),
+            ],
+            1,
+            2,
+        )
+        .unwrap();
+        let result = lower_builtin(Value::Cell(cell)).expect("lower");
+        match result {
+            Value::Cell(out) => {
+                let first = out.get(0, 0).unwrap();
+                let second = out.get(0, 1).unwrap();
+                assert_eq!(first, Value::CharArray(CharArray::new_row("run")));
+                assert_eq!(second, Value::String("mat".into()));
+            }
+            other => panic!("expected cell array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_errors_on_invalid_input() {
+        let err = lower_builtin(Value::Num(1.0)).unwrap_err();
+        assert_eq!(err, ARG_TYPE_ERROR);
+    }
+
+    #[test]
+    fn lower_cell_errors_on_invalid_element() {
+        let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
+        let err = lower_builtin(Value::Cell(cell)).unwrap_err();
+        assert_eq!(err, CELL_ELEMENT_ERROR);
+    }
+
+    #[test]
+    fn lower_preserves_missing_string() {
+        let result = lower_builtin(Value::String("<missing>".into())).expect("lower");
+        assert_eq!(result, Value::String("<missing>".into()));
+    }
+
+    #[test]
+    fn lower_cell_allows_empty_char_vector() {
+        let empty_char = CharArray::new(Vec::new(), 1, 0).unwrap();
+        let cell = CellArray::new(vec![Value::CharArray(empty_char.clone())], 1, 1).unwrap();
+        let result = lower_builtin(Value::Cell(cell)).expect("lower");
+        match result {
+            Value::Cell(out) => {
+                let element = out.get(0, 0).unwrap();
+                assert_eq!(element, Value::CharArray(empty_char));
+            }
+            other => panic!("expected cell array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn lower_gpu_tensor_input_gathers_then_errors() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let data = [1.0f64, 2.0];
+        let shape = [2usize, 1usize];
+        let handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .expect("upload");
+        let err = lower_builtin(Value::GpuTensor(handle.clone())).unwrap_err();
+        assert_eq!(err, ARG_TYPE_ERROR);
+        provider.free(&handle).ok();
+    }
+
+    #[test]
+    #[cfg(feature = "doc_export")]
+    fn doc_examples_present() {
+        let blocks = test_support::doc_examples(DOC_MD);
+        assert!(!blocks.is_empty());
+    }
+}

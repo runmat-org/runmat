@@ -2706,6 +2706,31 @@ pub fn interpret_with_vars(
                     }
                     continue;
                 }
+                if name == "regexp" && args.len() >= 2 {
+                    let eval = match runmat_runtime::builtins::strings::regex::regexp::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        &args[2..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    let mut values = match eval.outputs_for_multi() {
+                        Ok(values) => values,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    for _ in 0..out_count {
+                        if !values.is_empty() {
+                            stack.push(values.remove(0));
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
                 if name == "sort" && !args.is_empty() {
                     let eval = match runmat_runtime::builtins::array::sorting_sets::sort::evaluate(
                         args[0].clone(),

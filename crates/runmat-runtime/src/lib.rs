@@ -1,7 +1,8 @@
-use regex::Regex;
 use runmat_builtins::Value;
 use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
+
+use crate::builtins::common::format::format_variadic;
 
 pub mod dispatcher;
 
@@ -90,55 +91,6 @@ fn cellstr_builtin(a: Value) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "char")]
-fn char_builtin(a: Value) -> Result<Value, String> {
-    match a {
-        Value::String(s) => {
-            let data: Vec<f64> = s.chars().map(|ch| ch as u32 as f64).collect();
-            Ok(Value::Tensor(
-                runmat_builtins::Tensor::new(data, vec![1, s.chars().count()])
-                    .map_err(|e| format!("char: {e}"))?,
-            ))
-        }
-        Value::StringArray(sa) => {
-            let rows = sa.rows();
-            let cols = sa.cols();
-            let mut max_len = 0usize;
-            for c in 0..cols {
-                for r in 0..rows {
-                    let idx = r + c * rows;
-                    max_len = max_len.max(sa.data[idx].chars().count());
-                }
-            }
-            if rows == 0 || cols == 0 {
-                return Ok(Value::Tensor(
-                    runmat_builtins::Tensor::new(Vec::new(), vec![0, 0]).unwrap(),
-                ));
-            }
-            let out_rows = rows;
-            let out_cols = max_len * cols;
-            let mut out = vec![32.0; out_rows * out_cols];
-            for c in 0..cols {
-                for r in 0..rows {
-                    let idx = r + c * rows;
-                    let s = &sa.data[idx];
-                    for (j, ch) in s.chars().enumerate() {
-                        let oc = c * max_len + j;
-                        out[r + oc * out_rows] = ch as u32 as f64;
-                    }
-                }
-            }
-            Ok(Value::Tensor(
-                runmat_builtins::Tensor::new(out, vec![out_rows, out_cols])
-                    .map_err(|e| format!("char: {e}"))?,
-            ))
-        }
-        other => Err(format!(
-            "char: expected string or string array, got {other:?}"
-        )),
-    }
-}
-
 // size builtin centralized in introspection.rs
 
 // -------- String constructors/conversions --------
@@ -185,106 +137,6 @@ fn string_empty_ctor(rest: Vec<Value>) -> Result<Value, String> {
     Ok(Value::StringArray(
         runmat_builtins::StringArray::new(data, shape).map_err(|e| format!("string.empty: {e}"))?,
     ))
-}
-
-#[runmat_macros::runtime_builtin(name = "string")]
-fn string_conv(a: Value) -> Result<Value, String> {
-    match a {
-        Value::String(s) => Ok(Value::StringArray(
-            runmat_builtins::StringArray::new(vec![s], vec![1, 1]).unwrap(),
-        )),
-        Value::StringArray(sa) => Ok(Value::StringArray(sa)),
-        Value::CharArray(ca) => {
-            let mut out: Vec<String> = Vec::with_capacity(ca.rows);
-            for r in 0..ca.rows {
-                let mut s = String::with_capacity(ca.cols);
-                for c in 0..ca.cols {
-                    s.push(ca.data[r * ca.cols + c]);
-                }
-                out.push(s);
-            }
-            Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(out, vec![ca.rows, 1])
-                    .map_err(|e| e.to_string())?,
-            ))
-        }
-        Value::Tensor(t) => {
-            let mut out: Vec<String> = Vec::with_capacity(t.data.len());
-            for &x in &t.data {
-                out.push(x.to_string());
-            }
-            Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(out, t.shape)
-                    .map_err(|e| format!("string: {e}"))?,
-            ))
-        }
-        Value::ComplexTensor(t) => {
-            let mut out: Vec<String> = Vec::with_capacity(t.data.len());
-            for &(re, im) in &t.data {
-                out.push(runmat_builtins::Value::Complex(re, im).to_string());
-            }
-            Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(out, t.shape)
-                    .map_err(|e| format!("string: {e}"))?,
-            ))
-        }
-        Value::LogicalArray(la) => {
-            let mut out: Vec<String> = Vec::with_capacity(la.data.len());
-            for &b in &la.data {
-                out.push((if b != 0 { 1 } else { 0 }).to_string());
-            }
-            Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(out, la.shape)
-                    .map_err(|e| format!("string: {e}"))?,
-            ))
-        }
-        Value::Cell(ca) => {
-            let mut out: Vec<String> = Vec::with_capacity(ca.rows * ca.cols);
-            for r in 0..ca.rows {
-                for c in 0..ca.cols {
-                    let v = &ca.data[r * ca.cols + c];
-                    let s: String = match &**v {
-                        Value::String(s) => s.clone(),
-                        Value::Num(n) => n.to_string(),
-                        Value::Int(i) => i.to_i64().to_string(),
-                        Value::Bool(b) => (if *b { 1 } else { 0 }).to_string(),
-                        Value::LogicalArray(la) => {
-                            if la.data.len() == 1 {
-                                (if la.data[0] != 0 { 1 } else { 0 }).to_string()
-                            } else {
-                                format!("LogicalArray(shape={:?})", la.shape)
-                            }
-                        }
-                        Value::CharArray(ch) => ch.data.iter().collect(),
-                        other => format!("{other:?}"),
-                    };
-                    out.push(s);
-                }
-            }
-            Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(out, vec![ca.rows, ca.cols])
-                    .map_err(|e| e.to_string())?,
-            ))
-        }
-        Value::Num(n) => Ok(Value::StringArray(
-            runmat_builtins::StringArray::new(vec![n.to_string()], vec![1, 1]).unwrap(),
-        )),
-        Value::Complex(re, im) => {
-            let s = runmat_builtins::Value::Complex(re, im).to_string();
-            Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(vec![s], vec![1, 1]).unwrap(),
-            ))
-        }
-        Value::Int(i) => Ok(Value::StringArray(
-            runmat_builtins::StringArray::new(vec![i.to_i64().to_string()], vec![1, 1]).unwrap(),
-        )),
-        Value::HandleObject(_) => {
-            // The MATLAB language string(handle) produces class-name-like text; keep conservative
-            Err("string: unsupported conversion from handle".to_string())
-        }
-        Value::Listener(_) => Err("string: unsupported conversion from listener".to_string()),
-        other => Err(format!("string: unsupported conversion from {other:?}")),
-    }
 }
 
 // -------- Logical constructors / conversions --------
@@ -448,30 +300,6 @@ fn strncmp_builtin(a: Value, b: Value, n: f64) -> Result<Value, String> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "contains")]
-fn contains_builtin(a: Value, pat: Value) -> Result<Value, String> {
-    let p = to_string_scalar(&pat)?;
-    match a {
-        Value::String(s) => Ok(Value::Num(if s.contains(&p) { 1.0 } else { 0.0 })),
-        Value::StringArray(sa) => {
-            let data: Vec<f64> = sa
-                .data
-                .iter()
-                .map(|x| if x.contains(&p) { 1.0 } else { 0.0 })
-                .collect();
-            Ok(Value::Tensor(
-                runmat_builtins::Tensor::new(data, sa.shape)
-                    .map_err(|e| format!("contains: {e}"))?,
-            ))
-        }
-        Value::CharArray(ca) => {
-            let s: String = ca.data.iter().collect();
-            Ok(Value::Num(if s.contains(&p) { 1.0 } else { 0.0 }))
-        }
-        other => Err(format!("contains: unsupported input {other:?}")),
-    }
-}
-
 #[runmat_macros::runtime_builtin(name = "strrep")]
 fn strrep_builtin(a: Value, old: Value, newv: Value) -> Result<Value, String> {
     let old_s = to_string_scalar(&old)?;
@@ -554,114 +382,6 @@ fn strcat_builtin(rest: Vec<Value>) -> Result<Value, String> {
     ))
 }
 
-// removed duplicate strjoin (keep row-wise version below)
-
-#[runmat_macros::runtime_builtin(name = "join")]
-fn join_builtin(a: Value, delim: Value) -> Result<Value, String> {
-    strjoin_rowwise(a, delim)
-}
-
-#[runmat_macros::runtime_builtin(name = "split")]
-fn split_builtin(a: Value, delim: Value) -> Result<Value, String> {
-    let s = to_string_scalar(&a)?;
-    let d = to_string_scalar(&delim)?;
-    if d.is_empty() {
-        return Err("split: empty delimiter not supported".to_string());
-    }
-    let parts: Vec<String> = s.split(&d).map(|t| t.to_string()).collect();
-    let len = parts.len();
-    Ok(Value::StringArray(
-        runmat_builtins::StringArray::new(parts, vec![len, 1])
-            .map_err(|e| format!("split: {e}"))?,
-    ))
-}
-
-#[runmat_macros::runtime_builtin(name = "upper")]
-fn upper_builtin(a: Value) -> Result<Value, String> {
-    match a {
-        Value::String(s) => Ok(Value::String(s.to_uppercase())),
-        Value::StringArray(sa) => {
-            let data: Vec<String> = sa.data.iter().map(|x| x.to_uppercase()).collect();
-            Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(data, sa.shape)
-                    .map_err(|e| format!("upper: {e}"))?,
-            ))
-        }
-        Value::CharArray(ca) => {
-            let s: String = ca.data.iter().collect();
-            Ok(Value::String(s.to_uppercase()))
-        }
-        other => Err(format!("upper: unsupported input {other:?}")),
-    }
-}
-
-#[runmat_macros::runtime_builtin(name = "lower")]
-fn lower_builtin(a: Value) -> Result<Value, String> {
-    match a {
-        Value::String(s) => Ok(Value::String(s.to_lowercase())),
-        Value::StringArray(sa) => {
-            let data: Vec<String> = sa.data.iter().map(|x| x.to_lowercase()).collect();
-            Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(data, sa.shape)
-                    .map_err(|e| format!("lower: {e}"))?,
-            ))
-        }
-        Value::CharArray(ca) => {
-            let s: String = ca.data.iter().collect();
-            Ok(Value::String(s.to_lowercase()))
-        }
-        other => Err(format!("lower: unsupported input {other:?}")),
-    }
-}
-
-#[runmat_macros::runtime_builtin(name = "startsWith")]
-fn starts_with_builtin(a: Value, prefix: Value) -> Result<Value, String> {
-    let p = to_string_scalar(&prefix)?;
-    match a {
-        Value::String(s) => Ok(Value::Num(if s.starts_with(&p) { 1.0 } else { 0.0 })),
-        Value::StringArray(sa) => {
-            let data: Vec<f64> = sa
-                .data
-                .iter()
-                .map(|x| if x.starts_with(&p) { 1.0 } else { 0.0 })
-                .collect();
-            Ok(Value::Tensor(
-                runmat_builtins::Tensor::new(data, sa.shape)
-                    .map_err(|e| format!("startsWith: {e}"))?,
-            ))
-        }
-        Value::CharArray(ca) => {
-            let s: String = ca.data.iter().collect();
-            Ok(Value::Num(if s.starts_with(&p) { 1.0 } else { 0.0 }))
-        }
-        other => Err(format!("startsWith: unsupported input {other:?}")),
-    }
-}
-
-#[runmat_macros::runtime_builtin(name = "endsWith")]
-fn ends_with_builtin(a: Value, suffix: Value) -> Result<Value, String> {
-    let p = to_string_scalar(&suffix)?;
-    match a {
-        Value::String(s) => Ok(Value::Num(if s.ends_with(&p) { 1.0 } else { 0.0 })),
-        Value::StringArray(sa) => {
-            let data: Vec<f64> = sa
-                .data
-                .iter()
-                .map(|x| if x.ends_with(&p) { 1.0 } else { 0.0 })
-                .collect();
-            Ok(Value::Tensor(
-                runmat_builtins::Tensor::new(data, sa.shape)
-                    .map_err(|e| format!("endsWith: {e}"))?,
-            ))
-        }
-        Value::CharArray(ca) => {
-            let s: String = ca.data.iter().collect();
-            Ok(Value::Num(if s.ends_with(&p) { 1.0 } else { 0.0 }))
-        }
-        other => Err(format!("endsWith: unsupported input {other:?}")),
-    }
-}
-
 #[runmat_macros::runtime_builtin(name = "extractBetween")]
 fn extract_between_builtin(a: Value, start: Value, stop: Value) -> Result<Value, String> {
     let s = to_string_scalar(&a)?;
@@ -738,62 +458,6 @@ fn pad_builtin(a: Value, total_len: f64, rest: Vec<Value>) -> Result<Value, Stri
 fn strtrim_builtin(a: Value) -> Result<Value, String> {
     let s = to_string_scalar(&a)?;
     Ok(Value::String(s.trim().to_string()))
-}
-
-#[runmat_macros::runtime_builtin(name = "strip")]
-fn strip_builtin(a: Value) -> Result<Value, String> {
-    strtrim_builtin(a)
-}
-
-#[runmat_macros::runtime_builtin(name = "regexp")]
-fn regexp_builtin(a: Value, pat: Value) -> Result<Value, String> {
-    let s = to_string_scalar(&a)?;
-    let p = to_string_scalar(&pat)?;
-    let re = Regex::new(&p).map_err(|e| format!("regexp: {e}"))?;
-    let mut matches: Vec<Value> = Vec::new();
-    for cap in re.captures_iter(&s) {
-        // tokens: full match and capture groups
-        let full = cap
-            .get(0)
-            .map(|m| m.as_str().to_string())
-            .unwrap_or_default();
-        let mut row: Vec<Value> = vec![Value::String(full)];
-        for i in 1..cap.len() {
-            row.push(Value::String(
-                cap.get(i)
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_default(),
-            ));
-        }
-        matches.push(make_cell(row, 1, cap.len())?);
-    }
-    let len = matches.len();
-    make_cell(matches, 1, len)
-}
-
-#[runmat_macros::runtime_builtin(name = "regexpi")]
-fn regexpi_builtin(a: Value, pat: Value) -> Result<Value, String> {
-    let s = to_string_scalar(&a)?;
-    let p = to_string_scalar(&pat)?;
-    let re = Regex::new(&format!("(?i){p}")).map_err(|e| format!("regexpi: {e}"))?;
-    let mut matches: Vec<Value> = Vec::new();
-    for cap in re.captures_iter(&s) {
-        let full = cap
-            .get(0)
-            .map(|m| m.as_str().to_string())
-            .unwrap_or_default();
-        let mut row: Vec<Value> = vec![Value::String(full)];
-        for i in 1..cap.len() {
-            row.push(Value::String(
-                cap.get(i)
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_default(),
-            ));
-        }
-        matches.push(make_cell(row, 1, cap.len())?);
-    }
-    let len = matches.len();
-    make_cell(matches, 1, len)
 }
 
 // Adjust strjoin semantics: join rows (row-wise)
@@ -2764,76 +2428,6 @@ fn struct_builtin(rest: Vec<Value>) -> Result<Value, String> {
         i += 2;
     }
     Ok(Value::Struct(st))
-}
-
-fn format_variadic(fmt: &str, args: &[Value]) -> Result<String, String> {
-    // Minimal subset: supports %d/%i, %f, %s and %%
-    let mut out = String::with_capacity(fmt.len() + args.len() * 8);
-    let mut it = fmt.chars().peekable();
-    let mut ai = 0usize;
-    while let Some(c) = it.next() {
-        if c != '%' {
-            out.push(c);
-            continue;
-        }
-        if let Some('%') = it.peek() {
-            it.next();
-            out.push('%');
-            continue;
-        }
-        // Consume optional width/precision (very limited)
-        let mut precision: Option<usize> = None;
-        // skip digits for width
-        while let Some(ch) = it.peek() {
-            if ch.is_ascii_digit() {
-                it.next();
-            } else {
-                break;
-            }
-        }
-        // precision .digits
-        if let Some('.') = it.peek() {
-            it.next();
-            let mut p = String::new();
-            while let Some(ch) = it.peek() {
-                if ch.is_ascii_digit() {
-                    p.push(*ch);
-                    it.next();
-                } else {
-                    break;
-                }
-            }
-            if !p.is_empty() {
-                precision = p.parse::<usize>().ok();
-            }
-        }
-        let ty = it.next().ok_or("sprintf: incomplete format specifier")?;
-        let val = args.get(ai).cloned().unwrap_or(Value::Num(0.0));
-        ai += 1;
-        match ty {
-            'd' | 'i' => {
-                let v: f64 = (&val).try_into()?;
-                out.push_str(&(v as i64).to_string());
-            }
-            'f' => {
-                let v: f64 = (&val).try_into()?;
-                if let Some(p) = precision {
-                    out.push_str(&format!("{v:.p$}"));
-                } else {
-                    out.push_str(&format!("{v}"));
-                }
-            }
-            's' => match val {
-                Value::String(s) => out.push_str(&s),
-                Value::Num(n) => out.push_str(&n.to_string()),
-                Value::Int(i) => out.push_str(&i.to_i64().to_string()),
-                Value::Tensor(t) => out.push_str(&format!("{:?}", t.data)),
-                other => out.push_str(&format!("{other:?}")),
-            },
-            other => return Err(format!("sprintf: unsupported format %{other}")),
-        }
-    }
-    Ok(out)
 }
 
 #[runmat_macros::runtime_builtin(name = "getmethod")]
