@@ -356,7 +356,9 @@ mod tests {
     use crate::builtins::io::net::tcpclient::tcpclient_builtin;
     use crate::builtins::io::net::tcpserver::{server_handle, tcpserver_builtin};
     use once_cell::sync::Lazy;
-    use runmat_builtins::{CharArray, CellArray, IntValue, StringArray, StructValue, Tensor, Value};
+    use runmat_builtins::{
+        CellArray, CharArray, IntValue, StringArray, StructValue, Tensor, Value,
+    };
     use std::net::{TcpListener, TcpStream};
     use std::sync::Mutex;
     use std::thread;

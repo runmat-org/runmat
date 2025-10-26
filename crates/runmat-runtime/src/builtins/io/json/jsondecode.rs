@@ -241,6 +241,12 @@ fn jsondecode_builtin(text: Value) -> Result<Value, String> {
     value_from_json(&parsed)
 }
 
+pub(crate) fn decode_json_text(text: &str) -> Result<Value, String> {
+    let parsed: JsonValue =
+        serde_json::from_str(text).map_err(|err| format!("{PARSE_ERROR_PREFIX} ({err})"))?;
+    value_from_json(&parsed)
+}
+
 fn extract_text(value: Value) -> Result<String, String> {
     match value {
         Value::CharArray(array) => {
