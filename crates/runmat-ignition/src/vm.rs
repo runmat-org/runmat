@@ -15,10 +15,14 @@ use runmat_accelerate::{
     active_group_plan_clone, FusionOp as AccelFusionOp, ShapeInfo, ValueOrigin, VarKind,
 };
 use runmat_builtins::{Type, Value};
-use runmat_runtime::call_builtin;
+use runmat_runtime::{
+    call_builtin,
+    workspace::{self as runtime_workspace, WorkspaceResolver},
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::sync::Once;
 
 #[cfg(feature = "native-accel")]
 struct FusionPlanGuard;
@@ -112,6 +116,162 @@ thread_local! {
     static PERSISTENTS_BY_NAME: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
 }
 
+struct WorkspaceState {
+    names: HashMap<String, usize>,
+    data_ptr: *const Value,
+    len: usize,
+}
+
+thread_local! {
+    static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = RefCell::new(None);
+    static PENDING_WORKSPACE: RefCell<Option<HashMap<String, usize>>> = RefCell::new(None);
+    static LAST_WORKSPACE_NAMES: RefCell<Option<HashMap<String, usize>>> = RefCell::new(None);
+}
+
+struct WorkspaceStateGuard;
+
+impl Drop for WorkspaceStateGuard {
+    fn drop(&mut self) {
+        WORKSPACE_STATE.with(|state| {
+            let mut state_mut = state.borrow_mut();
+            if let Some(ws) = state_mut.take() {
+                LAST_WORKSPACE_NAMES.with(|slot| {
+                    *slot.borrow_mut() = Some(ws.names);
+                });
+            }
+        });
+    }
+}
+
+fn set_workspace_state(names: HashMap<String, usize>, vars: &Vec<Value>) -> WorkspaceStateGuard {
+    WORKSPACE_STATE.with(|state| {
+        *state.borrow_mut() = Some(WorkspaceState {
+            names,
+            data_ptr: vars.as_ptr(),
+            len: vars.len(),
+        });
+    });
+    WorkspaceStateGuard
+}
+
+fn refresh_workspace_state(vars: &Vec<Value>) {
+    WORKSPACE_STATE.with(|state| {
+        if let Some(ws) = state.borrow_mut().as_mut() {
+            ws.data_ptr = vars.as_ptr();
+            ws.len = vars.len();
+        }
+    });
+}
+
+fn workspace_lookup(name: &str) -> Option<Value> {
+    WORKSPACE_STATE.with(|state| {
+        let state_ref = state.borrow();
+        let ws = state_ref.as_ref()?;
+        let idx = ws.names.get(name)?;
+        if *idx >= ws.len {
+            return None;
+        }
+        unsafe {
+            let ptr = ws.data_ptr.add(*idx);
+            Some((*ptr).clone())
+        }
+    })
+}
+
+fn workspace_snapshot() -> Vec<(String, Value)> {
+    WORKSPACE_STATE.with(|state| {
+        if let Some(ws) = state.borrow().as_ref() {
+            let mut entries: Vec<(String, Value)> = ws
+                .names
+                .iter()
+                .filter_map(|(name, idx)| {
+                    if *idx >= ws.len {
+                        return None;
+                    }
+                    unsafe {
+                        let ptr = ws.data_ptr.add(*idx);
+                        Some((name.clone(), (*ptr).clone()))
+                    }
+                })
+                .collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            entries
+        } else {
+            Vec::new()
+        }
+    })
+}
+
+fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> Result<(), String> {
+    let mut result = Ok(());
+    WORKSPACE_STATE.with(|state| {
+        let mut state_mut = state.borrow_mut();
+        match state_mut.as_mut() {
+            Some(ws) => {
+                let idx = if let Some(idx) = ws.names.get(name).copied() {
+                    idx
+                } else {
+                    let idx = vars.len();
+                    ws.names.insert(name.to_string(), idx);
+                    idx
+                };
+                if idx >= vars.len() {
+                    vars.resize(idx + 1, Value::Num(0.0));
+                }
+                vars[idx] = value;
+                ws.data_ptr = vars.as_ptr();
+                ws.len = vars.len();
+            }
+            None => {
+                result = Err("load: workspace state unavailable".to_string());
+            }
+        }
+    });
+    result
+}
+
+fn assign_loaded_variables(
+    vars: &mut Vec<Value>,
+    entries: &[(String, Value)],
+) -> Result<(), String> {
+    for (name, value) in entries {
+        set_workspace_variable(name, value.clone(), vars)?;
+    }
+    refresh_workspace_state(vars);
+    Ok(())
+}
+
+fn ensure_workspace_resolver_registered() {
+    static REGISTER: Once = Once::new();
+    REGISTER.call_once(|| {
+        runtime_workspace::register_workspace_resolver(WorkspaceResolver {
+            lookup: workspace_lookup,
+            snapshot: workspace_snapshot,
+        });
+    });
+}
+
+pub struct PendingWorkspaceGuard;
+
+impl Drop for PendingWorkspaceGuard {
+    fn drop(&mut self) {
+        PENDING_WORKSPACE.with(|slot| {
+            slot.borrow_mut().take();
+        });
+    }
+}
+
+pub fn push_pending_workspace(names: HashMap<String, usize>) -> PendingWorkspaceGuard {
+    PENDING_WORKSPACE.with(|slot| {
+        *slot.borrow_mut() = Some(names);
+    });
+    PendingWorkspaceGuard
+}
+
+pub fn take_updated_workspace_names() -> Option<HashMap<String, usize>> {
+    LAST_WORKSPACE_NAMES.with(|slot| slot.borrow_mut().take())
+}
+
 thread_local! {
     // (nargin, nargout) for current call
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
@@ -132,6 +292,7 @@ pub fn interpret_with_vars(
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
 ) -> Result<Vec<Value>, String> {
+    ensure_workspace_resolver_registered();
     #[cfg(feature = "native-accel")]
     let fusion_plan = prepare_fusion_plan(bytecode.accel_graph.as_ref(), &bytecode.fusion_groups);
     #[cfg(feature = "native-accel")]
@@ -143,6 +304,9 @@ pub fn interpret_with_vars(
     if vars.len() < bytecode.var_count {
         vars.resize(bytecode.var_count, Value::Num(0.0));
     }
+    let pending_names = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
+    let _workspace_guard = pending_names.map(|names| set_workspace_state(names, &vars));
+    refresh_workspace_state(&vars);
     let mut pc: usize = 0;
     let mut context = ExecutionContext {
         call_stack: Vec::new(),
@@ -212,6 +376,7 @@ pub fn interpret_with_vars(
                 if let Some(var_idx) = catch_var {
                     if var_idx >= vars.len() {
                         vars.resize(var_idx + 1, Value::Num(0.0));
+                        refresh_workspace_state(&vars);
                     }
                     let mex = parse_exception(&e);
                     last_exception = Some(mex.clone());
@@ -331,6 +496,7 @@ pub fn interpret_with_vars(
                 }
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
+                    refresh_workspace_state(&vars);
                 }
                 vars[i] = val;
                 // If this var is declared global, update the global table entry
@@ -378,6 +544,7 @@ pub fn interpret_with_vars(
                 } else {
                     if offset >= vars.len() {
                         vars.resize(offset + 1, Value::Num(0.0));
+                        refresh_workspace_state(&vars);
                     }
                     #[cfg(feature = "native-accel")]
                     if offset < vars.len() {
@@ -423,6 +590,7 @@ pub fn interpret_with_vars(
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
                             vars.resize(i + 1, Value::Num(0.0));
+                            refresh_workspace_state(&vars);
                         }
                         vars[i] = v;
                     }
@@ -438,6 +606,7 @@ pub fn interpret_with_vars(
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
                             vars.resize(i + 1, Value::Num(0.0));
+                            refresh_workspace_state(&vars);
                         }
                         vars[i] = v;
                     }
@@ -459,6 +628,7 @@ pub fn interpret_with_vars(
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
                             vars.resize(i + 1, Value::Num(0.0));
+                            refresh_workspace_state(&vars);
                         }
                         vars[i] = v;
                     }
@@ -478,6 +648,7 @@ pub fn interpret_with_vars(
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
                             vars.resize(i + 1, Value::Num(0.0));
+                            refresh_workspace_state(&vars);
                         }
                         vars[i] = v;
                     }
@@ -1511,6 +1682,7 @@ pub fn interpret_with_vars(
                                     if let Some(var_idx) = catch_var {
                                         if var_idx >= vars.len() {
                                             vars.resize(var_idx + 1, Value::Num(0.0));
+                                            refresh_workspace_state(&vars);
                                         }
                                         let mex = parse_exception(&e);
                                         last_exception = Some(mex.clone());
@@ -2282,6 +2454,7 @@ pub fn interpret_with_vars(
                             if let Some(var_idx) = catch_var {
                                 if var_idx >= vars.len() {
                                     vars.resize(var_idx + 1, Value::Num(0.0));
+                                    refresh_workspace_state(&vars);
                                 }
                                 let mex = parse_exception(&e);
                                 last_exception = Some(mex.clone());
@@ -2577,6 +2750,7 @@ pub fn interpret_with_vars(
                             if let Some(var_idx) = catch_var {
                                 if var_idx >= vars.len() {
                                     vars.resize(var_idx + 1, Value::Num(0.0));
+                                    refresh_workspace_state(&vars);
                                 }
                                 let mex = parse_exception(&e);
                                 last_exception = Some(mex.clone());
@@ -2659,6 +2833,206 @@ pub fn interpret_with_vars(
                     );
                 }
                 args.reverse();
+                if name == "load" {
+                    let eval = match runmat_runtime::builtins::io::mat::load::evaluate(&args) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        if let Err(err) = assign_loaded_variables(&mut vars, eval.variables()) {
+                            vm_bail!(err);
+                        }
+                        continue;
+                    }
+                    if out_count > 1 {
+                        vm_bail!(mex(
+                            "TooManyOutputs",
+                            "load supports at most one output argument"
+                        ));
+                    }
+                    stack.push(eval.first_output());
+                    for _ in 1..out_count {
+                        stack.push(Value::Num(0.0));
+                    }
+                    continue;
+                }
+                if name == "fopen" {
+                    let eval = match runmat_runtime::builtins::io::filetext::fopen::evaluate(&args)
+                    {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "fgets" {
+                    if args.is_empty() {
+                        vm_bail!(mex(
+                            "RuntimeError",
+                            "fgets requires at least one input argument"
+                        ));
+                    }
+                    let eval = match runmat_runtime::builtins::io::filetext::fgets::evaluate(
+                        &args[0],
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "fclose" {
+                    let eval = match runmat_runtime::builtins::io::filetext::fclose::evaluate(&args)
+                    {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "mkdir" {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::mkdir::evaluate(&args) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "setenv" {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::setenv::evaluate(&args)
+                    {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "savepath" {
+                    let eval =
+                        match runmat_runtime::builtins::io::repl_fs::savepath::evaluate(&args) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "copyfile" {
+                    let eval =
+                        match runmat_runtime::builtins::io::repl_fs::copyfile::evaluate(&args) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "movefile" {
+                    let eval =
+                        match runmat_runtime::builtins::io::repl_fs::movefile::evaluate(&args) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "rmdir" {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::rmdir::evaluate(&args) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
                 // Special-case for 'find' to support [i,j,v] = find(A)
                 if name == "find" && !args.is_empty() {
                     let eval = match runmat_runtime::builtins::array::indexing::find::evaluate(

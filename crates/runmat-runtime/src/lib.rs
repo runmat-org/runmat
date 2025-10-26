@@ -18,6 +18,7 @@ pub mod io;
 pub mod mathematics;
 pub mod matrix;
 pub mod plotting;
+pub mod workspace;
 
 #[cfg(feature = "blas-lapack")]
 pub mod blas;
@@ -893,21 +894,6 @@ fn isvalid_builtin(v: Value) -> Result<Value, String> {
         Value::HandleObject(h) => Ok(Value::Bool(h.valid)),
         Value::Listener(l) => Ok(Value::Bool(l.valid && l.enabled)),
         _ => Ok(Value::Bool(false)),
-    }
-}
-
-#[runmat_macros::runtime_builtin(name = "delete")]
-fn delete_builtin(v: Value) -> Result<Value, String> {
-    match v {
-        Value::HandleObject(mut h) => {
-            h.valid = false;
-            Ok(Value::HandleObject(h))
-        }
-        Value::Listener(mut l) => {
-            l.valid = false;
-            Ok(Value::Listener(l))
-        }
-        other => Err(format!("delete: unsupported value {other:?}")),
     }
 }
 
@@ -2370,29 +2356,6 @@ fn all_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
         }
     }
     Err("all: unsupported arguments".to_string())
-}
-
-#[runmat_macros::runtime_builtin(name = "fprintf", sink = true)]
-fn fprintf_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
-    // MATLAB: fprintf(fid, fmt, ...) or fprintf(fmt, ...)
-    let (fmt, args) = match first {
-        Value::String(s) => (s, rest),
-        Value::Num(_) | Value::Int(_) => {
-            // File IDs not supported yet; treat as stdout and expect format string next
-            if rest.is_empty() {
-                return Err("fprintf: missing format string".to_string());
-            }
-            let fmt = match &rest[0] {
-                Value::String(s) => s.clone(),
-                _ => return Err("fprintf: expected format string".to_string()),
-            };
-            (fmt, rest[1..].to_vec())
-        }
-        other => return Err(format!("fprintf: unsupported first argument {other:?}")),
-    };
-    let s = format_variadic(&fmt, &args)?;
-    println!("{s}");
-    Ok(Value::Num(s.len() as f64))
 }
 
 #[runmat_macros::runtime_builtin(name = "warning", sink = true)]

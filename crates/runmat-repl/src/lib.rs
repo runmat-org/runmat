@@ -230,6 +230,8 @@ impl ReplEngine {
             lowering_result.variables,
             lowering_result.functions,
         );
+        let _pending_workspace_guard =
+            runmat_ignition::push_pending_workspace(updated_vars.clone());
         if self.verbose {
             debug!("HIR generated successfully");
         }
@@ -520,7 +522,11 @@ impl ReplEngine {
 
         // Update variable names mapping and function definitions if execution was successful
         if error.is_none() {
-            self.variable_names = updated_vars;
+            if let Some(mutated) = runmat_ignition::take_updated_workspace_names() {
+                self.variable_names = mutated;
+            } else {
+                self.variable_names = updated_vars;
+            }
             self.function_definitions = updated_functions;
         }
 

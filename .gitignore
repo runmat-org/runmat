@@ -6,14 +6,6 @@
 
 # VSCode
 .vscode/
-
-# Core dumps
-core
-core.*
-*.core
-**/core
-**/core.*
-**/*.core
  
 # Generated website content
 website/content/builtins.json

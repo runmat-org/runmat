@@ -1,11 +1,12 @@
 //! MATLAB-compatible `sprintf` builtin that mirrors printf-style formatting semantics.
 
-use std::char;
-
-use runmat_builtins::{CharArray, LogicalArray, StringArray, Value};
+use runmat_builtins::{CharArray, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::format::{format_variadic_with_cursor, ArgCursor};
+use crate::builtins::common::format::{
+    decode_escape_sequences, extract_format_string, flatten_arguments, format_variadic_with_cursor,
+    ArgCursor,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -245,9 +246,9 @@ register_builtin_doc_text!("sprintf", DOC_MD);
 )]
 fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String> {
     let gathered_spec = gather_if_needed(&format_spec).map_err(|e| format!("sprintf: {e}"))?;
-    let raw_format = extract_format_string(&gathered_spec)?;
-    let format_string = decode_escape_sequences(&raw_format)?;
-    let flattened_args = flatten_arguments(&rest)?;
+    let raw_format = extract_format_string(&gathered_spec, "sprintf")?;
+    let format_string = decode_escape_sequences("sprintf", &raw_format)?;
+    let flattened_args = flatten_arguments(&rest, "sprintf")?;
     let mut cursor = ArgCursor::new(&flattened_args);
     let mut output = String::new();
 
@@ -271,179 +272,6 @@ fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> Result<Value, String
     }
 
     char_row_value(&output)
-}
-
-fn extract_format_string(value: &Value) -> Result<String, String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) => {
-            if ca.rows != 1 {
-                return Err(
-                    "sprintf: formatSpec must be a character row vector or string scalar"
-                        .to_string(),
-                );
-            }
-            Ok(ca.data.iter().collect())
-        }
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err("sprintf: formatSpec must be a character row vector or string scalar".to_string()),
-    }
-}
-
-fn decode_escape_sequences(input: &str) -> Result<String, String> {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch != '\\' {
-            result.push(ch);
-            continue;
-        }
-        let Some(next) = chars.next() else {
-            result.push('\\');
-            break;
-        };
-        match next {
-            '\\' => result.push('\\'),
-            'a' => result.push('\u{0007}'),
-            'b' => result.push('\u{0008}'),
-            'f' => result.push('\u{000C}'),
-            'n' => result.push('\n'),
-            'r' => result.push('\r'),
-            't' => result.push('\t'),
-            'v' => result.push('\u{000B}'),
-            'x' => {
-                let mut hex = String::new();
-                for _ in 0..2 {
-                    match chars.peek().copied() {
-                        Some(c) if c.is_ascii_hexdigit() => {
-                            hex.push(chars.next().unwrap());
-                        }
-                        _ => break,
-                    }
-                }
-                if hex.is_empty() {
-                    result.push('\\');
-                    result.push('x');
-                } else {
-                    let value = u32::from_str_radix(&hex, 16)
-                        .map_err(|_| format!("sprintf: invalid hexadecimal escape \\x{hex}"))?;
-                    if let Some(chr) = char::from_u32(value) {
-                        result.push(chr);
-                    } else {
-                        return Err(format!(
-                            "sprintf: \\x{hex} escape outside valid Unicode range"
-                        ));
-                    }
-                }
-            }
-            '0'..='7' => {
-                let mut oct = String::new();
-                oct.push(next);
-                for _ in 0..2 {
-                    match chars.peek().copied() {
-                        Some(c) if ('0'..='7').contains(&c) => {
-                            oct.push(chars.next().unwrap());
-                        }
-                        _ => break,
-                    }
-                }
-                let value = u32::from_str_radix(&oct, 8)
-                    .map_err(|_| format!("sprintf: invalid octal escape \\{oct}"))?;
-                if let Some(chr) = char::from_u32(value) {
-                    result.push(chr);
-                } else {
-                    return Err(format!(
-                        "sprintf: \\{oct} escape outside valid Unicode range"
-                    ));
-                }
-            }
-            other => {
-                result.push('\\');
-                result.push(other);
-            }
-        }
-    }
-    Ok(result)
-}
-
-fn flatten_arguments(args: &[Value]) -> Result<Vec<Value>, String> {
-    let mut flattened = Vec::new();
-    for value in args {
-        let gathered = gather_if_needed(value).map_err(|e| format!("sprintf: {e}"))?;
-        flatten_value(gathered, &mut flattened)?;
-    }
-    Ok(flattened)
-}
-
-fn flatten_value(value: Value, output: &mut Vec<Value>) -> Result<(), String> {
-    match value {
-        Value::Num(_)
-        | Value::Int(_)
-        | Value::Bool(_)
-        | Value::String(_)
-        | Value::Complex(_, _) => {
-            output.push(value);
-        }
-        Value::Tensor(tensor) => {
-            for &n in &tensor.data {
-                output.push(Value::Num(n));
-            }
-        }
-        Value::ComplexTensor(tensor) => {
-            for &(re, im) in &tensor.data {
-                output.push(Value::Complex(re, im));
-            }
-        }
-        Value::LogicalArray(LogicalArray { data, .. }) => {
-            for byte in data {
-                output.push(Value::Bool(byte != 0));
-            }
-        }
-        Value::StringArray(StringArray { data, .. }) => {
-            for s in data {
-                output.push(Value::String(s));
-            }
-        }
-        Value::CharArray(ca) => {
-            if ca.rows == 1 {
-                output.push(Value::String(ca.data.iter().collect()));
-            } else {
-                for row in 0..ca.rows {
-                    let mut line = String::with_capacity(ca.cols);
-                    for col in 0..ca.cols {
-                        line.push(ca.data[row * ca.cols + col]);
-                    }
-                    output.push(Value::String(line));
-                }
-            }
-        }
-        Value::Cell(cell) => {
-            for col in 0..cell.cols {
-                for row in 0..cell.rows {
-                    let idx = row * cell.cols + col;
-                    let inner = (*cell.data[idx]).clone();
-                    let gathered = gather_if_needed(&inner).map_err(|e| format!("sprintf: {e}"))?;
-                    flatten_value(gathered, output)?;
-                }
-            }
-        }
-        Value::GpuTensor(handle) => {
-            let gathered =
-                gather_if_needed(&Value::GpuTensor(handle)).map_err(|e| format!("sprintf: {e}"))?;
-            flatten_value(gathered, output)?;
-        }
-        Value::MException(_)
-        | Value::HandleObject(_)
-        | Value::Listener(_)
-        | Value::Object(_)
-        | Value::Struct(_)
-        | Value::FunctionHandle(_)
-        | Value::Closure(_)
-        | Value::ClassRef(_) => {
-            return Err("sprintf: unsupported argument type".to_string());
-        }
-    }
-    Ok(())
 }
 
 fn char_row_value(text: &str) -> Result<Value, String> {
