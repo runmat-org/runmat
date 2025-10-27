@@ -833,6 +833,8 @@ mod tests {
     use crate::builtins::io::filetext::{fclose, fopen};
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Tensor;
     use std::fs::{self, File};

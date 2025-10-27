@@ -507,6 +507,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::path_state::{current_path_string, set_path_string};
     use crate::builtins::common::test_support;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use std::fs;
     use tempfile::tempdir;

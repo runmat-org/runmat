@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::containers::map::map_length;
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
@@ -202,6 +203,9 @@ register_builtin_doc_text!("length", DOC_MD);
     accel = "metadata"
 )]
 fn length_builtin(value: Value) -> Result<Value, String> {
+    if let Some(count) = map_length(&value) {
+        return Ok(Value::Num(count as f64));
+    }
     let len = max_dimension(&value) as f64;
     Ok(Value::Num(len))
 }

@@ -375,7 +375,9 @@ impl TextMatrix {
     }
 
     fn from_cell_array(cell: CellArray) -> Result<Self, String> {
-        let CellArray { data, rows, cols } = cell;
+        let CellArray {
+            data, rows, cols, ..
+        } = cell;
         let mut strings = Vec::with_capacity(data.len());
         for col in 0..cols {
             for row in 0..rows {

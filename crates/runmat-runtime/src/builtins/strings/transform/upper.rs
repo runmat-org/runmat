@@ -261,7 +261,9 @@ fn upper_char_array(array: CharArray) -> Result<Value, String> {
 }
 
 fn upper_cell_array(cell: CellArray) -> Result<Value, String> {
-    let CellArray { data, rows, cols } = cell;
+    let CellArray {
+        data, rows, cols, ..
+    } = cell;
     let mut upper_values = Vec::with_capacity(rows * cols);
     for row in 0..rows {
         for col in 0..cols {

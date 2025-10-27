@@ -5,6 +5,7 @@ pub mod diag;
 pub mod elementwise;
 pub mod find;
 pub mod flip;
+pub mod imfilter;
 pub mod ind2sub;
 pub mod kron;
 pub mod matmul;

@@ -40,6 +40,38 @@ pub struct FusionParams {
     pub _pad2: u32,
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PackedU32(pub [u32; 4]);
+
+impl PackedU32 {
+    pub fn from_scalar(value: u32) -> Self {
+        Self([value, 0, 0, 0])
+    }
+}
+
+impl Default for PackedU32 {
+    fn default() -> Self {
+        Self([0; 4])
+    }
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PackedI32(pub [i32; 4]);
+
+impl PackedI32 {
+    pub fn from_scalar(value: i32) -> Self {
+        Self([value, 0, 0, 0])
+    }
+}
+
+impl Default for PackedI32 {
+    fn default() -> Self {
+        Self([0; 4])
+    }
+}
+
 pub const PERMUTE_MAX_RANK: usize = 8;
 
 #[repr(C)]
@@ -49,10 +81,10 @@ pub struct PermuteParams {
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub src_shape: [u32; PERMUTE_MAX_RANK],
-    pub dst_shape: [u32; PERMUTE_MAX_RANK],
-    pub order: [u32; PERMUTE_MAX_RANK],
-    pub src_strides: [u32; PERMUTE_MAX_RANK],
+    pub src_shape: [PackedU32; PERMUTE_MAX_RANK],
+    pub dst_shape: [PackedU32; PERMUTE_MAX_RANK],
+    pub order: [PackedU32; PERMUTE_MAX_RANK],
+    pub src_strides: [PackedU32; PERMUTE_MAX_RANK],
 }
 
 pub const FLIP_MAX_RANK: usize = PERMUTE_MAX_RANK;
@@ -64,9 +96,9 @@ pub struct FlipParams {
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub shape: [u32; FLIP_MAX_RANK],
-    pub strides: [u32; FLIP_MAX_RANK],
-    pub flags: [u32; FLIP_MAX_RANK],
+    pub shape: [PackedU32; FLIP_MAX_RANK],
+    pub strides: [PackedU32; FLIP_MAX_RANK],
+    pub flags: [PackedU32; FLIP_MAX_RANK],
 }
 
 pub const CIRCSHIFT_MAX_RANK: usize = PERMUTE_MAX_RANK;
@@ -78,9 +110,51 @@ pub struct CircshiftParams {
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub shape: [u32; CIRCSHIFT_MAX_RANK],
-    pub strides: [u32; CIRCSHIFT_MAX_RANK],
-    pub shifts: [u32; CIRCSHIFT_MAX_RANK],
+    pub shape: [PackedU32; CIRCSHIFT_MAX_RANK],
+    pub strides: [PackedU32; CIRCSHIFT_MAX_RANK],
+    pub shifts: [PackedU32; CIRCSHIFT_MAX_RANK],
+}
+
+pub const IMFILTER_MAX_RANK: usize = 8;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ImfilterParamsF64 {
+    pub len: u32,
+    pub offset: u32,
+    pub rank: u32,
+    pub padding: u32,
+    pub kernel_points: u32,
+    pub image_len: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub constant_value: f64,
+    pub _pad_const: f64,
+    pub image_shape: [PackedU32; IMFILTER_MAX_RANK],
+    pub image_strides: [PackedU32; IMFILTER_MAX_RANK],
+    pub output_shape: [PackedU32; IMFILTER_MAX_RANK],
+    pub base_offset: [PackedI32; IMFILTER_MAX_RANK],
+    pub _pad_tail: PackedU32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ImfilterParamsF32 {
+    pub len: u32,
+    pub offset: u32,
+    pub rank: u32,
+    pub padding: u32,
+    pub kernel_points: u32,
+    pub image_len: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub constant_value: f32,
+    pub _pad_const: [f32; 3],
+    pub image_shape: [PackedU32; IMFILTER_MAX_RANK],
+    pub image_strides: [PackedU32; IMFILTER_MAX_RANK],
+    pub output_shape: [PackedU32; IMFILTER_MAX_RANK],
+    pub base_offset: [PackedI32; IMFILTER_MAX_RANK],
+    pub _pad_tail: PackedU32,
 }
 
 pub const REPMAT_MAX_RANK: usize = PERMUTE_MAX_RANK;
@@ -92,9 +166,9 @@ pub struct RepmatParams {
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub base_shape: [u32; REPMAT_MAX_RANK],
-    pub new_shape: [u32; REPMAT_MAX_RANK],
-    pub base_strides: [u32; REPMAT_MAX_RANK],
+    pub base_shape: [PackedU32; REPMAT_MAX_RANK],
+    pub new_shape: [PackedU32; REPMAT_MAX_RANK],
+    pub base_strides: [PackedU32; REPMAT_MAX_RANK],
 }
 
 pub const KRON_MAX_RANK: usize = PERMUTE_MAX_RANK;
@@ -106,11 +180,11 @@ pub struct KronParams {
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub shape_a: [u32; KRON_MAX_RANK],
-    pub shape_b: [u32; KRON_MAX_RANK],
-    pub shape_out: [u32; KRON_MAX_RANK],
-    pub stride_a: [u32; KRON_MAX_RANK],
-    pub stride_b: [u32; KRON_MAX_RANK],
+    pub shape_a: [PackedU32; KRON_MAX_RANK],
+    pub shape_b: [PackedU32; KRON_MAX_RANK],
+    pub shape_out: [PackedU32; KRON_MAX_RANK],
+    pub stride_a: [PackedU32; KRON_MAX_RANK],
+    pub stride_b: [PackedU32; KRON_MAX_RANK],
 }
 
 #[repr(C)]
@@ -179,6 +253,37 @@ pub struct FillParamsF32 {
     pub value: f32,
     pub len: u32,
     pub _pad: [u32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FspecialParamsF64 {
+    pub rows: u32,
+    pub cols: u32,
+    pub kind: u32,
+    pub len: u32,
+    pub sigma: f64,
+    pub alpha: f64,
+    pub norm: f64,
+    pub center_x: f64,
+    pub center_y: f64,
+    pub extra0: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FspecialParamsF32 {
+    pub rows: u32,
+    pub cols: u32,
+    pub kind: u32,
+    pub len: u32,
+    pub sigma: f32,
+    pub alpha: f32,
+    pub norm: f32,
+    pub _pad0: f32,
+    pub center_x: f32,
+    pub center_y: f32,
+    pub _pad1: [f32; 2],
 }
 
 #[repr(C)]

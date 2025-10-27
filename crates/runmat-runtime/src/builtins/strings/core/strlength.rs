@@ -232,7 +232,9 @@ fn strlength_char_array(array: CharArray) -> Result<Value, String> {
 }
 
 fn strlength_cell_array(cell: CellArray) -> Result<Value, String> {
-    let CellArray { data, rows, cols } = cell;
+    let CellArray {
+        data, rows, cols, ..
+    } = cell;
     let mut lengths = Vec::with_capacity(rows * cols);
     for col in 0..cols {
         for row in 0..rows {

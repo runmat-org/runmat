@@ -344,6 +344,8 @@ fn logical_from_complex(re: f64, im: f64) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::builtins::common::tensor;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
@@ -503,19 +505,14 @@ mod tests {
             .unwrap();
         let gpu = not_builtin(Value::GpuTensor(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
-        match (cpu, gathered) {
-            (Value::LogicalArray(host), tensor) => {
-                assert_eq!(tensor.shape, host.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
-                    ProviderPrecision::F64 => 1e-12,
-                    ProviderPrecision::F32 => 1e-5,
-                };
-                for (expected, actual) in host.data.iter().zip(tensor.data.iter()) {
-                    assert!((*expected as f64 - *actual).abs() < tol);
-                }
-            }
-            (Value::Bool(host), Value::Bool(gathered)) => assert_eq!(host, gathered),
-            other => panic!("unexpected comparison values: {other:?}"),
+        let cpu_tensor = tensor::value_to_tensor(&cpu).expect("cpu tensor");
+        assert_eq!(gathered.shape, cpu_tensor.shape);
+        let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+            ProviderPrecision::F64 => 1e-12,
+            ProviderPrecision::F32 => 1e-5,
+        };
+        for (expected, actual) in cpu_tensor.data.iter().zip(gathered.data.iter()) {
+            assert!((*expected - *actual).abs() < tol, "{expected} vs {actual}");
         }
     }
 

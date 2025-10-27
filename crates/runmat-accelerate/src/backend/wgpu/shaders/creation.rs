@@ -198,6 +198,239 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+pub const FSPECIAL_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct FsParams {
+    rows: u32,
+    cols: u32,
+    kind: u32,
+    len: u32,
+    sigma: f64,
+    alpha: f64,
+    norm: f64,
+    center_x: f64,
+    center_y: f64,
+    extra0: f64,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: FsParams;
+
+fn laplacian_base(row: u32, col: u32, a: f64, b: f64) -> f64 {
+    if col == 0u {
+        if row == 0u { return a; }
+        if row == 1u { return b; }
+        return a;
+    }
+    if col == 1u {
+        if row == 0u { return b; }
+        if row == 1u { return -1.0; }
+        return b;
+    }
+    if row == 0u { return a; }
+    if row == 1u { return b; }
+    return a;
+}
+
+fn sobel_base(row: u32, col: u32) -> f64 {
+    if col == 0u {
+        if row == 0u { return 1.0; }
+        if row == 1u { return 2.0; }
+        return 1.0;
+    }
+    if col == 1u {
+        return 0.0;
+    }
+    if row == 0u { return -1.0; }
+    if row == 1u { return -2.0; }
+    return -1.0;
+}
+
+fn unsharp_base(row: u32, col: u32, alpha: f64) -> f64 {
+    if col == 0u {
+        if row == 1u { return alpha - 1.0; }
+        return -alpha;
+    }
+    if col == 1u {
+        if row == 0u || row == 2u { return alpha - 1.0; }
+        return alpha + 5.0;
+    }
+    if row == 1u { return alpha - 1.0; }
+    return -alpha;
+}
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.len {
+        return;
+    }
+    let rows = params.rows;
+    let row = idx % rows;
+    let col = idx / rows;
+    var value: f64 = 0.0;
+    switch params.kind {
+        case 0u: { // average
+            value = params.norm;
+        }
+        case 1u: { // gaussian
+            if params.sigma > 0.0 {
+                let dx = f64(col) - params.center_x;
+                let dy = f64(row) - params.center_y;
+                let denom = 2.0 * params.sigma * params.sigma;
+                value = params.norm * exp(-((dx * dx + dy * dy) / denom));
+            } else {
+                value = 0.0;
+            }
+        }
+        case 2u: { // laplacian
+            let a = params.alpha / 4.0;
+            let b = (1.0 - params.alpha) / 4.0;
+            value = laplacian_base(row, col, a, b) * params.norm;
+        }
+        case 3u: { // prewitt
+            if col == 0u {
+                value = 1.0;
+            } else if col == 1u {
+                value = 0.0;
+            } else {
+                value = -1.0;
+            }
+        }
+        case 4u: { // sobel
+            value = sobel_base(row, col);
+        }
+        case 5u: { // unsharp
+            value = unsharp_base(row, col, params.alpha) * params.norm;
+        }
+        default: {
+            value = 0.0;
+        }
+    }
+    Out.data[idx] = value;
+}
+"#;
+
+pub const FSPECIAL_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct FsParams {
+    rows: u32,
+    cols: u32,
+    kind: u32,
+    len: u32,
+    sigma: f32,
+    alpha: f32,
+    norm: f32,
+    _pad0: f32,
+    center_x: f32,
+    center_y: f32,
+    _pad1: vec2<f32>,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: FsParams;
+
+fn laplacian_base(row: u32, col: u32, a: f32, b: f32) -> f32 {
+    if col == 0u {
+        if row == 0u { return a; }
+        if row == 1u { return b; }
+        return a;
+    }
+    if col == 1u {
+        if row == 0u { return b; }
+        if row == 1u { return -1.0; }
+        return b;
+    }
+    if row == 0u { return a; }
+    if row == 1u { return b; }
+    return a;
+}
+
+fn sobel_base(row: u32, col: u32) -> f32 {
+    if col == 0u {
+        if row == 0u { return 1.0; }
+        if row == 1u { return 2.0; }
+        return 1.0;
+    }
+    if col == 1u {
+        return 0.0;
+    }
+    if row == 0u { return -1.0; }
+    if row == 1u { return -2.0; }
+    return -1.0;
+}
+
+fn unsharp_base(row: u32, col: u32, alpha: f32) -> f32 {
+    if col == 0u {
+        if row == 1u { return alpha - 1.0; }
+        return -alpha;
+    }
+    if col == 1u {
+        if row == 0u || row == 2u { return alpha - 1.0; }
+        return alpha + 5.0;
+    }
+    if row == 1u { return alpha - 1.0; }
+    return -alpha;
+}
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.len {
+        return;
+    }
+    let rows = params.rows;
+    let row = idx % rows;
+    let col = idx / rows;
+    var value: f32 = 0.0;
+    switch params.kind {
+        case 0u: {
+            value = params.norm;
+        }
+        case 1u: {
+            if params.sigma > 0.0 {
+                let dx = f32(col) - params.center_x;
+                let dy = f32(row) - params.center_y;
+                let denom = 2.0 * params.sigma * params.sigma;
+                value = params.norm * exp(-((dx * dx + dy * dy) / denom));
+            } else {
+                value = 0.0;
+            }
+        }
+        case 2u: {
+            let a = params.alpha / 4.0;
+            let b = (1.0 - params.alpha) / 4.0;
+            value = laplacian_base(row, col, a, b) * params.norm;
+        }
+        case 3u: {
+            if col == 0u {
+                value = 1.0;
+            } else if col == 1u {
+                value = 0.0;
+            } else {
+                value = -1.0;
+            }
+        }
+        case 4u: {
+            value = sobel_base(row, col);
+        }
+        case 5u: {
+            value = unsharp_base(row, col, params.alpha) * params.norm;
+        }
+        default: {
+            value = 0.0;
+        }
+    }
+    Out.data[idx] = value;
+}
+"#;
+
 pub const RANDOM_INT_SHADER_F64: &str = r#"
 struct Tensor {
     data: array<f64>,

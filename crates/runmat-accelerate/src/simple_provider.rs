@@ -2,9 +2,10 @@ use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
-    AccelProvider, FindDirection, GpuTensorHandle, HostTensorOwned, HostTensorView,
-    ProviderFindResult, ProviderPrecision, SetdiffOptions, SetdiffResult, SortComparison,
-    SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    AccelProvider, CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest,
+    GpuTensorHandle, HostTensorOwned, HostTensorView, ImfilterOptions, ProviderFindResult,
+    ProviderPrecision, SetdiffOptions, SetdiffResult, SortComparison, SortResult,
+    SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::Tensor;
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -12,6 +13,12 @@ use runmat_runtime::builtins::common::broadcast::{
     broadcast_index as runtime_broadcast_index, broadcast_shapes as runtime_broadcast_shapes,
     compute_strides as runtime_compute_strides,
 };
+use runmat_runtime::builtins::stats::summary::{
+    corrcoef_from_tensors as runtime_corrcoef_from_tensors,
+    cov_from_tensors as runtime_cov_from_tensors, CovWeightSpec,
+};
+
+const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -25,6 +32,22 @@ fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
 fn rng_state() -> &'static Mutex<u64> {
     static RNG: OnceCell<Mutex<u64>> = OnceCell::new();
     RNG.get_or_init(|| Mutex::new(0x9e3779b97f4a7c15))
+}
+
+fn tensor_to_weight_vector(tensor: &Tensor) -> Result<Vec<f64>> {
+    if tensor.shape.len() > 2 {
+        return Err(anyhow!("covariance: weight vector must be 1-D"));
+    }
+    let rows = tensor.rows();
+    let cols = tensor.cols();
+    if rows != 1 && cols != 1 {
+        return Err(anyhow!(
+            "covariance: weight vector must be 1-D (received shape {}x{})",
+            rows,
+            cols
+        ));
+    }
+    Ok(tensor.data.clone())
 }
 
 fn next_uniform(state: &mut u64) -> f64 {
@@ -916,6 +939,58 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn set_rng_state(&self, state: u64) -> Result<()> {
+        let mut guard = rng_state()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("set_rng_state: RNG mutex poisoned"))?;
+        *guard = if state == 0 {
+            PROVIDER_DEFAULT_SEED
+        } else {
+            state
+        };
+        Ok(())
+    }
+
+    fn fspecial(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
+        let spec =
+            runmat_runtime::builtins::image::filters::fspecial::spec_from_request(&request.filter)
+                .map_err(|e: String| anyhow!(e))?;
+        let tensor = spec.generate_tensor().map_err(|e| anyhow!(e))?;
+        Ok(self.allocate_tensor(tensor.data.clone(), tensor.shape.clone()))
+    }
+
+    fn imfilter(
+        &self,
+        image: &GpuTensorHandle,
+        kernel: &GpuTensorHandle,
+        options: &ImfilterOptions,
+    ) -> Result<GpuTensorHandle> {
+        let (image_vec, kernel_vec) = {
+            let guard = registry().lock().unwrap();
+            let image_buf = guard
+                .get(&image.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("imfilter: unknown buffer {}", image.buffer_id))?;
+            let kernel_buf = guard
+                .get(&kernel.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("imfilter: unknown buffer {}", kernel.buffer_id))?;
+            (image_buf, kernel_buf)
+        };
+        let image_tensor =
+            Tensor::new(image_vec, image.shape.clone()).map_err(|e| anyhow!("imfilter: {e}"))?;
+        let kernel_tensor =
+            Tensor::new(kernel_vec, kernel.shape.clone()).map_err(|e| anyhow!("imfilter: {e}"))?;
+        let result = runmat_runtime::builtins::image::filters::imfilter::apply_imfilter_tensor(
+            &image_tensor,
+            &kernel_tensor,
+            options,
+        )
+        .map_err(|e| anyhow!(e))?;
+        let Tensor { data, shape, .. } = result;
+        Ok(self.allocate_tensor(data, shape))
+    }
+
     fn random_integer_range(
         &self,
         lower: i64,
@@ -1009,6 +1084,65 @@ impl AccelProvider for InProcessProvider {
         k: usize,
     ) -> Result<GpuTensorHandle> {
         self.random_permutation(n, k)
+    }
+
+    fn covariance(
+        &self,
+        matrix: &GpuTensorHandle,
+        second: Option<&GpuTensorHandle>,
+        weights: Option<&GpuTensorHandle>,
+        options: &CovarianceOptions,
+    ) -> Result<GpuTensorHandle> {
+        let host_matrix = self.download(matrix)?;
+        let left = Tensor::new(host_matrix.data.clone(), host_matrix.shape.clone())
+            .map_err(|e| anyhow!("covariance: {e}"))?;
+
+        let right = if let Some(handle) = second {
+            let host = self.download(handle)?;
+            Some(
+                Tensor::new(host.data.clone(), host.shape.clone())
+                    .map_err(|e| anyhow!("covariance: {e}"))?,
+            )
+        } else {
+            None
+        };
+
+        let weight_spec = if let Some(handle) = weights {
+            let host = self.download(handle)?;
+            let tensor = Tensor::new(host.data.clone(), host.shape.clone())
+                .map_err(|e| anyhow!("covariance: {e}"))?;
+            let vec = tensor_to_weight_vector(&tensor).map_err(|e| anyhow!("covariance: {e}"))?;
+            CovWeightSpec::Vector(vec)
+        } else {
+            CovWeightSpec::Scalar(options.normalization)
+        };
+
+        let result = runtime_cov_from_tensors(left, right, options.rows, weight_spec)
+            .map_err(|e| anyhow!("covariance: {e}"))?;
+
+        let view = HostTensorView {
+            data: &result.data,
+            shape: &result.shape,
+        };
+        self.upload(&view)
+    }
+
+    fn corrcoef(
+        &self,
+        matrix: &GpuTensorHandle,
+        options: &CorrcoefOptions,
+    ) -> Result<GpuTensorHandle> {
+        let host = self.download(matrix)?;
+        let tensor = Tensor::new(host.data.clone(), host.shape.clone())
+            .map_err(|e| anyhow!("corrcoef: {e}"))?;
+        let result =
+            runtime_corrcoef_from_tensors(tensor, None, options.normalization, options.rows)
+                .map_err(|e| anyhow!("corrcoef: {e}"))?;
+        let view = HostTensorView {
+            data: &result.data,
+            shape: &result.shape,
+        };
+        self.upload(&view)
     }
 
     fn elem_add(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {

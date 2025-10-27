@@ -2,16 +2,132 @@ use std::f64::consts::PI;
 use std::sync::{Mutex, OnceLock};
 
 pub(crate) const DEFAULT_RNG_SEED: u64 = 0x9e3779b97f4a7c15;
+pub(crate) const DEFAULT_USER_SEED: u64 = 0;
 const RNG_MULTIPLIER: u64 = 6364136223846793005;
 const RNG_INCREMENT: u64 = 1;
 const RNG_SHIFT: u32 = 11;
 const RNG_SCALE: f64 = 1.0 / ((1u64 << 53) as f64);
 const MIN_UNIFORM: f64 = f64::MIN_POSITIVE;
 
-static RNG_STATE: OnceLock<Mutex<u64>> = OnceLock::new();
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RngAlgorithm {
+    RunMatLcg,
+}
 
-fn rng_state() -> &'static Mutex<u64> {
-    RNG_STATE.get_or_init(|| Mutex::new(DEFAULT_RNG_SEED))
+impl RngAlgorithm {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            RngAlgorithm::RunMatLcg => "twister",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RngSnapshot {
+    pub state: u64,
+    pub seed: Option<u64>,
+    pub algorithm: RngAlgorithm,
+}
+
+impl RngSnapshot {
+    pub(crate) fn new(state: u64, seed: Option<u64>, algorithm: RngAlgorithm) -> Self {
+        Self {
+            state,
+            seed,
+            algorithm,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct GlobalRng {
+    state: u64,
+    seed: Option<u64>,
+    algorithm: RngAlgorithm,
+}
+
+impl GlobalRng {
+    fn new() -> Self {
+        Self {
+            state: DEFAULT_RNG_SEED,
+            seed: Some(DEFAULT_USER_SEED),
+            algorithm: RngAlgorithm::RunMatLcg,
+        }
+    }
+
+    fn snapshot(&self) -> RngSnapshot {
+        RngSnapshot {
+            state: self.state,
+            seed: self.seed,
+            algorithm: self.algorithm,
+        }
+    }
+}
+
+impl From<RngSnapshot> for GlobalRng {
+    fn from(snapshot: RngSnapshot) -> Self {
+        Self {
+            state: snapshot.state,
+            seed: snapshot.seed,
+            algorithm: snapshot.algorithm,
+        }
+    }
+}
+
+static RNG_STATE: OnceLock<Mutex<GlobalRng>> = OnceLock::new();
+
+fn rng_state() -> &'static Mutex<GlobalRng> {
+    RNG_STATE.get_or_init(|| Mutex::new(GlobalRng::new()))
+}
+
+fn mix_seed(seed: u64) -> u64 {
+    if seed == 0 {
+        return DEFAULT_RNG_SEED;
+    }
+    let mut z = seed.wrapping_add(0x9e3779b97f4a7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    let mixed = z ^ (z >> 31);
+    if mixed == 0 {
+        DEFAULT_RNG_SEED
+    } else {
+        mixed
+    }
+}
+
+pub(crate) fn snapshot() -> Result<RngSnapshot, String> {
+    rng_state()
+        .lock()
+        .map(|guard| guard.snapshot())
+        .map_err(|_| "rng: failed to acquire RNG lock".to_string())
+}
+
+pub(crate) fn apply_snapshot(snapshot: RngSnapshot) -> Result<RngSnapshot, String> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| "rng: failed to acquire RNG lock".to_string())?;
+    let previous = guard.snapshot();
+    guard.state = snapshot.state;
+    guard.seed = snapshot.seed;
+    guard.algorithm = snapshot.algorithm;
+    Ok(previous)
+}
+
+pub(crate) fn set_seed(seed: u64) -> Result<RngSnapshot, String> {
+    let state = mix_seed(seed);
+    apply_snapshot(RngSnapshot::new(state, Some(seed), RngAlgorithm::RunMatLcg))
+}
+
+pub(crate) fn set_default() -> Result<RngSnapshot, String> {
+    apply_snapshot(default_snapshot())
+}
+
+pub(crate) fn default_snapshot() -> RngSnapshot {
+    RngSnapshot::new(
+        DEFAULT_RNG_SEED,
+        Some(DEFAULT_USER_SEED),
+        RngAlgorithm::RunMatLcg,
+    )
 }
 
 pub(crate) fn generate_uniform(len: usize, label: &str) -> Result<Vec<f64>, String> {
@@ -20,7 +136,7 @@ pub(crate) fn generate_uniform(len: usize, label: &str) -> Result<Vec<f64>, Stri
         .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
     let mut out = Vec::with_capacity(len);
     for _ in 0..len {
-        out.push(next_uniform_state(&mut *guard));
+        out.push(next_uniform_state(&mut guard.state));
     }
     Ok(out)
 }
@@ -31,8 +147,8 @@ pub(crate) fn generate_complex(len: usize, label: &str) -> Result<Vec<(f64, f64)
         .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
     let mut out = Vec::with_capacity(len);
     for _ in 0..len {
-        let re = next_uniform_state(&mut *guard);
-        let im = next_uniform_state(&mut *guard);
+        let re = next_uniform_state(&mut guard.state);
+        let im = next_uniform_state(&mut guard.state);
         out.push((re, im));
     }
     Ok(out)
@@ -63,7 +179,7 @@ pub(crate) fn generate_normal(len: usize, label: &str) -> Result<Vec<f64>, Strin
         .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
-        let (z0, z1) = next_normal_pair(&mut *guard);
+        let (z0, z1) = next_normal_pair(&mut guard.state);
         out.push(z0);
         if out.len() < len {
             out.push(z1);
@@ -78,7 +194,7 @@ pub(crate) fn generate_normal_complex(len: usize, label: &str) -> Result<Vec<(f6
         .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
     let mut out = Vec::with_capacity(len);
     for _ in 0..len {
-        let (re, im) = next_normal_pair(&mut *guard);
+        let (re, im) = next_normal_pair(&mut guard.state);
         out.push((re, im));
     }
     Ok(out)
@@ -88,10 +204,10 @@ pub(crate) fn generate_normal_complex(len: usize, label: &str) -> Result<Vec<(f6
 pub(crate) fn reset_rng() {
     if let Some(mutex) = RNG_STATE.get() {
         if let Ok(mut guard) = mutex.lock() {
-            *guard = DEFAULT_RNG_SEED;
+            *guard = GlobalRng::from(default_snapshot());
         }
     } else {
-        let _ = RNG_STATE.set(Mutex::new(DEFAULT_RNG_SEED));
+        let _ = RNG_STATE.set(Mutex::new(GlobalRng::new()));
     }
 }
 

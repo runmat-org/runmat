@@ -288,7 +288,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CharArray, CellArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
+        CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
         MException, ObjectInstance, StringArray, StructValue, Tensor,
     };
     use runmat_gc_api::GcPtr;

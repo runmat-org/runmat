@@ -6,14 +6,14 @@ struct Tensor {
 };
 
 struct Params {
-    len: u32;
-    offset: u32;
-    rank: u32;
-    _pad: u32;
-    src_shape: array<u32, MAX_RANK>;
-    dst_shape: array<u32, MAX_RANK>;
-    order: array<u32, MAX_RANK>;
-    src_strides: array<u32, MAX_RANK>;
+    len: u32,
+    offset: u32,
+    rank: u32,
+    _pad: u32,
+    src_shape: array<vec4<u32>, MAX_RANK>,
+    dst_shape: array<vec4<u32>, MAX_RANK>,
+    order: array<vec4<u32>, MAX_RANK>,
+    src_strides: array<vec4<u32>, MAX_RANK>,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
@@ -35,7 +35,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.dst_shape[dim];
+        let size = params.dst_shape[dim].x;
         if size == 0u {
             coords[dim] = 0u;
         } else {
@@ -51,8 +51,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let src_dim = params.order[dim];
-        let stride = params.src_strides[src_dim];
+        let src_dim = params.order[dim].x;
+        let stride = params.src_strides[src_dim].x;
         let coord = coords[dim];
         src_index = src_index + coord * stride;
         dim = dim + 1u;
@@ -70,14 +70,14 @@ struct Tensor {
 };
 
 struct Params {
-    len: u32;
-    offset: u32;
-    rank: u32;
-    _pad: u32;
-    src_shape: array<u32, MAX_RANK>;
-    dst_shape: array<u32, MAX_RANK>;
-    order: array<u32, MAX_RANK>;
-    src_strides: array<u32, MAX_RANK>;
+    len: u32,
+    offset: u32,
+    rank: u32,
+    _pad: u32,
+    src_shape: array<vec4<u32>, MAX_RANK>,
+    dst_shape: array<vec4<u32>, MAX_RANK>,
+    order: array<vec4<u32>, MAX_RANK>,
+    src_strides: array<vec4<u32>, MAX_RANK>,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
@@ -99,7 +99,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.dst_shape[dim];
+        let size = params.dst_shape[dim].x;
         if size == 0u {
             coords[dim] = 0u;
         } else {
@@ -115,8 +115,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let src_dim = params.order[dim];
-        let stride = params.src_strides[src_dim];
+        let src_dim = params.order[dim].x;
+        let stride = params.src_strides[src_dim].x;
         let coord = coords[dim];
         src_index = src_index + coord * stride;
         dim = dim + 1u;

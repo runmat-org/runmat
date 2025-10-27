@@ -51,6 +51,8 @@ const RANDOM_NORMAL_SHADER_F32: &str =
     crate::backend::wgpu::shaders::creation::RANDOM_NORMAL_SHADER_F32;
 const RANDPERM_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDPERM_SHADER_F64;
 const RANDPERM_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDPERM_SHADER_F32;
+const FSPECIAL_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::FSPECIAL_SHADER_F64;
+const FSPECIAL_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::FSPECIAL_SHADER_F32;
 const DIAG_FROM_VECTOR_SHADER_F64: &str =
     crate::backend::wgpu::shaders::diag::DIAG_FROM_VECTOR_SHADER_F64;
 const DIAG_FROM_VECTOR_SHADER_F32: &str =
@@ -63,6 +65,8 @@ const TRIL_SHADER_F64: &str = crate::backend::wgpu::shaders::tril::TRIL_SHADER_F
 const TRIL_SHADER_F32: &str = crate::backend::wgpu::shaders::tril::TRIL_SHADER_F32;
 const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F64;
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
+const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
+const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -92,6 +96,8 @@ pub struct WgpuPipelines {
     pub random_uniform: PipelineBundle,
     pub random_normal: PipelineBundle,
     pub randperm: PipelineBundle,
+    pub fspecial: PipelineBundle,
+    pub imfilter: PipelineBundle,
     pub diag_from_vector: PipelineBundle,
     pub diag_extract: PipelineBundle,
     pub find: PipelineBundle,
@@ -414,6 +420,35 @@ impl WgpuPipelines {
                 NumericPrecision::F32 => RANDOM_NORMAL_SHADER_F32,
             },
         );
+        let fspecial = create_pipeline(
+            device,
+            "runmat-fspecial-layout",
+            "runmat-fspecial-shader",
+            "runmat-fspecial-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => FSPECIAL_SHADER_F64,
+                NumericPrecision::F32 => FSPECIAL_SHADER_F32,
+            },
+        );
+
+        let imfilter = create_pipeline(
+            device,
+            "runmat-imfilter-layout",
+            "runmat-imfilter-shader",
+            "runmat-imfilter-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_write_entry(3),
+                uniform_entry(4),
+            ],
+            match precision {
+                NumericPrecision::F64 => IMFILTER_SHADER_F64,
+                NumericPrecision::F32 => IMFILTER_SHADER_F32,
+            },
+        );
 
         let randperm = create_pipeline(
             device,
@@ -502,6 +537,8 @@ impl WgpuPipelines {
             random_uniform,
             random_normal,
             randperm,
+            fspecial,
+            imfilter,
             diag_from_vector,
             diag_extract,
             find,

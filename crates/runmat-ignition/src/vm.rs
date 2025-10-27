@@ -202,6 +202,20 @@ fn workspace_snapshot() -> Vec<(String, Value)> {
     })
 }
 
+fn workspace_global_names() -> Vec<String> {
+    let mut names = Vec::new();
+    GLOBALS.with(|globals| {
+        let map = globals.borrow();
+        for key in map.keys() {
+            if !key.starts_with("var_") {
+                names.push(key.clone());
+            }
+        }
+    });
+    names.sort();
+    names
+}
+
 fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> Result<(), String> {
     let mut result = Ok(());
     WORKSPACE_STATE.with(|state| {
@@ -247,6 +261,7 @@ fn ensure_workspace_resolver_registered() {
         runtime_workspace::register_workspace_resolver(WorkspaceResolver {
             lookup: workspace_lookup,
             snapshot: workspace_snapshot,
+            globals: workspace_global_names,
         });
     });
 }
@@ -3239,6 +3254,64 @@ pub fn interpret_with_vars(
                     stack.push(values);
                     stack.push(ia);
                     stack.push(ib);
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "histcounts" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::stats::hist::histcounts::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_counts_value());
+                        continue;
+                    }
+                    let (counts, edges) = eval.into_pair();
+                    stack.push(counts);
+                    stack.push(edges);
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "histcounts2" && args.len() >= 2 {
+                    let eval = match runmat_runtime::builtins::stats::hist::histcounts2::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        &args[2..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_counts_value());
+                        continue;
+                    }
+                    if out_count == 2 {
+                        let (counts, xedges) = eval.into_pair();
+                        stack.push(counts);
+                        stack.push(xedges);
+                        continue;
+                    }
+                    let (counts, xedges, yedges) = eval.into_triple();
+                    stack.push(counts);
+                    stack.push(xedges);
+                    stack.push(yedges);
                     if out_count > 3 {
                         for _ in 3..out_count {
                             stack.push(Value::Num(0.0));

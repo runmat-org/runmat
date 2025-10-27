@@ -2,8 +2,6 @@ use runmat_builtins::Value;
 use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::format::format_variadic;
-
 pub mod dispatcher;
 
 pub mod arrays;
@@ -52,14 +50,18 @@ pub use blas::*;
 #[cfg(feature = "blas-lapack")]
 pub use lapack::*;
 
-pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, String> {
+pub(crate) fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
     let handles: Vec<GcPtr<Value>> = values
         .into_iter()
         .map(|v| runmat_gc::gc_allocate(v).expect("gc alloc"))
         .collect();
-    let ca = runmat_builtins::CellArray::new_handles(handles, rows, cols)
+    let ca = runmat_builtins::CellArray::new_handles_with_shape(handles, shape)
         .map_err(|e| format!("Cell creation error: {e}"))?;
     Ok(Value::Cell(ca))
+}
+
+pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, String> {
+    make_cell_with_shape(values, vec![rows, cols])
 }
 
 // Internal builtin to construct a cell from a vector of values (used by ignition)
@@ -550,28 +552,6 @@ fn getfield_builtin(base: Value, field: String) -> Result<Value, String> {
             "getfield unsupported on this value for field '{field}': {other:?}"
         )),
     }
-}
-
-// Error handling builtins (basic compatibility)
-#[runmat_macros::runtime_builtin(name = "error")]
-fn error_builtin(rest: Vec<Value>) -> Result<Value, String> {
-    // The MATLAB language is compatible: error(message) or error(identifier, message)
-    // We surface a unified error string "IDENT: message" for VM to parse into MException
-    if rest.is_empty() {
-        return Err("MATLAB:error: missing message".to_string());
-    }
-    if rest.len() == 1 {
-        let msg: String = (&rest[0]).try_into()?;
-        return Err(format!("MATLAB:error: {msg}"));
-    }
-    let ident: String = (&rest[0]).try_into()?;
-    let msg: String = (&rest[1]).try_into()?;
-    let id = if ident.contains(":") {
-        ident
-    } else {
-        ident.to_string()
-    };
-    Err(format!("{id}: {msg}"))
 }
 
 #[runmat_macros::runtime_builtin(name = "rethrow")]
@@ -2356,13 +2336,6 @@ fn all_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
         }
     }
     Err("all: unsupported arguments".to_string())
-}
-
-#[runmat_macros::runtime_builtin(name = "warning", sink = true)]
-fn warning_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
-    let s = format_variadic(&fmt, &rest)?;
-    eprintln!("Warning: {s}");
-    Ok(Value::Num(0.0))
 }
 
 #[runmat_macros::runtime_builtin(name = "disp", sink = true)]

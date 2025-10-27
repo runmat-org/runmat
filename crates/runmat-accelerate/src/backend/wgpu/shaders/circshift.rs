@@ -6,13 +6,13 @@ struct Tensor {
 };
 
 struct Params {
-    len: u32;
-    offset: u32;
-    rank: u32;
-    _pad: u32;
-    shape: array<u32, MAX_RANK>;
-    strides: array<u32, MAX_RANK>;
-    shifts: array<u32, MAX_RANK>;
+    len: u32,
+    offset: u32,
+    rank: u32,
+    _pad: u32,
+    shape: array<vec4<u32>, MAX_RANK>,
+    strides: array<vec4<u32>, MAX_RANK>,
+    shifts: array<vec4<u32>, MAX_RANK>,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
@@ -34,7 +34,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.shape[dim];
+        let size = params.shape[dim].x;
         if size == 0u {
             coords[dim] = 0u;
         } else {
@@ -50,11 +50,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.shape[dim];
-        let stride = params.strides[dim];
+        let size = params.shape[dim].x;
+        let stride = params.strides[dim].x;
         var coord = coords[dim];
         if size > 1u {
-            let shift = params.shifts[dim];
+            let shift = params.shifts[dim].x;
             if shift != 0u {
                 let wrap = shift % size;
                 coord = (coord + size - wrap) % size;
@@ -76,13 +76,13 @@ struct Tensor {
 };
 
 struct Params {
-    len: u32;
-    offset: u32;
-    rank: u32;
-    _pad: u32;
-    shape: array<u32, MAX_RANK>;
-    strides: array<u32, MAX_RANK>;
-    shifts: array<u32, MAX_RANK>;
+    len: u32,
+    offset: u32,
+    rank: u32,
+    _pad: u32,
+    shape: array<vec4<u32>, MAX_RANK>,
+    strides: array<vec4<u32>, MAX_RANK>,
+    shifts: array<vec4<u32>, MAX_RANK>,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
@@ -104,7 +104,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.shape[dim];
+        let size = params.shape[dim].x;
         if size == 0u {
             coords[dim] = 0u;
         } else {
@@ -120,11 +120,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.shape[dim];
-        let stride = params.strides[dim];
+        let size = params.shape[dim].x;
+        let stride = params.strides[dim].x;
         var coord = coords[dim];
         if size > 1u {
-            let shift = params.shifts[dim];
+            let shift = params.shifts[dim].x;
             if shift != 0u {
                 let wrap = shift % size;
                 coord = (coord + size - wrap) % size;

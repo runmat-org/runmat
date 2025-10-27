@@ -17,7 +17,7 @@ pub fn value_dimensions(value: &Value) -> Vec<usize> {
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
         Value::CharArray(ca) => vec![ca.rows, ca.cols],
-        Value::Cell(ca) => vec![ca.rows, ca.cols],
+        Value::Cell(ca) => normalize_shape(&ca.shape),
         Value::GpuTensor(handle) => {
             if handle.shape.is_empty() {
                 if let Some(provider) = runmat_accelerate_api::provider() {

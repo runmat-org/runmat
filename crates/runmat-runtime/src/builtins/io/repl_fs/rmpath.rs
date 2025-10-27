@@ -145,7 +145,7 @@ Error: rmpath: folder 'nonexistent/toolbox' not found
 - **Is there a bulk reset option?** To clear the path entirely call `path("")`. `rmpath` intentionally targets specific folders.
 
 ## See Also
-[path](./path), [addpath](./addpath), [genpath](https://www.mathworks.com/help/matlab/ref/genpath.html), [which](./which), [exist](./exist)
+[path](./path), [addpath](./addpath), [genpath](https://www.mathworks.com/help/matlab/ref/genpath.html), [which](../../introspection/which), [exist](./exist)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/rmpath.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/rmpath.rs)

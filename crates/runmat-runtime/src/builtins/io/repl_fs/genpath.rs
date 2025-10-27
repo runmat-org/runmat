@@ -155,7 +155,7 @@ savepath();
   The output string is `pathsep`-delimited specifically for that purpose.
 
 ## See Also
-[addpath](./addpath), [rmpath](./rmpath), [path](./path), [which](./which)
+[addpath](./addpath), [rmpath](./rmpath), [path](./path), [which](../../introspection/which)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/genpath.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/genpath.rs)

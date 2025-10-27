@@ -6,15 +6,15 @@ struct Tensor {
 };
 
 struct Params {
-    len: u32;
-    offset: u32;
-    rank: u32;
-    _pad: u32;
-    shape_a: array<u32, MAX_RANK>;
-    shape_b: array<u32, MAX_RANK>;
-    shape_out: array<u32, MAX_RANK>;
-    stride_a: array<u32, MAX_RANK>;
-    stride_b: array<u32, MAX_RANK>;
+    len: u32,
+    offset: u32,
+    rank: u32,
+    _pad: u32,
+    shape_a: array<vec4<u32>, MAX_RANK>,
+    shape_b: array<vec4<u32>, MAX_RANK>,
+    shape_out: array<vec4<u32>, MAX_RANK>,
+    stride_a: array<vec4<u32>, MAX_RANK>,
+    stride_b: array<vec4<u32>, MAX_RANK>,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -39,14 +39,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let out_dim = params.shape_out[dim];
+        let out_dim = params.shape_out[dim].x;
         var coord_out: u32 = 0u;
         if out_dim != 0u {
             coord_out = remaining % out_dim;
             remaining = remaining / out_dim;
         }
 
-        let dim_b = params.shape_b[dim];
+        let dim_b = params.shape_b[dim].x;
         var coord_b: u32 = 0u;
         var coord_a: u32 = 0u;
         if dim_b != 0u {
@@ -54,8 +54,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             coord_a = coord_out / dim_b;
         }
 
-        let stride_a = params.stride_a[dim];
-        let stride_b = params.stride_b[dim];
+        let stride_a = params.stride_a[dim].x;
+        let stride_b = params.stride_b[dim].x;
         index_a = index_a + coord_a * stride_a;
         index_b = index_b + coord_b * stride_b;
 
@@ -74,15 +74,15 @@ struct Tensor {
 };
 
 struct Params {
-    len: u32;
-    offset: u32;
-    rank: u32;
-    _pad: u32;
-    shape_a: array<u32, MAX_RANK>;
-    shape_b: array<u32, MAX_RANK>;
-    shape_out: array<u32, MAX_RANK>;
-    stride_a: array<u32, MAX_RANK>;
-    stride_b: array<u32, MAX_RANK>;
+    len: u32,
+    offset: u32,
+    rank: u32,
+    _pad: u32,
+    shape_a: array<vec4<u32>, MAX_RANK>,
+    shape_b: array<vec4<u32>, MAX_RANK>,
+    shape_out: array<vec4<u32>, MAX_RANK>,
+    stride_a: array<vec4<u32>, MAX_RANK>,
+    stride_b: array<vec4<u32>, MAX_RANK>,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -107,14 +107,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let out_dim = params.shape_out[dim];
+        let out_dim = params.shape_out[dim].x;
         var coord_out: u32 = 0u;
         if out_dim != 0u {
             coord_out = remaining % out_dim;
             remaining = remaining / out_dim;
         }
 
-        let dim_b = params.shape_b[dim];
+        let dim_b = params.shape_b[dim].x;
         var coord_b: u32 = 0u;
         var coord_a: u32 = 0u;
         if dim_b != 0u {
@@ -122,8 +122,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             coord_a = coord_out / dim_b;
         }
 
-        let stride_a = params.stride_a[dim];
-        let stride_b = params.stride_b[dim];
+        let stride_a = params.stride_a[dim].x;
+        let stride_b = params.stride_b[dim].x;
         index_a = index_a + coord_a * stride_a;
         index_b = index_b + coord_b * stride_b;
 

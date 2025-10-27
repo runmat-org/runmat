@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use runmat_builtins::{builtin_functions, LogicalArray, Tensor, Value};
 
-use crate::{make_cell, new_object_builtin};
+use crate::{make_cell_with_shape, new_object_builtin};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -45,7 +45,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
             for ptr in &ca.data {
                 gathered.push(gather_if_needed(&**ptr)?);
             }
-            make_cell(gathered, ca.rows, ca.cols)
+            make_cell_with_shape(gathered, ca.shape.clone())
         }
         Value::Struct(sv) => {
             let mut fields = HashMap::with_capacity(sv.fields.len());

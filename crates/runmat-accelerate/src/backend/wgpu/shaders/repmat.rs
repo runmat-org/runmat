@@ -6,13 +6,13 @@ struct Tensor {
 };
 
 struct Params {
-    len: u32;
-    offset: u32;
-    rank: u32;
-    _pad: u32;
-    base_shape: array<u32, MAX_RANK>;
-    new_shape: array<u32, MAX_RANK>;
-    base_strides: array<u32, MAX_RANK>;
+    len: u32,
+    offset: u32,
+    rank: u32,
+    _pad: u32,
+    base_shape: array<vec4<u32>, MAX_RANK>,
+    new_shape: array<vec4<u32>, MAX_RANK>,
+    base_strides: array<vec4<u32>, MAX_RANK>,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
@@ -35,18 +35,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.new_shape[dim];
+        let size = params.new_shape[dim].x;
         var coord: u32 = 0u;
         if size != 0u {
             coord = remaining % size;
             remaining = remaining / size;
         }
-        let base = params.base_shape[dim];
+        let base = params.base_shape[dim].x;
         var orig_coord: u32 = 0u;
         if base != 0u {
             orig_coord = coord % base;
         }
-        let stride = params.base_strides[dim];
+        let stride = params.base_strides[dim].x;
         src_index = src_index + orig_coord * stride;
         dim = dim + 1u;
     }
@@ -63,13 +63,13 @@ struct Tensor {
 };
 
 struct Params {
-    len: u32;
-    offset: u32;
-    rank: u32;
-    _pad: u32;
-    base_shape: array<u32, MAX_RANK>;
-    new_shape: array<u32, MAX_RANK>;
-    base_strides: array<u32, MAX_RANK>;
+    len: u32,
+    offset: u32,
+    rank: u32,
+    _pad: u32,
+    base_shape: array<vec4<u32>, MAX_RANK>,
+    new_shape: array<vec4<u32>, MAX_RANK>,
+    base_strides: array<vec4<u32>, MAX_RANK>,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
@@ -92,18 +92,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.new_shape[dim];
+        let size = params.new_shape[dim].x;
         var coord: u32 = 0u;
         if size != 0u {
             coord = remaining % size;
             remaining = remaining / size;
         }
-        let base = params.base_shape[dim];
+        let base = params.base_shape[dim].x;
         var orig_coord: u32 = 0u;
         if base != 0u {
             orig_coord = coord % base;
         }
-        let stride = params.base_strides[dim];
+        let stride = params.base_strides[dim].x;
         src_index = src_index + orig_coord * stride;
         dim = dim + 1u;
     }

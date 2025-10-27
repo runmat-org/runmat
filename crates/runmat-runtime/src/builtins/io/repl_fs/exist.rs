@@ -535,6 +535,7 @@ mod tests {
                     entries.sort_by(|a, b| a.0.cmp(&b.0));
                     entries
                 },
+                globals: || Vec::new(),
             });
         });
     }

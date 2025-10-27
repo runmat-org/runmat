@@ -451,7 +451,9 @@ fn char_array_rows_to_strings(array: &CharArray) -> Vec<String> {
 }
 
 fn cell_array_to_strings(cell: CellArray) -> Result<(Vec<String>, Vec<usize>), String> {
-    let CellArray { data, rows, cols } = cell;
+    let CellArray {
+        data, rows, cols, ..
+    } = cell;
     let mut strings = Vec::with_capacity(rows * cols);
     for col in 0..cols {
         for row in 0..rows {

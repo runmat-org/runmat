@@ -844,9 +844,6 @@ mod tests {
         )
         .expect("flip gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        match gathered {
-            Value::Tensor(t) => assert_eq!(t.data, cpu.data),
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        assert_eq!(gathered.data, cpu.data);
     }
 }

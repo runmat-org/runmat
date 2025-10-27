@@ -25,6 +25,7 @@ encoding_rs = "0.8.35"
 chrono = { workspace = true }
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "charset", "gzip", "json", "rustls-tls"] }
+log = { workspace = true }
 
 # BLAS/LAPACK bindings for high-performance linear algebra (optional)
 blas = { version = "0.22", optional = true }

@@ -6,6 +6,7 @@ use runmat_builtins::Value;
 pub struct WorkspaceResolver {
     pub lookup: fn(&str) -> Option<Value>,
     pub snapshot: fn() -> Vec<(String, Value)>,
+    pub globals: fn() -> Vec<String>,
 }
 
 static RESOLVER: OnceCell<WorkspaceResolver> = OnceCell::new();
@@ -25,6 +26,14 @@ pub fn lookup(name: &str) -> Option<Value> {
 /// Returns `None` when no resolver/workspace is active.
 pub fn snapshot() -> Option<Vec<(String, Value)>> {
     RESOLVER.get().map(|resolver| (resolver.snapshot)())
+}
+
+/// Return the list of global variable names visible to the active workspace.
+pub fn global_names() -> Vec<String> {
+    RESOLVER
+        .get()
+        .map(|resolver| (resolver.globals)())
+        .unwrap_or_default()
 }
 
 /// Returns true when a resolver has been registered.

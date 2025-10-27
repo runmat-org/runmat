@@ -19,8 +19,6 @@ pub mod savepath;
 pub mod setenv;
 pub mod tempdir;
 pub mod tempname;
-pub mod which;
-
 #[cfg(test)]
 use once_cell::sync::Lazy;
 #[cfg(test)]

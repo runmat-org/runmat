@@ -2,8 +2,8 @@ use anyhow::{anyhow, bail, Context};
 use once_cell::sync::OnceCell;
 use runmat_accelerate::fusion_residency;
 use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned, HostTensorView,
-    ProviderPrecision, UniqueOptions, UniqueResult,
+    AccelProvider, ApiDeviceInfo, CorrcoefOptions, FspecialRequest, GpuTensorHandle,
+    HostTensorOwned, HostTensorView, ProviderPrecision, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
@@ -11,6 +11,7 @@ use runmat_hir::lower;
 use runmat_ignition::vm::interpret_function;
 use runmat_ignition::{compile, interpret, Instr};
 use runmat_parser::parse;
+use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::gather_if_needed;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -89,6 +90,13 @@ impl AccelProvider for TestProvider {
         Ok(true)
     }
 
+    fn fspecial(&self, request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
+        let spec =
+            test_fspecial_spec_from_request(&request.filter).map_err(|e: String| anyhow!(e))?;
+        let tensor = spec.generate_tensor().map_err(|e| anyhow!(e))?;
+        Ok(self.push(tensor.data.clone(), tensor.shape.clone()))
+    }
+
     fn reduce_sum_dim(&self, a: &GpuTensorHandle, dim: usize) -> anyhow::Result<GpuTensorHandle> {
         let (data, shape) = self.pull(a)?;
         if shape.len() != 2 {
@@ -150,6 +158,14 @@ impl AccelProvider for TestProvider {
         )
         .and_then(|eval| eval.into_numeric_unique_result())
         .map_err(|e| anyhow!("unique (test provider): {e}"))
+    }
+
+    fn corrcoef(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _options: &CorrcoefOptions,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow!("corrcoef (test provider): not implemented"))
     }
 
     fn fused_elementwise(

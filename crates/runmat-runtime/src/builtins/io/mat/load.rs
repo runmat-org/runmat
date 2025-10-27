@@ -394,7 +394,7 @@ fn insert_or_replace(selected: &mut Vec<(String, Value)>, name: &str, value: Val
     }
 }
 
-fn read_mat_file(path: &Path) -> Result<Vec<(String, Value)>, String> {
+pub(crate) fn read_mat_file(path: &Path) -> Result<Vec<(String, Value)>, String> {
     let file = File::open(path)
         .map_err(|err| format!("load: failed to open '{}': {err}", path.display()))?;
     let mut reader = BufReader::new(file);
@@ -917,6 +917,7 @@ mod tests {
                     entries.sort_by(|a, b| a.0.cmp(&b.0));
                     entries
                 },
+                globals: || Vec::new(),
             });
         });
     }

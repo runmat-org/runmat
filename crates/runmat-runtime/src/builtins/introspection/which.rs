@@ -34,7 +34,7 @@ const ERROR_OPTION_ARG: &str = "which: option must be a character vector or stri
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
 title: "which"
-category: "io/repl_fs"
+category: "introspection"
 keywords: ["which", "search path", "builtin lookup", "script path", "variable shadowing"]
 summary: "Identify which variable, builtin, script, class, or folder RunMat will execute for a given name."
 references:
@@ -52,8 +52,8 @@ fusion:
   constants: "inline"
 requires_feature: null
 tested:
-  unit: "builtins::io::repl_fs::which::tests"
-  integration: "builtins::io::repl_fs::which::tests::which_variable_search_respects_workspace"
+  unit: "builtins::introspection::which::tests"
+  integration: "builtins::introspection::which::tests::which_variable_search_respects_workspace"
 ---
 
 # What does the `which` function do in MATLAB / RunMat?
@@ -153,10 +153,10 @@ Expected output (example):
 - **Does `which` gather GPU values?** Yes. GPU-resident arguments are automatically gathered before the search begins.
 
 ## See Also
-[exist](./exist), [ls](./ls), [dir](./dir), [copyfile](./copyfile)
+[exist](../io/repl_fs/exist), [ls](../io/repl_fs/ls), [dir](../io/repl_fs/dir), [copyfile](../io/repl_fs/copyfile)
 
 ## Source & Feedback
-- Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/which.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/which.rs)
+- Source: [`crates/runmat-runtime/src/builtins/introspection/which.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/which.rs)
 - Found an issue? [Open a GitHub ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
 "#;
 
@@ -195,7 +195,7 @@ register_builtin_doc_text!("which", DOC_MD);
 
 #[runtime_builtin(
     name = "which",
-    category = "io/repl_fs",
+    category = "introspection",
     summary = "Identify which variable, builtin, script, class, or folder RunMat will execute for a given name.",
     keywords = "which,search path,builtin lookup,script path,variable shadowing",
     accel = "cpu"
@@ -489,16 +489,18 @@ fn push_unique(results: &mut Vec<String>, seen: &mut HashSet<String>, entry: Str
 
 #[cfg(test)]
 mod tests {
-    use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use once_cell::sync::OnceCell;
+    use once_cell::sync::{Lazy, OnceCell};
     use runmat_builtins::{CharArray, StringArray, Value};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::fs::File;
     use std::io::Write;
     use std::path::PathBuf;
+    use std::sync::Mutex;
     use tempfile::tempdir;
+
+    static WHICH_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     thread_local! {
         static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
@@ -515,6 +517,7 @@ mod tests {
                     entries.sort_by(|a, b| a.0.cmp(&b.0));
                     entries
                 },
+                globals: || Vec::new(),
             });
         });
     }
@@ -531,7 +534,7 @@ mod tests {
 
     #[test]
     fn which_reports_builtin() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let value = which_builtin(vec![Value::from("sin")]).expect("which");
@@ -544,7 +547,7 @@ mod tests {
 
     #[test]
     fn which_variable_search_respects_workspace() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         ensure_test_resolver();
@@ -556,7 +559,7 @@ mod tests {
 
     #[test]
     fn which_finds_files() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let temp = tempdir().expect("tempdir");
@@ -580,7 +583,7 @@ mod tests {
 
     #[test]
     fn which_all_returns_cell_array() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let value = which_builtin(vec![Value::from("sin"), Value::from("-all")]).expect("which");
@@ -592,7 +595,7 @@ mod tests {
 
     #[test]
     fn which_not_found_message() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let value = which_builtin(vec![Value::from("definitely_missing")]).expect("which");
@@ -602,7 +605,7 @@ mod tests {
 
     #[test]
     fn which_parses_leading_option() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let value = which_builtin(vec![Value::from("-all"), Value::from("sin")]).expect("which");
@@ -614,7 +617,7 @@ mod tests {
 
     #[test]
     fn which_allows_uppercase_and_repeated_flags() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let value = which_builtin(vec![
@@ -632,7 +635,7 @@ mod tests {
 
     #[test]
     fn which_conflicting_flags_error() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = which_builtin(vec![
@@ -649,7 +652,7 @@ mod tests {
 
     #[test]
     fn which_invalid_flag_error() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = which_builtin(vec![Value::from("-nope"), Value::from("sin")]).unwrap_err();
@@ -661,7 +664,7 @@ mod tests {
 
     #[test]
     fn which_requires_name_argument() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = which_builtin(vec![]).unwrap_err();
@@ -670,7 +673,7 @@ mod tests {
 
     #[test]
     fn which_errors_on_non_string_name() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = which_builtin(vec![Value::Num(4.0)]).unwrap_err();
@@ -679,7 +682,7 @@ mod tests {
 
     #[test]
     fn which_errors_on_too_many_arguments() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let err = which_builtin(vec![
@@ -693,7 +696,7 @@ mod tests {
 
     #[test]
     fn which_accepts_char_and_string_array_inputs() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let char_value = Value::CharArray(CharArray::new_row("sin"));
@@ -716,7 +719,7 @@ mod tests {
 
     #[test]
     fn which_file_option_finds_directories() {
-        let _lock = REPL_FS_TEST_LOCK
+        let _lock = WHICH_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let temp = tempdir().expect("tempdir");

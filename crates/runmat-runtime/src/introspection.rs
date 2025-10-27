@@ -46,53 +46,6 @@ fn isstring_builtin(a: Value) -> Result<bool, String> {
     Ok(matches!(a, Value::String(_) | Value::StringArray(_)))
 }
 
-#[runtime_builtin(name = "class")]
-fn class_builtin(a: Value) -> Result<String, String> {
-    let s = match &a {
-        Value::Num(_) | Value::Tensor(_) => "double",
-        Value::ComplexTensor(_) => "double",
-        Value::Complex(_, _) => "double", // The MATLAB language reports 'double' though value is complex
-        Value::Int(iv) => iv.class_name(),
-        Value::Bool(_) | Value::LogicalArray(_) => "logical",
-        Value::String(_) | Value::StringArray(_) => "string",
-        Value::CharArray(_) => "char",
-        Value::Cell(_) => "cell",
-        Value::Struct(_) => "struct",
-        Value::GpuTensor(_) => "gpuArray",
-        Value::FunctionHandle(_) | Value::Closure(_) => "function_handle",
-        Value::HandleObject(_) => "handle",
-        Value::Listener(_) => "listener",
-        Value::Object(o) => o.class_name.as_str(),
-        Value::ClassRef(_) => "meta.class",
-        Value::MException(_) => "MException",
-    };
-    Ok(s.to_string())
-}
-
-#[runtime_builtin(name = "isa")]
-fn isa_builtin(a: Value, type_name: String) -> Result<bool, String> {
-    let t = type_name.to_lowercase();
-    let is = match &a {
-        Value::Num(_) | Value::Tensor(_) => t == "double" || t == "numeric",
-        Value::ComplexTensor(_) => t == "double" || t == "numeric",
-        Value::Complex(_, _) => t == "double" || t == "numeric",
-        Value::Int(iv) => t == iv.class_name() || t == "numeric",
-        Value::Bool(_) | Value::LogicalArray(_) => t == "logical",
-        Value::String(_) | Value::StringArray(_) => t == "string",
-        Value::CharArray(_) => t == "char",
-        Value::Cell(_) => t == "cell",
-        Value::Struct(_) => t == "struct",
-        Value::GpuTensor(_) => t == "gpuarray",
-        Value::FunctionHandle(_) | Value::Closure(_) => t == "function_handle",
-        Value::HandleObject(_) => t == "handle",
-        Value::Listener(_) => t == "listener",
-        Value::Object(o) => t == o.class_name.to_lowercase(),
-        Value::ClassRef(_) => t == "meta.class",
-        Value::MException(_) => t == "mexception",
-    };
-    Ok(is)
-}
-
 // ---------------------------
 // String predicates and ops
 // ---------------------------

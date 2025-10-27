@@ -163,7 +163,7 @@ Expected behaviour:
 - **Does `addpath` return the new path?** Like MATLAB, `addpath` returns the previous path so it can be restored later with `path(old)`.
 
 ## See Also
-[path](./path), [rmpath](https://www.mathworks.com/help/matlab/ref/rmpath.html), [genpath](https://www.mathworks.com/help/matlab/ref/genpath.html), [which](./which), [exist](./exist)
+[path](./path), [rmpath](https://www.mathworks.com/help/matlab/ref/rmpath.html), [genpath](https://www.mathworks.com/help/matlab/ref/genpath.html), [which](../../introspection/which), [exist](./exist)
 
 ## Source & Feedback
 - Source: [`crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs)

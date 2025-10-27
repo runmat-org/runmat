@@ -322,7 +322,9 @@ fn replace_char_array(array: CharArray, spec: &ReplacementSpec) -> Result<Value,
 }
 
 fn replace_cell_array(cell: CellArray, spec: &ReplacementSpec) -> Result<Value, String> {
-    let CellArray { data, rows, cols } = cell;
+    let CellArray {
+        data, rows, cols, ..
+    } = cell;
     let mut replaced = Vec::with_capacity(rows * cols);
     for row in 0..rows {
         for col in 0..cols {

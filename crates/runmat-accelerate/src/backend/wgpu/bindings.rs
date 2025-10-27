@@ -122,6 +122,21 @@ pub fn build_bgl_for_layout_tag(device: &wgpu::Device, tag: &str) -> Option<wgpu
                 }),
             );
         }
+        "runmat-imfilter-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_write_entry(3),
+                uniform_entry(4),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-imfilter-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
         _ => {}
     }
     None

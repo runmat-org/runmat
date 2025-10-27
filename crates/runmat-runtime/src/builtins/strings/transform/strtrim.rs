@@ -270,7 +270,9 @@ fn strtrim_char_array(array: CharArray) -> Result<Value, String> {
 }
 
 fn strtrim_cell_array(cell: CellArray) -> Result<Value, String> {
-    let CellArray { data, rows, cols } = cell;
+    let CellArray {
+        data, rows, cols, ..
+    } = cell;
     let mut trimmed_values = Vec::with_capacity(rows * cols);
     for idx in 0..data.len() {
         let trimmed = strtrim_cell_element(&data[idx])?;
