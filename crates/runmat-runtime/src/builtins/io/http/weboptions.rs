@@ -661,10 +661,7 @@ mod tests {
     fn weboptions_rejects_unknown_option() {
         let err = weboptions_builtin(vec![Value::from("BogusOption"), Value::Num(1.0)])
             .expect_err("unknown option should fail");
-        assert!(
-            err.contains("unknown option"),
-            "unexpected error: {err}"
-        );
+        assert!(err.contains("unknown option"), "unexpected error: {err}");
     }
 
     #[test]
@@ -690,11 +687,8 @@ mod tests {
     #[test]
     fn weboptions_rejects_headerfields_bad_cell_shape() {
         let cell = CellArray::new(vec![Value::from("Accept")], 1, 1).expect("cell");
-        let err = weboptions_builtin(vec![
-            Value::from("HeaderFields"),
-            Value::Cell(cell),
-        ])
-        .expect_err("headerfields cell shape");
+        let err = weboptions_builtin(vec![Value::from("HeaderFields"), Value::Cell(cell)])
+            .expect_err("headerfields cell shape");
         assert!(
             err.contains("HeaderFields cell array must have exactly two columns"),
             "unexpected error: {err}"

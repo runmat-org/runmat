@@ -1,5 +1,5 @@
 use crate::builtins::common::shape::{value_ndims, value_numel};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 #[runtime_builtin(name = "numel")]
@@ -22,11 +22,6 @@ fn isempty_builtin(a: Value) -> Result<bool, String> {
         Value::Cell(ca) => ca.data.is_empty() || ca.rows == 0 || ca.cols == 0,
         _ => false,
     })
-}
-
-#[runtime_builtin(name = "islogical")]
-fn islogical_builtin(a: Value) -> Result<bool, String> {
-    Ok(matches!(a, Value::Bool(_) | Value::LogicalArray(_)))
 }
 
 #[runtime_builtin(name = "isnumeric")]
@@ -96,53 +91,6 @@ fn isa_builtin(a: Value, type_name: String) -> Result<bool, String> {
         Value::MException(_) => t == "mexception",
     };
     Ok(is)
-}
-
-// ---------------------------
-// Numeric predicates
-// ---------------------------
-
-fn map_tensor_to_mask<F: Fn(f64) -> bool>(t: &Tensor, pred: F) -> Result<Value, String> {
-    let data: Vec<u8> = t
-        .data
-        .iter()
-        .map(|&x| if pred(x) { 1u8 } else { 0u8 })
-        .collect();
-    let out = runmat_builtins::LogicalArray::new(data, t.shape.clone())?;
-    Ok(Value::LogicalArray(out))
-}
-
-#[runtime_builtin(name = "isnan")]
-fn isnan_builtin(a: Value) -> Result<Value, String> {
-    Ok(match a {
-        Value::Num(x) => Value::Bool(x.is_nan()),
-        Value::Int(_) => Value::Bool(false),
-        Value::Tensor(t) => return map_tensor_to_mask(&t, |x| x.is_nan()),
-        Value::LogicalArray(la) => Value::LogicalArray(la),
-        _ => Value::Bool(false),
-    })
-}
-
-#[runtime_builtin(name = "isfinite")]
-fn isfinite_builtin(a: Value) -> Result<Value, String> {
-    Ok(match a {
-        Value::Num(x) => Value::Bool(x.is_finite()),
-        Value::Int(_) => Value::Bool(true),
-        Value::Tensor(t) => return map_tensor_to_mask(&t, |x| x.is_finite()),
-        Value::LogicalArray(la) => Value::LogicalArray(la),
-        _ => Value::Bool(false),
-    })
-}
-
-#[runtime_builtin(name = "isinf")]
-fn isinf_builtin(a: Value) -> Result<Value, String> {
-    Ok(match a {
-        Value::Num(x) => Value::Bool(x.is_infinite()),
-        Value::Int(_) => Value::Bool(false),
-        Value::Tensor(t) => return map_tensor_to_mask(&t, |x| x.is_infinite()),
-        Value::LogicalArray(la) => Value::LogicalArray(la),
-        _ => Value::Bool(false),
-    })
 }
 
 // ---------------------------

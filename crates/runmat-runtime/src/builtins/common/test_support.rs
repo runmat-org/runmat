@@ -1,4 +1,4 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{LogicalArray, Tensor, Value};
 
 /// Extract MATLAB code blocks from builtin documentation.
 pub fn doc_examples(doc: &str) -> Vec<String> {
@@ -37,6 +37,7 @@ where
     F: FnOnce(&'static dyn runmat_accelerate_api::AccelProvider) -> R,
 {
     runmat_accelerate::simple_provider::register_inprocess_provider();
+    runmat_accelerate::simple_provider::reset_inprocess_rng();
     let provider = runmat_accelerate_api::provider().expect("test provider registered");
     f(provider)
 }
@@ -46,6 +47,13 @@ pub fn gather(value: Value) -> Result<Tensor, String> {
     match crate::dispatcher::gather_if_needed(&value)? {
         Value::Tensor(t) => Ok(t),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gather: {e}")),
+        Value::LogicalArray(LogicalArray { data, shape }) => {
+            let dense: Vec<f64> = data
+                .iter()
+                .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                .collect();
+            Tensor::new(dense, shape.clone()).map_err(|e| format!("gather: {e}"))
+        }
         other => Err(format!("gather: unsupported value {other:?}")),
     }
 }

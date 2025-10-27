@@ -84,6 +84,11 @@ impl AccelProvider for TestProvider {
         }
     }
 
+    fn logical_isreal(&self, handle: &GpuTensorHandle) -> anyhow::Result<bool> {
+        let _ = self.pull(handle)?;
+        Ok(true)
+    }
+
     fn reduce_sum_dim(&self, a: &GpuTensorHandle, dim: usize) -> anyhow::Result<GpuTensorHandle> {
         let (data, shape) = self.pull(a)?;
         if shape.len() != 2 {

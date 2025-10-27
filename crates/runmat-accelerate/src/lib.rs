@@ -324,6 +324,16 @@ pub trait AccelerateBackend: Send + Sync {
         a: &dyn DeviceMatrix,
         b: &dyn DeviceMatrix,
     ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_ne(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_eq(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
     fn elem_div(
         &self,
         a: &dyn DeviceMatrix,

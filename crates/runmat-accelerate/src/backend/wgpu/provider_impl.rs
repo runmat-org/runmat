@@ -63,6 +63,770 @@ struct BufferEntry {
     precision: NumericPrecision,
 }
 
+const LOGICAL_AND_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = (lhs != 0.0) && (rhs != 0.0);
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const LOGICAL_AND_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = (lhs != f64(0.0)) && (rhs != f64(0.0));
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const ELEM_EQ_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs == rhs;
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const ELEM_EQ_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs == rhs;
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const ELEM_NE_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs != rhs;
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const ELEM_NE_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs != rhs;
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const ELEM_LT_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs < rhs;
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const ELEM_LT_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs < rhs;
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const ELEM_LE_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs <= rhs;
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const ELEM_LE_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs <= rhs;
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const ELEM_GT_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs > rhs;
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const ELEM_GT_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs > rhs;
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const ELEM_GE_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs >= rhs;
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const ELEM_GE_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = lhs >= rhs;
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const LOGICAL_OR_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = (lhs != 0.0) || (rhs != 0.0);
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const LOGICAL_OR_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = (lhs != f64(0.0)) || (rhs != f64(0.0));
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const LOGICAL_XOR_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = ((lhs != 0.0) != (rhs != 0.0));
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const LOGICAL_XOR_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> input1: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let lhs = input0.data[idx];
+    let rhs = input1.data[idx];
+    let cond = ((lhs != f64(0.0)) != (rhs != f64(0.0)));
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const LOGICAL_NOT_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let value = input0.data[idx];
+    let cond = (value != 0.0);
+    output.data[idx] = select(1.0, 0.0, cond);
+}
+"#;
+
+const LOGICAL_NOT_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let value = input0.data[idx];
+    let cond = (value != f64(0.0));
+    output.data[idx] = select(f64(1.0), f64(0.0), cond);
+}
+"#;
+
+const LOGICAL_ISNAN_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let value = input0.data[idx];
+    let cond = isNan(value);
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const LOGICAL_ISNAN_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let value = input0.data[idx];
+    let cond = isNan(value);
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const LOGICAL_ISINF_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let value = input0.data[idx];
+    let cond = isInf(value);
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const LOGICAL_ISINF_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let value = input0.data[idx];
+    let cond = isInf(value);
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
+const LOGICAL_ISFINITE_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let value = input0.data[idx];
+    let cond = isFinite(value);
+    output.data[idx] = select(0.0, 1.0, cond);
+}
+"#;
+
+const LOGICAL_ISFINITE_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct Params {
+    len: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= params.len) {
+        return;
+    }
+    let value = input0.data[idx];
+    let cond = isFinite(value);
+    output.data[idx] = select(f64(0.0), f64(1.0), cond);
+}
+"#;
+
 fn normalize_eye_shape(shape: &[usize]) -> Vec<usize> {
     match shape.len() {
         0 => vec![1, 1],
@@ -662,11 +1426,13 @@ impl WgpuProvider {
             .lock()
             .expect("buffer mutex poisoned")
             .insert(id, entry);
-        GpuTensorHandle {
+        let handle = GpuTensorHandle {
             shape,
             device_id: self.device_id,
             buffer_id: id,
-        }
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, false);
+        handle
     }
 
     fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
@@ -4193,6 +4959,299 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(out_buffer, entry_a.shape, len))
     }
 
+    pub(crate) fn elem_eq_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            return Err(anyhow!("elem_eq: shape mismatch between inputs"));
+        }
+        let len = entry_a.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-elem-eq-empty");
+            self.register_existing_buffer(out, entry_a.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => ELEM_EQ_SHADER_F64,
+                NumericPrecision::F32 => ELEM_EQ_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn elem_ne_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            return Err(anyhow!("elem_ne: shape mismatch between inputs"));
+        }
+        let len = entry_a.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-elem-ne-empty");
+            self.register_existing_buffer(out, entry_a.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => ELEM_NE_SHADER_F64,
+                NumericPrecision::F32 => ELEM_NE_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn elem_lt_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            return Err(anyhow!("elem_lt: shape mismatch between inputs"));
+        }
+        let len = entry_a.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-elem-lt-empty");
+            self.register_existing_buffer(out, entry_a.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => ELEM_LT_SHADER_F64,
+                NumericPrecision::F32 => ELEM_LT_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn elem_le_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            return Err(anyhow!("elem_le: shape mismatch between inputs"));
+        }
+        let len = entry_a.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-elem-le-empty");
+            self.register_existing_buffer(out, entry_a.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => ELEM_LE_SHADER_F64,
+                NumericPrecision::F32 => ELEM_LE_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn elem_gt_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            return Err(anyhow!("elem_gt: shape mismatch between inputs"));
+        }
+        let len = entry_a.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-elem-gt-empty");
+            self.register_existing_buffer(out, entry_a.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => ELEM_GT_SHADER_F64,
+                NumericPrecision::F32 => ELEM_GT_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn elem_ge_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            return Err(anyhow!("elem_ge: shape mismatch between inputs"));
+        }
+        let len = entry_a.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-elem-ge-empty");
+            self.register_existing_buffer(out, entry_a.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => ELEM_GE_SHADER_F64,
+                NumericPrecision::F32 => ELEM_GE_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn logical_and_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            return Err(anyhow!("logical_and: shape mismatch between inputs"));
+        }
+        let len = entry_a.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-logical-and-empty");
+            self.register_existing_buffer(out, entry_a.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => LOGICAL_AND_SHADER_F64,
+                NumericPrecision::F32 => LOGICAL_AND_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn logical_or_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            return Err(anyhow!("logical_or: shape mismatch between inputs"));
+        }
+        let len = entry_a.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-logical-or-empty");
+            self.register_existing_buffer(out, entry_a.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => LOGICAL_OR_SHADER_F64,
+                NumericPrecision::F32 => LOGICAL_OR_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn logical_xor_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            return Err(anyhow!("logical_xor: shape mismatch between inputs"));
+        }
+        let len = entry_a.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-logical-xor-empty");
+            self.register_existing_buffer(out, entry_a.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => LOGICAL_XOR_SHADER_F64,
+                NumericPrecision::F32 => LOGICAL_XOR_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn logical_not_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        let len = entry.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-logical-not-empty");
+            self.register_existing_buffer(out, entry.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => LOGICAL_NOT_SHADER_F64,
+                NumericPrecision::F32 => LOGICAL_NOT_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn logical_isfinite_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        let len = entry.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-logical-isfinite-empty");
+            self.register_existing_buffer(out, entry.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => LOGICAL_ISFINITE_SHADER_F64,
+                NumericPrecision::F32 => LOGICAL_ISFINITE_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn logical_isnan_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        let len = entry.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-logical-isnan-empty");
+            self.register_existing_buffer(out, entry.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => LOGICAL_ISNAN_SHADER_F64,
+                NumericPrecision::F32 => LOGICAL_ISNAN_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
+    pub(crate) fn logical_isinf_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        let len = entry.len;
+        let handle = if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-logical-isinf-empty");
+            self.register_existing_buffer(out, entry.shape, 0)
+        } else {
+            let shader = match self.precision {
+                NumericPrecision::F64 => LOGICAL_ISINF_SHADER_F64,
+                NumericPrecision::F32 => LOGICAL_ISINF_SHADER_F32,
+            };
+            self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)?
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
     pub(crate) fn unary_op_exec(
         &self,
         op: crate::backend::wgpu::types::UnaryOpCode,
@@ -4845,6 +5904,68 @@ impl AccelProvider for WgpuProvider {
         self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Div, a, b)
     }
 
+    fn elem_ge(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.elem_ge_exec(a, b)
+    }
+
+    fn elem_le(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.elem_le_exec(a, b)
+    }
+
+    fn elem_lt(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.elem_lt_exec(a, b)
+    }
+
+    fn elem_gt(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.elem_gt_exec(a, b)
+    }
+
+    fn elem_eq(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.elem_eq_exec(a, b)
+    }
+
+    fn elem_ne(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.elem_ne_exec(a, b)
+    }
+
+    fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.logical_and_exec(a, b)
+    }
+
+    fn logical_or(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.logical_or_exec(a, b)
+    }
+
+    fn logical_xor(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.logical_xor_exec(a, b)
+    }
+
+    fn logical_not(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.logical_not_exec(a)
+    }
+
+    fn logical_islogical(&self, a: &GpuTensorHandle) -> Result<bool> {
+        let _ = self.get_entry(a)?;
+        Ok(runmat_accelerate_api::handle_is_logical(a))
+    }
+
+    fn logical_isreal(&self, a: &GpuTensorHandle) -> Result<bool> {
+        let _ = self.get_entry(a)?;
+        Ok(true)
+    }
+
+    fn logical_isfinite(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.logical_isfinite_exec(a)
+    }
+
+    fn logical_isnan(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.logical_isnan_exec(a)
+    }
+
+    fn logical_isinf(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.logical_isinf_exec(a)
+    }
+
     fn unary_sin(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sin, a)
     }
@@ -5302,6 +6423,7 @@ impl AccelProvider for WgpuProvider {
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         let mut guard = self.buffers.lock().expect("buffer mutex poisoned");
         guard.remove(&h.buffer_id);
+        runmat_accelerate_api::clear_handle_logical(h);
         Ok(())
     }
 

@@ -1,10 +1,14 @@
 use anyhow::anyhow;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::RwLock;
 
 type ResidencyClearFn = fn(&GpuTensorHandle);
 
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
+
+static LOGICAL_HANDLES: Lazy<RwLock<HashSet<u64>>> = Lazy::new(|| RwLock::new(HashSet::new()));
 
 /// Register a callback used to clear residency tracking when GPU tensors are
 /// gathered back to the host. Backends that maintain residency metadata should
@@ -19,6 +23,31 @@ pub fn clear_residency(handle: &GpuTensorHandle) {
     if let Some(handler) = RESIDENCY_CLEAR.get() {
         handler(handle);
     }
+}
+
+/// Annotate a GPU tensor handle as logically-typed (`logical` in MATLAB terms)
+/// or clear the logical flag when `logical` is `false`.
+pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
+    if let Ok(mut guard) = LOGICAL_HANDLES.write() {
+        if logical {
+            guard.insert(handle.buffer_id);
+        } else {
+            guard.remove(&handle.buffer_id);
+        }
+    }
+}
+
+/// Convenience helper for clearing logical annotations explicitly.
+pub fn clear_handle_logical(handle: &GpuTensorHandle) {
+    set_handle_logical(handle, false);
+}
+
+/// Returns true when the supplied handle has been marked as logical.
+pub fn handle_is_logical(handle: &GpuTensorHandle) -> bool {
+    LOGICAL_HANDLES
+        .read()
+        .map(|guard| guard.contains(&handle.buffer_id))
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -399,6 +428,89 @@ pub trait AccelProvider: Send + Sync {
         _b: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_div not supported by provider"))
+    }
+    fn elem_ge(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_ge not supported by provider"))
+    }
+    fn elem_le(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_le not supported by provider"))
+    }
+    fn elem_lt(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_lt not supported by provider"))
+    }
+    fn elem_gt(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_gt not supported by provider"))
+    }
+    fn elem_eq(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_eq not supported by provider"))
+    }
+    fn elem_ne(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_ne not supported by provider"))
+    }
+    fn logical_and(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("logical_and not supported by provider"))
+    }
+    fn logical_or(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("logical_or not supported by provider"))
+    }
+    fn logical_xor(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("logical_xor not supported by provider"))
+    }
+    fn logical_not(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("logical_not not supported by provider"))
+    }
+    fn logical_islogical(&self, a: &GpuTensorHandle) -> anyhow::Result<bool> {
+        Ok(handle_is_logical(a))
+    }
+    fn logical_isreal(&self, _a: &GpuTensorHandle) -> anyhow::Result<bool> {
+        Err(anyhow::anyhow!("logical_isreal not supported by provider"))
+    }
+    fn logical_isfinite(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "logical_isfinite not supported by provider"
+        ))
+    }
+    fn logical_isnan(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("logical_isnan not supported by provider"))
+    }
+    fn logical_isinf(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("logical_isinf not supported by provider"))
     }
     // Unary elementwise operations (optional)
     fn unary_sin(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {

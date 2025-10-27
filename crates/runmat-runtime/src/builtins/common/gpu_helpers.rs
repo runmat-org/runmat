@@ -1,3 +1,4 @@
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 
 /// Download a GPU tensor handle to host memory, returning a dense `Tensor`.
@@ -9,6 +10,14 @@ pub fn gather_tensor(handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<
     match crate::dispatcher::gather_if_needed(&value)? {
         Value::Tensor(t) => Ok(t),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gather: {e}")),
+        Value::LogicalArray(la) => {
+            let data: Vec<f64> = la
+                .data
+                .iter()
+                .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                .collect();
+            Tensor::new(data, la.shape.clone()).map_err(|e| format!("gather: {e}"))
+        }
         other => Err(format!("gather: unexpected value kind {other:?}")),
     }
 }
@@ -16,4 +25,11 @@ pub fn gather_tensor(handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<
 /// Gather an arbitrary value, returning a host-side `Value`.
 pub fn gather_value(value: &Value) -> Result<Value, String> {
     crate::dispatcher::gather_if_needed(value)
+}
+
+/// Wrap a GPU tensor handle as a logical gpuArray value, recording metadata so that
+/// predicates like `islogical` can inspect the handle without downloading it.
+pub fn logical_gpu_value(handle: GpuTensorHandle) -> Value {
+    runmat_accelerate_api::set_handle_logical(&handle, true);
+    Value::GpuTensor(handle)
 }

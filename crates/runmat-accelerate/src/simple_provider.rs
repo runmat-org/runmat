@@ -8,6 +8,10 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::Tensor;
 use runmat_runtime::builtins::array::sorting_sets::unique;
+use runmat_runtime::builtins::common::broadcast::{
+    broadcast_index as runtime_broadcast_index, broadcast_shapes as runtime_broadcast_shapes,
+    compute_strides as runtime_compute_strides,
+};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -632,11 +636,13 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap();
         guard.insert(id, host.data.to_vec());
-        Ok(GpuTensorHandle {
+        let handle = GpuTensorHandle {
             shape: host.shape.to_vec(),
             device_id: 0,
             buffer_id: id,
-        })
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, false);
+        Ok(handle)
     }
 
     fn download(&self, h: &GpuTensorHandle) -> Result<HostTensorOwned> {
@@ -654,6 +660,7 @@ impl AccelProvider for InProcessProvider {
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         let mut guard = registry().lock().unwrap();
         guard.remove(&h.buffer_id);
+        runmat_accelerate_api::clear_handle_logical(h);
         Ok(())
     }
 
@@ -1111,6 +1118,514 @@ impl AccelProvider for InProcessProvider {
             device_id: 0,
             buffer_id: id,
         })
+    }
+
+    fn elem_ne(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (adata, bdata) = {
+            let guard = registry().lock().unwrap();
+            let a_vec = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("elem_ne: unknown buffer {}", a.buffer_id))?
+                .clone();
+            let b_vec = guard
+                .get(&b.buffer_id)
+                .ok_or_else(|| anyhow!("elem_ne: unknown buffer {}", b.buffer_id))?
+                .clone();
+            (a_vec, b_vec)
+        };
+
+        let shape = runtime_broadcast_shapes("ne", &a.shape, &b.shape).map_err(|e| anyhow!(e))?;
+        let total: usize = shape.iter().copied().product();
+        if total == 0 {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let strides_a = runtime_compute_strides(&a.shape);
+        let strides_b = runtime_compute_strides(&b.shape);
+        let len_a = adata.len();
+        let len_b = bdata.len();
+
+        let mut out = Vec::with_capacity(total);
+        for idx in 0..total {
+            let lhs = if len_a == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &a.shape, &strides_a);
+                *adata.get(offset).unwrap_or(&0.0)
+            };
+            let rhs = if len_b == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &b.shape, &strides_b);
+                *bdata.get(offset).unwrap_or(&0.0)
+            };
+            out.push(if lhs != rhs { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn elem_ge(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (adata, bdata) = {
+            let guard = registry().lock().unwrap();
+            let a_vec = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("elem_ge: unknown buffer {}", a.buffer_id))?
+                .clone();
+            let b_vec = guard
+                .get(&b.buffer_id)
+                .ok_or_else(|| anyhow!("elem_ge: unknown buffer {}", b.buffer_id))?
+                .clone();
+            (a_vec, b_vec)
+        };
+
+        let shape = runtime_broadcast_shapes("ge", &a.shape, &b.shape).map_err(|e| anyhow!(e))?;
+        let total: usize = shape.iter().copied().product();
+        if total == 0 {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let strides_a = runtime_compute_strides(&a.shape);
+        let strides_b = runtime_compute_strides(&b.shape);
+        let len_a = adata.len();
+        let len_b = bdata.len();
+
+        let mut out = Vec::with_capacity(total);
+        for idx in 0..total {
+            let lhs = if len_a == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &a.shape, &strides_a);
+                *adata.get(offset).unwrap_or(&0.0)
+            };
+            let rhs = if len_b == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &b.shape, &strides_b);
+                *bdata.get(offset).unwrap_or(&0.0)
+            };
+            out.push(if lhs >= rhs { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn elem_le(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (adata, bdata) = {
+            let guard = registry().lock().unwrap();
+            let a_vec = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("elem_le: unknown buffer {}", a.buffer_id))?
+                .clone();
+            let b_vec = guard
+                .get(&b.buffer_id)
+                .ok_or_else(|| anyhow!("elem_le: unknown buffer {}", b.buffer_id))?
+                .clone();
+            (a_vec, b_vec)
+        };
+
+        let shape = runtime_broadcast_shapes("le", &a.shape, &b.shape).map_err(|e| anyhow!(e))?;
+        let total: usize = shape.iter().copied().product();
+        if total == 0 {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let strides_a = runtime_compute_strides(&a.shape);
+        let strides_b = runtime_compute_strides(&b.shape);
+        let len_a = adata.len();
+        let len_b = bdata.len();
+
+        let mut out = Vec::with_capacity(total);
+        for idx in 0..total {
+            let lhs = if len_a == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &a.shape, &strides_a);
+                *adata.get(offset).unwrap_or(&0.0)
+            };
+            let rhs = if len_b == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &b.shape, &strides_b);
+                *bdata.get(offset).unwrap_or(&0.0)
+            };
+            out.push(if lhs <= rhs { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn elem_lt(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (adata, bdata) = {
+            let guard = registry().lock().unwrap();
+            let a_vec = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("elem_lt: unknown buffer {}", a.buffer_id))?
+                .clone();
+            let b_vec = guard
+                .get(&b.buffer_id)
+                .ok_or_else(|| anyhow!("elem_lt: unknown buffer {}", b.buffer_id))?
+                .clone();
+            (a_vec, b_vec)
+        };
+
+        let shape = runtime_broadcast_shapes("lt", &a.shape, &b.shape).map_err(|e| anyhow!(e))?;
+        let total: usize = shape.iter().copied().product();
+        if total == 0 {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let strides_a = runtime_compute_strides(&a.shape);
+        let strides_b = runtime_compute_strides(&b.shape);
+        let len_a = adata.len();
+        let len_b = bdata.len();
+
+        let mut out = Vec::with_capacity(total);
+        for idx in 0..total {
+            let lhs = if len_a == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &a.shape, &strides_a);
+                *adata.get(offset).unwrap_or(&0.0)
+            };
+            let rhs = if len_b == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &b.shape, &strides_b);
+                *bdata.get(offset).unwrap_or(&0.0)
+            };
+            out.push(if lhs < rhs { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn elem_gt(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (adata, bdata) = {
+            let guard = registry().lock().unwrap();
+            let a_vec = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("elem_gt: unknown buffer {}", a.buffer_id))?
+                .clone();
+            let b_vec = guard
+                .get(&b.buffer_id)
+                .ok_or_else(|| anyhow!("elem_gt: unknown buffer {}", b.buffer_id))?
+                .clone();
+            (a_vec, b_vec)
+        };
+
+        let shape = runtime_broadcast_shapes("gt", &a.shape, &b.shape).map_err(|e| anyhow!(e))?;
+        let total: usize = shape.iter().copied().product();
+        if total == 0 {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let strides_a = runtime_compute_strides(&a.shape);
+        let strides_b = runtime_compute_strides(&b.shape);
+        let len_a = adata.len();
+        let len_b = bdata.len();
+
+        let mut out = Vec::with_capacity(total);
+        for idx in 0..total {
+            let lhs = if len_a == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &a.shape, &strides_a);
+                *adata.get(offset).unwrap_or(&0.0)
+            };
+            let rhs = if len_b == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &b.shape, &strides_b);
+                *bdata.get(offset).unwrap_or(&0.0)
+            };
+            out.push(if lhs > rhs { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn elem_eq(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (adata, bdata) = {
+            let guard = registry().lock().unwrap();
+            let a_vec = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("elem_eq: unknown buffer {}", a.buffer_id))?
+                .clone();
+            let b_vec = guard
+                .get(&b.buffer_id)
+                .ok_or_else(|| anyhow!("elem_eq: unknown buffer {}", b.buffer_id))?
+                .clone();
+            (a_vec, b_vec)
+        };
+
+        let shape = runtime_broadcast_shapes("eq", &a.shape, &b.shape).map_err(|e| anyhow!(e))?;
+        let total: usize = shape.iter().copied().product();
+        if total == 0 {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let strides_a = runtime_compute_strides(&a.shape);
+        let strides_b = runtime_compute_strides(&b.shape);
+        let len_a = adata.len();
+        let len_b = bdata.len();
+
+        let mut out = Vec::with_capacity(total);
+        for idx in 0..total {
+            let lhs = if len_a == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &a.shape, &strides_a);
+                *adata.get(offset).unwrap_or(&0.0)
+            };
+            let rhs = if len_b == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &b.shape, &strides_b);
+                *bdata.get(offset).unwrap_or(&0.0)
+            };
+            out.push(if lhs == rhs { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (adata, bdata) = {
+            let guard = registry().lock().unwrap();
+            let a_vec = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("logical_and: unknown buffer {}", a.buffer_id))?
+                .clone();
+            let b_vec = guard
+                .get(&b.buffer_id)
+                .ok_or_else(|| anyhow!("logical_and: unknown buffer {}", b.buffer_id))?
+                .clone();
+            (a_vec, b_vec)
+        };
+
+        let shape =
+            runtime_broadcast_shapes("logical_and", &a.shape, &b.shape).map_err(|e| anyhow!(e))?;
+        let total: usize = shape.iter().copied().product();
+        if total == 0 {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let strides_a = runtime_compute_strides(&a.shape);
+        let strides_b = runtime_compute_strides(&b.shape);
+        let len_a = adata.len();
+        let len_b = bdata.len();
+
+        let mut out = Vec::with_capacity(total);
+        for idx in 0..total {
+            let lhs = if len_a == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &a.shape, &strides_a);
+                *adata.get(offset).unwrap_or(&0.0)
+            };
+            let rhs = if len_b == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &b.shape, &strides_b);
+                *bdata.get(offset).unwrap_or(&0.0)
+            };
+            out.push(if lhs != 0.0 && rhs != 0.0 { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn logical_or(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (adata, bdata) = {
+            let guard = registry().lock().unwrap();
+            let a_vec = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("logical_or: unknown buffer {}", a.buffer_id))?
+                .clone();
+            let b_vec = guard
+                .get(&b.buffer_id)
+                .ok_or_else(|| anyhow!("logical_or: unknown buffer {}", b.buffer_id))?
+                .clone();
+            (a_vec, b_vec)
+        };
+
+        let shape =
+            runtime_broadcast_shapes("logical_or", &a.shape, &b.shape).map_err(|e| anyhow!(e))?;
+        let total: usize = shape.iter().copied().product();
+        if total == 0 {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let strides_a = runtime_compute_strides(&a.shape);
+        let strides_b = runtime_compute_strides(&b.shape);
+        let len_a = adata.len();
+        let len_b = bdata.len();
+
+        let mut out = Vec::with_capacity(total);
+        for idx in 0..total {
+            let lhs = if len_a == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &a.shape, &strides_a);
+                *adata.get(offset).unwrap_or(&0.0)
+            };
+            let rhs = if len_b == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &b.shape, &strides_b);
+                *bdata.get(offset).unwrap_or(&0.0)
+            };
+            out.push(if lhs != 0.0 || rhs != 0.0 { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn logical_xor(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (adata, bdata) = {
+            let guard = registry().lock().unwrap();
+            let a_vec = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("logical_xor: unknown buffer {}", a.buffer_id))?
+                .clone();
+            let b_vec = guard
+                .get(&b.buffer_id)
+                .ok_or_else(|| anyhow!("logical_xor: unknown buffer {}", b.buffer_id))?
+                .clone();
+            (a_vec, b_vec)
+        };
+
+        let shape =
+            runtime_broadcast_shapes("logical_xor", &a.shape, &b.shape).map_err(|e| anyhow!(e))?;
+        let total: usize = shape.iter().copied().product();
+        if total == 0 {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let strides_a = runtime_compute_strides(&a.shape);
+        let strides_b = runtime_compute_strides(&b.shape);
+        let len_a = adata.len();
+        let len_b = bdata.len();
+
+        let mut out = Vec::with_capacity(total);
+        for idx in 0..total {
+            let lhs = if len_a == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &a.shape, &strides_a);
+                *adata.get(offset).unwrap_or(&0.0)
+            };
+            let rhs = if len_b == 0 {
+                0.0
+            } else {
+                let offset = runtime_broadcast_index(idx, &shape, &b.shape, &strides_b);
+                *bdata.get(offset).unwrap_or(&0.0)
+            };
+            let lhs_true = lhs != 0.0;
+            let rhs_true = rhs != 0.0;
+            out.push(if lhs_true ^ rhs_true { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn logical_not(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("logical_not: unknown buffer {}", a.buffer_id))?
+                .clone()
+        };
+
+        let shape = a.shape.clone();
+        if data.is_empty() {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let mut out = Vec::with_capacity(data.len());
+        for value in data {
+            out.push(if value == 0.0 { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn logical_isreal(&self, a: &GpuTensorHandle) -> Result<bool> {
+        {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("logical_isreal: unknown buffer {}", a.buffer_id))?;
+        }
+        Ok(true)
+    }
+
+    fn logical_isfinite(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("logical_isfinite: unknown buffer {}", a.buffer_id))?
+                .clone()
+        };
+
+        let shape = a.shape.clone();
+        if data.is_empty() {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let mut out = Vec::with_capacity(data.len());
+        for value in data {
+            out.push(if value.is_finite() { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn logical_isnan(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("logical_isnan: unknown buffer {}", a.buffer_id))?
+                .clone()
+        };
+
+        let shape = a.shape.clone();
+        if data.is_empty() {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let mut out = Vec::with_capacity(data.len());
+        for value in data {
+            out.push(if value.is_nan() { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn logical_isinf(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow!("logical_isinf: unknown buffer {}", a.buffer_id))?
+                .clone()
+        };
+
+        let shape = a.shape.clone();
+        if data.is_empty() {
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let mut out = Vec::with_capacity(data.len());
+        for value in data {
+            out.push(if value.is_infinite() { 1.0 } else { 0.0 });
+        }
+
+        Ok(self.allocate_tensor(out, shape))
     }
 
     fn unary_sin(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -1967,4 +2482,11 @@ pub fn register_inprocess_provider() {
     let provider: &'static InProcessProvider = INSTANCE.get_or_init(InProcessProvider::new);
     // Safety: we intentionally install a reference with 'static lifetime
     unsafe { runmat_accelerate_api::register_provider(provider) };
+}
+
+/// Reset the in-process provider RNG to its default seed (test-only helper).
+pub fn reset_inprocess_rng() {
+    if let Ok(mut guard) = rng_state().lock() {
+        *guard = 0x9e3779b97f4a7c15;
+    }
 }

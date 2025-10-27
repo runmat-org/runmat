@@ -12,10 +12,9 @@ use crate::builtins::common::tensor;
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
 
-use super::text_utils::{
-    broadcast_index, broadcast_shapes, compute_strides, logical_result, parse_ignore_case,
-    TextCollection, TextElement,
-};
+use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
+
+use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextElement};
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
@@ -291,7 +290,7 @@ fn evaluate_endswith(
                         .expect("lowercase pattern available");
                     lowered_subject.ends_with(lowered_pattern)
                 } else {
-                    text.ends_with(pattern)
+                    text.ends_with(pattern.as_str())
                 }
             }
         };

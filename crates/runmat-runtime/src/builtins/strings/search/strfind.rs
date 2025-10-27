@@ -12,10 +12,9 @@ use crate::builtins::common::tensor;
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
 
-use super::text_utils::{
-    broadcast_index, broadcast_shapes, compute_strides, value_to_owned_string, TextCollection,
-    TextElement,
-};
+use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
+
+use super::text_utils::{value_to_owned_string, TextCollection, TextElement};
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
@@ -248,7 +247,9 @@ fn evaluate_strfind(
         ) {
             (TextElement::Missing, _) => Vec::new(),
             (_, TextElement::Missing) => Vec::new(),
-            (TextElement::Text(text), TextElement::Text(pattern)) => find_indices(text, pattern),
+            (TextElement::Text(text), TextElement::Text(pattern)) => {
+                find_indices(text, pattern.as_str())
+            }
         };
         matches.push(result);
     }

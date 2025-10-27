@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use runmat_builtins::{builtin_functions, Tensor, Value};
+use runmat_builtins::{builtin_functions, LogicalArray, Tensor, Value};
 
 use crate::{make_cell, new_object_builtin};
 
@@ -27,10 +27,18 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
         Value::GpuTensor(handle) => {
             let provider = runmat_accelerate_api::provider()
                 .ok_or_else(|| "gather: no acceleration provider registered".to_string())?;
+            let is_logical = runmat_accelerate_api::handle_is_logical(handle);
             let host = provider.download(handle).map_err(|e| e.to_string())?;
             runmat_accelerate_api::clear_residency(handle);
-            let tensor = Tensor::new(host.data, host.shape).map_err(|e| e.to_string())?;
-            Ok(Value::Tensor(tensor))
+            let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
+            if is_logical {
+                let bits: Vec<u8> = data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
+                let logical = LogicalArray::new(bits, shape).map_err(|e| e.to_string())?;
+                Ok(Value::LogicalArray(logical))
+            } else {
+                let tensor = Tensor::new(data, shape).map_err(|e| e.to_string())?;
+                Ok(Value::Tensor(tensor))
+            }
         }
         Value::Cell(ca) => {
             let mut gathered = Vec::with_capacity(ca.data.len());
