@@ -3,7 +3,9 @@
 //! This module hosts small utility subsystems that new-style builtins
 //! can depend on without reaching back into the legacy runtime modules.
 
+pub mod broadcast;
 pub mod gpu_helpers;
+pub mod linalg;
 pub mod random;
 pub mod random_args;
 pub mod shape;

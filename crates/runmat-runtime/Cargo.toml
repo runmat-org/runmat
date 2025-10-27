@@ -20,6 +20,10 @@ runmat-gc = { workspace = true }
 runmat-gc-api = { workspace = true }
 glam = "0.24"
 tokio = { workspace = true }
+log = "0.4"
+num-complex = "0.4"
+nalgebra = "0.32"
+rustfft = "6.2"
 
 # BLAS/LAPACK bindings for high-performance linear algebra (optional)
 blas = { version = "0.22", optional = true }

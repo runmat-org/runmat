@@ -313,23 +313,6 @@ fn abs_runtime_builtin(x: Value) -> Result<Value, String> {
     }
 }
 
-// Rounding and related functions
-
-#[runtime_builtin(name = "round")]
-fn round_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.round())
-}
-
-#[runtime_builtin(name = "floor")]
-fn floor_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.floor())
-}
-
-#[runtime_builtin(name = "ceil")]
-fn ceil_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.ceil())
-}
-
 #[runtime_builtin(name = "trunc")]
 fn trunc_builtin(x: f64) -> Result<f64, String> {
     Ok(x.trunc())

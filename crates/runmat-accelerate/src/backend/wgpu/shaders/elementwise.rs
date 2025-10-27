@@ -15,12 +15,17 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> Out: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
+fn hypot(a: f64, b: f64) -> f64 {
+    return sqrt((a * a) + (b * b));
+}
+
 fn apply(a: f64, b: f64) -> f64 {
     switch params.op {
         case 0u: { return a + b; }
         case 1u: { return a - b; }
         case 2u: { return a * b; }
         case 3u: { return a / b; }
+        case 4u: { return hypot(a, b); }
         default: { return a; }
     }
 }
@@ -56,13 +61,18 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> Out: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
+fn hypot(a: f32, b: f32) -> f32 {
+    return sqrt((a * a) + (b * b));
+}
+
 fn apply(a: f32, b: f32) -> f32 {
     switch params.op {
-        default: { return pow(a, b); }
         case 0u: { return a + b; }
         case 1u: { return a - b; }
         case 2u: { return a * b; }
         case 3u: { return a / b; }
+        case 4u: { return hypot(a, b); }
+        default: { return pow(a, b); }
     }
 }
 
@@ -92,6 +102,30 @@ struct Params {
     total: u32,
 };
 
+fn expm1_precise(a: f64) -> f64 {
+    let abs_a = abs(a);
+    if abs_a < 1.0e-6 {
+        let a2 = a * a;
+        let a3 = a2 * a;
+        let a4 = a2 * a2;
+        let a5 = a4 * a;
+        return (((a5 * (1.0 / 120.0)) + (a4 * (1.0 / 24.0)) + (a3 * (1.0 / 6.0))) + (a2 * 0.5)) + a;
+    }
+    return exp(a) - 1.0;
+}
+
+fn log1p_precise(a: f64) -> f64 {
+    let abs_a = abs(a);
+    if abs_a < 1.0e-6 {
+        let a2 = a * a;
+        let a3 = a2 * a;
+        let a4 = a2 * a2;
+        let a5 = a4 * a;
+        return ((((a5 * (1.0 / 5.0)) - (a4 * 0.25)) + (a3 * (1.0 / 3.0))) - (a2 * 0.5)) + a;
+    }
+    return log(1.0 + a);
+}
+
 @group(0) @binding(0) var<storage, read> A: Tensor;
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
@@ -104,6 +138,36 @@ fn apply(a: f64) -> f64 {
         case 3u: { return exp(a); }
         case 4u: { return log(a); }
         case 5u: { return sqrt(a); }
+        case 6u: {
+            if (a > 0.0) {
+                return 1.0;
+            }
+            if (a < 0.0) {
+                return -1.0;
+            }
+            if (a == 0.0) {
+                return 0.0;
+            }
+            return a;
+        }
+        case 7u: { return a; }
+        case 8u: { return 0.0; }
+        case 9u: { return a; }
+        case 10u: { return atan2(f64(0.0), a); }
+        case 11u: { return expm1_precise(a); }
+        case 12u: { return log1p_precise(a); }
+        case 13u: { return log(a) * 0.4342944819032518; }
+        case 14u: { return log(a) * 1.4426950408889634; }
+        case 15u: { return exp(a * 0.6931471805599453); }
+        case 16u: { return floor(a); }
+        case 17u: { return ceil(a); }
+        case 18u: {
+            let t = trunc(a);
+            if (t == 0.0) {
+                return 0.0;
+            }
+            return t;
+        }
         default: { return a; }
     }
 }
@@ -134,6 +198,30 @@ struct Params {
     total: u32,
 };
 
+fn expm1_precise(a: f32) -> f32 {
+    let abs_a = abs(a);
+    if abs_a < 1.0e-4 {
+        let a2 = a * a;
+        let a3 = a2 * a;
+        let a4 = a2 * a2;
+        let a5 = a4 * a;
+        return (((a5 * (1.0 / 120.0)) + (a4 * (1.0 / 24.0)) + (a3 * (1.0 / 6.0))) + (a2 * 0.5)) + a;
+    }
+    return exp(a) - 1.0;
+}
+
+fn log1p_precise(a: f32) -> f32 {
+    let abs_a = abs(a);
+    if abs_a < 1.0e-4 {
+        let a2 = a * a;
+        let a3 = a2 * a;
+        let a4 = a2 * a2;
+        let a5 = a4 * a;
+        return ((((a5 * (1.0 / 5.0)) - (a4 * 0.25)) + (a3 * (1.0 / 3.0))) - (a2 * 0.5)) + a;
+    }
+    return log(1.0 + a);
+}
+
 @group(0) @binding(0) var<storage, read> A: Tensor;
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
@@ -146,6 +234,36 @@ fn apply(a: f32) -> f32 {
         case 3u: { return exp(a); }
         case 4u: { return log(a); }
         case 5u: { return sqrt(a); }
+        case 6u: {
+            if (a > 0.0) {
+                return 1.0;
+            }
+            if (a < 0.0) {
+                return -1.0;
+            }
+            if (a == 0.0) {
+                return 0.0;
+            }
+            return a;
+        }
+        case 7u: { return a; }
+        case 8u: { return 0.0; }
+        case 9u: { return a; }
+        case 10u: { return atan2(0.0, a); }
+        case 11u: { return expm1_precise(a); }
+        case 12u: { return log1p_precise(a); }
+        case 13u: { return log(a) * 0.4342944819; }
+        case 14u: { return log(a) * 1.4426950409; }
+        case 15u: { return exp(a * 0.6931472); }
+        case 16u: { return floor(a); }
+        case 17u: { return ceil(a); }
+        case 18u: {
+            let t = trunc(a);
+            if (t == 0.0) {
+                return 0.0;
+            }
+            return t;
+        }
         default: { return a; }
     }
 }

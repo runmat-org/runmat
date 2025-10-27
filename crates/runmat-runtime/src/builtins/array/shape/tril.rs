@@ -532,11 +532,7 @@ mod tests {
             .expect("upload");
         let gpu = tril_gpu(handle, -1).expect("gpu tril");
         let gathered = test_support::gather(gpu).expect("gather");
-        match (cpu, gathered) {
-            (Tensor { data: cpu_data, .. }, Tensor { data: gpu_data, .. }) => {
-                assert_eq!(cpu_data, gpu_data);
-            }
-            _ => panic!("unexpected value shapes"),
-        }
+        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.data, cpu.data);
     }
 }

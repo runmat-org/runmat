@@ -9,7 +9,7 @@ mod flipud;
 mod horzcat;
 mod ipermute;
 mod kron;
-mod permute;
+pub(crate) mod permute;
 mod repmat;
 mod reshape;
 mod rot90;

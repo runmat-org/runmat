@@ -1,0 +1,765 @@
+//! MATLAB-compatible `ifft` builtin with GPU-aware semantics for RunMat.
+
+use super::common::{
+    default_dimension, host_to_complex_tensor, parse_length, trim_trailing_ones,
+    value_to_complex_tensor,
+};
+use num_complex::Complex;
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
+use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_macros::runtime_builtin;
+use rustfft::FftPlanner;
+
+use crate::builtins::common::random_args::complex_tensor_into_value;
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+};
+use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
+use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+
+#[cfg(feature = "doc_export")]
+pub const DOC_MD: &str = r#"---
+title: "ifft"
+category: "math/fft"
+keywords: ["ifft", "inverse fft", "inverse fourier transform", "symmetric", "gpu"]
+summary: "Compute the inverse discrete Fourier transform (IDFT) of vectors, matrices, or N-D tensors."
+references:
+  - title: "MATLAB ifft documentation"
+    url: "https://www.mathworks.com/help/matlab/ref/ifft.html"
+gpu_support:
+  elementwise: false
+  reduction: false
+  precisions: ["f32", "f64"]
+  broadcasting: "matlab"
+  notes: "Falls back to host execution when the acceleration provider does not expose an inverse FFT hook; even with a hook, the result is downloaded immediately to return a MATLAB-compatible host array."
+fusion:
+  elementwise: false
+  reduction: false
+  max_inputs: 1
+  constants: "inline"
+requires_feature: null
+tested:
+  unit: "builtins::math::fft::ifft::tests"
+  integration: "builtins::math::fft::ifft::tests::ifft_gpu_roundtrip_matches_cpu"
+---
+
+# What does the `ifft` function do in MATLAB / RunMat?
+`ifft(X)` performs the inverse discrete Fourier transform (IDFT) of the data in `X`.
+For vectors, the result is a time-domain sequence whose FFT equals the original
+input. For matrices and higher-rank tensors, the transform is applied along the
+first non-singleton dimension unless a different dimension is specified.
+
+## How does the `ifft` function behave in MATLAB / RunMat?
+- `ifft(X)` transforms along the first dimension whose size is greater than 1.
+- `ifft(X, N)` zero-pads or truncates `X` to length `N` before applying the transform.
+- `ifft(X, N, DIM)` applies the transform along dimension `DIM`.
+- `ifft(X, [], DIM)` keeps the existing length and transforms along dimension `DIM`.
+- `ifft(..., 'symmetric')` forces the output to be real-valued, mirroring MATLAB's
+  handling of conjugate-symmetric spectra.
+- `ifft(..., 'nonsymmetric')` keeps the default complex result; it is equivalent to
+  omitting the symmetry flag but is accepted for MATLAB compatibility.
+- Empty inputs and dimensions larger than the rank of `X` mirror MATLAB behaviour.
+
+## `ifft` Function GPU Execution Behaviour
+RunMat keeps `gpuArray` inputs on the device long enough to query the active acceleration
+provider for the `ifft_dim` hook. When the hook is present, the inverse transform executes
+on the device, after which RunMat immediately downloads the result to return the standard
+MATLAB host types. If the provider lacks that hook—or if the requested length is zero—the
+runtime gathers the data once, evaluates the inverse transform on the CPU via `rustfft`,
+and returns a MATLAB-compatible result.
+
+## Examples of using the `ifft` function in MATLAB / RunMat
+
+### Reconstructing a time-domain signal from FFT bins
+```matlab
+Y = [10  -2+2i  -2  -2-2i];
+x = ifft(Y);
+```
+Expected output:
+```matlab
+x =
+  Columns 1 through 4
+       1     2     3     4
+```
+
+### Computing `ifft` along a specific dimension
+```matlab
+F = [10  14  18;
+     -3+3i  -3+3i  -3+3i];
+X = ifft(F, [], 1);
+```
+The result matches the original two-row matrix that produced `F` via `fft`:
+```matlab
+X =
+   1 + 0i   2 + 0i   3 + 0i
+   4 + 0i   5 + 0i   6 + 0i
+```
+
+### Zero-padding the inverse transform
+```matlab
+F = [4 0 0 0];
+x = ifft(F, 8);
+```
+`x` has length 8, and every element equals `0.5` because only the DC bin is populated:
+```matlab
+x =
+  Columns 1 through 8
+    0.5    0.5    0.5    0.5    0.5    0.5    0.5    0.5
+```
+
+### Enforcing a real result with `'symmetric'`
+```matlab
+F = fft([1 2 3 4]);
+x = ifft(F, 'symmetric');
+```
+`x` is returned as a real vector, discarding tiny imaginary components from numerical error.
+```matlab
+x =
+  Columns 1 through 4
+       1     2     3     4
+```
+
+### Running `ifft` on `gpuArray` inputs
+```matlab
+G = gpuArray(fft([1 0 0 0]));
+X = ifft(G);
+result = gather(X);
+```
+`result` equals `[1 0 0 0]`. When the provider does not expose `ifft_dim`, RunMat gathers `G`,
+performs the inverse on the host, and returns a host array. When the hook exists, the device
+kernel runs first and the result is downloaded immediately so the builtin can return MATLAB
+host types.
+
+## GPU residency in RunMat (Do I need `gpuArray`?)
+RunMat's auto-offload system keeps tensors on the GPU when profitable, so explicit `gpuArray`
+calls are rarely required. They remain available to mirror MATLAB workflows. When the provider
+lacks an inverse FFT hook, RunMat automatically gathers once, evaluates the transform on the
+host, and returns the result, so manual residency management is unnecessary.
+
+## FAQ
+
+### Does `ifft` always return complex values?
+By default, yes. The `'symmetric'` flag converts the result to a real array when the spectrum is
+conjugate-symmetric. You can also pass `'nonsymmetric'` to state this default explicitly while keeping
+the complex result.
+
+### How does `ifft` scale the result?
+RunMat divides by the transform length so that `ifft(fft(x))` reproduces `x`, matching MATLAB.
+
+### Can I omit the length but specify a dimension?
+Yes. Use an empty array for the length: `ifft(X, [], DIM)`.
+
+### What happens if I request a zero length?
+You receive an empty array along the selected dimension, mirroring MATLAB behaviour.
+
+### Does `'symmetric'` validate conjugate symmetry?
+No. Like MATLAB, RunMat assumes the spectrum is conjugate-symmetric and simply discards
+imaginary components.
+
+### Will RunMat run the inverse FFT on the GPU automatically?
+Only when the provider exposes an inverse FFT kernel (`ifft_dim`). Otherwise, the runtime
+gathers to the host transparently.
+
+### How do I perform multi-dimensional inverse transforms?
+Apply `ifft` sequentially along each dimension (e.g., `ifft(ifft(X, [], 1), [], 2)`).
+
+## See Also
+[fft](./fft), [fftshift](./fftshift), [ifftshift](./ifftshift), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+
+## Source & Feedback
+- Full source: `crates/runmat-runtime/src/builtins/math/fft/ifft.rs`
+- Found an issue? [Open a ticket](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
+"#;
+
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "ifft",
+    op_kind: GpuOpKind::Custom("ifft"),
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    broadcast: BroadcastSemantics::Matlab,
+    provider_hooks: &[ProviderHook::Custom("ifft_dim")],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::NewHandle,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "Providers should expose `ifft_dim` (or reuse `fft_dim` with inverse scaling); when absent, the runtime gathers to the host and evaluates the inverse FFT in software.",
+};
+
+register_builtin_gpu_spec!(GPU_SPEC);
+
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "ifft",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "Inverse FFT boundaries are not currently fused; fusion plans terminate before invoking `ifft`.",
+};
+
+register_builtin_fusion_spec!(FUSION_SPEC);
+
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("ifft", DOC_MD);
+
+#[runtime_builtin(
+    name = "ifft",
+    category = "math/fft",
+    summary = "Inverse discrete Fourier transform with optional length, dimension, and symmetric flag.",
+    keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu"
+)]
+fn ifft_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+    let (length, dimension, symmetric) = parse_arguments(&rest)?;
+    match value {
+        Value::GpuTensor(handle) => ifft_gpu(handle, length, dimension, symmetric),
+        other => ifft_host(other, length, dimension, symmetric),
+    }
+}
+
+fn ifft_host(
+    value: Value,
+    length: Option<usize>,
+    dimension: Option<usize>,
+    symmetric: bool,
+) -> Result<Value, String> {
+    let tensor = value_to_complex_tensor(value, "ifft")?;
+    let transformed = ifft_complex_tensor(tensor, length, dimension)?;
+    finalize_ifft_output(transformed, symmetric)
+}
+
+fn ifft_gpu(
+    handle: GpuTensorHandle,
+    length: Option<usize>,
+    dimension: Option<usize>,
+    symmetric: bool,
+) -> Result<Value, String> {
+    let mut logical_shape = if handle.shape.is_empty() {
+        vec![1]
+    } else {
+        handle.shape.clone()
+    };
+    if logical_shape.last() == Some(&2) {
+        logical_shape.pop();
+        if logical_shape.is_empty() {
+            logical_shape.push(1);
+        }
+    }
+
+    let dim_one_based = match dimension {
+        Some(0) => return Err("ifft: dimension must be >= 1".to_string()),
+        Some(dim) => dim,
+        None => default_dimension(&logical_shape),
+    };
+    let dim_index = dim_one_based - 1;
+
+    while logical_shape.len() <= dim_index {
+        logical_shape.push(1);
+    }
+
+    let current_len = logical_shape.get(dim_index).copied().unwrap_or(0);
+    let target_len = length.unwrap_or(current_len);
+
+    if let Some(provider) = runmat_accelerate_api::provider() {
+        if target_len != 0 {
+            if let Ok(out) = provider.ifft_dim(&handle, length, dim_index) {
+                let complex = ifft_download_gpu_result(provider, &out)?;
+                return finalize_ifft_output(complex, symmetric);
+            }
+        }
+
+        let host = provider
+            .download(&handle)
+            .map_err(|e| format!("ifft: {e}"))?;
+        runmat_accelerate_api::clear_residency(&handle);
+        let complex = host_to_complex_tensor(host, "ifft")?;
+        let transformed = ifft_complex_tensor(complex, length, dimension)?;
+        return finalize_ifft_output(transformed, symmetric);
+    }
+
+    let tensor = gpu_helpers::gather_tensor(&handle)?;
+    let Tensor { data, shape, .. } = tensor;
+    let host = HostTensorOwned { data, shape };
+    let complex = host_to_complex_tensor(host, "ifft")?;
+    let transformed = ifft_complex_tensor(complex, length, dimension)?;
+    finalize_ifft_output(transformed, symmetric)
+}
+
+pub(super) fn ifft_complex_tensor(
+    mut tensor: ComplexTensor,
+    length: Option<usize>,
+    dimension: Option<usize>,
+) -> Result<ComplexTensor, String> {
+    if tensor.shape.is_empty() {
+        tensor.shape = vec![tensor.data.len()];
+        tensor.rows = tensor.shape.first().copied().unwrap_or(1);
+        tensor.cols = tensor.shape.get(1).copied().unwrap_or(1);
+    }
+
+    let mut shape = tensor.shape.clone();
+    let origin_rank = shape.len();
+    let dim_index = match dimension {
+        Some(dim) if dim == 0 => return Err("ifft: dimension must be >= 1".to_string()),
+        Some(dim) => dim - 1,
+        None => default_dimension(&shape) - 1,
+    };
+
+    while shape.len() <= dim_index {
+        shape.push(1);
+    }
+
+    let current_len = shape[dim_index];
+    let target_len = length.unwrap_or(current_len);
+
+    if target_len == 0 {
+        let mut out_shape = shape;
+        out_shape[dim_index] = 0;
+        trim_trailing_ones(&mut out_shape, origin_rank);
+        return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
+            .map_err(|e| format!("ifft: {e}"));
+    }
+
+    let inner_stride = shape[..dim_index]
+        .iter()
+        .copied()
+        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
+    let outer_stride = shape[dim_index + 1..]
+        .iter()
+        .copied()
+        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
+    let num_slices = inner_stride.saturating_mul(outer_stride);
+
+    let input = tensor
+        .data
+        .into_iter()
+        .map(|(re, im)| Complex::new(re, im))
+        .collect::<Vec<_>>();
+
+    if num_slices == 0 {
+        let mut out_shape = shape;
+        out_shape[dim_index] = target_len;
+        trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
+        return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
+            .map_err(|e| format!("ifft: {e}"));
+    }
+
+    let output_len = target_len.saturating_mul(num_slices);
+    let mut output = vec![Complex::new(0.0, 0.0); output_len];
+
+    let mut planner = FftPlanner::<f64>::new();
+    let ifft_plan = if target_len > 1 {
+        Some(planner.plan_fft_inverse(target_len))
+    } else {
+        None
+    };
+
+    let copy_len = current_len.min(target_len);
+    let mut buffer = vec![Complex::new(0.0, 0.0); target_len];
+    let scale = 1.0 / (target_len as f64);
+
+    for outer in 0..outer_stride {
+        let base_in = outer.saturating_mul(current_len.saturating_mul(inner_stride));
+        let base_out = outer.saturating_mul(target_len.saturating_mul(inner_stride));
+        for inner in 0..inner_stride {
+            buffer.fill(Complex::new(0.0, 0.0));
+            for k in 0..copy_len {
+                let src_idx = base_in + inner + k * inner_stride;
+                if src_idx < input.len() {
+                    buffer[k] = input[src_idx];
+                }
+            }
+            if let Some(plan) = &ifft_plan {
+                plan.process(&mut buffer);
+            }
+            for k in 0..target_len {
+                let dst_idx = base_out + inner + k * inner_stride;
+                if dst_idx < output.len() {
+                    output[dst_idx] = buffer[k] * scale;
+                }
+            }
+        }
+    }
+
+    let mut out_shape = shape;
+    out_shape[dim_index] = target_len;
+    trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
+
+    let data = output.into_iter().map(|c| (c.re, c.im)).collect::<Vec<_>>();
+    ComplexTensor::new(data, out_shape).map_err(|e| format!("ifft: {e}"))
+}
+
+fn finalize_ifft_output(tensor: ComplexTensor, symmetric: bool) -> Result<Value, String> {
+    if symmetric {
+        complex_tensor_to_real_value(tensor, "ifft")
+    } else {
+        Ok(complex_tensor_into_value(tensor))
+    }
+}
+
+fn ifft_download_gpu_result(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+) -> Result<ComplexTensor, String> {
+    let host = provider
+        .download(handle)
+        .map_err(|e| format!("ifft: {e}"))?;
+    provider.free(handle).ok();
+    runmat_accelerate_api::clear_residency(handle);
+    host_to_complex_tensor(host, "ifft")
+}
+
+fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> Result<Value, String> {
+    let data = tensor.data.iter().map(|(re, _)| *re).collect::<Vec<_>>();
+    let real = Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("{builtin}: {e}"))?;
+    Ok(Value::Tensor(real))
+}
+
+fn parse_arguments(args: &[Value]) -> Result<(Option<usize>, Option<usize>, bool), String> {
+    match args.len() {
+        0 => Ok((None, None, false)),
+        1 => match parse_symflag(&args[0])? {
+            Some(flag) => Ok((None, None, flag)),
+            None => {
+                let len = parse_length(&args[0], "ifft")?;
+                Ok((len, None, false))
+            }
+        },
+        2 => {
+            let first_flag = parse_symflag(&args[0])?;
+            let second_flag = parse_symflag(&args[1])?;
+            if let Some(flag) = second_flag {
+                if first_flag.is_some() {
+                    return Err("ifft: symmetry flag must appear as the final argument".to_string());
+                }
+                let len = parse_length(&args[0], "ifft")?;
+                Ok((len, None, flag))
+            } else if first_flag.is_some() {
+                Err("ifft: symmetry flag must appear as the final argument".to_string())
+            } else {
+                let len = parse_length(&args[0], "ifft")?;
+                let dim = Some(tensor::parse_dimension(&args[1], "ifft")?);
+                Ok((len, dim, false))
+            }
+        }
+        3 => {
+            let first_flag = parse_symflag(&args[0])?;
+            let second_flag = parse_symflag(&args[1])?;
+            let third_flag = parse_symflag(&args[2])?;
+            let symmetry = third_flag.ok_or_else(|| {
+                "ifft: expected 'symmetric' or 'nonsymmetric' as the final argument".to_string()
+            })?;
+            if first_flag.is_some() || second_flag.is_some() {
+                return Err("ifft: symmetry flag may only appear once at the end".to_string());
+            }
+            let len = parse_length(&args[0], "ifft")?;
+            let dim = Some(tensor::parse_dimension(&args[1], "ifft")?);
+            Ok((len, dim, symmetry))
+        }
+        _ => Err(
+            "ifft: expected ifft(X), ifft(X, N), ifft(X, N, DIM), or ifft(X, N, DIM, symflag)"
+                .to_string(),
+        ),
+    }
+}
+
+fn parse_symflag(value: &Value) -> Result<Option<bool>, String> {
+    use std::borrow::Cow;
+
+    let text: Option<Cow<'_, str>> = match value {
+        Value::String(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            let collected: String = ca.data.iter().collect();
+            Some(Cow::Owned(collected))
+        }
+        Value::StringArray(sa) if sa.data.len() == 1 => Some(Cow::Borrowed(sa.data[0].as_str())),
+        _ => None,
+    };
+
+    let Some(text) = text else {
+        return Ok(None);
+    };
+
+    let trimmed = text.trim();
+    if trimmed.eq_ignore_ascii_case("symmetric") {
+        Ok(Some(true))
+    } else if trimmed.eq_ignore_ascii_case("nonsymmetric") {
+        Ok(Some(false))
+    } else {
+        Err(format!("ifft: unrecognized option '{trimmed}'"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtins::common::test_support;
+    use num_complex::Complex;
+    use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue};
+
+    fn approx_eq((a_re, a_im): (f64, f64), (b_re, b_im): (f64, f64), tol: f64) -> bool {
+        (a_re - b_re).abs() <= tol && (a_im - b_im).abs() <= tol
+    }
+
+    fn value_as_complex_tensor(value: Value) -> HostComplexTensor {
+        match value {
+            Value::ComplexTensor(t) => t,
+            Value::Tensor(t) => {
+                HostComplexTensor::new(t.data.into_iter().map(|re| (re, 0.0)).collect(), t.shape)
+                    .unwrap()
+            }
+            Value::Num(n) => HostComplexTensor::new(vec![(n, 0.0)], vec![1, 1]).unwrap(),
+            Value::Int(i) => HostComplexTensor::new(vec![(i.to_f64(), 0.0)], vec![1, 1]).unwrap(),
+            other => panic!("unexpected value kind {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifft_inverts_known_fft() {
+        let spectrum = HostComplexTensor::new(
+            vec![(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)],
+            vec![4],
+        )
+        .unwrap();
+        let result = ifft_host(Value::ComplexTensor(spectrum), None, None, false).expect("ifft");
+        match result {
+            Value::ComplexTensor(ct) => {
+                assert_eq!(ct.shape, vec![4]);
+                let expected = [(1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0)];
+                for (idx, actual) in ct.data.iter().enumerate() {
+                    assert!(approx_eq(*actual, expected[idx], 1e-12));
+                }
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifft_symmetric_returns_real_tensor() {
+        let spectrum = HostComplexTensor::new(
+            vec![(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)],
+            vec![4],
+        )
+        .unwrap();
+        let result =
+            ifft_host(Value::ComplexTensor(spectrum), None, None, true).expect("ifft symmetric");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![4]);
+                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+            }
+            other => panic!("expected real tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifft_zero_length_returns_empty_tensor() {
+        let spectrum = HostComplexTensor::new(Vec::new(), vec![0]).unwrap();
+        let result = ifft_host(Value::ComplexTensor(spectrum), Some(0), None, false)
+            .expect("ifft zero length");
+        match result {
+            Value::ComplexTensor(ct) => {
+                assert_eq!(ct.shape, vec![0]);
+                assert!(ct.data.is_empty());
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifft_dimension_argument_recovers_matrix() {
+        let original = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
+        let mut spectrum = Vec::with_capacity(original.data.len());
+        let rows = original.shape[0];
+        let cols = original.shape[1];
+        for c in 0..cols {
+            let mut column = Vec::with_capacity(rows);
+            for r in 0..rows {
+                column.push(Complex::new(original.data[r + c * rows], 0.0));
+            }
+            let mut fft = column.clone();
+            FftPlanner::<f64>::new()
+                .plan_fft_forward(rows)
+                .process(&mut fft);
+            for value in fft {
+                spectrum.push((value.re, value.im));
+            }
+        }
+        let freq = HostComplexTensor::new(spectrum, vec![2, 3]).unwrap();
+        let result = ifft_host(Value::ComplexTensor(freq), None, Some(1), false).expect("ifft dim");
+        match result {
+            Value::ComplexTensor(ct) => {
+                assert_eq!(ct.shape, vec![2, 3]);
+                for (idx, (re, im)) in ct.data.iter().enumerate() {
+                    assert!(approx_eq((*re, *im), (original.data[idx], 0.0), 1e-12));
+                }
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifft_rejects_dimension_zero() {
+        let err = parse_arguments(&[Value::Num(4.0), Value::Int(IntValue::I32(0))]).unwrap_err();
+        assert!(err.contains("dimension must be >= 1"));
+    }
+
+    #[test]
+    fn ifft_rejects_unknown_string_option() {
+        let err = parse_arguments(&[Value::from("invalidflag")]).unwrap_err();
+        assert!(err.contains("unrecognized option"));
+    }
+
+    #[test]
+    fn ifft_accepts_nonsymmetric_flag() {
+        let (len, dim, symmetric) = parse_arguments(&[Value::from("nonsymmetric")]).expect("parse");
+        assert!(len.is_none());
+        assert!(dim.is_none());
+        assert!(!symmetric);
+
+        let spectrum = HostComplexTensor::new(
+            vec![(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)],
+            vec![4],
+        )
+        .unwrap();
+        let result =
+            ifft_host(Value::ComplexTensor(spectrum), None, None, symmetric).expect("ifft");
+        match result {
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![4]),
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifft_symflag_requires_final_position() {
+        let err = parse_arguments(&[Value::from("nonsymmetric"), Value::Num(4.0)]).unwrap_err();
+        assert!(err.contains("symmetry flag must appear as the final argument"));
+    }
+
+    #[test]
+    fn ifft_symflag_accepts_whitespace() {
+        let (len, dim, symmetric) = parse_arguments(&[Value::from(" symmetric ")]).expect("parse");
+        assert!(len.is_none());
+        assert!(dim.is_none());
+        assert!(symmetric);
+    }
+
+    #[test]
+    fn ifft_zero_padding_length_argument() {
+        let spectrum = HostComplexTensor::new(vec![(4.0, 0.0)], vec![1]).unwrap();
+        let result = ifft_host(Value::ComplexTensor(spectrum), Some(4), None, false).expect("ifft");
+        match result {
+            Value::ComplexTensor(ct) => {
+                assert_eq!(ct.shape, vec![4]);
+                for &(re, im) in &ct.data {
+                    assert!((re - 1.0).abs() < 1e-12);
+                    assert!(im.abs() < 1e-12);
+                }
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifft_truncates_when_length_is_smaller() {
+        let spectrum = HostComplexTensor::new(
+            vec![(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)],
+            vec![4],
+        )
+        .unwrap();
+        let result = ifft_host(Value::ComplexTensor(spectrum), Some(2), None, false).expect("ifft");
+        let mut expected = vec![Complex::new(10.0, 0.0), Complex::new(-2.0, 2.0)];
+        FftPlanner::<f64>::new()
+            .plan_fft_inverse(2)
+            .process(&mut expected);
+        for value in &mut expected {
+            *value /= 2.0;
+        }
+        match result {
+            Value::ComplexTensor(ct) => {
+                assert_eq!(ct.shape, vec![2]);
+                for ((re, im), expected) in ct.data.iter().zip(expected.iter()) {
+                    assert!(approx_eq((*re, *im), (expected.re, expected.im), 1e-12));
+                }
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifft_empty_length_with_symmetric_flag() {
+        let empty = Tensor::new(Vec::new(), vec![0]).unwrap();
+        let (len, dim, symmetric) =
+            parse_arguments(&[Value::Tensor(empty), Value::from("symmetric")]).expect("parse");
+        assert!(len.is_none());
+        assert!(dim.is_none());
+        assert!(symmetric);
+    }
+
+    #[test]
+    fn ifft_gpu_roundtrip_matches_cpu() {
+        test_support::with_test_provider(|provider| {
+            let spectrum = vec![10.0, 0.0, -2.0, 2.0, -2.0, 0.0, -2.0, -2.0];
+            let shape = vec![4, 2];
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &spectrum,
+                shape: &shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let gpu = ifft_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("ifft");
+            let cpu_spectrum = HostComplexTensor::new(
+                vec![(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)],
+                vec![4],
+            )
+            .unwrap();
+            let cpu = ifft_builtin(Value::ComplexTensor(cpu_spectrum), Vec::new()).expect("ifft");
+            let gpu_ct = value_as_complex_tensor(gpu);
+            let cpu_ct = value_as_complex_tensor(cpu);
+            assert_eq!(gpu_ct.shape, cpu_ct.shape);
+            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+                assert!(approx_eq(*a, *b, 1e-12));
+            }
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ifft_wgpu_matches_cpu() {
+        if let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
+            .expect("wgpu provider")
+        {
+            let spectrum = vec![10.0, 0.0, -2.0, 2.0, -2.0, 0.0, -2.0, -2.0];
+            let shape = vec![4, 2];
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &spectrum,
+                shape: &shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let gpu = ifft_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("gpu ifft");
+            let cpu_spectrum = HostComplexTensor::new(
+                vec![(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)],
+                vec![4],
+            )
+            .unwrap();
+            let cpu =
+                ifft_builtin(Value::ComplexTensor(cpu_spectrum), Vec::new()).expect("cpu ifft");
+            let gpu_ct = value_as_complex_tensor(gpu);
+            let cpu_ct = value_as_complex_tensor(cpu);
+            assert_eq!(gpu_ct.shape, cpu_ct.shape);
+            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+                assert!(approx_eq(*a, *b, 1e-9));
+            }
+            provider.free(&handle).ok();
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "doc_export")]
+    fn doc_examples_present() {
+        let blocks = test_support::doc_examples(DOC_MD);
+        assert!(!blocks.is_empty());
+    }
+}

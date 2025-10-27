@@ -2659,6 +2659,212 @@ pub fn interpret_with_vars(
                     );
                 }
                 args.reverse();
+                if name == "chol" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "chol requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            if !eval.is_positive_definite() {
+                                vm_bail!("Matrix must be positive definite.".to_string());
+                            }
+                            stack.push(eval.factor());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.factor());
+                            stack.push(eval.flag());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "chol currently supports at most two outputs"
+                        )),
+                    }
+                }
+                if name == "lu" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "lu requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::lu::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.combined());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.lower());
+                            stack.push(eval.upper());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.lower());
+                            stack.push(eval.upper());
+                            stack.push(eval.permutation());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "lu currently supports at most three outputs"
+                        )),
+                    }
+                }
+                if name == "linsolve" {
+                    if args.len() < 2 {
+                        vm_bail!(mex(
+                            "NotEnoughInputs",
+                            "linsolve requires coefficient and right-hand side inputs"
+                        ));
+                    }
+                    let eval =
+                        match runmat_runtime::builtins::math::linalg::solve::linsolve::evaluate_args(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        ) {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.solution());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.solution());
+                            stack.push(eval.reciprocal_condition());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "linsolve currently supports at most two outputs"
+                        )),
+                    }
+                }
+                if name == "qr" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "qr requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.r());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.q());
+                            stack.push(eval.r());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.q());
+                            stack.push(eval.r());
+                            stack.push(eval.permutation());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "qr currently supports at most three outputs"
+                        )),
+                    }
+                }
+                if name == "svd" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "svd requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::svd::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.singular_values());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.u());
+                            stack.push(eval.sigma());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.u());
+                            stack.push(eval.sigma());
+                            stack.push(eval.v());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "svd currently supports at most three outputs"
+                        )),
+                    }
+                }
+                if name == "eig" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "eig requires an input matrix"));
+                    }
+                    let require_left = out_count >= 3;
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                        require_left,
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.eigenvalues());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.right());
+                            stack.push(eval.diagonal());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.right());
+                            stack.push(eval.diagonal());
+                            let left = match eval.left() {
+                                Ok(value) => value,
+                                Err(err) => vm_bail!(err),
+                            };
+                            stack.push(left);
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "eig currently supports at most three outputs"
+                        )),
+                    }
+                }
                 // Special-case for 'find' to support [i,j,v] = find(A)
                 if name == "find" && !args.is_empty() {
                     let eval = match runmat_runtime::builtins::array::indexing::find::evaluate(
@@ -2706,6 +2912,61 @@ pub fn interpret_with_vars(
                     }
                     continue;
                 }
+                if name == "deconv" {
+                    if args.len() < 2 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::signal::deconv::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    stack.push(eval.quotient());
+                    if out_count >= 2 {
+                        stack.push(eval.remainder());
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "filter" {
+                    if args.len() < 3 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::signal::filter::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        args[2].clone(),
+                        &args[3..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_value());
+                    } else {
+                        let (output, final_state) = eval.into_pair();
+                        stack.push(output);
+                        stack.push(final_state);
+                        if out_count > 2 {
+                            for _ in 2..out_count {
+                                stack.push(Value::Num(0.0));
+                            }
+                        }
+                    }
+                    continue;
+                }
                 if name == "sort" && !args.is_empty() {
                     let eval = match runmat_runtime::builtins::array::sorting_sets::sort::evaluate(
                         args[0].clone(),
@@ -2719,6 +2980,52 @@ pub fn interpret_with_vars(
                     }
                     let (sorted, indices) = eval.into_values();
                     stack.push(sorted);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "cummin" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::math::reduction::evaluate_cummin(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (values, indices) = eval.into_pair();
+                    stack.push(values);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "min" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::math::reduction::evaluate_min(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (values, indices) = eval.into_pair();
+                    stack.push(values);
                     if out_count >= 2 {
                         stack.push(indices);
                     }

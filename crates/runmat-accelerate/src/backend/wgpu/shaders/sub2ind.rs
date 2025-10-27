@@ -18,7 +18,7 @@ pub fn build_sub2ind_shader(
         "struct ErrorState {{ code: atomic<u32>, dim: atomic<u32>, extra: atomic<u32>, pad: atomic<u32> }};"
     )
     .unwrap();
-    writeln!(shader, "struct Params {{ len: u32; }}").unwrap();
+    writeln!(shader, "struct Params {{ len: u32, }}").unwrap();
     for (idx, _) in dims.iter().enumerate() {
         writeln!(
             shader,
