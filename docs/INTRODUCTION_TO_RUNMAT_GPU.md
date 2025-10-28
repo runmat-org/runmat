@@ -4,7 +4,7 @@ This guide explains how RunMat turns ordinary MATLAB-syntax scripts into GPU-acc
 
 ---
 
-## 1. Why RunMat pushes work to the GPU
+## Why RunMat pushes work to the GPU
 
 Modern GPUs are wide data engines: thousands of arithmetic lanes, fed by high-bandwidth memory, designed to chew through the same operation applied to many values. Monte Carlo risk paths, image and signal processing, large matrix statistics—are exactly that: repeat the same math across millions of elements, punctuated by a few reductions or matrix multiplies.
 
@@ -18,7 +18,7 @@ RunMat’s promise is “write MATLAB-syntax code, let the runtime discover and 
 
 ---
 
-## 2. Stage 1 — Capture the math, not the syntax
+## Stage 1 — Capture the math, not the syntax
 
 When you run a RunMat script, the runtime translates your high-level operations into an “acceleration graph.” Think of it as a block diagram where each block is an operation (`+`, `exp`, `mean`, `matmul`) and the wires are data flowing between them. The graph keeps track of:
 
@@ -52,7 +52,7 @@ graph TD
 
 ---
 
-## 3. Stage 2 — Decide what should live on the GPU
+## Stage 2 — Decide what should live on the GPU
 
 With the graph in hand, RunMat asks: “Which parts deliver a speedup on a GPU, and are big enough to be worth the trip?”
 
@@ -66,10 +66,10 @@ The outcome is a schedule: some blocks tagged “stay on CPU,” others “ship 
 
 Continuing the example above, the planner makes a costed decision for `rand`:
 
-- If the provider exposes GPU RNG and the array is large enough (element-count exceeds the auto‑offload threshold or it will be reused), generating on the GPU is cheaper because it avoids a host→device upload.
-- If the array is small or GPU RNG isn’t available, generating on the host and doing a single upload is cheaper and simpler.
+- If the provider exposes GPU RNG hooks, `rand` is generated on the device to avoid uploads and keep residency on GPU.
+- If hooks are unavailable, RunMat generates on the host and uploads once to preserve downstream GPU residency.
 
-For this small example (1024×1), host generation is typically cheaper; the fused elementwise chain and the reduction are offloaded to the GPU (green):
+For this example (1024×1), `rand` is produced on device when supported; the fused elementwise chain and the reduction are offloaded to the GPU (green):
 
 Note: In this guide, “provider” refers to the active acceleration backend (currently wgpu). It’s a portable layer that targets Metal (macOS), DirectX 12 (Windows), and Vulkan (Linux) without code changes. The provider:
 - Selects the right GPU API for your OS/device.
@@ -79,8 +79,8 @@ Note: In this guide, “provider” refers to the active acceleration backend (c
 
 ```mermaid
 graph TD
-  X["x: rand (1024x1, single)"]:::cpu --> S[sin]:::gpu
-  X:::cpu --> M1[mul]:::gpu
+  X["x: rand (1024x1, single)"]:::gpu --> S[sin]:::gpu
+  X:::gpu --> M1[mul]:::gpu
   S:::gpu --> M1:::gpu
   M1:::gpu --> A1[add]:::gpu
   A1:::gpu --> R[mean]:::gpu
@@ -92,7 +92,7 @@ graph TD
 
 ---
 
-## 4. Stage 3 — Translate into GPU-native work
+## Stage 3 — Translate into GPU-native work
 
 RunMat ships with a portable GPU backend built on WebGPU (via wgpu). Conceptually, it plays the role of a translator:
 
@@ -108,26 +108,29 @@ Continuing the example, the planner produces two WGSL kernels and the provider c
 ```mermaid
 graph TD
   subgraph Planner
-    G1["Fused elementwise: sin ∘ mul ∘ add"]
+    S0["Source: rand(1024×1) (device RNG when available)"]
+    G1["Fused elementwise: sin ∘ mul ∘ add(0.5 const)"]
     G2["Reduction: mean(all)"]
   end
-  G1 --> K1["Kernel K1 (WGSL)"]
+  S0 --> G1
+  G1 --> K1["Kernel K1 (WGSL, const inlined)"]
   G2 --> K2["Kernel K2 (WGSL)"]
 
   subgraph "Provider (wgpu)"
-    P1["Compute pipeline for K1"]:::gpu
-    P2["Compute pipeline for K2"]:::gpu
-    C["Pipeline cache (hash: shader+layout+WG)"]
+    P1["Compute pipeline for K1 (cached)"]:::gpu
+    P2["Compute pipeline for K2 (cached)"]:::gpu
+    C["Pipeline cache (reused on subsequent calls)"]
   end
   K1 --> P1 --> C
   K2 --> P2 --> C
 
   classDef gpu fill:#c8e6c9,stroke:#2e7d32,color:#1b5e20,stroke-width:1px;
 ```
+Pipelines are cached by shader+layout+workgroup so future runs skip compile time.
 
 ---
 
-## 5. Stage 4 — Execute and keep data moving efficiently
+## Stage 4 — Execute and keep data moving efficiently
 
 Execution is where the pieces come together:
 
@@ -143,16 +146,16 @@ Continuing the example, uploads, residency, and the final gather look like this:
 ```mermaid
 graph LR
   subgraph Host
-    XH["x: rand (host)"]:::cpu
     MH["m (host) → fprintf"]:::cpu
   end
   subgraph GPU
+    XG["x: rand (device)"]:::gpu
     K1["K1: fused elementwise (sin(x) * x + 0.5)"]:::gpu
     YG["y (resident)"]:::gpu
     K2["K2: mean(all)"]:::gpu
   end
 
-  XH -- upload --> K1
+  XG --> K1
   K1 --> YG
   YG --> K2
   K2 -- gather (download) --> MH
@@ -160,10 +163,12 @@ graph LR
   classDef gpu fill:#c8e6c9,stroke:#2e7d32,color:#1b5e20,stroke-width:1px;
   classDef cpu fill:#eeeeee,stroke:#666,color:#333,stroke-width:1px;
 ```
- 
+
+If GPU RNG hooks are unavailable, RunMat falls back to host sampling and uploads once to keep downstream work on the GPU.
+
  ---
  
- ## 6. How this maps to the real workloads
+## How this maps to real workloads
 
 The pipeline above pays off in all regimes in which mathematical operations can be fused and offloaded to the GPU. Versus CPUs, using GPUs with RunMat can expect to see:
 
@@ -175,7 +180,7 @@ In each case, you're able to capture your logic with MATLAB-syntax code, allowin
 
 ---
 
-## 7. Practical takeaways for non-GPU specialists
+## Practical takeaways for non-GPU specialists
 
 - **No device flags.** RunMat chooses GPU or CPU automatically.
 - **One script, all platforms.** Metal/DX12/Vulkan with CPU fallback.
@@ -184,7 +189,7 @@ In each case, you're able to capture your logic with MATLAB-syntax code, allowin
 
 ---
 
-## 8. When to expect the biggest wins
+## When to expect the biggest wins
 
 Biggest wins when:
 
@@ -196,7 +201,7 @@ Caveat: gains are modest for tiny arrays or when you pull data back to the CPU m
 
 ---
 
-## 9. Cross‑platform portability
+## Cross‑platform portability
 
 RunMat + accelerate/fusion run your MATLAB-syntax scripts across platforms via the wgpu provider. Same code, no changes required.
 
@@ -208,7 +213,7 @@ When no GPU is available, RunMat automatically falls back to CPU, preserving cor
 
 ---
 
-## 10. Summary
+## Summary
 
 RunMat’s GPU acceleration is best understood as a system that:
 
@@ -221,7 +226,7 @@ By working at this higher level, RunMat gives you the throughput benefits of mod
 
 ---
  
-## 11. Advanced — Managing memory and transfers
+## Advanced — Managing memory and transfers
  
 Most users can ignore device management; RunMat keeps values resident and transfers only at the edges. If you do want to reason about it:
  
