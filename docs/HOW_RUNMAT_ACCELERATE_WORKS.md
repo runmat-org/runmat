@@ -1,95 +1,108 @@
-# Deep Dive: How RunMat Accelerate Works
+# Deep Dive: RunMat Accelerate Architecture
 
-This document explains how RunMat turns MATLAB syntax into efficient GPU work without asking you to write kernels or worry about drivers. It is a technical deep dive meant for engineers who want to understand the moving parts and the trade‑offs.
+This document explains how RunMat routes high-level MATLAB-compatible builtins onto GPU hardware through the **RunMat Accelerate** subsystem. The focus is on the provider abstraction, auto-offload planner, and how new-style runtime builtins cooperate with the acceleration layer.
 
-## What RunMat Accelerate does (at a glance)
+## 1. Architectural Overview
 
-- Picks an acceleration backend (GPU via wgpu, or a CPU fallback) and exposes a uniform interface to the runtime.
-- Decides whether each builtin should run on CPU or GPU using size/shape heuristics and live context from fusion.
-- When profitable, generates and executes GPU kernels, keeping data resident on device as long as possible.
+RunMat Accelerate defines a backend-agnostic façade that lives in `crates/runmat-accelerate/src/lib.rs`. The crate exposes three main responsibilities:
 
-Think of RunMat Accelerate as a traffic controller between high‑level math and the GPU: it schedules, compiles, dispatches, and measures.
+- Select and initialise an acceleration provider (wgpu, in-process fallback, etc.).
+- Maintain heuristics that decide whether a builtin should execute on the CPU or on the selected device.
+- Coordinate with the fusion planner to compile larger expression graphs into GPU kernels.
 
-## The Provider abstraction
+At runtime the `Accelerator` façade (`crates/runmat-accelerate/src/lib.rs`) sits between builtin dispatchers and the provider interface. It receives RunMat `Value` arguments, asks the planner where to execute, and either forwards to the legacy CPU implementation (`runmat_runtime`) or marshals tensors into GPU buffers before calling provider hooks.
 
-RunMat works with a "provider", which is an active acceleration backend able to offload work to a GPU. Today that is usually the `wgpu` provider (portable over Metal on macOS, DirectX 12 on Windows, and Vulkan on Linux/ARM), but the architecture is designed to support custom backends if needed. The provider:
+## 2. Provider Abstraction (`runmat-accelerate-api`)
 
-- Manages the device and queue; allocates and frees GPU buffers; uploads and downloads tensors.
-- Compiles WGSL (the GPU language we generate) into native compute pipelines, caches them, and reuses them across runs.
-- Implements hooks for common categories (elementwise math, reductions, matmul, random, and fused kernels).
-- Reports timings so the planner can learn when GPU is a win.
+Acceleration providers implement the `AccelProvider` trait defined in `crates/runmat-accelerate-api/src/lib.rs`. The trait is extensive: aside from core memory operations (`upload`, `download`, `free`), it contains optional hooks for elementwise math, reductions, linear algebra, signal processing, random number generation, sorting, set operations, cumulative scans, and fused kernels (`fused_elementwise`, `fused_reduction`).
 
-If no GPU is available or features are missing, a simple in-process provider steps in, keeping scripts working on the CPU.
+Important pieces:
 
-## From script to execution: the control flow
+- **Registration** – `unsafe fn register_provider` installs a `'static` provider instance into a global (`GLOBAL_PROVIDER`). The helper `provider()` returns an `Option<&'static dyn AccelProvider>` for callers.
+- **Structured metadata** – providers can override `device_info_struct()` to surface vendor / backend / memory information for user-facing builtins such as `gpuDevice`.
+- **Fused kernel entry points** – the fusion engine relies on `fused_elementwise` and `fused_reduction` to submit generated WGSL code and obtain new `GpuTensorHandle` results without falling back to the CPU.
+- **Convenience functions** – the API offers helpers such as `try_elem_add` and random tensor initialisers that internally check whether a provider is registered.
 
-1. The runtime lowers your MATLAB syntax code into an acceleration graph: nodes are ops (like `+`, `sin`, `mean`), edges are data.
-2. The fusion planner scans the graph to find long elementwise chains and standalone reductions that can be consolidated.
-3. The auto-offload logic weighs sizes, shapes, and whether results will stay on device; it picks CPU or GPU for each region.
-4. For GPU regions, the fusion layer emits WGSL, the provider compiles (or reuses) pipelines, and dispatches kernels.
-5. Results remain resident on device until a host-only sink (e.g., `fprintf`, file I/O) requires a gather back to the CPU.
+Because the trait covers a superset of MATLAB semantics, providers can opt-in incrementally. Missing features return `Err` so Callers can fall back to host code.
 
-The end result is fewer kernel launches, less memory traffic, and decisions that adapt to what the script is actually doing.
+## 3. Provider Lifecycle & Initialisation
 
-## Choosing CPU vs GPU (auto-offload)
+`AccelerateInitOptions` in `crates/runmat-accelerate/src/lib.rs` packages all runtime configuration (provider preference, power preference, fallback behaviour, auto-offload options). `initialize_acceleration_provider_with` performs the following steps:
 
-The auto-offload engine combines simple rules of thumb with live context:
+1. Applies auto-offload configuration (`configure_auto_offload` ➜ global `Lazy<RwLock<AutoOffloadOptions>>`).
+2. Short-circuits if a provider is already registered.
+3. Registers the preferred backend:
+   - With the `wgpu` feature enabled, it creates a `WgpuProvider` using `backend::wgpu::provider::register_wgpu_provider`, logging adapter details and triggering a warm-up to amortise shader compilation.
+   - Otherwise it chooses the in-process provider (`simple_provider::register_inprocess_provider`) as a compatibility fallback.
 
-- Element count matters. Very small arrays don’t amortize upload/launch overheads—those stay on the CPU.
-- Operation mix matters. Compute-heavy reductions and matmuls tip toward GPU; tiny scalar work does not.
-- Residency avoids re-uploads. If an operand is already on the GPU and downstream is GPU-friendly, it often stays there.
-- Calibration is optional. On your machine, quick micro-benchmarks can refine thresholds for elementwise, reduction, and matmul.
+During initialisation the crate also installs residency hooks via `runmat_accelerate_api::register_residency_clear`, enabling the runtime dispatcher to clear GPU residency metadata when tensors are gathered back to the host (`crates/runmat-accelerate/src/fusion_residency.rs`).
 
-These decisions are conservative by default and configurable via environment or runtime options.
+## 4. Planner & Execution Path
 
-## Fusion: what we combine and why
+The `Planner` (`crates/runmat-accelerate/src/lib.rs`) encapsulates the decision of whether to offload a builtin. The current implementation is intentionally simple: `choose_elem_add` checks tensor sizes and shape compatibility before returning `ExecutionTarget::Gpu` or `ExecutionTarget::Cpu`. The `Accelerator::elementwise_add` façade demonstrates the standard flow:
 
-Fusion looks for two profitable shapes:
+1. Gather GPU handles into host tensors if required (e.g., when one operand is still a `GpuTensorHandle` but the provider lacks buffer bookkeeping).
+2. For CPU execution, call back into `runmat_runtime`.
+3. For GPU execution, upload host tensors with `provider.upload`, invoke the elementwise hook, download the result, and wrap it into a `Value::Tensor`.
 
-- Elementwise chains that read the same array(s) and apply a sequence of pointwise ops; these become one kernel.
-- Single reductions (e.g., sum/mean) where the preceding or following context can reuse the GPU output.
+Higher-level builtins follow the same pattern after passing through the new dispatcher. The planner will evolve to consult profiling data produced by `NativeAutoOffload`.
 
-The planner enforces shape/broadcast compatibility, bails out on unknown shapes, and preserves MATLAB semantics (NaN handling, `'like'`, etc.). Successful plans provide enough metadata (element counts, reduce sizes) for the offload engine and the provider.
+## 5. Native Auto-Offload Engine
 
-## Kernel generation and caching
+`crates/runmat-accelerate/src/native_auto.rs` manages heuristics that automatically promote builtin arguments to GPU residency. Key details:
 
-- WGSL generation. For elementwise groups we emit a loop that reads inputs, applies the fused formula, and writes the result. For reductions we emit tiled kernels that use workgroup memory and, for large reduce lengths, optionally switch to a two‑pass strategy.
-- Tuning knobs. Providers advertise defaults like reduction workgroup size and the threshold where two‑pass reductions win; env overrides let you tune without code changes.
-- Pipeline caching. The provider hashes shader source plus layout/workgroup signature to reuse compute pipelines. Warm‑up can compile common kernels on startup so first‑use is smooth. Timings (upload/compute/download) and cache hit/miss counters feed observability.
-- Portability. The same WGSL compiles via wgpu to Metal/DX12/Vulkan—no script changes required.
+- **Global singleton** – the first call invokes `initialize`, checks configuration flags (environment variables or `AutoOffloadOptions`), and captures the active provider reference.
+- **Thresholds** – `ThresholdConfig` stores minimum element counts / FLOPs before GPU execution becomes worthwhile. Defaults are conservative and can be overridden at runtime.
+- **Calibration** – optional `auto_calibrate` benchmarks (`compare_elemwise`, `compare_reduction`, `compare_matmul`) run both CPU and provider kernels to refine thresholds.
+- **Dynamic decisions** – methods like `promote_binary` and `promote_reduction` reuse cached GPU handles when possible, consult the fusion engine (`active_fusion`) to factor in upcoming element counts, and fall back to gathering values for sink builtins.
+- **`'like'` handling** – reduction helpers honour MATLAB semantics such as `'like'` or `'native'` prototypes by re-uploading host results when requested.
 
-## Memory model and residency
+These heuristics let front-end code remain MATLAB-friendly while opportunistically keeping tensors resident on the GPU.
 
-Accelerate tries to move data once, then keep it on device:
+## 6. Runtime Builtins & GPU Specs
 
-- Uploads happen at region boundaries; scalars are materialized as tiny buffers if needed.
-- Intermediate results of fused kernels remain resident (marked in a residency table) so the next GPU region can consume them directly.
-- Host sinks (printing, exporting) trigger gathers and clear residency for those handles; correctness beats residency when required.
+New-style builtins inside `crates/runmat-runtime/src/builtins` record their GPU capabilities using inventory macros (`register_builtin_gpu_spec!`) and describe fusion templates via `BuiltinFusionSpec` (`crates/runmat-runtime/src/builtins/common/spec.rs`). For example:
 
-This model minimizes PCIe (or integrated GPU) copies and preserves the biggest wins.
+- `math/elementwise/exp.rs` declares an elementwise GPU spec that points to the provider hook `unary_exp` and a fusion template that emits WGSL for single-input exponentials.
+- `math/reduction/sum.rs` registers a reduction spec referencing `reduce_sum_dim`, marks omit-nan requirements, and exposes metadata used by the fusion planner (e.g., preferred workgroup size).
 
-## Provider lifecycle (initialization and fallback)
+At execution time each builtin:
 
-On first use, Accelerate selects and registers a provider. With wgpu available, it enumerates adapters, logs device info, and may run a short warm‑up to populate caches. If a GPU is unavailable or disabled, the in‑process provider is installed so scripts still run—slowly, but correctly—with the same semantics.
+1. Validates / broadcasts arguments using helpers from `builtins/common`.
+2. Consults provider hooks through `runmat_accelerate_api::provider()`.
+3. Falls back to the CPU implementation when the provider reports `Err`.
+4. Delegates residency decisions to `NativeAutoOffload` for `'like'` or auto-offload scenarios.
 
-## Observability and tuning
+The dispatcher (`crates/runmat-runtime/src/dispatcher.rs`) automatically gathers GPU tensors when a builtin rejects device residency, ensuring MATLAB compatibility without extra user code.
 
-- Device and cache info. A provider info path can expose device name, backend (Metal/DX12/Vulkan), cache hits/misses, and default tuning values.
-- Metrics. Timers around upload, compute, and download inform thresholds and help catch regressions.
-- Overrides. Environment variables (e.g., reduction workgroup size, two‑pass threshold) allow quick experimentation.
+## 7. WGPU Provider Implementation
 
-These levers make behavior inspectable and adjustable without changing the script.
+The default GPU backend, `WgpuProvider` (`crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs`), owns:
 
-## Putting it together (end-to-end)
+- The `wgpu::Device` / `Queue`.
+- A handle table (`Mutex<HashMap<u64, BufferEntry>>`) used to translate `GpuTensorHandle::buffer_id` back into `wgpu::Buffer` objects.
+- A `WgpuPipelines` bundle (`crates/runmat-accelerate/src/backend/wgpu/pipelines.rs`) that lazily creates compute pipelines for elementwise math, reductions, scans, permutations, convolution, random number generation, etc. Pipeline layouts share a consistent binding scheme so generated WGSL from the fusion engine can be compiled and cached (`fused_pipeline_cache`).
+- Fused kernel helpers that hash shader sources to reuse compute pipelines across invocations. The warm-up pass executed during provider registration primes caches by dispatching representative kernels and reporting hit/miss counts for observability.
+- Metrics (`metrics::WgpuMetrics`) that track transfer / dispatch timings. These counters feed the auto-offload cost model via the profiling subsystem.
 
-1. The runtime captures intent (graph).
-2. Fusion identifies GPU-friendly regions.
-3. Auto-offload decides CPU vs GPU using sizes and context.
-4. WGSL is generated, compiled (or cache‑hit), and dispatched by the provider.
-5. Results stay resident until a host sink forces a gather; residency is updated.
+Because the provider implements most `AccelProvider` hooks, builtins can offload a broad spectrum of operations while retaining a CPU fallback path.
 
-This layered design balances MATLAB compatibility, performance portability, and incremental backend support. Builtins describe what they can do on GPU; Accelerate decides when and how to do it efficiently.
+## 8. In-Process Provider Fallback
 
-## Deeper dive
+When GPU acceleration is disabled or unavailable, `simple_provider::register_inprocess_provider` registers `InProcessProvider` from `crates/runmat-accelerate/src/simple_provider.rs`. This shim stores tensors in a `HashMap` keyed by `buffer_id` and implements hooks by delegating to host algorithms from `runmat_runtime`. It exists to preserve builtins that expect GPU handles without forcing every configuration to ship with a real GPU backend.
 
-For a deeper dive into the implementation, see the [RunMat Accelerate source code & documentation](https://github.com/runmat-org/runmat/tree/main/crates/runmat-accelerate), and the [RunMat Runtime Builtin Functions source code & documentation](https://github.com/runmat-org/runmat/tree/main/crates/runmat-runtime/src/builtins).
+## 9. Residency Tracking & Gather Semantics
+
+Some GPU tensors stay resident across fused kernels. The fusion subsystem marks handles via `fusion_residency::mark` and clears them when a gather occurs. The runtime dispatcher (`gather_if_needed`) invokes the `runmat_accelerate_api::clear_residency` hook before reconstructing a dense tensor, which lets higher-level logic know the buffer is no longer live on the device.
+
+## 10. Putting It Together
+
+A typical accelerated builtin call flows as follows:
+
+1. User code invokes a builtin that was generated by `runmatfunc` (e.g., `sum`).
+2. The builtin checks for provider support and invokes `NativeAutoOffload` to promote inputs when profitable.
+3. The fusion planner inspects the surrounding `AccelGraph` (if the builtin participates in a fusion opportunity) and, when successful, emits WGSL via `FusionGroupPlan::generate_wgsl` or `generate_reduction_wgsl`.
+4. `fusion_exec` submits the kernel to the provider using `fused_elementwise`/`fused_reduction`. Otherwise the builtin calls a direct provider hook (e.g., `reduce_sum_dim`).
+5. Results stay on the GPU unless the caller explicitly requests a gather or the provider lacks an implementation, in which case the dispatcher materialises a CPU tensor.
+
+This layered design lets RunMat balance MATLAB compatibility, performance portability, and incremental backend support while keeping the new builtin surface area focused on declarative specs rather than device plumbing.
