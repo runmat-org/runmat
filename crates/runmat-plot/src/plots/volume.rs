@@ -201,8 +201,9 @@ impl VolumePlot {
                 });
             }
 
-            println!(
-                "DEBUG: Generated {} vertices for volume bounding box",
+            log::trace!(
+                target: "runmat_plot",
+                "volume bbox vertices={}",
                 vertices.len()
             );
             self.vertices = Some(vertices);
@@ -214,7 +215,7 @@ impl VolumePlot {
     /// Generate indices for volume bounding box (12 triangles forming a cube)
     fn generate_indices(&mut self) -> &Vec<u32> {
         if self.dirty || self.indices.is_none() {
-            println!("DEBUG: Generating volume indices");
+            log::trace!(target: "runmat_plot", "volume generating indices");
 
             // Cube faces (2 triangles per face)
             let indices = vec![
@@ -227,7 +228,7 @@ impl VolumePlot {
                 3, 2, 6, 3, 6, 7,
             ];
 
-            println!("DEBUG: Generated {} indices for volume", indices.len());
+            log::trace!(target: "runmat_plot", "volume indices={}", indices.len());
             self.indices = Some(indices);
         }
         self.indices.as_ref().unwrap()
@@ -235,16 +236,18 @@ impl VolumePlot {
 
     /// Generate complete render data for the graphics pipeline
     pub fn render_data(&mut self) -> RenderData {
-        println!(
-            "DEBUG: VolumePlot::render_data() called for {} x {} x {} volume",
+        log::debug!(
+            target: "runmat_plot",
+            "volume render_data: dims=({},{},{})",
             self.dimensions.0, self.dimensions.1, self.dimensions.2
         );
 
         let vertices = self.generate_vertices().clone();
         let indices = self.generate_indices().clone();
 
-        println!(
-            "DEBUG: Volume render data: {} vertices, {} indices",
+        log::debug!(
+            target: "runmat_plot",
+            "volume render_data generated: vertices={}, indices={}",
             vertices.len(),
             indices.len()
         );
@@ -262,7 +265,7 @@ impl VolumePlot {
             instance_count: 1,
         };
 
-        println!("DEBUG: VolumePlot render_data completed successfully");
+        log::trace!(target: "runmat_plot", "volume render_data done");
 
         RenderData {
             pipeline_type: PipelineType::Triangles, // For volume bounding box
@@ -270,6 +273,7 @@ impl VolumePlot {
             indices: Some(indices),
             material,
             draw_calls: vec![draw_call],
+            image: None,
         }
     }
 

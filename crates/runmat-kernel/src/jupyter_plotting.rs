@@ -329,15 +329,24 @@ impl JupyterPlottingManager {
             "hist" => {
                 if !args.is_empty() {
                     let data = self.extract_numeric_array(&args[0])?;
-                    let bins = if args.len() > 1 {
-                        self.extract_number(&args[1])? as usize
-                    } else {
-                        20
-                    };
-
-                    let histogram = runmat_plot::plots::Histogram::new(data, bins)
-                        .map_err(KernelError::Execution)?;
-                    figure.add_histogram(histogram);
+                    let bins = if args.len() > 1 { self.extract_number(&args[1])? as usize } else { 20 };
+                    if data.is_empty() || bins == 0 { return Err(KernelError::Execution("Invalid histogram input".to_string())); }
+                    let min_val = data.iter().copied().fold(f64::INFINITY, f64::min);
+                    let max_val = data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                    let (min_val, max_val) = if (max_val - min_val).abs() < f64::EPSILON { (min_val - 0.5, max_val + 0.5) } else { (min_val, max_val) };
+                    let bin_width = (max_val - min_val) / bins as f64;
+                    let edges: Vec<f64> = (0..=bins).map(|i| min_val + i as f64 * bin_width).collect();
+                    let mut counts = vec![0u64; bins];
+                    for &v in &data {
+                        let mut idx = bins;
+                        for i in 0..bins { if v >= edges[i] && v < edges[i+1] { idx = i; break; } }
+                        if idx == bins && (v - edges[bins]).abs() < f64::EPSILON { idx = bins - 1; }
+                        if idx < bins { counts[idx] += 1; }
+                    }
+                    let labels: Vec<String> = edges.windows(2).map(|w| format!("[{:.3},{:.3})", w[0], w[1])).collect();
+                    let values: Vec<f64> = counts.into_iter().map(|c| c as f64).collect();
+                    let bar_chart = runmat_plot::plots::BarChart::new(labels, values).map_err(KernelError::Execution)?;
+                    figure.add_bar_chart(bar_chart);
                 }
             }
             _ => {

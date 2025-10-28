@@ -18,6 +18,14 @@ pub struct SurfacePlot {
     pub shading_mode: ShadingMode,
     pub wireframe: bool,
     pub alpha: f32,
+    /// If true, render Z at 0 (flat), but color-map using Z values
+    pub flatten_z: bool,
+
+    /// Optional color limits override for mapping Z -> color (caxis)
+    pub color_limits: Option<(f64, f64)>,
+
+    /// Optional per-vertex color grid (for RGB images); if set, overrides colormap mapping
+    pub color_grid: Option<Vec<Vec<Vec4>>>, // [x_index][y_index] -> RGBA
 
     /// Lighting and material
     pub lighting_enabled: bool,
@@ -124,6 +132,9 @@ impl SurfacePlot {
             shading_mode: ShadingMode::default(),
             wireframe: false,
             alpha: 1.0,
+            flatten_z: false,
+            color_limits: None,
+            color_grid: None,
             lighting_enabled: true,
             ambient_strength: 0.2,
             diffuse_strength: 0.8,
@@ -193,6 +204,33 @@ impl SurfacePlot {
     /// Set transparency
     pub fn with_alpha(mut self, alpha: f32) -> Self {
         self.alpha = alpha.clamp(0.0, 1.0);
+        self.dirty = true;
+        self
+    }
+
+    /// Render surface flat in Z while mapping colors from Z values (for imagesc/imshow)
+    pub fn with_flatten_z(mut self, enabled: bool) -> Self {
+        self.flatten_z = enabled;
+        self.dirty = true;
+        self
+    }
+
+    /// Override color mapping limits (caxis)
+    pub fn with_color_limits(mut self, limits: Option<(f64, f64)>) -> Self {
+        self.color_limits = limits;
+        self.dirty = true;
+        self
+    }
+
+    /// Mutably set color mapping limits (caxis)
+    pub fn set_color_limits(&mut self, limits: Option<(f64, f64)>) {
+        self.color_limits = limits;
+        self.dirty = true;
+    }
+
+    /// Provide explicit per-vertex colors (RGB[A])
+    pub fn with_color_grid(mut self, grid: Vec<Vec<Vec4>>) -> Self {
+        self.color_grid = Some(grid);
         self.dirty = true;
         self
     }
@@ -294,44 +332,52 @@ impl SurfacePlot {
     /// Generate vertices for surface mesh
     fn generate_vertices(&mut self) -> &Vec<Vertex> {
         if self.dirty || self.vertices.is_none() {
-            println!(
-                "DEBUG: Generating surface vertices for {} x {} grid",
+            log::trace!(
+                target: "runmat_plot",
+                "surface gen vertices {} x {}",
                 self.x_data.len(),
                 self.y_data.len()
             );
 
             let mut vertices = Vec::new();
 
-            // Find Z value range for color mapping
-            let mut min_z = f64::INFINITY;
-            let mut max_z = f64::NEG_INFINITY;
-            for row in &self.z_data {
-                for &z in row {
-                    if z.is_finite() {
-                        min_z = min_z.min(z);
-                        max_z = max_z.max(z);
+            // Determine color mapping range
+            let (min_z, max_z) = if let Some((lo, hi)) = self.color_limits {
+                (lo, hi)
+            } else {
+                let mut min_z = f64::INFINITY;
+                let mut max_z = f64::NEG_INFINITY;
+                for row in &self.z_data {
+                    for &z in row {
+                        if z.is_finite() {
+                            min_z = min_z.min(z);
+                            max_z = max_z.max(z);
+                        }
                     }
                 }
-            }
-            let z_range = max_z - min_z;
+                (min_z, max_z)
+            };
+            let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
 
             // Generate vertices for each grid point
             for (i, &x) in self.x_data.iter().enumerate() {
                 for (j, &y) in self.y_data.iter().enumerate() {
                     let z = self.z_data[i][j];
-                    let position = Vec3::new(x as f32, y as f32, z as f32);
+                    let z_pos = if self.flatten_z { 0.0 } else { z as f32 };
+                    let position = Vec3::new(x as f32, y as f32, z_pos);
 
                     // Simple normal calculation (can be improved with proper gradients)
                     let normal = Vec3::new(0.0, 0.0, 1.0); // Placeholder
 
-                    // Color based on Z value using colormap
-                    let t = if z_range > 0.0 {
-                        ((z - min_z) / z_range) as f32
+                    // Determine color: explicit grid (RGB) or colormap from Z
+                    let color = if let Some(grid) = &self.color_grid {
+                        let c = grid[i][j];
+                        Vec4::new(c.x, c.y, c.z, c.w)
                     } else {
-                        0.5
+                        let t = ((z - min_z) / z_range) as f32;
+                        let color_rgb = self.colormap.map_value(t.clamp(0.0, 1.0));
+                        Vec4::new(color_rgb.x, color_rgb.y, color_rgb.z, self.alpha)
                     };
-                    let color_rgb = self.colormap.map_value(t);
-                    let color = Vec4::new(color_rgb.x, color_rgb.y, color_rgb.z, self.alpha);
 
                     vertices.push(Vertex {
                         position: position.to_array(),
@@ -345,7 +391,7 @@ impl SurfacePlot {
                 }
             }
 
-            println!("DEBUG: Generated {} vertices for surface", vertices.len());
+            log::trace!(target: "runmat_plot", "surface vertices={}", vertices.len());
             self.vertices = Some(vertices);
         }
         self.vertices.as_ref().unwrap()
@@ -354,7 +400,7 @@ impl SurfacePlot {
     /// Generate indices for surface triangulation
     fn generate_indices(&mut self) -> &Vec<u32> {
         if self.dirty || self.indices.is_none() {
-            println!("DEBUG: Generating surface indices");
+            log::trace!(target: "runmat_plot", "surface generating indices");
 
             let mut indices = Vec::new();
             let x_res = self.x_data.len();
@@ -379,7 +425,7 @@ impl SurfacePlot {
                 }
             }
 
-            println!("DEBUG: Generated {} indices for surface", indices.len());
+            log::trace!(target: "runmat_plot", "surface indices={}", indices.len());
             self.indices = Some(indices);
             self.dirty = false;
         }
@@ -388,8 +434,9 @@ impl SurfacePlot {
 
     /// Generate complete render data for the graphics pipeline
     pub fn render_data(&mut self) -> RenderData {
-        println!(
-            "DEBUG: SurfacePlot::render_data() called for {} x {} surface",
+        log::debug!(
+            target: "runmat_plot",
+            "surface render_data start: {} x {}",
             self.x_data.len(),
             self.y_data.len()
         );
@@ -397,8 +444,9 @@ impl SurfacePlot {
         let vertices = self.generate_vertices().clone();
         let indices = self.generate_indices().clone();
 
-        println!(
-            "DEBUG: Surface render data: {} vertices, {} indices",
+        log::debug!(
+            target: "runmat_plot",
+            "surface render_data generated: vertices={}, indices={}",
             vertices.len(),
             indices.len()
         );
@@ -416,7 +464,7 @@ impl SurfacePlot {
             instance_count: 1,
         };
 
-        println!("DEBUG: SurfacePlot render_data completed successfully");
+        log::trace!(target: "runmat_plot", "surface render_data done");
 
         RenderData {
             pipeline_type: if self.wireframe {
@@ -428,6 +476,7 @@ impl SurfacePlot {
             indices: Some(indices),
             material,
             draw_calls: vec![draw_call],
+            image: None,
         }
     }
 }

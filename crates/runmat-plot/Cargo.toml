@@ -56,6 +56,8 @@ serde_yaml = "0.9"
 
 # Image processing for export
 image = { version = "0.24", features = ["png", "jpeg"] }
+base64 = "0.22"
+rfd = { version = "0.14", optional = true }
 
 
 
@@ -67,7 +69,7 @@ runmat-macros = { workspace = true }
 [features]
 default = ["static", "gui"]
 static = []  # Static image export (always enabled)
-gui = ["winit", "egui", "egui-wgpu", "egui-winit", "eframe"]  # Interactive GUI
+gui = ["winit", "egui", "egui-wgpu", "egui-winit", "eframe", "rfd"]  # Interactive GUI
 jupyter = ["eframe"]  # Jupyter widget support
 web = []  # WebGL backend for web/jupyter
 

@@ -95,13 +95,13 @@ impl WebExporter {
         let html_content = self.render_to_html()?;
         std::fs::write(path, html_content)
             .map_err(|e| format!("Failed to write HTML file: {e}"))?;
-        println!("DEBUG: HTML widget export completed successfully");
+        log::debug!(target: "runmat_plot", "html widget export completed");
         Ok(())
     }
 
     /// Render figure to HTML widget string (placeholder implementation)
     pub fn render_to_html(&mut self) -> Result<String, String> {
-        println!("DEBUG: Starting HTML widget export");
+        log::debug!(target: "runmat_plot", "html widget export start");
 
         let widget_id = self.generate_widget_id();
 
@@ -147,10 +147,7 @@ impl WebExporter {
             widget_id
         );
 
-        println!(
-            "DEBUG: HTML widget render completed, {} characters generated",
-            html.len()
-        );
+        log::debug!(target: "runmat_plot", "html widget size chars={}", html.len());
         Ok(html)
     }
 

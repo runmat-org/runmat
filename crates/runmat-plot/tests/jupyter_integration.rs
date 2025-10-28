@@ -1,10 +1,11 @@
+#![cfg(feature = "jupyter")]
 //! Comprehensive Jupyter integration tests for RunMat plotting
 //!
 //! Tests the complete Jupyter plotting pipeline including export systems,
 //! widget generation, and protocol integration.
 
 use runmat_plot::jupyter::{ExportSettings, JupyterBackend, OutputFormat, Quality};
-use runmat_plot::plots::{BarChart, Figure, Histogram, LinePlot, ScatterPlot};
+use runmat_plot::plots::{BarChart, Figure, LinePlot, ScatterPlot};
 use tempfile::TempDir;
 
 #[test]
@@ -206,9 +207,11 @@ fn test_multiple_plot_types_in_figure() {
     .unwrap();
     figure.add_bar_chart(bar_chart);
 
-    // Add histogram
-    let histogram = Histogram::new(vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], 5).unwrap();
-    figure.add_histogram(histogram);
+    // Add histogram-like bar chart
+    let labels = vec!["[1.0,2.0)".to_string(), "[2.0,3.0)".to_string(), "[3.0,4.0)".to_string(), "[4.0,5.0)".to_string(), "[5.0,6.0)".to_string()];
+    let values = vec![1.0, 2.0, 3.0, 1.0, 0.0];
+    let histogram_bars = BarChart::new(labels, values).unwrap();
+    figure.add_bar_chart(histogram_bars);
 
     let result = backend.display_figure(&mut figure);
     assert!(result.is_ok());

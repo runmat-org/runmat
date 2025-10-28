@@ -5,6 +5,12 @@
 use crate::core::{BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
 use glam::{Vec3, Vec4};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Orientation {
+    Vertical,
+    Horizontal,
+}
+
 /// High-performance GPU-accelerated bar chart
 #[derive(Debug, Clone)]
 pub struct BarChart {
@@ -17,6 +23,18 @@ pub struct BarChart {
     pub bar_width: f32,
     pub outline_color: Option<Vec4>,
     pub outline_width: f32,
+
+    /// Orientation (vertical = default bar, horizontal = barh)
+    pub orientation: Orientation,
+
+    /// Grouped bar configuration: index within group and total group count
+    /// Example: for 3-series grouped bars, group_count=3 and each series has group_index 0,1,2
+    pub group_index: usize,
+    pub group_count: usize,
+
+    /// Stacked bar offsets per category (bottom/base for each bar)
+    /// When provided, bars are drawn starting at offset[i] and extending by values[i]
+    pub stack_offsets: Option<Vec<f64>>,
 
     /// Metadata
     pub label: Option<String>,
@@ -51,6 +69,10 @@ impl BarChart {
             bar_width: 0.8,                       // 80% of available space
             outline_color: None,
             outline_width: 1.0,
+            orientation: Orientation::Vertical,
+            group_index: 0,
+            group_count: 1,
+            stack_offsets: None,
             label: None,
             visible: true,
             vertices: None,
@@ -73,6 +95,30 @@ impl BarChart {
         self.outline_color = Some(outline_color);
         self.outline_width = outline_width.max(0.1);
         self.dirty = true;
+        self
+    }
+
+    /// Set orientation (vertical/horizontal)
+    pub fn with_orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
+        self.dirty = true;
+        self
+    }
+
+    /// Configure grouped bars (index within group and total group count)
+    pub fn with_group(mut self, group_index: usize, group_count: usize) -> Self {
+        self.group_index = group_index.min(group_count.saturating_sub(1));
+        self.group_count = group_count.max(1);
+        self.dirty = true;
+        self
+    }
+
+    /// Configure stacked bars with per-category offsets (base values)
+    pub fn with_stack_offsets(mut self, offsets: Vec<f64>) -> Self {
+        if offsets.len() == self.values.len() {
+            self.stack_offsets = Some(offsets);
+            self.dirty = true;
+        }
         self
     }
 
@@ -114,6 +160,25 @@ impl BarChart {
         self.dirty = true;
     }
 
+    /// Set the outline color (enables outline if not present)
+    pub fn set_outline_color(&mut self, color: Vec4) {
+        if self.outline_color.is_none() {
+            self.outline_width = self.outline_width.max(1.0);
+        }
+        self.outline_color = Some(color);
+        self.dirty = true;
+    }
+
+    /// Set the outline width (enables outline if not present)
+    pub fn set_outline_width(&mut self, width: f32) {
+        self.outline_width = width.max(0.1);
+        if self.outline_color.is_none() {
+            // Default to black if no color set
+            self.outline_color = Some(Vec4::new(0.0, 0.0, 0.0, 1.0));
+        }
+        self.dirty = true;
+    }
+
     /// Show or hide the chart
     pub fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
@@ -148,41 +213,62 @@ impl BarChart {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
 
-        let _bar_spacing = 1.0; // Space between bar centers
-        let half_width = self.bar_width * 0.5;
+        let group_count = self.group_count.max(1) as f32;
+        let per_group_width = (self.bar_width / group_count).max(0.01);
+        let group_offset_start = -self.bar_width * 0.5;
+        let local_offset = group_offset_start + per_group_width * (self.group_index as f32) + per_group_width * 0.5;
 
-        for (i, &value) in self.values.iter().enumerate() {
-            let x_center = i as f32; // Bar position along X axis
-            let left = x_center - half_width;
-            let right = x_center + half_width;
-            let bottom = 0.0; // Baseline
-            let top = value as f32;
+        match self.orientation {
+            Orientation::Vertical => {
+                for (i, &value) in self.values.iter().enumerate() {
+                    if !value.is_finite() { continue; }
+                    let x_center = (i as f32) + 1.0;
+                    let center = x_center + local_offset;
+                    let half = per_group_width * 0.5;
+                    let left = center - half;
+                    let right = center + half;
+                    let base = self.stack_offsets.as_ref().map(|v| v[i] as f32).unwrap_or(0.0);
+                    let bottom = base;
+                    let top = base + value as f32;
 
-            // Create rectangle vertices for this bar (4 vertices per bar)
-            let vertex_offset = vertices.len() as u32;
+                    let vertex_offset = vertices.len() as u32;
+                    vertices.push(Vertex::new(Vec3::new(left, bottom, 0.0), self.color));
+                    vertices.push(Vertex::new(Vec3::new(right, bottom, 0.0), self.color));
+                    vertices.push(Vertex::new(Vec3::new(right, top, 0.0), self.color));
+                    vertices.push(Vertex::new(Vec3::new(left, top, 0.0), self.color));
+                    indices.push(vertex_offset);
+                    indices.push(vertex_offset + 1);
+                    indices.push(vertex_offset + 2);
+                    indices.push(vertex_offset);
+                    indices.push(vertex_offset + 2);
+                    indices.push(vertex_offset + 3);
+                }
+            }
+            Orientation::Horizontal => {
+                for (i, &value) in self.values.iter().enumerate() {
+                    if !value.is_finite() { continue; }
+                    let y_center = (i as f32) + 1.0;
+                    let center = y_center + local_offset;
+                    let half = per_group_width * 0.5;
+                    let bottom = center - half;
+                    let top = center + half;
+                    let base = self.stack_offsets.as_ref().map(|v| v[i] as f32).unwrap_or(0.0);
+                    let left = base;
+                    let right = base + value as f32;
 
-            // Bottom left
-            vertices.push(Vertex::new(Vec3::new(left, bottom, 0.0), self.color));
-
-            // Bottom right
-            vertices.push(Vertex::new(Vec3::new(right, bottom, 0.0), self.color));
-
-            // Top right
-            vertices.push(Vertex::new(Vec3::new(right, top, 0.0), self.color));
-
-            // Top left
-            vertices.push(Vertex::new(Vec3::new(left, top, 0.0), self.color));
-
-            // Create indices for two triangles per bar (6 indices per bar)
-            // Triangle 1: bottom-left, bottom-right, top-right
-            indices.push(vertex_offset);
-            indices.push(vertex_offset + 1);
-            indices.push(vertex_offset + 2);
-
-            // Triangle 2: bottom-left, top-right, top-left
-            indices.push(vertex_offset);
-            indices.push(vertex_offset + 2);
-            indices.push(vertex_offset + 3);
+                    let vertex_offset = vertices.len() as u32;
+                    vertices.push(Vertex::new(Vec3::new(left, bottom, 0.0), self.color));
+                    vertices.push(Vertex::new(Vec3::new(right, bottom, 0.0), self.color));
+                    vertices.push(Vertex::new(Vec3::new(right, top, 0.0), self.color));
+                    vertices.push(Vertex::new(Vec3::new(left, top, 0.0), self.color));
+                    indices.push(vertex_offset);
+                    indices.push(vertex_offset + 1);
+                    indices.push(vertex_offset + 2);
+                    indices.push(vertex_offset);
+                    indices.push(vertex_offset + 2);
+                    indices.push(vertex_offset + 3);
+                }
+            }
         }
 
         (vertices, indices)
@@ -197,16 +283,54 @@ impl BarChart {
                 return self.bounds.unwrap();
             }
 
-            let min_x = -self.bar_width * 0.5;
-            let max_x = (num_bars - 1) as f32 + self.bar_width * 0.5;
-
-            let min_y = self.values.iter().fold(0.0f64, |acc, &val| acc.min(val)) as f32;
-            let max_y = self.values.iter().fold(0.0f64, |acc, &val| acc.max(val)) as f32;
-
-            self.bounds = Some(BoundingBox::new(
-                Vec3::new(min_x, min_y, 0.0),
-                Vec3::new(max_x, max_y, 0.0),
-            ));
+            match self.orientation {
+                Orientation::Vertical => {
+                    // X spans category centers at 1..n with half-bar padding
+                    let min_x = 1.0 - self.bar_width * 0.5;
+                    let max_x = num_bars as f32 + self.bar_width * 0.5;
+                    // Y spans min/max of values and optional stack offsets
+                    let (mut min_y, mut max_y) = (0.0f32, 0.0f32);
+                    if let Some(offsets) = &self.stack_offsets {
+                        for i in 0..num_bars {
+                            let base = offsets[i] as f32;
+                            let v = self.values[i];
+                            if !v.is_finite() { continue; }
+                            let top = base + v as f32;
+                            min_y = min_y.min(base.min(top));
+                            max_y = max_y.max(base.max(top));
+                        }
+                    } else {
+                        for &v in &self.values { if !v.is_finite() { continue; } min_y = min_y.min(v as f32); max_y = max_y.max(v as f32); }
+                    }
+                    self.bounds = Some(BoundingBox::new(
+                        Vec3::new(min_x, min_y, 0.0),
+                        Vec3::new(max_x, max_y, 0.0),
+                    ));
+                }
+                Orientation::Horizontal => {
+                    // Y spans category centers at 1..n with half-bar padding
+                    let min_y = 1.0 - self.bar_width * 0.5;
+                    let max_y = num_bars as f32 + self.bar_width * 0.5;
+                    // X spans min/max of values and optional stack offsets
+                    let (mut min_x, mut max_x) = (0.0f32, 0.0f32);
+                    if let Some(offsets) = &self.stack_offsets {
+                        for i in 0..num_bars {
+                            let base = offsets[i] as f32;
+                            let v = self.values[i];
+                            if !v.is_finite() { continue; }
+                            let right = base + v as f32;
+                            min_x = min_x.min(base.min(right));
+                            max_x = max_x.max(base.max(right));
+                        }
+                    } else {
+                        for &v in &self.values { if !v.is_finite() { continue; } min_x = min_x.min(v as f32); max_x = max_x.max(v as f32); }
+                    }
+                    self.bounds = Some(BoundingBox::new(
+                        Vec3::new(min_x, min_y, 0.0),
+                        Vec3::new(max_x, max_y, 0.0),
+                    ));
+                }
+            }
         }
         self.bounds.unwrap()
     }
@@ -236,6 +360,7 @@ impl BarChart {
             indices: Some(indices),
             material,
             draw_calls: vec![draw_call],
+            image: None,
         }
     }
 
@@ -377,9 +502,9 @@ mod tests {
         let mut chart = BarChart::new(labels, values).unwrap();
         let bounds = chart.bounds();
 
-        // X bounds should span all bars
-        assert!(bounds.min.x < 0.0);
-        assert!(bounds.max.x > 2.0);
+        // X bounds should span all bars (centers are 1-based)
+        assert!(bounds.min.x < 1.0);
+        assert!(bounds.max.x > 3.0);
 
         // Y bounds should include negative and positive values
         assert_eq!(bounds.min.y, -2.0);

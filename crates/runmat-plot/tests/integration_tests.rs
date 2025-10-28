@@ -3,6 +3,7 @@
 //! Tests the complete plotting system including 2D plots, 3D plots,
 //! Jupyter integration, and performance characteristics.
 
+#[cfg(feature = "jupyter")]
 use runmat_plot::jupyter::{JupyterBackend, OutputFormat};
 use runmat_plot::plots::*;
 
@@ -103,64 +104,7 @@ fn test_3d_surface_plotting() {
     assert!(bounds.max.z >= 3.0 && bounds.max.z <= 5.0);
 }
 
-#[test]
-fn test_3d_point_cloud_visualization() {
-    // Create test point cloud data (spiral)
-    let num_points = 100;
-    let positions: Vec<glam::Vec3> = (0..num_points)
-        .map(|i| {
-            let t = i as f32 * 0.3;
-            let radius = 1.0 + t * 0.1;
-            glam::Vec3::new(radius * t.cos(), radius * t.sin(), t * 0.5)
-        })
-        .collect();
-
-    // Create values for color mapping
-    let values: Vec<f64> = (0..num_points)
-        .map(|i| (i as f64 / num_points as f64) * 10.0)
-        .collect();
-
-    // Create point cloud
-    let point_cloud = PointCloudPlot::new(positions.clone())
-        .with_values(values.clone())
-        .unwrap()
-        .with_colormap(ColorMap::Plasma)
-        .with_point_style(PointStyle::Sphere)
-        .with_size_mode(SizeMode::Proportional)
-        .with_default_size(5.0)
-        .with_label("Spiral Point Cloud");
-
-    // Verify properties
-    assert_eq!(point_cloud.len(), 100);
-    assert_eq!(point_cloud.values, Some(values));
-    assert_eq!(point_cloud.colormap, ColorMap::Plasma);
-    assert_eq!(point_cloud.point_style, PointStyle::Sphere);
-    assert_eq!(point_cloud.size_mode, SizeMode::Proportional);
-    assert_eq!(point_cloud.default_size, 5.0);
-    assert_eq!(point_cloud.label, Some("Spiral Point Cloud".to_string()));
-
-    // Test statistics
-    let stats = point_cloud.statistics();
-    assert_eq!(stats.point_count, 100);
-    assert!(stats.has_values);
-    assert!(!stats.has_colors);
-    assert!(!stats.has_sizes);
-    assert!(stats.memory_usage > 0);
-
-    // Test vertex generation
-    let mut point_cloud_mut = point_cloud;
-    let vertices = point_cloud_mut.generate_vertices();
-    assert_eq!(vertices.len(), 100);
-
-    // Verify first vertex
-    assert_eq!(vertices[0].position, positions[0].to_array());
-
-    // Test bounds
-    let bounds = point_cloud_mut.bounds();
-    assert!(bounds.max.x > bounds.min.x);
-    assert!(bounds.max.y > bounds.min.y);
-    assert!(bounds.max.z > bounds.min.z);
-}
+// Point cloud tests removed with point_cloud module deprecation
 
 #[test]
 fn test_colormap_functionality() {
@@ -210,7 +154,6 @@ fn test_colormap_functionality() {
 
 #[test]
 fn test_matlab_compatibility_functions() {
-    use runmat_plot::plots::point_cloud::matlab_compat as pc_compat;
     use runmat_plot::plots::surface::matlab_compat as surf_compat;
 
     // Test MATLAB-style surface plot
@@ -224,15 +167,10 @@ fn test_matlab_compatibility_functions() {
     let mesh = surf_compat::mesh(surf_x, surf_y, surf_z).unwrap();
     assert!(mesh.wireframe);
 
-    // Test MATLAB-style 3D scatter
-    let x3d = vec![0.0, 1.0, 2.0];
-    let y3d = vec![0.0, 1.0, 2.0];
-    let z3d = vec![0.0, 1.0, 2.0];
-
-    let scatter3d = pc_compat::scatter3(x3d, y3d, z3d).unwrap();
-    assert_eq!(scatter3d.len(), 3);
+    // 3D scatter not available in plots module; runtime handles future scatter3
 }
 
+#[cfg(feature = "jupyter")]
 #[test]
 fn test_jupyter_integration() {
     // Test Jupyter backend creation
@@ -333,12 +271,7 @@ fn test_error_handling() {
 
     assert!(SurfacePlot::new(surf_x, surf_y, surf_z).is_err());
 
-    // Test invalid point cloud operations
-    let positions = vec![glam::Vec3::new(0.0, 0.0, 0.0)];
-    let wrong_values = vec![1.0, 2.0]; // Length mismatch
-
-    let point_cloud_result = PointCloudPlot::new(positions).with_values(wrong_values);
-    assert!(point_cloud_result.is_err());
+    // Point cloud module removed; skipping invalid point cloud tests
 }
 
 #[test]

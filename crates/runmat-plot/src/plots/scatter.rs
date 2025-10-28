@@ -5,6 +5,7 @@
 use crate::core::{
     vertex_utils, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex,
 };
+use crate::plots::surface::ColorMap;
 use glam::{Vec3, Vec4};
 
 /// High-performance GPU-accelerated scatter plot
@@ -16,8 +17,16 @@ pub struct ScatterPlot {
 
     /// Visual styling
     pub color: Vec4,
+    pub edge_color: Vec4,
+    pub edge_thickness: f32,
     pub marker_size: f32,
     pub marker_style: MarkerStyle,
+    pub per_point_sizes: Option<Vec<f32>>,      // pixel diameters per point
+    pub per_point_colors: Option<Vec<Vec4>>,    // per-point RGBA
+    pub color_values: Option<Vec<f64>>,         // scalar values mapped by colormap
+    pub color_limits: Option<(f64, f64)>,
+    pub colormap: ColorMap,
+    pub filled: bool,
 
     /// Metadata
     pub label: Option<String>,
@@ -66,9 +75,17 @@ impl ScatterPlot {
         Ok(Self {
             x_data,
             y_data,
-            color: Vec4::new(1.0, 0.0, 0.0, 1.0), // Default red
-            marker_size: 3.0,
+            color: Vec4::new(1.0, 0.2, 0.2, 1.0), // Brighter red
+            edge_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            edge_thickness: 1.0,
+            marker_size: 12.0,
             marker_style: MarkerStyle::default(),
+            per_point_sizes: None,
+            per_point_colors: None,
+            color_values: None,
+            color_limits: None,
+            colormap: ColorMap::Parula,
+            filled: false,
             label: None,
             visible: true,
             vertices: None,
@@ -91,6 +108,18 @@ impl ScatterPlot {
         self.label = Some(label.into());
         self
     }
+
+    /// Set marker face color
+    pub fn set_face_color(&mut self, color: Vec4) { self.color = color; self.dirty = true; }
+    /// Set marker edge color
+    pub fn set_edge_color(&mut self, color: Vec4) { self.edge_color = color; self.dirty = true; }
+    /// Set marker edge thickness (pixels)
+    pub fn set_edge_thickness(&mut self, px: f32) { self.edge_thickness = px.max(0.0); self.dirty = true; }
+    pub fn set_sizes(&mut self, sizes: Vec<f32>) { self.per_point_sizes = Some(sizes); self.dirty = true; }
+    pub fn set_colors(&mut self, colors: Vec<Vec4>) { self.per_point_colors = Some(colors); self.dirty = true; }
+    pub fn set_color_values(&mut self, values: Vec<f64>, limits: Option<(f64, f64)>) { self.color_values = Some(values); self.color_limits = limits; self.dirty = true; }
+    pub fn with_colormap(mut self, cmap: ColorMap) -> Self { self.colormap = cmap; self }
+    pub fn set_filled(&mut self, filled: bool) { self.filled = filled; self.dirty = true; }
 
     /// Update the data points
     pub fn update_data(&mut self, x_data: Vec<f64>, y_data: Vec<f64>) -> Result<(), String> {
@@ -148,11 +177,35 @@ impl ScatterPlot {
     /// Generate vertices for GPU rendering
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {
         if self.dirty || self.vertices.is_none() {
-            self.vertices = Some(vertex_utils::create_scatter_plot(
-                &self.x_data,
-                &self.y_data,
-                self.color,
-            ));
+            let base_color = self.color;
+            if self.per_point_colors.is_some() || self.color_values.is_some() { /* vertex color takes precedence; shader blends by face alpha */ }
+            let mut verts = vertex_utils::create_scatter_plot(&self.x_data, &self.y_data, base_color);
+            // per-point colors
+            if let Some(ref colors) = self.per_point_colors {
+                let m = colors.len().min(verts.len());
+                for i in 0..m { verts[i].color = colors[i].to_array(); }
+            } else if let Some(ref vals) = self.color_values {
+                let n = verts.len();
+                let (mut cmin, mut cmax) = if let Some(lims) = self.color_limits { lims } else {
+                    let mut lo = f64::INFINITY; let mut hi = f64::NEG_INFINITY;
+                    for &v in vals { if v.is_finite() { if v < lo { lo = v; } if v > hi { hi = v; } } }
+                    if !lo.is_finite() || !hi.is_finite() || hi <= lo { (0.0, 1.0) } else { (lo, hi) }
+                };
+                if !(cmin.is_finite() && cmax.is_finite()) || cmax <= cmin { cmin = 0.0; cmax = 1.0; }
+                let denom = (cmax - cmin).max(std::f64::EPSILON);
+                for i in 0..n {
+                    let t = ((vals[i] - cmin) / denom) as f32;
+                    let rgb = self.colormap.map_value(t);
+                    verts[i].color = [rgb.x, rgb.y, rgb.z, 1.0];
+                }
+            }
+            // Store marker size in normal.z for direct point expansion
+            if let Some(ref sizes) = self.per_point_sizes {
+                for i in 0..verts.len() { let s = sizes.get(i).copied().unwrap_or(self.marker_size); verts[i].normal[2] = s.max(1.0); }
+            } else {
+                for v in &mut verts { v.normal[2] = self.marker_size.max(1.0); }
+            }
+            self.vertices = Some(verts);
             self.dirty = false;
         }
         self.vertices.as_ref().unwrap()
@@ -177,9 +230,30 @@ impl ScatterPlot {
         let vertices = self.generate_vertices().clone();
         let vertex_count = vertices.len();
 
-        let material = Material {
-            albedo: self.color,
-            ..Default::default()
+        let mut material = Material { albedo: self.color, ..Default::default() };
+        // If vertex colors vary across points, prefer per-vertex colors (alpha=0)
+        let is_multi_color = {
+            if vertices.is_empty() { false } else {
+                let first = vertices[0].color;
+                vertices.iter().any(|v| v.color != first)
+            }
+        };
+        if is_multi_color || self.per_point_colors.is_some() || self.color_values.is_some() {
+            material.albedo.w = 0.0;
+        } else if self.filled {
+            material.albedo.w = 1.0;
+        }
+        material.emissive = self.edge_color; // stash edge color
+        material.roughness = self.edge_thickness; // stash thickness in roughness
+        material.metallic = match self.marker_style {
+            MarkerStyle::Circle => 0.0,
+            MarkerStyle::Square => 1.0,
+            MarkerStyle::Triangle => 2.0,
+            MarkerStyle::Diamond => 3.0,
+            MarkerStyle::Plus => 4.0,
+            MarkerStyle::Cross => 5.0,
+            MarkerStyle::Star => 6.0,
+            MarkerStyle::Hexagon => 7.0,
         };
 
         let draw_call = DrawCall {
@@ -196,6 +270,7 @@ impl ScatterPlot {
             indices: None,
             material,
             draw_calls: vec![draw_call],
+            image: None,
         }
     }
 

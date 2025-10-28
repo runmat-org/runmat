@@ -20,6 +20,9 @@ pub struct SceneNode {
     pub cast_shadows: bool,
     pub receive_shadows: bool,
 
+    /// Axes index this node belongs to (for subplots). Row-major index in [0, rows*cols).
+    pub axes_index: usize,
+
     // Hierarchy
     pub parent: Option<NodeId>,
     pub children: Vec<NodeId>,
@@ -43,6 +46,19 @@ pub struct RenderData {
     pub indices: Option<Vec<u32>>,
     pub material: Material,
     pub draw_calls: Vec<DrawCall>,
+    /// Optional image payload for textured rendering
+    pub image: Option<ImageData>,
+}
+
+/// CPU-side image payload for textured rendering
+#[derive(Debug, Clone)]
+pub enum ImageData {
+    /// 8-bit RGBA image (row-major, top-to-bottom rows)
+    Rgba8 {
+        width: u32,
+        height: u32,
+        data: Vec<u8>,
+    },
 }
 
 /// Material properties for rendering
@@ -593,6 +609,7 @@ mod tests {
             visible: true,
             cast_shadows: true,
             receive_shadows: true,
+            axes_index: 0,
             parent: None,
             children: Vec::new(),
             render_data: None,
@@ -610,6 +627,7 @@ mod tests {
             visible: true,
             cast_shadows: true,
             receive_shadows: true,
+            axes_index: 0,
             parent: Some(parent_id),
             children: Vec::new(),
             render_data: None,

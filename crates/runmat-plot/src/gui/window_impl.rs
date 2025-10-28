@@ -145,6 +145,9 @@ impl<'window> PlotWindow<'window> {
             config,
             mouse_position: Vec2::ZERO,
             is_mouse_over_plot: true,
+            needs_initial_redraw: true,
+            pixels_per_point: 1.0,
+            mouse_left_down: false,
         })
     }
 
@@ -173,6 +176,7 @@ impl<'window> PlotWindow<'window> {
                 index_count: None,
                 instance_count: 1,
             }],
+            image: None,
         };
 
         // Set material color
@@ -185,6 +189,7 @@ impl<'window> PlotWindow<'window> {
             visible: true,
             cast_shadows: false,
             receive_shadows: false,
+            axes_index: 0,
             parent: None,
             children: Vec::new(),
             render_data: Some(render_data),
@@ -225,17 +230,25 @@ impl<'window> PlotWindow<'window> {
         event_loop.run(move |event, target| {
             target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
-            // Handle egui events
+            // Track current modifiers for Command/Ctrl shortcuts
+            static mut MODIFIERS: Option<winit::keyboard::ModifiersState> = None;
+
+            // Handle egui events and record consumption
             let mut repaint = false;
+            let mut egui_consumed = false;
             if let Event::WindowEvent { ref event, .. } = event {
                 let response = self.egui_state.on_window_event(&window, event);
                 repaint = response.repaint;
+                egui_consumed = response.consumed;
             }
             if repaint {
                 window.request_redraw();
             }
 
             match event {
+                winit::event::Event::WindowEvent { window_id, event: winit::event::WindowEvent::ModifiersChanged(mods) } if window_id == window.id() => {
+                    unsafe { MODIFIERS = Some(mods.state()); }
+                }
                 winit::event::Event::WindowEvent {
                     window_id,
                     event: winit::event::WindowEvent::CloseRequested,
@@ -271,30 +284,83 @@ impl<'window> PlotWindow<'window> {
                     }
                 }
 
-                winit::event::Event::WindowEvent {
-                    window_id,
-                    event: winit::event::WindowEvent::MouseInput { button, state, .. },
-                } if window_id == window.id() => {
-                    self.handle_mouse_input(button, state);
+                // Exit on Escape key for quick UX
+                winit::event::Event::WindowEvent { window_id, event }
+                    if window_id == window.id() =>
+                {
+                    if let winit::event::WindowEvent::KeyboardInput {
+                        event: key_event, ..
+                    } = event
+                    {
+                        if key_event.state == winit::event::ElementState::Pressed {
+                            if let winit::keyboard::PhysicalKey::Code(
+                                winit::keyboard::KeyCode::Escape,
+                            ) = key_event.physical_key
+                            {
+                                target.exit();
+                            }
+                            // macOS-like Command+Q (and Ctrl+Q on other platforms) to quit
+                            if let Some(text) = key_event.text {
+                                if text == "\u{11}" { /* ignore control chars */ }
+                            }
+                            // Handle Q with Command or Control modifier
+                            if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyQ) = key_event.physical_key {
+                                let mods = unsafe { MODIFIERS.unwrap_or_else(winit::keyboard::ModifiersState::empty) };
+                                if mods.super_key() || mods.control_key() {
+                                    target.exit();
+                                }
+                            }
+                        }
+                    }
                 }
 
-                winit::event::Event::WindowEvent {
-                    window_id,
-                    event: winit::event::WindowEvent::CursorMoved { position, .. },
-                } if window_id == window.id() => {
-                    self.handle_mouse_move(position);
+                winit::event::Event::WindowEvent { window_id, event: winit::event::WindowEvent::MouseInput { button, state, .. } } if window_id == window.id() => {
+                    // Allow interactions inside plot even if egui reports consumed elsewhere
+                    let mut route = !egui_consumed;
+                    if let Some(plot_rect) = self.plot_overlay.plot_area() {
+                        let ppp = self.pixels_per_point.max(0.5);
+                        let mx = self.mouse_position.x; let my = self.mouse_position.y;
+                        let px_min_x = plot_rect.min.x * ppp; let px_min_y = plot_rect.min.y * ppp; let px_w = plot_rect.width() * ppp; let px_h = plot_rect.height() * ppp;
+                        if mx >= px_min_x && mx <= px_min_x + px_w && my >= px_min_y && my <= px_min_y + px_h {
+                            route = true;
+                            if let Some(tb) = self.plot_overlay.toolbar_rect() { if my >= tb.min.y * ppp && my <= tb.max.y * ppp { route = false; } }
+                            if let Some(sb) = self.plot_overlay.sidebar_rect() { if mx >= sb.min.x * ppp && mx <= sb.max.x * ppp && my >= sb.min.y * ppp && my <= sb.max.y * ppp { route = false; } }
+                        }
+                    }
+                    if route {
+                        // Track left button state to avoid stray pan starts
+                        use winit::event::{ElementState, MouseButton};
+                        if button == MouseButton::Left { self.mouse_left_down = state == ElementState::Pressed; }
+                        self.handle_mouse_input(button, state); window.request_redraw();
+                    }
                 }
 
-                winit::event::Event::WindowEvent {
-                    window_id,
-                    event: winit::event::WindowEvent::MouseWheel { delta, .. },
-                } if window_id == window.id() => {
-                    self.handle_mouse_scroll(delta);
+                winit::event::Event::WindowEvent { window_id, event: winit::event::WindowEvent::CursorMoved { position, .. } } if window_id == window.id() => {
+                    let mut route = !egui_consumed;
+                    if let Some(plot_rect) = self.plot_overlay.plot_area() {
+                        let ppp = self.pixels_per_point.max(0.5);
+                        let mx = position.x as f32; let my = position.y as f32;
+                        let px_min_x = plot_rect.min.x * ppp; let px_min_y = plot_rect.min.y * ppp; let px_w = plot_rect.width() * ppp; let px_h = plot_rect.height() * ppp;
+                        if mx >= px_min_x && mx <= px_min_x + px_w && my >= px_min_y && my <= px_min_y + px_h { route = true; }
+                    }
+                    if route { self.handle_mouse_move(position); window.request_redraw(); }
+                }
+
+                winit::event::Event::WindowEvent { window_id, event: winit::event::WindowEvent::MouseWheel { delta, .. } } if window_id == window.id() => {
+                    let mut route = !egui_consumed;
+                    if let Some(plot_rect) = self.plot_overlay.plot_area() {
+                        let ppp = self.pixels_per_point.max(0.5);
+                        let mx = self.mouse_position.x; let my = self.mouse_position.y;
+                        let px_min_x = plot_rect.min.x * ppp; let px_min_y = plot_rect.min.y * ppp; let px_w = plot_rect.width() * ppp; let px_h = plot_rect.height() * ppp;
+                        if mx >= px_min_x && mx <= px_min_x + px_w && my >= px_min_y && my <= px_min_y + px_h { route = true; }
+                    }
+                    if route { self.handle_mouse_scroll(delta); window.request_redraw(); }
                 }
 
                 winit::event::Event::AboutToWait => {
-                    // Request redraw only when interaction occurs - prevents infinite loop
-                    if repaint {
+                    // Always request the first redraw; afterwards, only redraw when needed
+                    if self.needs_initial_redraw || repaint {
+                        self.needs_initial_redraw = false;
                         window.request_redraw();
                     }
                 }
@@ -396,11 +462,19 @@ impl<'window> PlotWindow<'window> {
         // Track the plot area for WGPU rendering
         let mut plot_area: Option<egui::Rect> = None;
 
+        // Ensure data bounds are current before drawing overlay (keeps axes in sync with render)
+        let _ = self.plot_renderer.calculate_data_bounds();
+
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Use PlotOverlay for unified UI rendering - no more duplicate sidebar code!
             let overlay_config = OverlayConfig {
-                show_grid: true,
+                // Grid drawn under data in WGPU; overlay handles axes/labels/titles only
+                show_grid: self.plot_renderer.overlay_show_grid(),
                 show_axes: true,
+                show_title: true,
+                title: self.plot_renderer.overlay_title().cloned().or(Some("Plot".to_string())),
+                x_label: self.plot_renderer.overlay_x_label().cloned().or(Some("X".to_string())),
+                y_label: self.plot_renderer.overlay_y_label().cloned().or(Some("Y".to_string())),
                 ..Default::default()
             };
             let overlay_metrics = OverlayMetrics {
@@ -419,8 +493,69 @@ impl<'window> PlotWindow<'window> {
             plot_area = frame_info.plot_area;
         });
 
-        // Calculate data bounds for viewport transformation
-        let data_bounds = self.plot_renderer.calculate_data_bounds();
+        // Update pixels-per-point for input mapping and calculate data bounds
+        let ppp_now = full_output.pixels_per_point;
+        if ppp_now > 0.0 {
+            // store for later mapping
+            // SAFETY: field exists in window struct
+            self.pixels_per_point = ppp_now;
+        }
+        // Calculate data bounds (kept for potential overlay/tick use)
+        let _data_bounds = self.plot_renderer.data_bounds();
+
+        // Handle toolbar actions requested by overlay
+        let (save_png, save_svg, reset_view, toggle_grid_opt, toggle_legend_opt) = self.plot_overlay.take_toolbar_actions();
+        if let Some(show) = toggle_grid_opt {
+            // mutate last_figure and overlay flag
+            if let Some(mut fig) = self.plot_renderer.last_figure.clone() { fig.grid_enabled = show; self.plot_renderer.set_figure(fig); }
+        }
+        if let Some(show) = toggle_legend_opt {
+            if let Some(mut fig) = self.plot_renderer.last_figure.clone() { fig.legend_enabled = show; self.plot_renderer.set_figure(fig); }
+        }
+        if reset_view {
+            // Refit main camera to data
+            self.plot_renderer.fit_camera_to_data();
+        }
+        if save_png || save_svg {
+            // OS Save Dialog to select path
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            {
+                if save_png {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("PNG Image", &["png"]).set_file_name("plot.png").save_file() {
+                        let mut fig_for_save = self.plot_renderer.export_figure_clone();
+                        let _ = std::thread::spawn(move || {
+                            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build();
+                            if let Ok(rt) = rt { let _ = rt.block_on(async move { if let Ok(exporter) = crate::export::image::ImageExporter::new().await { let _ = exporter.export_png(&mut fig_for_save, &path).await; } }); }
+                        });
+                    }
+                }
+                if save_svg {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("SVG", &["svg"]).set_file_name("plot.svg").save_file() {
+                        let mut fig_for_save = self.plot_renderer.export_figure_clone();
+                        let exporter = crate::export::vector::VectorExporter::new();
+                        let _ = exporter.export_svg(&mut fig_for_save, &path);
+                    }
+                }
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+            {
+                // Fallback to temp directory
+                if save_png {
+                    let mut fig = self.plot_renderer.export_figure_clone();
+                    let tmp = std::env::temp_dir().join("runmat_export.png");
+                    let _ = std::thread::spawn(move || {
+                        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build();
+                        if let Ok(rt) = rt { let _ = rt.block_on(async move { if let Ok(exporter) = crate::export::image::ImageExporter::new().await { let _ = exporter.export_png(&mut fig, &tmp).await; } }); }
+                    });
+                }
+                if save_svg {
+                    let mut fig = self.plot_renderer.export_figure_clone();
+                    let tmp = std::env::temp_dir().join("runmat_export.svg");
+                    let exporter = crate::export::vector::VectorExporter::new();
+                    let _ = exporter.export_svg(&mut fig, &tmp);
+                }
+            }
+        }
 
         // Now we have the plot area, update camera and WGPU rendering accordingly
         if let Some(plot_rect) = plot_area {
@@ -456,61 +591,104 @@ impl<'window> PlotWindow<'window> {
             &tris,
             &egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [self.config.width, self.config.height],
-                pixels_per_point: self.window.scale_factor() as f32,
+                pixels_per_point: full_output.pixels_per_point,
             },
         );
 
+        // First render the plot data into the scissored viewport (MSAA-friendly)
+        if let Some(plot_rect) = plot_area {
+            // Use egui's pixels-per-point for exact device pixel mapping
+            let ppp = self.pixels_per_point.max(0.5);
+            let vx = (plot_rect.min.x * ppp).round();
+            let vy = (plot_rect.min.y * ppp).round();
+            let vw = (plot_rect.width() * ppp).round().max(1.0);
+            let vh = (plot_rect.height() * ppp).round().max(1.0);
+
+            // Clamp to surface dimensions
+            let sw = self.config.width as f32;
+            let sh = self.config.height as f32;
+            let cvx = vx.max(0.0);
+            let cvy = vy.max(0.0);
+            let mut cvw = vw;
+            let mut cvh = vh;
+            if cvx + cvw > sw { cvw = (sw - cvx).max(1.0); }
+            if cvy + cvh > sh { cvh = (sh - cvy).max(1.0); }
+
+            // Scissor rectangle is specified in physical pixels as u32
+            let scissor = (cvx as u32, cvy as u32, cvw as u32, cvh as u32);
+
+            // If this figure has a subplot grid > 1, split into axes rectangles and render each
+            let (rows, cols) = self.plot_renderer.figure_axes_grid();
+            if rows * cols > 1 {
+                // compute subplot rects in UI points first, then convert to pixels
+                let rects = self
+                    .plot_overlay
+                    .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+                let mut viewports: Vec<(u32, u32, u32, u32)> = Vec::new();
+                let mut hovered_axes: Option<usize> = None;
+                // Detect hovered subplot for camera interaction
+                let mouse_pos = self.mouse_position;
+                for (i, r) in rects.iter().enumerate() {
+                    let rx = (r.min.x * ppp).round();
+                    let ry = (r.min.y * ppp).round();
+                    let rw = (r.width() * ppp).round().max(1.0);
+                    let rh = (r.height() * ppp).round().max(1.0);
+                    // clamp each to surface
+                    let svx = rx.max(0.0);
+                    let svy = ry.max(0.0);
+                    let mut svw = rw;
+                    let mut svh = rh;
+                    if svx + svw > sw { svw = (sw - svx).max(1.0); }
+                    if svy + svh > sh { svh = (sh - svy).max(1.0); }
+                    viewports.push((svx as u32, svy as u32, svw as u32, svh as u32));
+
+                    if hovered_axes.is_none() {
+                        let px_min_x = rx;
+                        let px_min_y = ry;
+                        if mouse_pos.x >= px_min_x && mouse_pos.x <= px_min_x + rw && mouse_pos.y >= px_min_y && mouse_pos.y <= px_min_y + rh {
+                            hovered_axes = Some(i);
+                        }
+                    }
+                }
+                // Do not overwrite per-axes cameras; keep their independent state for interaction
+                let _ = self
+                    .plot_renderer
+                    .render_axes_to_viewports(&mut encoder, &view, &viewports, 4);
+            } else {
+                // Single axes fallback: Render into the scissored viewport using camera path
+                let cfg = crate::core::plot_renderer::PlotRenderConfig {
+                    width: scissor.2,
+                    height: scissor.3,
+                    msaa_samples: 4,
+                    ..Default::default()
+                };
+                let _ = self.plot_renderer.render_camera_to_viewport(
+                    &mut encoder,
+                    &view,
+                    scissor,
+                    &cfg,
+                );
+            }
+        }
+
+        // Then render the UI overlay on top (legend, labels, etc.)
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Egui Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-
             self.egui_renderer.render(
                 &mut render_pass,
                 &tris,
-                &egui_wgpu::ScreenDescriptor {
-                    size_in_pixels: [self.config.width, self.config.height],
-                    pixels_per_point: self.window.scale_factor() as f32,
-                },
+                &egui_wgpu::ScreenDescriptor { size_in_pixels: [self.config.width, self.config.height], pixels_per_point: full_output.pixels_per_point },
             );
-
-            // End the egui render pass to avoid borrowing conflicts
-            drop(render_pass);
-
-            // Render WGPU plot data on top of egui content using the unified renderer
-            if let Some(plot_rect) = plot_area {
-                let scale_factor = self.window.scale_factor() as f32;
-
-                let viewport = (
-                    plot_rect.min.x * scale_factor,
-                    plot_rect.min.y * scale_factor,
-                    plot_rect.width() * scale_factor,
-                    plot_rect.height() * scale_factor,
-                );
-
-                // Execute optimized direct viewport rendering
-                if let Some(bounds) = data_bounds {
-                    let _ = self.plot_renderer.render_direct_to_viewport(
-                        &mut encoder,
-                        &view,
-                        viewport,
-                        bounds,
-                        false, // Don't clear background, preserve egui content
-                        None,  // No custom background color
-                    );
-                }
-            }
         }
 
         for id in &full_output.textures_delta.free {
@@ -537,7 +715,31 @@ impl<'window> PlotWindow<'window> {
 
         match (button, state) {
             (MouseButton::Left, ElementState::Pressed) => {
-                self.is_mouse_over_plot = true; // For panning
+                // Only start panning if press occurs inside the plot area (or a subplot rect)
+                self.is_mouse_over_plot = false;
+                if let Some(plot_rect) = self.plot_overlay.plot_area() {
+                    let mx = self.mouse_position.x;
+                    let my = self.mouse_position.y;
+                    let (rows, cols) = self.plot_renderer.figure_axes_grid();
+                    if rows * cols > 1 {
+                        // Check sub-rects
+                        let rects = self.plot_overlay.compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+                        for r in rects {
+                            let rx = r.min.x * self.pixels_per_point;
+                            let ry = r.min.y * self.pixels_per_point;
+                            let rw = r.width() * self.pixels_per_point;
+                            let rh = r.height() * self.pixels_per_point;
+                            if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh { self.is_mouse_over_plot = true; break; }
+                        }
+                    } else {
+                        let ppp = self.pixels_per_point.max(0.5);
+                        let px_min_x = plot_rect.min.x * ppp;
+                        let px_min_y = plot_rect.min.y * ppp;
+                        let px_w = plot_rect.width() * ppp;
+                        let px_h = plot_rect.height() * ppp;
+                        self.is_mouse_over_plot = mx >= px_min_x && mx <= px_min_x + px_w && my >= px_min_y && my <= px_min_y + px_h;
+                    }
+                }
             }
             (MouseButton::Left, ElementState::Released) => {
                 self.is_mouse_over_plot = false;
@@ -549,12 +751,47 @@ impl<'window> PlotWindow<'window> {
     /// Handle mouse movement
     fn handle_mouse_move(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
         let new_position = glam::Vec2::new(position.x as f32, position.y as f32);
-        let delta = new_position - self.mouse_position;
+        let delta = if self.mouse_left_down { new_position - self.mouse_position } else { glam::Vec2::ZERO };
         self.mouse_position = new_position;
 
-        // Pan when left mouse button is held down
+        // Pan when left mouse button is held down: shift orthographic bounds in world units
         if self.is_mouse_over_plot && delta.length() > 0.0 {
-            self.plot_renderer.camera.pan(-delta * 0.01); // Negative for natural feel
+            if let Some(plot_rect) = self.plot_overlay.plot_area() {
+                let (rows, cols) = self.plot_renderer.figure_axes_grid();
+                if rows * cols > 1 {
+                    // Determine hovered subplot and pan its camera
+                    let rects = self.plot_overlay.compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+                    for (i, r) in rects.iter().enumerate() {
+                        let rx = r.min.x * self.pixels_per_point; let ry = r.min.y * self.pixels_per_point; let rw = r.width() * self.pixels_per_point; let rh = r.height() * self.pixels_per_point;
+                        if self.mouse_position.x >= rx && self.mouse_position.x <= rx + rw && self.mouse_position.y >= ry && self.mouse_position.y <= ry + rh {
+                            if let Some(cam) = self.plot_renderer.axes_camera_mut(i) {
+                                if let crate::core::camera::ProjectionType::Orthographic { left, right, bottom, top, .. } = cam.projection {
+                                    let pw = rw.max(1.0); let ph = rh.max(1.0);
+                                    let world_w = right - left; let world_h = top - bottom;
+                                    let dx_world = (delta.x / pw) * world_w; let dy_world = (delta.y / ph) * world_h;
+                                    cam.projection = crate::core::camera::ProjectionType::Orthographic {
+                                        left: left - dx_world,
+                                        right: right - dx_world,
+                                        bottom: bottom + dy_world,
+                                        top: top + dy_world,
+                                        near: -1.0,
+                                        far: 1.0,
+                                    };
+                                    cam.mark_dirty();
+                                }
+                            }
+                            break;
+                        }
+                    }
+                } else if let crate::core::camera::ProjectionType::Orthographic { ref mut left, ref mut right, ref mut bottom, ref mut top, .. } = self.plot_renderer.camera.projection {
+                    let pw = (plot_rect.width() * self.pixels_per_point).max(1.0);
+                    let ph = (plot_rect.height() * self.pixels_per_point).max(1.0);
+                    let world_w = *right - *left; let world_h = *top - *bottom;
+                    let dx_world = (delta.x / pw) * world_w; let dy_world = (delta.y / ph) * world_h;
+                    *left -= dx_world; *right -= dx_world; *bottom += dy_world; *top += dy_world;
+                    self.plot_renderer.camera.mark_dirty();
+                }
+            }
         }
     }
 
@@ -565,25 +802,42 @@ impl<'window> PlotWindow<'window> {
             winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 100.0,
         };
 
-        // Zoom in/out by scaling the orthographic projection
-        if let crate::core::camera::ProjectionType::Orthographic {
-            ref mut left,
-            ref mut right,
-            ref mut bottom,
-            ref mut top,
-            ..
-        } = self.plot_renderer.camera.projection
-        {
-            let zoom_factor = 1.0 + scroll_delta * 0.1;
-            let center_x = (*left + *right) / 2.0;
-            let center_y = (*bottom + *top) / 2.0;
-            let width = (*right - *left) / zoom_factor;
-            let height = (*top - *bottom) / zoom_factor;
-
-            *left = center_x - width / 2.0;
-            *right = center_x + width / 2.0;
-            *bottom = center_y - height / 2.0;
-            *top = center_y + height / 2.0;
+        // Zoom in/out by scaling the orthographic projection. Anchor zoom at cursor when inside plot area.
+        if let Some(plot_rect) = self.plot_overlay.plot_area() {
+            let (rows, cols) = self.plot_renderer.figure_axes_grid();
+            if rows * cols > 1 {
+                let rects = self.plot_overlay.compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+                for (i, r) in rects.iter().enumerate() {
+                    let rx = r.min.x * self.pixels_per_point; let ry = r.min.y * self.pixels_per_point; let rw = r.width() * self.pixels_per_point; let rh = r.height() * self.pixels_per_point;
+                    let mx = self.mouse_position.x; let my = self.mouse_position.y;
+                    if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
+                        if let Some(cam) = self.plot_renderer.axes_camera_mut(i) {
+                            if let crate::core::camera::ProjectionType::Orthographic { left, right, bottom, top, .. } = cam.projection {
+                                let factor = (1.0 - scroll_delta * 0.1).clamp(0.2, 5.0);
+                                let tx = (mx - rx) / rw; let ty = (my - ry) / rh; let w = right - left; let h = top - bottom;
+                                let pivot_x = left + tx * w; let pivot_y = top - ty * h;
+                                let new_left = pivot_x - (pivot_x - left) * factor; let new_right = pivot_x + (right - pivot_x) * factor;
+                                let new_bottom = pivot_y - (pivot_y - bottom) * factor; let new_top = pivot_y + (top - pivot_y) * factor;
+                                cam.projection = crate::core::camera::ProjectionType::Orthographic { left: new_left, right: new_right, bottom: new_bottom, top: new_top, near: -1.0, far: 1.0 };
+                                cam.mark_dirty();
+                            }
+                        }
+                        break;
+                    }
+                }
+            } else if let crate::core::camera::ProjectionType::Orthographic { ref mut left, ref mut right, ref mut bottom, ref mut top, .. } = self.plot_renderer.camera.projection {
+                let factor = (1.0 - scroll_delta * 0.1).clamp(0.2, 5.0);
+                let px_min_x = plot_rect.min.x * self.pixels_per_point; let px_min_y = plot_rect.min.y * self.pixels_per_point; let px_w = plot_rect.width() * self.pixels_per_point; let px_h = plot_rect.height() * self.pixels_per_point;
+                let mx = self.mouse_position.x; let my = self.mouse_position.y;
+                let mut pivot_x = (*left + *right) * 0.5; let mut pivot_y = (*bottom + *top) * 0.5;
+                if mx >= px_min_x && mx <= px_min_x + px_w && my >= px_min_y && my <= px_min_y + px_h {
+                    let tx = (mx - px_min_x) / px_w; let ty = (my - px_min_y) / px_h; let w = *right - *left; let h = *top - *bottom;
+                    pivot_x = *left + tx * w; pivot_y = *top - ty * h;
+                }
+                let new_left = pivot_x - (pivot_x - *left) * factor; let new_right = pivot_x + (*right - pivot_x) * factor;
+                let new_bottom = pivot_y - (pivot_y - *bottom) * factor; let new_top = pivot_y + (*top - pivot_y) * factor;
+                *left = new_left; *right = new_right; *bottom = new_bottom; *top = new_top; self.plot_renderer.camera.mark_dirty();
+            }
         }
     }
 }

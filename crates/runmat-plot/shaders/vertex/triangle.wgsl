@@ -28,11 +28,12 @@ struct VertexOutput {
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     
-    // TEMP: Bypass projection matrix - use direct NDC coordinates
-    out.clip_position = vec4<f32>(input.position, 1.0);
-    out.world_position = input.position;
+    // Proper transformation using uniforms
+    let world_position = uniforms.model * vec4<f32>(input.position, 1.0);
+    out.clip_position = uniforms.view_proj * world_position;
+    out.world_position = world_position.xyz;
     out.color = input.color;
-    out.normal = normalize(input.normal); // Skip normal transformation for 2D plotting
+    out.normal = normalize(input.normal);
     out.tex_coords = input.tex_coords;
     
     return out;

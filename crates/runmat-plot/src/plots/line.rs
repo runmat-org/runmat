@@ -18,6 +18,8 @@ pub struct LinePlot {
     pub color: Vec4,
     pub line_width: f32,
     pub line_style: LineStyle,
+    pub line_join: LineJoin,
+    pub line_cap: LineCap,
 
     /// Metadata
     pub label: Option<String>,
@@ -37,6 +39,18 @@ pub enum LineStyle {
     Dotted,
     DashDot,
 }
+
+/// Line join style for thick polylines
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineJoin { Miter, Bevel, Round }
+
+impl Default for LineJoin { fn default() -> Self { Self::Miter } }
+
+/// Line cap style for thick polylines
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineCap { Butt, Square, Round }
+
+impl Default for LineCap { fn default() -> Self { Self::Butt } }
 
 impl Default for LineStyle {
     fn default() -> Self {
@@ -65,6 +79,8 @@ impl LinePlot {
             color: Vec4::new(0.0, 0.5, 1.0, 1.0), // Default blue
             line_width: 1.0,
             line_style: LineStyle::default(),
+            line_join: LineJoin::default(),
+            line_cap: LineCap::default(),
             label: None,
             visible: true,
             vertices: None,
@@ -126,6 +142,18 @@ impl LinePlot {
         self.dirty = true;
     }
 
+    /// Set the line join style for thick lines
+    pub fn set_line_join(&mut self, join: LineJoin) {
+        self.line_join = join;
+        self.dirty = true;
+    }
+
+    /// Set the line cap style for thick lines
+    pub fn set_line_cap(&mut self, cap: LineCap) {
+        self.line_cap = cap;
+        self.dirty = true;
+    }
+
     /// Show or hide the plot
     pub fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
@@ -144,11 +172,30 @@ impl LinePlot {
     /// Generate vertices for GPU rendering
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {
         if self.dirty || self.vertices.is_none() {
-            self.vertices = Some(vertex_utils::create_line_plot(
-                &self.x_data,
-                &self.y_data,
-                self.color,
-            ));
+            if self.line_width > 1.0 {
+                // Use triangle extrusion for thicker lines; switch pipeline in render_data
+                let base_tris = match self.line_cap {
+                    LineCap::Butt => vertex_utils::create_thick_polyline_with_join(&self.x_data, &self.y_data, self.color, self.line_width, self.line_join),
+                    LineCap::Square => vertex_utils::create_thick_polyline_square_caps(&self.x_data, &self.y_data, self.color, self.line_width),
+                    LineCap::Round => vertex_utils::create_thick_polyline_round_caps(&self.x_data, &self.y_data, self.color, self.line_width, 12),
+                };
+                let tris = match self.line_style {
+                    LineStyle::Solid => base_tris,
+                    LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted =>
+                        vertex_utils::create_thick_polyline_dashed(&self.x_data, &self.y_data, self.color, self.line_width, self.line_style),
+                };
+                self.vertices = Some(tris);
+            } else {
+                let verts = match self.line_style {
+                    LineStyle::Solid => vertex_utils::create_line_plot(&self.x_data, &self.y_data, self.color),
+                    LineStyle::Dashed | LineStyle::DashDot => vertex_utils::create_line_plot_dashed(&self.x_data, &self.y_data, self.color, self.line_style),
+                    LineStyle::Dotted => {
+                        // Render as a sequence of tiny dashes to approximate dots
+                        vertex_utils::create_line_plot_dashed(&self.x_data, &self.y_data, self.color, LineStyle::Dashed)
+                    }
+                };
+                self.vertices = Some(verts);
+            }
             self.dirty = false;
         }
         self.vertices.as_ref().unwrap()
@@ -173,10 +220,23 @@ impl LinePlot {
         let vertices = self.generate_vertices().clone();
         let vertex_count = vertices.len();
 
-        let material = Material {
-            albedo: self.color,
-            ..Default::default()
+        // Encode width/style/cap/join into material for exporters:
+        // - roughness: line width
+        // - metallic: line style code (0 solid,1 dashed,2 dotted,3 dashdot)
+        // - emissive.x: cap (0 butt,1 square,2 round)
+        // - emissive.y: join (0 miter,1 bevel,2 round)
+        let style_code = match self.line_style {
+            LineStyle::Solid => 0.0,
+            LineStyle::Dashed => 1.0,
+            LineStyle::Dotted => 2.0,
+            LineStyle::DashDot => 3.0,
         };
+        let cap_code = match self.line_cap { LineCap::Butt => 0.0, LineCap::Square => 1.0, LineCap::Round => 2.0 };
+        let join_code = match self.line_join { LineJoin::Miter => 0.0, LineJoin::Bevel => 1.0, LineJoin::Round => 2.0 };
+        let mut material = Material { albedo: self.color, ..Default::default() };
+        material.roughness = self.line_width.max(0.0);
+        material.metallic = style_code;
+        material.emissive = Vec4::new(cap_code, join_code, 0.0, 0.0);
 
         let draw_call = DrawCall {
             vertex_offset: 0,
@@ -186,13 +246,9 @@ impl LinePlot {
             instance_count: 1,
         };
 
-        RenderData {
-            pipeline_type: PipelineType::Lines,
-            vertices,
-            indices: None,
-            material,
-            draw_calls: vec![draw_call],
-        }
+        // If thick polyline was generated, we must render as triangles
+        let pipeline = if self.line_width > 1.0 { PipelineType::Triangles } else { PipelineType::Lines };
+        RenderData { pipeline_type: pipeline, vertices, indices: None, material, draw_calls: vec![draw_call], image: None }
     }
 
     /// Get plot statistics for debugging
