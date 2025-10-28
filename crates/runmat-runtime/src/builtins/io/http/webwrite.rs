@@ -1130,15 +1130,16 @@ mod tests {
     #[test]
     fn webwrite_posts_form_data_by_default() {
         let payload = {
-            let mut fields = std::collections::HashMap::new();
-            fields.insert("name".to_string(), Value::from("Ada"));
-            fields.insert("score".to_string(), Value::Num(42.0));
-            StructValue { fields }
+            let mut st = StructValue::new();
+            st.fields.insert("name".to_string(), Value::from("Ada"));
+            st.fields.insert("score".to_string(), Value::Num(42.0));
+            st
         };
         let opts = {
-            let mut fields = std::collections::HashMap::new();
-            fields.insert("ContentType".to_string(), Value::from("json"));
-            StructValue { fields }
+            let mut st = StructValue::new();
+            st.fields
+                .insert("ContentType".to_string(), Value::from("json"));
+            st
         };
 
         let (tx, rx) = mpsc::channel();
@@ -1180,19 +1181,20 @@ mod tests {
     #[test]
     fn webwrite_sends_json_when_media_type_json() {
         let payload = {
-            let mut fields = std::collections::HashMap::new();
-            fields.insert("title".to_string(), Value::from("RunMat"));
-            fields.insert("stars".to_string(), Value::Num(5.0));
-            StructValue { fields }
+            let mut st = StructValue::new();
+            st.fields.insert("title".to_string(), Value::from("RunMat"));
+            st.fields.insert("stars".to_string(), Value::Num(5.0));
+            st
         };
         let opts = {
-            let mut fields = std::collections::HashMap::new();
-            fields.insert(
+            let mut st = StructValue::new();
+            st.fields.insert(
                 "MediaType".to_string(),
                 Value::from("application/json; charset=utf-8"),
             );
-            fields.insert("ContentType".to_string(), Value::from("json"));
-            StructValue { fields }
+            st.fields
+                .insert("ContentType".to_string(), Value::from("json"));
+            st
         };
 
         let (tx, rx) = mpsc::channel();
@@ -1226,20 +1228,29 @@ mod tests {
     #[test]
     fn webwrite_applies_basic_auth_and_custom_headers() {
         let payload = Value::from("");
-        let mut header_struct = std::collections::HashMap::new();
-        header_struct.insert("X-Test".to_string(), Value::from("yes"));
-        header_struct.insert("Accept".to_string(), Value::from("text/plain"));
-        let mut opts_struct = std::collections::HashMap::new();
-        opts_struct.insert("Username".to_string(), Value::from("ada"));
-        opts_struct.insert("Password".to_string(), Value::from("secret"));
-        opts_struct.insert(
-            "HeaderFields".to_string(),
-            Value::Struct(StructValue {
-                fields: header_struct,
-            }),
-        );
-        opts_struct.insert("ContentType".to_string(), Value::from("text"));
-        opts_struct.insert("MediaType".to_string(), Value::from("text/plain"));
+        let mut header_struct = StructValue::new();
+        header_struct
+            .fields
+            .insert("X-Test".to_string(), Value::from("yes"));
+        header_struct
+            .fields
+            .insert("Accept".to_string(), Value::from("text/plain"));
+        let mut opts_struct = StructValue::new();
+        opts_struct
+            .fields
+            .insert("Username".to_string(), Value::from("ada"));
+        opts_struct
+            .fields
+            .insert("Password".to_string(), Value::from("secret"));
+        opts_struct
+            .fields
+            .insert("HeaderFields".to_string(), Value::Struct(header_struct));
+        opts_struct
+            .fields
+            .insert("ContentType".to_string(), Value::from("text"));
+        opts_struct
+            .fields
+            .insert("MediaType".to_string(), Value::from("text/plain"));
 
         let (tx, rx) = mpsc::channel();
         let url = spawn_server(move |mut stream| {
@@ -1248,16 +1259,8 @@ mod tests {
             respond_with(stream, "text/plain", b"OK");
         });
 
-        let result = webwrite_builtin(
-            Value::from(url),
-            vec![
-                payload,
-                Value::Struct(StructValue {
-                    fields: opts_struct,
-                }),
-            ],
-        )
-        .expect("webwrite");
+        let result = webwrite_builtin(Value::from(url), vec![payload, Value::Struct(opts_struct)])
+            .expect("webwrite");
 
         let headers = rx.recv().expect("headers");
         let headers_lower = headers.to_ascii_lowercase();
@@ -1276,17 +1279,16 @@ mod tests {
 
     #[test]
     fn webwrite_supports_query_parameters() {
-        let payload = Value::Struct(StructValue {
-            fields: std::collections::HashMap::new(),
-        });
-        let mut qp = std::collections::HashMap::new();
-        qp.insert("page".to_string(), Value::Num(2.0));
-        qp.insert("verbose".to_string(), Value::Bool(true));
-        let mut opts_struct = std::collections::HashMap::new();
-        opts_struct.insert(
-            "QueryParameters".to_string(),
-            Value::Struct(StructValue { fields: qp }),
-        );
+        let payload = Value::Struct(StructValue::new());
+        let mut qp_struct = StructValue::new();
+        qp_struct.fields.insert("page".to_string(), Value::Num(2.0));
+        qp_struct
+            .fields
+            .insert("verbose".to_string(), Value::Bool(true));
+        let mut opts_struct = StructValue::new();
+        opts_struct
+            .fields
+            .insert("QueryParameters".to_string(), Value::Struct(qp_struct));
 
         let (tx, rx) = mpsc::channel();
         let url = spawn_server(move |mut stream| {
@@ -1297,12 +1299,7 @@ mod tests {
 
         let _ = webwrite_builtin(
             Value::from(url.clone()),
-            vec![
-                payload,
-                Value::Struct(StructValue {
-                    fields: opts_struct,
-                }),
-            ],
+            vec![payload, Value::Struct(opts_struct)],
         )
         .expect("webwrite");
 
@@ -1317,9 +1314,11 @@ mod tests {
     fn webwrite_binary_payload_respected() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 255.0], vec![4, 1]).unwrap();
         let payload = Value::Tensor(tensor);
-        let mut opts_struct = std::collections::HashMap::new();
-        opts_struct.insert("ContentType".to_string(), Value::from("binary"));
-        opts_struct.insert(
+        let mut opts_struct = StructValue::new();
+        opts_struct
+            .fields
+            .insert("ContentType".to_string(), Value::from("binary"));
+        opts_struct.fields.insert(
             "MediaType".to_string(),
             Value::from("application/octet-stream"),
         );
@@ -1331,16 +1330,8 @@ mod tests {
             respond_with(stream, "text/plain", b"OK");
         });
 
-        let _ = webwrite_builtin(
-            Value::from(url),
-            vec![
-                payload,
-                Value::Struct(StructValue {
-                    fields: opts_struct,
-                }),
-            ],
-        )
-        .expect("webwrite");
+        let _ = webwrite_builtin(Value::from(url), vec![payload, Value::Struct(opts_struct)])
+            .expect("webwrite");
 
         let (headers, body) = rx.recv().expect("request");
         let headers_lower = headers.to_ascii_lowercase();

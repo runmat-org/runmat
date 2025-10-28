@@ -1,6 +1,5 @@
 //! MATLAB-compatible `dir` builtin for RunMat.
 
-use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -441,14 +440,20 @@ fn records_to_value(records: Vec<DirRecord>) -> Result<Value, String> {
     let rows = records.len();
     let mut values = Vec::with_capacity(rows);
     for record in records {
-        let mut fields = HashMap::new();
-        fields.insert("name".to_string(), Value::String(record.name));
-        fields.insert("folder".to_string(), Value::String(record.folder));
-        fields.insert("date".to_string(), Value::String(record.date));
-        fields.insert("bytes".to_string(), Value::Num(record.bytes));
-        fields.insert("isdir".to_string(), Value::Bool(record.is_dir));
-        fields.insert("datenum".to_string(), Value::Num(record.datenum));
-        values.push(Value::Struct(StructValue { fields }));
+        let mut st = StructValue::new();
+        st.fields
+            .insert("name".to_string(), Value::String(record.name));
+        st.fields
+            .insert("folder".to_string(), Value::String(record.folder));
+        st.fields
+            .insert("date".to_string(), Value::String(record.date));
+        st.fields
+            .insert("bytes".to_string(), Value::Num(record.bytes));
+        st.fields
+            .insert("isdir".to_string(), Value::Bool(record.is_dir));
+        st.fields
+            .insert("datenum".to_string(), Value::Num(record.datenum));
+        values.push(Value::Struct(st));
     }
     make_cell(values, rows, 1)
 }

@@ -795,9 +795,11 @@ fn allocate_handle(store: MapStore) -> Result<Value, String> {
         .write()
         .map_err(|_| "containers.Map: registry lock poisoned".to_string())?
         .insert(id, store);
-    let mut fields = HashMap::new();
-    fields.insert("id".to_string(), Value::Int(IntValue::U64(id)));
-    let storage = Value::Struct(StructValue { fields });
+    let mut struct_value = StructValue::new();
+    struct_value
+        .fields
+        .insert("id".to_string(), Value::Int(IntValue::U64(id)));
+    let storage = Value::Struct(struct_value);
     let gc = runmat_gc::gc_allocate(storage).map_err(|e| format!("containers.Map: {e}"))?;
     Ok(Value::HandleObject(HandleRef {
         class_name: CLASS_NAME.to_string(),

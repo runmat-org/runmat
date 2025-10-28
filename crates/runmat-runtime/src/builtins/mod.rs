@@ -14,6 +14,7 @@ pub mod math;
 pub mod stats;
 pub mod strings;
 pub mod structs;
+pub mod timing;
 
 // Temporary: expose legacy modules while migration is in progress.
 pub mod legacy {

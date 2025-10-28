@@ -266,17 +266,26 @@ impl WhosRecord {
     }
 
     fn into_value(self) -> Result<Value, String> {
-        let mut fields = HashMap::new();
-        fields.insert("name".to_string(), Value::String(self.name));
-        fields.insert("size".to_string(), Value::Tensor(self.size));
-        fields.insert("bytes".to_string(), Value::Num(self.bytes as f64));
-        fields.insert("class".to_string(), Value::String(self.class_name));
-        fields.insert("global".to_string(), Value::Bool(self.is_global));
-        fields.insert("sparse".to_string(), Value::Bool(self.is_sparse));
-        fields.insert("complex".to_string(), Value::Bool(self.is_complex));
-        fields.insert("nesting".to_string(), Value::String(self.nesting));
-        fields.insert("persistent".to_string(), Value::Bool(self.persistent));
-        Ok(Value::Struct(StructValue { fields }))
+        let mut st = StructValue::new();
+        st.fields
+            .insert("name".to_string(), Value::String(self.name));
+        st.fields
+            .insert("size".to_string(), Value::Tensor(self.size));
+        st.fields
+            .insert("bytes".to_string(), Value::Num(self.bytes as f64));
+        st.fields
+            .insert("class".to_string(), Value::String(self.class_name));
+        st.fields
+            .insert("global".to_string(), Value::Bool(self.is_global));
+        st.fields
+            .insert("sparse".to_string(), Value::Bool(self.is_sparse));
+        st.fields
+            .insert("complex".to_string(), Value::Bool(self.is_complex));
+        st.fields
+            .insert("nesting".to_string(), Value::String(self.nesting));
+        st.fields
+            .insert("persistent".to_string(), Value::Bool(self.persistent));
+        Ok(Value::Struct(st))
     }
 }
 

@@ -418,7 +418,6 @@ mod tests {
         client_handle, configure_stream, insert_client, remove_client_for_test,
     };
     use runmat_builtins::{IntValue, StructValue, Value};
-    use std::collections::HashMap;
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
     use std::thread;
@@ -428,12 +427,12 @@ mod tests {
         let peer_addr = stream.peer_addr().expect("peer addr");
         configure_stream(&stream, timeout).expect("configure stream");
         let client_id = insert_client(stream, 0, peer_addr, timeout, "little-endian".to_string());
-        let mut fields = HashMap::new();
-        fields.insert(
+        let mut st = StructValue::new();
+        st.fields.insert(
             CLIENT_HANDLE_FIELD.to_string(),
             Value::Int(IntValue::U64(client_id)),
         );
-        Value::Struct(StructValue { fields })
+        Value::Struct(st)
     }
 
     fn client_id(client: &Value) -> u64 {

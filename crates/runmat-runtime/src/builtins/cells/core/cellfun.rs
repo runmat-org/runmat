@@ -1,7 +1,5 @@
 //! MATLAB-compatible `cellfun` builtin with host execution semantics for RunMat.
 
-use std::collections::HashMap;
-
 use runmat_builtins::{
     CellArray, Closure, ComplexTensor, LogicalArray, StructValue, Tensor, Value,
 };
@@ -505,14 +503,18 @@ fn make_error_struct(
     shape: &[usize],
 ) -> Result<Value, String> {
     let (identifier, message) = split_error_message(raw_error);
-    let mut fields: HashMap<String, Value> = HashMap::new();
-    fields.insert("identifier".to_string(), Value::String(identifier));
-    fields.insert("message".to_string(), Value::String(message));
-    fields.insert("index".to_string(), Value::Num((linear_index + 1) as f64));
+    let mut st = StructValue::new();
+    st.fields
+        .insert("identifier".to_string(), Value::String(identifier));
+    st.fields
+        .insert("message".to_string(), Value::String(message));
+    st.fields
+        .insert("index".to_string(), Value::Num((linear_index + 1) as f64));
     let subs = linear_to_indices(linear_index, shape);
     let subs_tensor = dims_to_row_tensor(&subs)?;
-    fields.insert("indices".to_string(), Value::Tensor(subs_tensor));
-    Ok(Value::Struct(StructValue { fields }))
+    st.fields
+        .insert("indices".to_string(), Value::Tensor(subs_tensor));
+    Ok(Value::Struct(st))
 }
 
 fn split_error_message(raw: &str) -> (String, String) {

@@ -12,7 +12,6 @@ use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use log::debug;
 use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "doc_export")]
@@ -337,18 +336,22 @@ fn apply_command(command: ParsedCommand) -> Result<(), String> {
 }
 
 fn snapshot_to_value(snapshot: RngSnapshot) -> Result<Value, String> {
-    let mut fields = HashMap::new();
+    let mut struct_value = StructValue::new();
     let seed_value = snapshot.seed.unwrap_or(DEFAULT_USER_SEED) as f64;
-    fields.insert(
+    struct_value.fields.insert(
         "Type".to_string(),
         Value::String(snapshot.algorithm.as_str().to_string()),
     );
-    fields.insert("Seed".to_string(), Value::Num(seed_value));
+    struct_value
+        .fields
+        .insert("Seed".to_string(), Value::Num(seed_value));
     let lo = (snapshot.state & 0xFFFF_FFFF) as f64;
     let hi = (snapshot.state >> 32) as f64;
     let tensor = Tensor::new(vec![lo, hi], vec![1, 2]).map_err(|e| format!("rng: {e}"))?;
-    fields.insert("State".to_string(), Value::Tensor(tensor));
-    Ok(Value::Struct(StructValue { fields }))
+    struct_value
+        .fields
+        .insert("State".to_string(), Value::Tensor(tensor));
+    Ok(Value::Struct(struct_value))
 }
 
 fn snapshot_from_value(value: &Value) -> Result<RngSnapshot, String> {
@@ -607,10 +610,10 @@ mod tests {
         let _guard = random::test_lock().lock().unwrap();
         random::reset_rng();
         let tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("tensor");
-        let mut fields = HashMap::new();
-        fields.insert("Seed".to_string(), Value::Num(0.0));
-        fields.insert("State".to_string(), Value::Tensor(tensor));
-        let err = rng_builtin(vec![Value::Struct(StructValue { fields })]).unwrap_err();
+        let mut st = StructValue::new();
+        st.fields.insert("Seed".to_string(), Value::Num(0.0));
+        st.fields.insert("State".to_string(), Value::Tensor(tensor));
+        let err = rng_builtin(vec![Value::Struct(st)]).unwrap_err();
         assert!(err.contains("Type"), "unexpected error message: {err}");
     }
 

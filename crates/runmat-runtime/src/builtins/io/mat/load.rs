@@ -201,11 +201,11 @@ pub struct LoadEval {
 
 impl LoadEval {
     pub fn first_output(&self) -> Value {
-        let mut fields = HashMap::with_capacity(self.variables.len());
+        let mut st = StructValue::new();
         for (name, value) in &self.variables {
-            fields.insert(name.clone(), value.clone());
+            st.fields.insert(name.clone(), value.clone());
         }
-        Value::Struct(StructValue { fields })
+        Value::Struct(st)
     }
 
     pub fn variables(&self) -> &[(String, Value)] {
@@ -734,12 +734,12 @@ fn mat_array_to_value(array: MatArray) -> Result<Value, String> {
             if field_names.len() != field_values.len() {
                 return Err("load: struct field metadata is inconsistent".to_string());
             }
-            let mut fields = HashMap::with_capacity(field_names.len());
+            let mut st = StructValue::new();
             for (name, value) in field_names.into_iter().zip(field_values.into_iter()) {
                 let converted = mat_array_to_value(value)?;
-                fields.insert(name, converted);
+                st.fields.insert(name, converted);
             }
-            Ok(Value::Struct(StructValue { fields }))
+            Ok(Value::Struct(st))
         }
     }
 }

@@ -1026,15 +1026,15 @@ fn empty_token_extents() -> Result<Value, String> {
 }
 
 fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value {
-    let mut fields = HashMap::new();
+    let mut st = StructValue::new();
     for name in names {
         let value = match match_data {
             Some(m) => m.named.get(name).cloned().unwrap_or_default(),
             None => String::new(),
         };
-        fields.insert(name.clone(), Value::String(value));
+        st.fields.insert(name.clone(), Value::String(value));
     }
-    Value::Struct(StructValue { fields })
+    Value::Struct(st)
 }
 
 #[cfg(test)]

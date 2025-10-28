@@ -440,7 +440,7 @@ fn build_tcpserver_struct(
     local_addr: SocketAddr,
     options: &ParsedOptions,
 ) -> Value {
-    let mut fields = HashMap::new();
+    let mut st = StructValue::new();
 
     let server_address = local_addr.ip().to_string();
     let server_port = local_addr.port();
@@ -449,51 +449,65 @@ fn build_tcpserver_struct(
         .clone()
         .unwrap_or_else(|| format!("tcpserver:{server_address}:{server_port}"));
 
-    fields.insert("Type".to_string(), Value::String("tcpserver".to_string()));
-    fields.insert("Name".to_string(), Value::String(name));
-    fields.insert(
+    st.fields
+        .insert("Type".to_string(), Value::String("tcpserver".to_string()));
+    st.fields.insert("Name".to_string(), Value::String(name));
+    st.fields.insert(
         "ServerAddress".to_string(),
         Value::String(server_address.clone()),
     );
-    fields.insert(
+    st.fields.insert(
         "ServerPort".to_string(),
         Value::Int(IntValue::U16(server_port)),
     );
-    fields.insert("Port".to_string(), Value::Int(IntValue::U16(server_port)));
-    fields.insert(
+    st.fields
+        .insert("Port".to_string(), Value::Int(IntValue::U16(server_port)));
+    st.fields.insert(
         "RequestedAddress".to_string(),
         Value::String(requested_address.to_string()),
     );
-    fields.insert("Connected".to_string(), Value::Bool(false));
-    fields.insert("ClientAddress".to_string(), Value::String(String::new()));
-    fields.insert("ClientPort".to_string(), Value::Int(IntValue::I32(0)));
-    fields.insert(
+    st.fields
+        .insert("Connected".to_string(), Value::Bool(false));
+    st.fields
+        .insert("ClientAddress".to_string(), Value::String(String::new()));
+    st.fields
+        .insert("ClientPort".to_string(), Value::Int(IntValue::I32(0)));
+    st.fields.insert(
         "NumBytesAvailable".to_string(),
         Value::Int(IntValue::I32(0)),
     );
-    fields.insert("BytesAvailableFcn".to_string(), default_user_data());
-    fields.insert(
+    st.fields
+        .insert("BytesAvailableFcn".to_string(), default_user_data());
+    st.fields.insert(
         "BytesAvailableFcnMode".to_string(),
         Value::String("byte".to_string()),
     );
-    fields.insert(
+    st.fields.insert(
         "BytesAvailableFcnCount".to_string(),
         Value::Int(IntValue::I32(1)),
     );
-    fields.insert("ConnectionChangedFcn".to_string(), default_user_data());
-    fields.insert(
+    st.fields
+        .insert("ConnectionChangedFcn".to_string(), default_user_data());
+    st.fields.insert(
         "ByteOrder".to_string(),
         Value::String(options.byte_order.clone()),
     );
-    fields.insert("EnableBroadcast".to_string(), Value::Bool(false));
-    fields.insert("EnableMulticast".to_string(), Value::Bool(false));
-    fields.insert("EnableReuseAddress".to_string(), Value::Bool(false));
-    fields.insert("KeepAlive".to_string(), Value::Bool(false));
-    fields.insert(HANDLE_ID_FIELD.to_string(), Value::Int(IntValue::U64(id)));
-    fields.insert("Timeout".to_string(), Value::Num(options.timeout));
-    fields.insert("UserData".to_string(), options.user_data.clone());
+    st.fields
+        .insert("EnableBroadcast".to_string(), Value::Bool(false));
+    st.fields
+        .insert("EnableMulticast".to_string(), Value::Bool(false));
+    st.fields
+        .insert("EnableReuseAddress".to_string(), Value::Bool(false));
+    st.fields
+        .insert("KeepAlive".to_string(), Value::Bool(false));
+    st.fields
+        .insert(HANDLE_ID_FIELD.to_string(), Value::Int(IntValue::U64(id)));
+    st.fields
+        .insert("Timeout".to_string(), Value::Num(options.timeout));
+    st.fields
+        .insert("UserData".to_string(), options.user_data.clone());
 
-    Value::Struct(StructValue { fields })
+    Value::Struct(st)
 }
 
 pub(crate) fn string_scalar(value: &Value, context: &str) -> Result<String, String> {
@@ -767,9 +781,11 @@ mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
 
-        let user_struct = Value::Struct(StructValue {
-            fields: HashMap::from([("tag".to_string(), Value::from("demo"))]),
-        });
+        let mut user_struct_value = StructValue::new();
+        user_struct_value
+            .fields
+            .insert("tag".to_string(), Value::from("demo"));
+        let user_struct = Value::Struct(user_struct_value);
 
         let result = tcpserver_builtin(
             Value::from("127.0.0.1"),

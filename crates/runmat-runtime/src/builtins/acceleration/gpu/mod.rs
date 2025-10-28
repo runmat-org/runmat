@@ -3,7 +3,7 @@
 //! These builtins provide explicit GPU array support using the runmat-accelerate-api
 //! provider interface. If no provider is registered, calls will return an error.
 
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 #[runtime_builtin(
@@ -97,23 +97,26 @@ fn gpu_device_builtin() -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         // Prefer structured info when available
         let info = p.device_info_struct();
-        let mut fields = std::collections::HashMap::new();
-        fields.insert(
+        let mut st = StructValue::new();
+        st.fields.insert(
             "device_id".to_string(),
             Value::Int(runmat_builtins::IntValue::U32(info.device_id)),
         );
-        fields.insert("name".to_string(), Value::String(info.name));
-        fields.insert("vendor".to_string(), Value::String(info.vendor));
+        st.fields
+            .insert("name".to_string(), Value::String(info.name));
+        st.fields
+            .insert("vendor".to_string(), Value::String(info.vendor));
         if let Some(bytes) = info.memory_bytes {
-            fields.insert(
+            st.fields.insert(
                 "memory_bytes".to_string(),
                 Value::Int(runmat_builtins::IntValue::U64(bytes)),
             );
         }
         if let Some(backend) = info.backend {
-            fields.insert("backend".to_string(), Value::String(backend));
+            st.fields
+                .insert("backend".to_string(), Value::String(backend));
         }
-        Ok(Value::Struct(runmat_builtins::StructValue { fields }))
+        Ok(Value::Struct(st))
     } else {
         Ok(Value::String("no provider".to_string()))
     }

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use runmat_builtins::{builtin_functions, LogicalArray, Tensor, Value};
 
 use crate::{make_cell_with_shape, new_object_builtin};
@@ -48,11 +46,12 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
             make_cell_with_shape(gathered, ca.shape.clone())
         }
         Value::Struct(sv) => {
-            let mut fields = HashMap::with_capacity(sv.fields.len());
-            for (key, val) in &sv.fields {
-                fields.insert(key.clone(), gather_if_needed(val)?);
+            let mut gathered = sv.clone();
+            for value in gathered.fields.values_mut() {
+                let updated = gather_if_needed(value)?;
+                *value = updated;
             }
-            Ok(Value::Struct(runmat_builtins::StructValue { fields }))
+            Ok(Value::Struct(gathered))
         }
         Value::Object(obj) => {
             let mut cloned = obj.clone();

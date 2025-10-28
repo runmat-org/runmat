@@ -481,17 +481,19 @@ fn query_command(rest: &[Value]) -> Result<Value, String> {
             Ok(Value::Cell(cell))
         } else if target.trim().eq_ignore_ascii_case("last") {
             if let Some((identifier, message)) = mgr.last_warning.clone() {
-                let mut fields = HashMap::new();
-                fields.insert("identifier".to_string(), Value::from(identifier));
-                fields.insert("message".to_string(), Value::from(message));
-                fields.insert("state".to_string(), Value::from("last"));
-                Ok(Value::Struct(StructValue { fields }))
+                let mut st = StructValue::new();
+                st.fields
+                    .insert("identifier".to_string(), Value::from(identifier));
+                st.fields
+                    .insert("message".to_string(), Value::from(message));
+                st.fields.insert("state".to_string(), Value::from("last"));
+                Ok(Value::Struct(st))
             } else {
-                let mut fields = HashMap::new();
-                fields.insert("identifier".to_string(), Value::from(""));
-                fields.insert("message".to_string(), Value::from(""));
-                fields.insert("state".to_string(), Value::from("none"));
-                Ok(Value::Struct(StructValue { fields }))
+                let mut st = StructValue::new();
+                st.fields.insert("identifier".to_string(), Value::from(""));
+                st.fields.insert("message".to_string(), Value::from(""));
+                st.fields.insert("state".to_string(), Value::from("none"));
+                Ok(Value::Struct(st))
             }
         } else if target.trim().eq_ignore_ascii_case("backtrace") {
             Ok(state_struct_value(
@@ -827,23 +829,25 @@ impl WarningManager {
     }
 
     fn default_state_struct(&self) -> StructValue {
-        let mut fields = HashMap::new();
-        fields.insert("identifier".to_string(), Value::from("all".to_string()));
-        fields.insert(
+        let mut st = StructValue::new();
+        st.fields
+            .insert("identifier".to_string(), Value::from("all".to_string()));
+        st.fields.insert(
             "state".to_string(),
             Value::from(self.default_mode.keyword()),
         );
-        StructValue { fields }
+        st
     }
 
     fn state_struct_for(&self, identifier: &str, rule: WarningRule) -> StructValue {
-        let mut fields = HashMap::new();
-        fields.insert(
+        let mut st = StructValue::new();
+        st.fields.insert(
             "identifier".to_string(),
             Value::from(identifier.to_string()),
         );
-        fields.insert("state".to_string(), Value::from(rule.mode.keyword()));
-        StructValue { fields }
+        st.fields
+            .insert("state".to_string(), Value::from(rule.mode.keyword()));
+        st
     }
 
     fn lookup_mode(&self, identifier: &str) -> WarningRule {
@@ -909,13 +913,14 @@ fn build_error(identifier: &str, message: &str) -> String {
 }
 
 fn state_struct(identifier: &str, state: &str) -> StructValue {
-    let mut fields = HashMap::new();
-    fields.insert(
+    let mut st = StructValue::new();
+    st.fields.insert(
         "identifier".to_string(),
         Value::from(identifier.to_string()),
     );
-    fields.insert("state".to_string(), Value::from(state.to_string()));
-    StructValue { fields }
+    st.fields
+        .insert("state".to_string(), Value::from(state.to_string()));
+    st
 }
 
 fn state_struct_value(identifier: &str, state: &str) -> Value {
@@ -933,7 +938,6 @@ fn structs_to_cell(structs: Vec<StructValue>) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -1211,22 +1215,24 @@ mod tests {
     fn apply_state_struct_special_modes() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let mut backtrace_fields = HashMap::new();
-        backtrace_fields.insert("identifier".to_string(), Value::from("backtrace"));
-        backtrace_fields.insert("state".to_string(), Value::from("on"));
-        warning_builtin(vec![Value::Struct(StructValue {
-            fields: backtrace_fields,
-        })])
-        .expect("apply backtrace");
+        let mut backtrace = StructValue::new();
+        backtrace
+            .fields
+            .insert("identifier".to_string(), Value::from("backtrace"));
+        backtrace
+            .fields
+            .insert("state".to_string(), Value::from("on"));
+        warning_builtin(vec![Value::Struct(backtrace)]).expect("apply backtrace");
         assert!(with_manager(|mgr| mgr.backtrace_enabled));
 
-        let mut verbose_fields = HashMap::new();
-        verbose_fields.insert("identifier".to_string(), Value::from("verbose"));
-        verbose_fields.insert("state".to_string(), Value::from("default"));
-        warning_builtin(vec![Value::Struct(StructValue {
-            fields: verbose_fields,
-        })])
-        .expect("apply verbose");
+        let mut verbose = StructValue::new();
+        verbose
+            .fields
+            .insert("identifier".to_string(), Value::from("verbose"));
+        verbose
+            .fields
+            .insert("state".to_string(), Value::from("default"));
+        warning_builtin(vec![Value::Struct(verbose)]).expect("apply verbose");
         assert!(!with_manager(|mgr| mgr.verbose_enabled));
     }
 

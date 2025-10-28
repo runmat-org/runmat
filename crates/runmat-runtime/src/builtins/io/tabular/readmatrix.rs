@@ -1357,10 +1357,13 @@ mod tests {
     fn readmatrix_accepts_struct_options() {
         let path = unique_path("readmatrix_struct_opts");
         fs::write(&path, "header1,header2\n9,10\n11,12\n").expect("write sample file");
-        let mut fields = std::collections::HashMap::new();
-        fields.insert("Delimiter".to_string(), Value::from(","));
-        fields.insert("NumHeaderLines".to_string(), Value::Int(IntValue::I32(1)));
-        let options_struct = runmat_builtins::StructValue { fields };
+        let mut options_struct = runmat_builtins::StructValue::new();
+        options_struct
+            .fields
+            .insert("Delimiter".to_string(), Value::from(","));
+        options_struct
+            .fields
+            .insert("NumHeaderLines".to_string(), Value::Int(IntValue::I32(1)));
         let args = vec![Value::Struct(options_struct)];
         let result = readmatrix_builtin(Value::from(path.to_string_lossy().to_string()), args)
             .expect("readmatrix");

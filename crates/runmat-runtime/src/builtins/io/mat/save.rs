@@ -1037,10 +1037,14 @@ mod tests {
     #[test]
     fn save_struct_fields() {
         ensure_test_resolver();
-        let mut fields = HashMap::new();
-        fields.insert("foo".to_string(), Value::Num(1.0));
-        fields.insert("bar".to_string(), Value::Num(2.0));
-        set_workspace(&[("opts", Value::Struct(StructValue { fields }))]);
+        let mut opts_struct = StructValue::new();
+        opts_struct
+            .fields
+            .insert("foo".to_string(), Value::Num(1.0));
+        opts_struct
+            .fields
+            .insert("bar".to_string(), Value::Num(2.0));
+        set_workspace(&[("opts", Value::Struct(opts_struct))]);
         let dir = tempdir().unwrap();
         let path = dir.path().join("struct.mat");
         let args = vec![
@@ -1062,10 +1066,14 @@ mod tests {
     #[test]
     fn save_struct_field_selection() {
         ensure_test_resolver();
-        let mut fields = HashMap::new();
-        fields.insert("foo".to_string(), Value::Num(11.0));
-        fields.insert("bar".to_string(), Value::Num(22.0));
-        set_workspace(&[("opts", Value::Struct(StructValue { fields }))]);
+        let mut opts_struct = StructValue::new();
+        opts_struct
+            .fields
+            .insert("foo".to_string(), Value::Num(11.0));
+        opts_struct
+            .fields
+            .insert("bar".to_string(), Value::Num(22.0));
+        set_workspace(&[("opts", Value::Struct(opts_struct))]);
         let dir = tempdir().unwrap();
         let path = dir.path().join("struct_subset.mat");
         let args = vec![
@@ -1170,9 +1178,11 @@ mod tests {
     fn save_struct_without_filename_defaults_to_matlab_mat() {
         ensure_test_resolver();
         let _lock = lock_env_override();
-        let mut fields = HashMap::new();
-        fields.insert("alpha".to_string(), Value::Num(3.0));
-        set_workspace(&[("payload", Value::Struct(StructValue { fields }))]);
+        let mut payload_struct = StructValue::new();
+        payload_struct
+            .fields
+            .insert("alpha".to_string(), Value::Num(3.0));
+        set_workspace(&[("payload", Value::Struct(payload_struct))]);
         let dir = tempdir().unwrap();
         let target = dir.path().join("matlab_struct.mat");
         let target_str = target.to_string_lossy().to_string();

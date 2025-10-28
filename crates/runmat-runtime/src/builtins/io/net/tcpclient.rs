@@ -18,7 +18,6 @@ use super::tcpserver::{
     HANDLE_ID_FIELD,
 };
 
-use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -447,7 +446,7 @@ fn build_tcpclient_struct(
     local_addr: SocketAddr,
     options: &TcpClientOptions,
 ) -> Value {
-    let mut fields = HashMap::new();
+    let mut st = StructValue::new();
     let remote_addr = peer_addr.ip().to_string();
     let remote_port = peer_addr.port();
     let local_address = local_addr.ip().to_string();
@@ -458,67 +457,76 @@ fn build_tcpclient_struct(
         .clone()
         .unwrap_or_else(|| format!("tcpclient:{requested_host}:{remote_port}"));
 
-    fields.insert("Type".to_string(), Value::String("tcpclient".to_string()));
-    fields.insert("Name".to_string(), Value::String(name));
-    fields.insert("Address".to_string(), Value::String(remote_addr.clone()));
-    fields.insert("Port".to_string(), Value::Int(IntValue::U16(remote_port)));
-    fields.insert(
+    st.fields
+        .insert("Type".to_string(), Value::String("tcpclient".to_string()));
+    st.fields.insert("Name".to_string(), Value::String(name));
+    st.fields
+        .insert("Address".to_string(), Value::String(remote_addr.clone()));
+    st.fields
+        .insert("Port".to_string(), Value::Int(IntValue::U16(remote_port)));
+    st.fields.insert(
         "ServerAddress".to_string(),
         Value::String(remote_addr.clone()),
     );
-    fields.insert(
+    st.fields.insert(
         "ServerPort".to_string(),
         Value::Int(IntValue::U16(remote_port)),
     );
-    fields.insert("LocalAddress".to_string(), Value::String(local_address));
-    fields.insert(
+    st.fields
+        .insert("LocalAddress".to_string(), Value::String(local_address));
+    st.fields.insert(
         "LocalPort".to_string(),
         Value::Int(IntValue::U16(local_port)),
     );
-    fields.insert(
+    st.fields.insert(
         "RequestedAddress".to_string(),
         Value::String(requested_host.to_string()),
     );
-    fields.insert("Connected".to_string(), Value::Bool(true));
-    fields.insert("Status".to_string(), Value::String("connected".to_string()));
-    fields.insert(
+    st.fields.insert("Connected".to_string(), Value::Bool(true));
+    st.fields
+        .insert("Status".to_string(), Value::String("connected".to_string()));
+    st.fields.insert(
         "NumBytesAvailable".to_string(),
         Value::Int(IntValue::I32(0)),
     );
-    fields.insert("BytesAvailableFcn".to_string(), default_user_data());
-    fields.insert(
+    st.fields
+        .insert("BytesAvailableFcn".to_string(), default_user_data());
+    st.fields.insert(
         "BytesAvailableFcnMode".to_string(),
         Value::String("byte".to_string()),
     );
-    fields.insert(
+    st.fields.insert(
         "BytesAvailableFcnCount".to_string(),
         Value::Int(IntValue::I32(1)),
     );
-    fields.insert(
+    st.fields.insert(
         "ByteOrder".to_string(),
         Value::String(options.byte_order.clone()),
     );
-    fields.insert("Timeout".to_string(), Value::Num(options.timeout));
-    fields.insert(
+    st.fields
+        .insert("Timeout".to_string(), Value::Num(options.timeout));
+    st.fields.insert(
         "ConnectTimeout".to_string(),
         Value::Num(options.connect_timeout),
     );
-    fields.insert(
+    st.fields.insert(
         "InputBufferSize".to_string(),
         Value::Int(IntValue::I32(options.input_buffer_size)),
     );
-    fields.insert(
+    st.fields.insert(
         "OutputBufferSize".to_string(),
         Value::Int(IntValue::I32(options.output_buffer_size)),
     );
-    fields.insert("UserData".to_string(), options.user_data.clone());
-    fields.insert(
+    st.fields
+        .insert("UserData".to_string(), options.user_data.clone());
+    st.fields.insert(
         CLIENT_HANDLE_FIELD.to_string(),
         Value::Int(IntValue::U64(client_id)),
     );
-    fields.insert(HANDLE_ID_FIELD.to_string(), Value::Int(IntValue::I32(0)));
+    st.fields
+        .insert(HANDLE_ID_FIELD.to_string(), Value::Int(IntValue::I32(0)));
 
-    Value::Struct(StructValue { fields })
+    Value::Struct(st)
 }
 
 fn runtime_error(message_id: &'static str, message: String) -> String {

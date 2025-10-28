@@ -1,3 +1,5 @@
-//! Struct builtins placeholder module.
+//! Struct builtins.
 
-pub mod placeholder {}
+pub mod core;
+
+pub use core::*;

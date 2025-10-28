@@ -3048,6 +3048,29 @@ pub fn interpret_with_vars(
                     }
                     continue;
                 }
+                if name == "orderfields" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::structs::core::orderfields::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (ordered, permutation) = eval.into_values();
+                    stack.push(ordered);
+                    if out_count >= 2 {
+                        stack.push(permutation);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
                 // Special-case for 'find' to support [i,j,v] = find(A)
                 if name == "find" && !args.is_empty() {
                     let eval = match runmat_runtime::builtins::array::indexing::find::evaluate(

@@ -5,7 +5,6 @@
 //! `getenv` with no arguments returns a struct containing every environment variable visible to
 //! the current process.
 
-use std::collections::HashMap;
 use std::env;
 
 use runmat_builtins::{CharArray, StringArray, StructValue, Value};
@@ -255,11 +254,12 @@ fn getenv_builtin(args: Vec<Value>) -> Result<Value, String> {
 }
 
 fn getenv_all() -> Value {
-    let mut fields: HashMap<String, Value> = HashMap::new();
+    let mut st = StructValue::new();
     for (name, value) in env::vars() {
-        fields.insert(name, Value::CharArray(CharArray::new_row(&value)));
+        st.fields
+            .insert(name, Value::CharArray(CharArray::new_row(&value)));
     }
-    Value::Struct(StructValue { fields })
+    Value::Struct(st)
 }
 
 fn getenv_one(value: Value) -> Result<Value, String> {

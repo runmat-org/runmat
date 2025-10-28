@@ -5443,6 +5443,7 @@ dependencies = [
 name = "runmat-builtins"
 version = "0.0.17"
 dependencies = [
+ "indexmap 1.9.3",
  "inventory",
  "runmat-accelerate-api",
  "runmat-gc-api",

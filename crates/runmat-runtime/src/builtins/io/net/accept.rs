@@ -594,41 +594,45 @@ fn build_tcpclient_value(
     timeout: f64,
     byte_order: String,
 ) -> Value {
-    let mut fields = HashMap::new();
-    fields.insert("Type".to_string(), Value::String("tcpclient".to_string()));
-    fields.insert(
+    let mut st = StructValue::new();
+    st.fields
+        .insert("Type".to_string(), Value::String("tcpclient".to_string()));
+    st.fields.insert(
         "Address".to_string(),
         Value::String(peer_addr.ip().to_string()),
     );
-    fields.insert(
+    st.fields.insert(
         "Port".to_string(),
         Value::Int(IntValue::U16(peer_addr.port())),
     );
-    fields.insert(
+    st.fields.insert(
         "ServerAddress".to_string(),
         Value::String(server_state.local_addr.ip().to_string()),
     );
-    fields.insert(
+    st.fields.insert(
         "ServerPort".to_string(),
         Value::Int(IntValue::U16(server_state.local_addr.port())),
     );
-    fields.insert("Connected".to_string(), Value::Bool(true));
-    fields.insert("Status".to_string(), Value::String("connected".to_string()));
-    fields.insert(
+    st.fields.insert("Connected".to_string(), Value::Bool(true));
+    st.fields
+        .insert("Status".to_string(), Value::String("connected".to_string()));
+    st.fields.insert(
         "NumBytesAvailable".to_string(),
         Value::Int(IntValue::I32(0)),
     );
-    fields.insert("BytesAvailableFcn".to_string(), default_user_data());
-    fields.insert(
+    st.fields
+        .insert("BytesAvailableFcn".to_string(), default_user_data());
+    st.fields.insert(
         "BytesAvailableFcnMode".to_string(),
         Value::String("byte".to_string()),
     );
-    fields.insert(
+    st.fields.insert(
         "BytesAvailableFcnCount".to_string(),
         Value::Int(IntValue::I32(1)),
     );
-    fields.insert("ByteOrder".to_string(), Value::String(byte_order));
-    fields.insert(
+    st.fields
+        .insert("ByteOrder".to_string(), Value::String(byte_order));
+    st.fields.insert(
         "Timeout".to_string(),
         Value::Num(if timeout.is_infinite() {
             f64::INFINITY
@@ -636,16 +640,17 @@ fn build_tcpclient_value(
             timeout
         }),
     );
-    fields.insert("UserData".to_string(), default_user_data());
-    fields.insert(
+    st.fields
+        .insert("UserData".to_string(), default_user_data());
+    st.fields.insert(
         CLIENT_HANDLE_FIELD.to_string(),
         Value::Int(IntValue::U64(client_id)),
     );
-    fields.insert(
+    st.fields.insert(
         HANDLE_ID_FIELD.to_string(),
         Value::Int(IntValue::U64(server_state.id)),
     );
-    Value::Struct(StructValue { fields })
+    Value::Struct(st)
 }
 
 fn runtime_error(message_id: &'static str, message: String) -> String {
