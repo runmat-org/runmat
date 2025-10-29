@@ -14,7 +14,7 @@ We update `M` channels over `T` steps with `Y = alpha .* Y + beta .* X(:, t)`, t
 
 ---
 
-## Core implementation in RunMat (MATLAB‑syntax)
+## Core implementation in RunMat (MATLAB-syntax)
 
 ```matlab
 rng(0);
