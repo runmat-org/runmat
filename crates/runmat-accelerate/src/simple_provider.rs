@@ -3,9 +3,9 @@ use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
     AccelProvider, CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest,
-    GpuTensorHandle, HostTensorOwned, HostTensorView, ImfilterOptions, ProviderFindResult,
-    ProviderPrecision, SetdiffOptions, SetdiffResult, SortComparison, SortResult,
-    SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    GpuTensorHandle, HostTensorOwned, HostTensorView, ImfilterOptions, PagefunRequest,
+    ProviderFindResult, ProviderPrecision, SetdiffOptions, SetdiffResult, SortComparison,
+    SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::Tensor;
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -2512,6 +2512,12 @@ impl AccelProvider for InProcessProvider {
             device_id: 0,
             buffer_id: id,
         })
+    }
+
+    fn pagefun(&self, _request: &PagefunRequest) -> Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "pagefun: in-process provider does not implement GPU page operations"
+        ))
     }
 
     fn sub2ind(

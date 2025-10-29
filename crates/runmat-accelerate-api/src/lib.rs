@@ -73,6 +73,20 @@ pub struct ReduceDimResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PagefunOp {
+    Mtimes,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PagefunRequest {
+    pub op: PagefunOp,
+    pub inputs: Vec<GpuTensorHandle>,
+    pub output_shape: Vec<usize>,
+    pub page_dims: Vec<usize>,
+    pub input_page_dims: Vec<Vec<usize>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FindDirection {
     First,
     Last,
@@ -765,6 +779,9 @@ pub trait AccelProvider: Send + Sync {
         _b: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("matmul not supported by provider"))
+    }
+    fn pagefun(&self, _request: &PagefunRequest) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("pagefun not supported by provider"))
     }
     fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("transpose not supported by provider"))

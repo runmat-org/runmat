@@ -2848,6 +2848,35 @@ pub fn interpret_with_vars(
                     );
                 }
                 args.reverse();
+                if name == "gather" {
+                    let eval = match runmat_runtime::builtins::acceleration::gpu::gather::evaluate(
+                        &args,
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    let len = eval.len();
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if len == 1 {
+                        if out_count > 1 {
+                            vm_bail!(mex("TooManyOutputs", "gather: too many output arguments"));
+                        }
+                        stack.push(eval.into_first());
+                        continue;
+                    }
+                    if out_count != len {
+                        vm_bail!(mex(
+                            "TooManyOutputs",
+                            "gather: number of outputs must match number of inputs"
+                        ));
+                    }
+                    for value in eval.into_outputs() {
+                        stack.push(value);
+                    }
+                    continue;
+                }
                 if name == "load" {
                     let eval = match runmat_runtime::builtins::io::mat::load::evaluate(&args) {
                         Ok(eval) => eval,

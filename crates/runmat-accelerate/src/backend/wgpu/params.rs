@@ -205,7 +205,10 @@ pub struct MatmulParams {
     pub lda: u32,
     pub ldb: u32,
     pub ldc: u32,
-    pub _pad: [u32; 2],
+    pub offset_a: u32,
+    pub offset_b: u32,
+    pub offset_out: u32,
+    pub _pad: u32,
 }
 
 #[repr(C)]

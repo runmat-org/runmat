@@ -3,7 +3,8 @@ use once_cell::sync::OnceCell;
 use runmat_accelerate::fusion_residency;
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, CorrcoefOptions, FspecialRequest, GpuTensorHandle,
-    HostTensorOwned, HostTensorView, ProviderPrecision, UniqueOptions, UniqueResult,
+    HostTensorOwned, HostTensorView, PagefunRequest, ProviderPrecision, UniqueOptions,
+    UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
@@ -88,6 +89,10 @@ impl AccelProvider for TestProvider {
     fn logical_isreal(&self, handle: &GpuTensorHandle) -> anyhow::Result<bool> {
         let _ = self.pull(handle)?;
         Ok(true)
+    }
+
+    fn pagefun(&self, _request: &PagefunRequest) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow!("pagefun not supported by test provider"))
     }
 
     fn fspecial(&self, request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {

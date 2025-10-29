@@ -7,9 +7,9 @@ use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows,
     CovNormalization, CovRows, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
     HostTensorOwned, HostTensorView, ImfilterOptions, ImfilterPadding, IsMemberOptions,
-    IsMemberResult, ProviderFindResult, ProviderPrecision, ReduceDimResult, SetdiffOptions,
-    SetdiffResult, SortComparison, SortOrder, SortResult, SortRowsColumnSpec, UnionOptions,
-    UnionResult, UniqueOptions, UniqueResult,
+    IsMemberResult, PagefunOp, PagefunRequest, ProviderFindResult, ProviderPrecision,
+    ReduceDimResult, SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult,
+    SortRowsColumnSpec, UnionOptions, UnionResult, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::Tensor;
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -50,6 +50,7 @@ pub struct WgpuProvider {
     device: wgpu::Device,
     queue: wgpu::Queue,
     adapter_info: wgpu::AdapterInfo,
+    adapter_limits: wgpu::Limits,
     buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
     next_id: AtomicU64,
     pipelines: WgpuPipelines,
@@ -69,6 +70,30 @@ struct BufferEntry {
     len: usize,
     shape: Vec<usize>,
     precision: NumericPrecision,
+}
+
+fn canonical_vendor_name(info: &wgpu::AdapterInfo) -> String {
+    match info.vendor {
+        0x10DE => "NVIDIA".to_string(),
+        0x1002 | 0x1022 => "AMD".to_string(),
+        0x8086 => "Intel".to_string(),
+        0x106B => "Apple".to_string(),
+        0x13B5 => "ARM".to_string(),
+        0x5143 => "Qualcomm".to_string(),
+        0x1414 => "Microsoft".to_string(),
+        0x1AE0 => "Google".to_string(),
+        0x1C5C => "Huawei".to_string(),
+        0 => info
+            .name
+            .split_whitespace()
+            .next()
+            .unwrap_or("unknown")
+            .to_string(),
+        other => {
+            let prefix = info.name.split_whitespace().next().unwrap_or("vendor");
+            format!("{prefix} (0x{other:04x})")
+        }
+    }
 }
 
 const LOGICAL_AND_SHADER_F32: &str = r#"
@@ -862,6 +887,62 @@ fn product_checked(dims: &[usize]) -> Option<usize> {
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
 }
 
+fn canonical_matrix_shape(shape: &[usize]) -> Vec<usize> {
+    match shape.len() {
+        0 => vec![1, 1],
+        1 => vec![1, shape[0]],
+        _ => {
+            let mut out = shape.to_vec();
+            if out.len() == 1 {
+                out.push(1);
+            }
+            out
+        }
+    }
+}
+
+fn pad_dims(mut dims: Vec<usize>, rank: usize) -> Vec<usize> {
+    if dims.len() < rank {
+        dims.resize(rank, 1);
+    } else if dims.len() > rank {
+        dims.truncate(rank);
+    }
+    dims
+}
+
+fn compute_page_strides(dims: &[usize]) -> Vec<usize> {
+    let mut stride = 1usize;
+    let mut out = Vec::with_capacity(dims.len());
+    for &dim in dims {
+        out.push(stride);
+        stride = stride.saturating_mul(dim.max(1));
+    }
+    out
+}
+
+fn decode_multi_index(mut index: usize, dims: &[usize], out: &mut [usize]) {
+    for (dim, &extent) in dims.iter().enumerate() {
+        if extent == 0 {
+            out[dim] = 0;
+        } else {
+            out[dim] = index % extent;
+            index /= extent;
+        }
+    }
+}
+
+fn broadcast_linear_index(dims: &[usize], strides: &[usize], multi_index: &[usize]) -> usize {
+    let mut linear = 0usize;
+    for ((&extent, &stride), &coord) in dims.iter().zip(strides.iter()).zip(multi_index.iter()) {
+        if extent == 0 {
+            return 0;
+        }
+        let actual = if extent == 1 { 0 } else { coord };
+        linear += actual * stride;
+    }
+    linear
+}
+
 fn gaussian_normalizer(rows: usize, cols: usize, sigma: f64) -> f64 {
     if sigma <= 0.0 {
         return 0.0;
@@ -1432,6 +1513,7 @@ impl WgpuProvider {
             device,
             queue,
             adapter_info,
+            adapter_limits: limits.clone(),
             buffers: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             pipelines,
@@ -1494,6 +1576,29 @@ impl WgpuProvider {
                 contents: bytes_of(data),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             })
+    }
+
+    fn prepare_matmul_pipeline(&self) {
+        let mut enc = self
+            .device_ref()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-matmul-warmup"),
+            });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-matmul-warmup-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.matmul.pipeline);
+        }
+        self.submit(enc);
+
+        let enc = self
+            .device_ref()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-matmul-flush-gap"),
+            });
+        self.submit(enc);
     }
 
     fn submit(&self, encoder: wgpu::CommandEncoder) {
@@ -4063,29 +4168,8 @@ impl WgpuProvider {
         if len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
         }
-        {
-            let mut enc =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-matmul-noop"),
-                    });
-            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-matmul-noop-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.matmul.pipeline);
-            drop(pass);
-            self.submit(enc);
-        }
+        self.prepare_matmul_pipeline();
         self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-matmul-flush-gap"),
-                });
-            self.submit(enc);
-        }
         let params = crate::backend::wgpu::params::MatmulParams {
             m: m as u32,
             n: n as u32,
@@ -4093,7 +4177,10 @@ impl WgpuProvider {
             lda: entry_a.shape[0] as u32,
             ldb: entry_b.shape[0] as u32,
             ldc: m as u32,
-            _pad: [0, 0],
+            offset_a: 0,
+            offset_b: 0,
+            offset_out: 0,
+            _pad: 0,
         };
         let params_buffer = self.uniform_buffer(&params, "runmat-matmul-params");
         let bg = self
@@ -4137,6 +4224,208 @@ impl WgpuProvider {
             groups_y,
         );
         Ok(self.register_existing_buffer(out_buffer, out_shape, len))
+    }
+
+    pub(crate) fn pagefun_exec(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
+        match request.op {
+            PagefunOp::Mtimes => self.pagefun_mtimes_exec(request),
+        }
+    }
+
+    fn pagefun_mtimes_exec(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
+        ensure!(
+            request.inputs.len() == 2,
+            "pagefun: @mtimes expects exactly two inputs"
+        );
+        ensure!(
+            request.input_page_dims.len() == request.inputs.len(),
+            "pagefun: input metadata mismatch"
+        );
+
+        let lhs = &request.inputs[0];
+        let rhs = &request.inputs[1];
+        let entry_a = self.get_entry(lhs)?;
+        let entry_b = self.get_entry(rhs)?;
+
+        let canonical_a = canonical_matrix_shape(&entry_a.shape);
+        let canonical_b = canonical_matrix_shape(&entry_b.shape);
+        ensure!(
+            canonical_a.len() >= 2 && canonical_b.len() >= 2,
+            "pagefun: @mtimes operands must be at least 2-D"
+        );
+
+        let rows = canonical_a[0];
+        let k_a = canonical_a[1];
+        let k_b = canonical_b[0];
+        let cols = canonical_b[1];
+        ensure!(
+            k_a == k_b,
+            "pagefun: inner matrix dimensions must agree ({} vs {})",
+            k_a,
+            k_b
+        );
+
+        let rank = request.page_dims.len();
+        let lhs_dims = pad_dims(request.input_page_dims[0].clone(), rank);
+        let rhs_dims = pad_dims(request.input_page_dims[1].clone(), rank);
+        let lhs_strides = compute_page_strides(&lhs_dims);
+        let rhs_strides = compute_page_strides(&rhs_dims);
+
+        let lhs_page_size = rows
+            .checked_mul(k_a)
+            .ok_or_else(|| anyhow!("pagefun: lhs page size overflow"))?;
+        let rhs_page_size = k_b
+            .checked_mul(cols)
+            .ok_or_else(|| anyhow!("pagefun: rhs page size overflow"))?;
+        let out_page_size = rows
+            .checked_mul(cols)
+            .ok_or_else(|| anyhow!("pagefun: output page size overflow"))?;
+
+        let page_volume = if rank == 0 {
+            1
+        } else {
+            product_checked(&request.page_dims)
+                .ok_or_else(|| anyhow!("pagefun: page dimensions overflow"))?
+        };
+
+        let total_len = out_page_size
+            .checked_mul(page_volume)
+            .ok_or_else(|| anyhow!("pagefun: output size overflow"))?;
+        let out_buffer = self.create_storage_buffer(total_len, "runmat-pagefun-mtimes-out");
+
+        if total_len == 0 {
+            return Ok(self.register_existing_buffer(
+                out_buffer,
+                request.output_shape.clone(),
+                total_len,
+            ));
+        }
+
+        let m_u32 = u32::try_from(rows)
+            .map_err(|_| anyhow!("pagefun: matrix row count exceeds GPU limits"))?;
+        let n_u32 = u32::try_from(cols)
+            .map_err(|_| anyhow!("pagefun: matrix column count exceeds GPU limits"))?;
+        let k_u32 = u32::try_from(k_a)
+            .map_err(|_| anyhow!("pagefun: shared dimension exceeds GPU limits"))?;
+
+        let lda = m_u32;
+        let ldb = k_u32;
+        let ldc = m_u32;
+
+        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
+            n_u32,
+            crate::backend::wgpu::config::MATMUL_TILE,
+        );
+        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
+            m_u32,
+            crate::backend::wgpu::config::MATMUL_TILE,
+        );
+
+        self.prepare_matmul_pipeline();
+        self.device_ref().poll(wgpu::Maintain::Poll);
+
+        let mut multi_index = vec![0usize; rank];
+        for page_idx in 0..page_volume {
+            if rank > 0 {
+                decode_multi_index(page_idx, &request.page_dims, &mut multi_index);
+            }
+
+            let lhs_linear = broadcast_linear_index(&lhs_dims, &lhs_strides, &multi_index);
+            let rhs_linear = broadcast_linear_index(&rhs_dims, &rhs_strides, &multi_index);
+
+            let lhs_offset_elements = lhs_linear
+                .checked_mul(lhs_page_size)
+                .ok_or_else(|| anyhow!("pagefun: lhs offset overflow"))?;
+            let rhs_offset_elements = rhs_linear
+                .checked_mul(rhs_page_size)
+                .ok_or_else(|| anyhow!("pagefun: rhs offset overflow"))?;
+            let out_offset_elements = page_idx
+                .checked_mul(out_page_size)
+                .ok_or_else(|| anyhow!("pagefun: output offset overflow"))?;
+
+            let lhs_end = lhs_offset_elements
+                .checked_add(lhs_page_size)
+                .ok_or_else(|| anyhow!("pagefun: lhs offset overflow"))?;
+            let rhs_end = rhs_offset_elements
+                .checked_add(rhs_page_size)
+                .ok_or_else(|| anyhow!("pagefun: rhs offset overflow"))?;
+            let out_end = out_offset_elements
+                .checked_add(out_page_size)
+                .ok_or_else(|| anyhow!("pagefun: output offset overflow"))?;
+
+            ensure!(
+                lhs_end <= entry_a.len,
+                "pagefun: lhs page out of bounds (page {})",
+                page_idx
+            );
+            ensure!(
+                rhs_end <= entry_b.len,
+                "pagefun: rhs page out of bounds (page {})",
+                page_idx
+            );
+            ensure!(
+                out_end <= total_len,
+                "pagefun: output page out of bounds (page {})",
+                page_idx
+            );
+
+            let offset_a_u32 = u32::try_from(lhs_offset_elements)
+                .map_err(|_| anyhow!("pagefun: lhs offset exceeds GPU limits"))?;
+            let offset_b_u32 = u32::try_from(rhs_offset_elements)
+                .map_err(|_| anyhow!("pagefun: rhs offset exceeds GPU limits"))?;
+            let offset_out_u32 = u32::try_from(out_offset_elements)
+                .map_err(|_| anyhow!("pagefun: output offset exceeds GPU limits"))?;
+
+            let params = crate::backend::wgpu::params::MatmulParams {
+                m: m_u32,
+                n: n_u32,
+                k: k_u32,
+                lda,
+                ldb,
+                ldc,
+                offset_a: offset_a_u32,
+                offset_b: offset_b_u32,
+                offset_out: offset_out_u32,
+                _pad: 0,
+            };
+
+            let params_buffer = self.uniform_buffer(&params, "runmat-pagefun-mtimes-params");
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-pagefun-mtimes-bind"),
+                    layout: &self.pipelines.matmul.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry_a.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: entry_b.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+
+            crate::backend::wgpu::dispatch::matmul::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.matmul.pipeline,
+                &bind_group,
+                groups_x,
+                groups_y,
+            );
+        }
+
+        Ok(self.register_existing_buffer(out_buffer, request.output_shape.clone(), total_len))
     }
 
     pub(crate) fn covariance_exec(
@@ -6771,6 +7060,9 @@ impl AccelProvider for WgpuProvider {
     fn matmul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.matmul_exec(a, b)
     }
+    fn pagefun(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
+        self.pagefun_exec(request)
+    }
 
     fn covariance(
         &self,
@@ -7125,12 +7417,18 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn device_info_struct(&self) -> ApiDeviceInfo {
+        let backend = format!("{:?}", self.adapter_info.backend).to_ascii_lowercase();
+        let memory_bytes = if self.adapter_limits.max_buffer_size > 0 {
+            Some(self.adapter_limits.max_buffer_size)
+        } else {
+            None
+        };
         ApiDeviceInfo {
             device_id: self.device_id,
             name: self.adapter_info.name.clone(),
-            vendor: self.adapter_info.vendor.to_string(),
-            memory_bytes: None,
-            backend: Some(format!("{:?}", self.adapter_info.backend)),
+            vendor: canonical_vendor_name(&self.adapter_info),
+            memory_bytes,
+            backend: Some(backend),
         }
     }
 }
