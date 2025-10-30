@@ -246,6 +246,14 @@ fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> Result<Value, String>
     let mut outputs: Vec<Value> = Vec::with_capacity(dims.len());
     for tensor in subscripts {
         if want_gpu {
+            #[cfg(all(test, feature = "wgpu"))]
+            {
+                if runmat_accelerate_api::provider().is_none() {
+                    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                    );
+                }
+            }
             if let Some(provider) = runmat_accelerate_api::provider() {
                 let view = HostTensorView {
                     data: &tensor.data,
@@ -269,6 +277,16 @@ fn try_gpu_ind2sub(
     total: usize,
     indices: &Value,
 ) -> Result<Option<Value>, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if let Value::GpuTensor(h) = indices {
+            if h.device_id != 0 {
+                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                );
+            }
+        }
+    }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),

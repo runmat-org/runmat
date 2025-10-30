@@ -363,6 +363,15 @@ fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> Result<Opti
         return Ok(None);
     }
 
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        // Reassert WGPU provider only when operands are WGPU handles (device_id != 0).
+        if operands.iter().any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0)) {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     let Some(provider) = runmat_accelerate_api::provider() else {
         return Ok(None);
     };
@@ -556,6 +565,14 @@ impl FinalOutput {
         match self {
             FinalOutput::Real(tensor) => {
                 if wants_gpu {
+                    #[cfg(all(test, feature = "wgpu"))]
+                    {
+                        if runmat_accelerate_api::provider().is_none() {
+                            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                            );
+                        }
+                    }
                     if let Some(provider) = runmat_accelerate_api::provider() {
                         let view = HostTensorView {
                             data: &tensor.data,

@@ -191,6 +191,16 @@ register_builtin_doc_text!("who", DOC_MD);
     accel = "cpu"
 )]
 fn who_builtin(args: Vec<Value>) -> Result<Value, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        // Only install the WGPU provider if none is currently registered to avoid clobbering
+        // the in-process provider used by non-WGPU tests.
+        if runmat_accelerate_api::provider().is_none() {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
         gathered.push(gather_if_needed(&arg)?);

@@ -397,6 +397,14 @@ fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
 }
 
 fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     let shape_vec = shape.to_vec();
     if let Some(provider) = runmat_accelerate_api::provider() {
         let attempt = if handle.shape == shape_vec {

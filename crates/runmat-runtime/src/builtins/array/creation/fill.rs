@@ -567,6 +567,14 @@ fn fill_like_gpu(
     shape: &[usize],
     prototype: &GpuTensorHandle,
 ) -> Result<Value, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if prototype.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     let value = fill.as_real()?;
     if let Some(provider) = runmat_accelerate_api::provider() {
         let attempt = if prototype.shape == shape {

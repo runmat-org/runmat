@@ -12,10 +12,10 @@ pub fn build_sub2ind_shader(
     assert_eq!(dims.len(), scalar_mask.len());
 
     let mut shader = String::new();
-    writeln!(shader, "struct Tensor {{ data: array<{scalar_ty}>; }};").unwrap();
+    writeln!(shader, "struct Tensor {{ data: array<{scalar_ty}>, }};").unwrap();
     writeln!(
         shader,
-        "struct ErrorState {{ code: atomic<u32>, dim: atomic<u32>, extra: atomic<u32>, pad: atomic<u32> }};"
+        "struct ErrorState {{ code: u32, dim: u32, extra: u32, pad: u32 }};"
     )
     .unwrap();
     writeln!(shader, "struct Params {{ len: u32, }}").unwrap();
@@ -46,6 +46,12 @@ pub fn build_sub2ind_shader(
     )
     .unwrap();
     writeln!(shader, "const EPSILON: {scalar_ty} = {epsilon};").unwrap();
+    let max_val = if scalar_ty == "f32" { "3.4028234663852886e38" } else { "1.7976931348623157e308" };
+    writeln!(
+        shader,
+        "fn isfinite_scalar(x: {scalar_ty}) -> bool {{ return (x == x) && (abs(x) < {scalar_ty}({max_val})); }}"
+    )
+    .unwrap();
     for (idx, dim) in dims.iter().enumerate() {
         writeln!(shader, "const DIM_{idx}: u32 = {dim}u;").unwrap();
     }
@@ -58,12 +64,10 @@ pub fn build_sub2ind_shader(
     writeln!(
         shader,
         "fn set_error(code: u32, dim: u32, extra: u32) {{
-    let res = atomicCompareExchangeWeak(&error.code, 0u, code);
-    if (!res.exchanged) {{
-        return;
-    }}
-    atomicStore(&error.dim, dim);
-    atomicStore(&error.extra, extra);
+    if (error.code != 0u) {{ return; }}
+    error.code = code;
+    error.dim = dim;
+    error.extra = extra;
 }}"
     )
     .unwrap();
@@ -75,7 +79,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     if (idx >= params.len) {{
         return;
     }}
-    if (atomicLoad(&error.code) != 0u) {{
+    if (error.code != 0u) {{
         return;
     }}
     var offset: u32 = 0u;"
@@ -87,12 +91,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         writeln!(
             shader,
             "    {{
-        let raw: {scalar_ty} = if (SCALAR_MASK_{idx} != 0u) {{
-            input{idx}.data[0u]
+        var raw: {scalar_ty};
+        if (SCALAR_MASK_{idx} != 0u) {{
+            raw = input{idx}.data[0u];
         }} else {{
-            input{idx}.data[idx]
-        }};
-        if (!isFinite(raw)) {{
+            raw = input{idx}.data[idx];
+        }}
+        if (!isfinite_scalar(raw)) {{
             set_error(1u, {dim_id}u, 0u);
             return;
         }}

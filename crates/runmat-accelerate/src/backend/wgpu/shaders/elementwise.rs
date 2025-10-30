@@ -294,6 +294,10 @@ struct Params {
     _pad1: u32,
     scalar: f64,
     scalar_pad: f64,
+    scalar_pad2: f64,
+    scalar_pad3: f64,
+    scalar_pad4: f64,
+    scalar_pad5: f64,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -336,6 +340,7 @@ struct Params {
     total: u32,
     scalar: f32,
     scalar_pad: vec3<f32>,
+    scalar_pad2: vec4<f32>,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;

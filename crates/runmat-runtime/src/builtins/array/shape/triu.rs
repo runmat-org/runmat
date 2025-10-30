@@ -326,6 +326,14 @@ fn triu_complex_tensor(mut tensor: ComplexTensor, offset: isize) -> Result<Compl
 }
 
 fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> Result<Value, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         match provider.triu(&handle, offset) {
             Ok(out) => return Ok(Value::GpuTensor(out)),

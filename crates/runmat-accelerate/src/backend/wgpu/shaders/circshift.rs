@@ -1,9 +1,11 @@
 pub const CIRCSHIFT_SHADER_F64: &str = r#"
-const MAX_RANK: u32 = 8u;
+const MAX_RANK: u32 = 128u;
 
 struct PackedValue {
     value: u32,
-    _pad: vec3<u32>,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 };
 
 alias PackedArray = array<PackedValue, MAX_RANK>;
@@ -76,11 +78,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 pub const CIRCSHIFT_SHADER_F32: &str = r#"
-const MAX_RANK: u32 = 8u;
+const MAX_RANK: u32 = 128u;
 
 struct PackedValue {
     value: u32,
-    _pad: vec3<u32>,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 };
 
 alias PackedArray = array<PackedValue, MAX_RANK>;

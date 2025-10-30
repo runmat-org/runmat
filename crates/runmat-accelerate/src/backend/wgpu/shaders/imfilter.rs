@@ -1,5 +1,5 @@
 pub const IMFILTER_SHADER_F64: &str = r#"
-const MAX_RANK: u32 = 8u;
+const MAX_RANK: u32 = 512u;
 
 struct Tensor {
     data: array<f64>,
@@ -13,8 +13,8 @@ struct KernelValues {
     data: array<f64>,
 };
 
-struct PackedValueU32 { value: u32, _pad: vec3<u32> }
-struct PackedValueI32 { value: i32, _pad: vec3<i32> }
+struct PackedValueU32 { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 }
+struct PackedValueI32 { value: i32, _pad0: i32, _pad1: i32, _pad2: i32 }
 alias PackedArrayU32 = array<PackedValueU32, MAX_RANK>;
 alias PackedArrayI32 = array<PackedValueI32, MAX_RANK>;
 
@@ -177,7 +177,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 pub const IMFILTER_SHADER_F32: &str = r#"
-const MAX_RANK: u32 = 8u;
+const MAX_RANK: u32 = 512u;
 
 struct Tensor {
     data: array<f32>,
@@ -191,8 +191,8 @@ struct KernelValues {
     data: array<f32>,
 };
 
-struct PackedValueU32 { value: u32, _pad: vec3<u32> }
-struct PackedValueI32 { value: i32, _pad: vec3<i32> }
+struct PackedValueU32 { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 }
+struct PackedValueI32 { value: i32, _pad0: i32, _pad1: i32, _pad2: i32 }
 alias PackedArrayU32 = array<PackedValueU32, MAX_RANK>;
 alias PackedArrayI32 = array<PackedValueI32, MAX_RANK>;
 
@@ -206,7 +206,9 @@ struct Params {
     _pad0: u32,
     _pad1: u32,
     constant_value: f32,
-    _pad_const: vec3<f32>,
+    _pad_const0: f32,
+    _pad_const1: f32,
+    _pad_const2: f32,
     image_shape: PackedArrayU32,
     image_strides: PackedArrayU32,
     output_shape: PackedArrayU32,

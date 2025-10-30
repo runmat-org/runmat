@@ -424,6 +424,14 @@ fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> Result<Value, String> {
     if steps == 0 {
         return Ok(Value::GpuTensor(handle));
     }
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(out) = rot90_gpu_via_provider(provider, &handle, steps) {
             return Ok(Value::GpuTensor(out));

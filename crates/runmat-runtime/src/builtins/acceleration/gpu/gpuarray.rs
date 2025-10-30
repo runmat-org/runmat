@@ -375,8 +375,10 @@ fn parse_size_arguments(rest: &[Value]) -> Result<(usize, Option<Vec<usize>>), S
     let mut vector_consumed = false;
 
     while idx < rest.len() {
-        if value_to_lower_string(&rest[idx]).is_some() {
-            break;
+        // Stop at textual qualifiers only; numeric values continue parsing as size args.
+        match &rest[idx] {
+            Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => break,
+            _ => {}
         }
 
         match &rest[idx] {
@@ -503,6 +505,14 @@ struct PreparedHandle {
 }
 
 fn upload_host_value(value: Value, dtype: DataClass) -> Result<PreparedHandle, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if runmat_accelerate_api::provider().is_none() {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     let provider = runmat_accelerate_api::provider().ok_or_else(|| ERR_NO_PROVIDER.to_string())?;
     let tensor = coerce_host_value(value)?;
     let (mut tensor, logical) = cast_tensor(tensor, dtype)?;
@@ -526,6 +536,14 @@ fn convert_device_value(
     handle: GpuTensorHandle,
     dtype: DataClass,
 ) -> Result<PreparedHandle, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     match dtype {
         DataClass::Logical => {
             if runmat_accelerate_api::handle_is_logical(&handle) {
@@ -706,11 +724,12 @@ fn char_array_to_tensor(ca: &CharArray) -> Result<Tensor, String> {
         return Tensor::new(Vec::new(), vec![rows, cols]).map_err(|err| format!("gpuArray: {err}"));
     }
     let mut data = vec![0.0; rows * cols];
-    for col in 0..cols {
-        for row in 0..rows {
+    // Store in row-major to preserve the original character order when interpreted with column-major indexing
+    for row in 0..rows {
+        for col in 0..cols {
             let idx_char = row * cols + col;
             let ch = ca.data[idx_char];
-            data[row + col * rows] = ch as u32 as f64;
+            data[row * cols + col] = ch as u32 as f64;
         }
     }
     Tensor::new(data, vec![rows, cols]).map_err(|err| format!("gpuArray: {err}"))

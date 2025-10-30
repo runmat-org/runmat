@@ -257,6 +257,15 @@ fn filter2_gpu(
     options: &ImfilterOptions,
 ) -> Result<Value, String> {
     let kernel_clone = kernel_value.clone();
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        let kernel_is_wgpu = matches!(kernel_clone, Value::GpuTensor(ref h) if h.device_id != 0);
+        if kernel_is_wgpu || image_handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => {
@@ -638,8 +647,12 @@ mod tests {
 
         assert_eq!(gpu_tensor.shape, expected.shape);
         assert_eq!(gpu_tensor.data.len(), expected.data.len());
+        let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
         for (gpu, cpu) in gpu_tensor.data.iter().zip(expected.data.iter()) {
-            assert!((gpu - cpu).abs() < 1e-9, "{gpu} vs {cpu}");
+            assert!((gpu - cpu).abs() < tol, "{gpu} vs {cpu}");
         }
 
         let _ = provider.free(&kernel_handle);
@@ -696,8 +709,12 @@ mod tests {
 
         assert_eq!(gpu_tensor.shape, expected.shape);
         assert_eq!(gpu_tensor.data.len(), expected.data.len());
+        let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
         for (gpu, cpu) in gpu_tensor.data.iter().zip(expected.data.iter()) {
-            assert!((gpu - cpu).abs() < 1e-9, "{gpu} vs {cpu}");
+            assert!((gpu - cpu).abs() < tol, "{gpu} vs {cpu}");
         }
 
         let _ = provider.free(&kernel_handle);

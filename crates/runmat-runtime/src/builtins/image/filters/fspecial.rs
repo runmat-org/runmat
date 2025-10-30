@@ -413,6 +413,14 @@ fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> Result<Value, S
         return Ok(Value::Tensor(tensor));
     }
 
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if runmat_accelerate_api::provider().is_none() {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         match spec
             .to_request()
@@ -1140,18 +1148,19 @@ mod tests {
     fn fspecial_gaussian_size_sigma() {
         let args = vec![Value::from(7), Value::from(2.0)];
         let result = fspecial_builtin(Value::from("gaussian"), args).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![7, 7]);
-                let center = t.rows / 2;
-                let col = center;
-                let idx = col * t.rows + center;
-                assert!(t.data[idx] > 0.0);
-                let sum: f64 = t.data.iter().sum();
-                assert_close(sum, 1.0, 1e-12);
-            }
+        let tensor = match result {
+            Value::Tensor(t) => t,
+            Value::GpuTensor(h) =>
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather"),
             other => panic!("expected tensor, got {other:?}"),
-        }
+        };
+        assert_eq!(tensor.shape, vec![7, 7]);
+        let center = tensor.rows / 2;
+        let col = center;
+        let idx = col * tensor.rows + center;
+        assert!(tensor.data[idx] > 0.0);
+        let sum: f64 = tensor.data.iter().sum();
+        assert_close(sum, 1.0, 1e-12);
     }
 
     #[test]

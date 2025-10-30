@@ -556,6 +556,16 @@ impl FusionGroupPlan {
         let mut shader = String::new();
         shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}> }};\n"));
         shader.push_str("struct Params {\n    len: u32;\n    _pad0: u32;\n    _pad1: u32;\n    _pad2: u32;\n}\n\n");
+        // Provide portable stubs; avoid relying on backend builtins that may be missing
+        if scalar_ty == "f32" {
+            shader.push_str("fn isNan(x: f32) -> bool { return x != x; }\n");
+            shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
+            shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n\n");
+        } else {
+            shader.push_str("fn isNan(x: f64) -> bool { return x != x; }\n");
+            shader.push_str("fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }\n");
+            shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n\n");
+        }
         for (idx, _) in self.inputs.iter().enumerate() {
             shader.push_str(&format!(
                 "@group(0) @binding({}) var<storage, read> input{}: Tensor;\n",
@@ -755,6 +765,9 @@ fn builtin_expr(
     scalar_ty: &str,
 ) -> Option<String> {
     let func = match name.to_ascii_lowercase().as_str() {
+        "isfinite" => return builtin_unary_call("isFinite", inputs, exprs),
+        "isinf" => return builtin_unary_call("isInf", inputs, exprs),
+        "isnan" => return builtin_unary_call("isNan", inputs, exprs),
         "sin" => "sin",
         "cos" => "cos",
         "tan" => "tan",
@@ -808,6 +821,15 @@ fn builtin_binary(
     let lhs = exprs.get(inputs.get(0)?).cloned()?;
     let rhs = exprs.get(inputs.get(1)?).cloned()?;
     Some(format!("{func}({lhs}, {rhs})"))
+}
+
+fn builtin_unary_call(
+    func: &str,
+    inputs: &[ValueId],
+    exprs: &HashMap<ValueId, String>,
+) -> Option<String> {
+    let arg = exprs.get(inputs.get(0)?).cloned()?;
+    Some(format!("{func}({arg})"))
 }
 
 fn cast_literal(scalar_ty: &str, literal: &str) -> String {

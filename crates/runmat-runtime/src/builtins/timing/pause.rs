@@ -376,7 +376,9 @@ mod tests {
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
 
     fn reset_state(enabled: bool) {
-        let mut guard = PAUSE_STATE.write().unwrap();
+        let mut guard = PAUSE_STATE
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         guard.enabled = enabled;
     }
 
@@ -389,7 +391,7 @@ mod tests {
 
     #[test]
     fn query_returns_on_by_default() {
-        let _guard = TEST_GUARD.lock().unwrap();
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let result = pause_builtin(vec![Value::from("query")]).expect("pause query");
         assert_eq!(char_array_to_string(result), "on");
@@ -397,7 +399,7 @@ mod tests {
 
     #[test]
     fn pause_off_returns_previous_state() {
-        let _guard = TEST_GUARD.lock().unwrap();
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let previous = pause_builtin(vec![Value::from("off")]).expect("pause off");
         assert_eq!(char_array_to_string(previous), "on");
@@ -406,7 +408,7 @@ mod tests {
 
     #[test]
     fn pause_on_restores_state() {
-        let _guard = TEST_GUARD.lock().unwrap();
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(false);
         let previous = pause_builtin(vec![Value::from("on")]).expect("pause on");
         assert_eq!(char_array_to_string(previous), "off");
@@ -415,7 +417,7 @@ mod tests {
 
     #[test]
     fn pause_default_returns_empty_tensor() {
-        let _guard = TEST_GUARD.lock().unwrap();
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let result = pause_builtin(Vec::new()).expect("pause()");
         match result {
@@ -426,7 +428,7 @@ mod tests {
 
     #[test]
     fn numeric_zero_is_accepted() {
-        let _guard = TEST_GUARD.lock().unwrap();
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let result = pause_builtin(vec![Value::Num(0.0)]).expect("pause(0)");
         match result {
@@ -437,7 +439,7 @@ mod tests {
 
     #[test]
     fn integer_scalar_is_accepted() {
-        let _guard = TEST_GUARD.lock().unwrap();
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let result = pause_builtin(vec![Value::Int(IntValue::I32(0))]).expect("pause(int)");
         match result {
@@ -448,7 +450,7 @@ mod tests {
 
     #[test]
     fn numeric_negative_zero_is_treated_as_zero() {
-        let _guard = TEST_GUARD.lock().unwrap();
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let result = pause_builtin(vec![Value::Num(-0.0)]).expect("pause(-0)");
         match result {
@@ -459,7 +461,7 @@ mod tests {
 
     #[test]
     fn negative_duration_raises_error() {
-        let _guard = TEST_GUARD.lock().unwrap();
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let err = pause_builtin(vec![Value::Num(-0.1)]).unwrap_err();
         assert_eq!(err, ERR_INVALID_ARG);
@@ -467,7 +469,7 @@ mod tests {
 
     #[test]
     fn non_scalar_tensor_is_rejected() {
-        let _guard = TEST_GUARD.lock().unwrap();
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = pause_builtin(vec![Value::Tensor(tensor)]).unwrap_err();

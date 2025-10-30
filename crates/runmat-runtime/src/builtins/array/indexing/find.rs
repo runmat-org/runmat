@@ -255,6 +255,14 @@ fn try_provider_find(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     options: &FindOptions,
 ) -> Option<ProviderFindResult> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     let provider = runmat_accelerate_api::provider()?;
     let direction = match options.direction {
         FindDirection::First => runmat_accelerate_api::FindDirection::First,

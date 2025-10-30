@@ -745,6 +745,12 @@ fn is_empty_placeholder(value: &Value) -> bool {
 }
 
 fn try_filter_gpu(args: &FilterArgs) -> Result<Option<FilterEvaluation>, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+    }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -1231,12 +1237,16 @@ mod tests {
             lhs.len(),
             rhs.len()
         );
+        let tol = match runmat_accelerate_api::provider()
+            .map(|p| p.precision())
+            .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64)
+        {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-6,
+        };
         for (idx, (a, b)) in lhs.iter().zip(rhs.iter()).enumerate() {
             let diff = (a - b).abs();
-            assert!(
-                diff < 1e-9,
-                "value mismatch at index {idx}: {a} vs {b} (diff {diff})"
-            );
+            assert!(diff < tol, "value mismatch at index {idx}: {a} vs {b} (diff {diff})");
         }
     }
 

@@ -820,6 +820,14 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(device_value) = std_gpu_reduce(provider, &handle, args) {
             return Ok(Value::GpuTensor(device_value));

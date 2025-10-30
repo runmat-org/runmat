@@ -275,6 +275,9 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
     let has_gpu_input = inputs_snapshot
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)));
+    let gpu_device_id = inputs_snapshot.iter().find_map(|v| {
+        if let Value::GpuTensor(h) = v { Some(h.device_id) } else { None }
+    });
 
     if uniform_output {
         if let Some(gpu_result) =
@@ -414,16 +417,29 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
 
     if let Some(collector) = collector {
         let uniform = collector.finish(&base_shape)?;
-        maybe_upload_uniform(uniform, has_gpu_input)
+        maybe_upload_uniform(uniform, has_gpu_input, gpu_device_id)
     } else {
         make_cell_with_shape(cell_outputs, base_shape).map_err(|e| format!("arrayfun: {e}"))
     }
 }
 
-fn maybe_upload_uniform(value: Value, has_gpu_input: bool) -> Result<Value, String> {
+fn maybe_upload_uniform(
+    value: Value,
+    has_gpu_input: bool,
+    gpu_device_id: Option<u32>,
+) -> Result<Value, String> {
     if !has_gpu_input {
         return Ok(value);
     }
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if matches!(gpu_device_id, Some(id) if id != 0) {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
+    let _ = gpu_device_id; // may be used only in cfg(test)
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(value),
@@ -723,6 +739,14 @@ fn try_gpu_fast_path(
         return Ok(None);
     }
 
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if inputs.iter().any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0)) {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),

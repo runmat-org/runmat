@@ -11,10 +11,10 @@ pub fn build_ind2sub_shader(
     assert_eq!(dims.len(), strides.len());
 
     let mut shader = String::new();
-    writeln!(shader, "struct Tensor {{ data: array<{scalar_ty}>; }};").unwrap();
+    writeln!(shader, "struct Tensor {{ data: array<{scalar_ty}>, }};").unwrap();
     writeln!(
         shader,
-        "struct ErrorState {{ code: atomic<u32>, dim: atomic<u32>, extra: atomic<u32>, pad: atomic<u32> }};"
+        "struct ErrorState {{ code: u32, dim: u32, extra: u32, pad: u32 }};"
     )
     .unwrap();
     writeln!(
@@ -54,6 +54,13 @@ pub fn build_ind2sub_shader(
     writeln!(shader, "const ONE: {scalar_ty} = {scalar_ty}(1.0);").unwrap();
     writeln!(shader, "const TOTAL_F: {scalar_ty} = {scalar_ty}({total});").unwrap();
     writeln!(shader, "const TOTAL: u32 = {total}u;").unwrap();
+    // Finite check helper using x==x (not NaN) and a large bound.
+    let max_val = if scalar_ty == "f32" { "3.4028234663852886e38" } else { "1.7976931348623157e308" };
+    writeln!(
+        shader,
+        "fn isfinite_scalar(x: {scalar_ty}) -> bool {{ return (x == x) && (abs(x) < {scalar_ty}({max_val})); }}"
+    )
+    .unwrap();
     for (idx, dim) in dims.iter().enumerate() {
         writeln!(shader, "const DIM_{idx}: u32 = {dim}u;").unwrap();
     }
@@ -63,12 +70,10 @@ pub fn build_ind2sub_shader(
     writeln!(
         shader,
         "fn set_error(code: u32, extra: u32) {{
-    let res = atomicCompareExchangeWeak(&error.code, 0u, code);
-    if (!res.exchanged) {{
-        return;
-    }}
-    atomicStore(&error.dim, 0u);
-    atomicStore(&error.extra, extra);
+    if (error.code != 0u) {{ return; }}
+    error.code = code;
+    error.dim = 0u;
+    error.extra = extra;
 }}"
     )
     .unwrap();
@@ -80,11 +85,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     if (idx >= params.len) {{
         return;
     }}
-    if (atomicLoad(&error.code) != 0u) {{
+    if (error.code != 0u) {{
         return;
     }}
     let raw: {scalar_ty} = input.data[idx];
-    if (!isFinite(raw)) {{
+    if (!isfinite_scalar(raw)) {{
         set_error(1u, 0u);
         return;
     }}

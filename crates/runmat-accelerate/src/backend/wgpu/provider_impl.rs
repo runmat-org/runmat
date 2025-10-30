@@ -736,6 +736,8 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+fn isNan(x: f32) -> bool { return x != x; }
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
@@ -764,6 +766,8 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+fn isNan(x: f64) -> bool { return x != x; }
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
@@ -787,10 +791,11 @@ struct Params {
     _pad1: u32,
     _pad2: u32,
 };
-
 @group(0) @binding(0) var<storage, read> input0: Tensor;
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
+
+fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -820,6 +825,8 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
@@ -848,6 +855,8 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
@@ -875,6 +884,8 @@ struct Params {
 @group(0) @binding(0) var<storage, read> input0: Tensor;
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
+
+fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -1433,7 +1444,6 @@ fn next_normal_pair(state: &mut u64) -> (f64, f64) {
     let angle = 2.0 * std::f64::consts::PI * u2;
     (radius * angle.cos(), radius * angle.sin())
 }
-
 impl WgpuProvider {
     pub fn device_id(&self) -> u32 {
         self.device_id
@@ -1763,7 +1773,6 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
     }
 }
-
 // Internal exec methods for WgpuProvider
 impl WgpuProvider {
     pub(crate) fn bandwidth_exec(&self, matrix: &GpuTensorHandle) -> Result<ProviderBandwidth> {
@@ -2400,7 +2409,6 @@ impl WgpuProvider {
         );
         Ok(self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols))
     }
-
     pub(crate) fn sub2ind_exec(
         &self,
         dims: &[usize],
@@ -3096,7 +3104,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
     }
-
     pub(crate) fn circshift_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -3821,7 +3828,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, out_shape, output_len))
     }
-
     pub(crate) fn iir_filter_exec(
         &self,
         b: &GpuTensorHandle,
@@ -4489,7 +4495,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, out_shape, new_total))
     }
-
     pub(crate) fn cat_exec(
         &self,
         dim: usize,
@@ -5211,7 +5216,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, request.output_shape.clone(), total_len))
     }
-
     pub(crate) fn covariance_exec(
         &self,
         matrix: &GpuTensorHandle,
@@ -5742,7 +5746,7 @@ impl WgpuProvider {
         );
         ensure!(
             segments <= u32::MAX as usize,
-            "cumprod: segment count exceeds GPU kernel limits"
+            "cumprod: segment count exceeds GPU limits"
         );
         ensure!(
             block <= u32::MAX as usize,
@@ -5968,7 +5972,6 @@ impl WgpuProvider {
         let indices = self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
         Ok(ProviderCumminResult { values, indices })
     }
-
     pub(crate) fn cummax_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -6480,6 +6483,12 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(out_buffer, plan.final_shape.clone(), output_len))
     }
 
+    pub(crate) fn zeros_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let len: usize = shape.iter().copied().product();
+        let buffer = self.create_storage_buffer(len, "zeros");
+        Ok(self.register_existing_buffer(buffer, shape.to_vec(), len))
+    }
+
     fn imfilter_exec_fallback(
         &self,
         image: &GpuTensorHandle,
@@ -6731,7 +6740,6 @@ impl WgpuProvider {
         let handle = <Self as AccelProvider>::upload(self, &view)?;
         Ok(handle)
     }
-
     pub(crate) fn randperm_exec(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
         ensure!(
             k <= n,
@@ -7470,7 +7478,6 @@ impl WgpuProvider {
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
     }
-
     pub(crate) fn unary_op_exec(
         &self,
         op: crate::backend::wgpu::types::UnaryOpCode,
@@ -7587,6 +7594,10 @@ impl WgpuProvider {
                         total: len as u32,
                         scalar,
                         _pad_scalar: 0.0,
+                        _pad_tail: 0.0,
+                        _pad_tail2: 0.0,
+                        _pad_tail3: 0.0,
+                        _pad_tail4: 0.0,
                     };
                     self.uniform_buffer(&params, "runmat-scalar-params")
                 }
@@ -7598,6 +7609,8 @@ impl WgpuProvider {
                         total: len as u32,
                         scalar: scalar as f32,
                         _pad_scalar: [0.0; 3],
+                        _pad_tail: [0.0; 4],
+                        _pad_tail2: [0.0; 4],
                     };
                     self.uniform_buffer(&params, "runmat-scalar-params")
                 }
@@ -8212,7 +8225,6 @@ impl WgpuProvider {
         let result = self.upload(&view)?;
         Ok(result)
     }
-
     pub(crate) fn ifft_dim_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -8405,17 +8417,20 @@ impl WgpuProvider {
         let cols_buffer = self.create_storage_buffer(cap, "runmat-find-cols");
         let values_buffer = self.create_storage_buffer(cap, "runmat-find-values");
 
-        let count_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-find-count"),
+        let count_storage = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-find-count-storage"),
             size: 8,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::MAP_READ,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         self.queue
-            .write_buffer(&count_buffer, 0, bytemuck::cast_slice(&[0u32, 0u32]));
+            .write_buffer(&count_storage, 0, bytemuck::cast_slice(&[0u32, 0u32]));
+        let count_staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-find-count-staging"),
+            size: 8,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let params = crate::backend::wgpu::params::FindParams {
             len: total as u32,
@@ -8460,7 +8475,7 @@ impl WgpuProvider {
                     },
                     wgpu::BindGroupEntry {
                         binding: 5,
-                        resource: count_buffer.as_entire_binding(),
+                        resource: count_storage.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 6,
@@ -8476,7 +8491,14 @@ impl WgpuProvider {
             &bind_group,
         );
 
-        let slice = count_buffer.slice(..8);
+        let mut copy_encoder = self
+            .device_ref()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-find-copy-count"),
+            });
+        copy_encoder.copy_buffer_to_buffer(&count_storage, 0, &count_staging, 0, 8);
+        self.submit(copy_encoder);
+        let slice = count_staging.slice(..8);
         let (tx, rx) = mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| {
             let _ = tx.send(res);
@@ -8489,7 +8511,7 @@ impl WgpuProvider {
         let counts: &[u32] = cast_slice(&mapped);
         let count = counts.get(0).copied().unwrap_or(0) as usize;
         drop(mapped);
-        count_buffer.unmap();
+        count_staging.unmap();
 
         let shape = vec![count, 1];
         let linear = self.register_existing_buffer(indices_buffer, shape.clone(), count);
@@ -8507,6 +8529,13 @@ impl WgpuProvider {
 }
 
 impl AccelProvider for WgpuProvider {
+    fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
+        self.zeros_exec(shape)
+    }
+
+    fn zeros_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.zeros_exec(&prototype.shape)
+    }
     fn precision(&self) -> ProviderPrecision {
         match self.precision {
             NumericPrecision::F32 => ProviderPrecision::F32,
@@ -9003,7 +9032,6 @@ impl AccelProvider for WgpuProvider {
     fn kron(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.kron_exec(a, b)
     }
-
     fn reshape(&self, handle: &GpuTensorHandle, new_shape: &[usize]) -> Result<GpuTensorHandle> {
         let new_len = if new_shape.is_empty() {
             1
@@ -9689,7 +9717,6 @@ impl AccelProvider for WgpuProvider {
     ) -> Result<ProviderFindResult> {
         self.find_exec(a, limit, direction)
     }
-
     fn issymmetric(
         &self,
         matrix: &GpuTensorHandle,
@@ -9748,6 +9775,7 @@ impl AccelProvider for WgpuProvider {
                     mode,
                     tolerance,
                     _pad: 0.0,
+                    _pad2: 0.0,
                 };
                 let params_buffer = self.uniform_buffer(&params, "runmat-issymmetric-params-f64");
                 let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -10044,7 +10072,7 @@ impl AccelProvider for WgpuProvider {
         if entry.len == 0 {
             return Ok(HostTensorOwned {
                 data: Vec::new(),
-                shape: entry.shape,
+                shape: h.shape.clone(),
             });
         }
         let size_bytes = (entry.len * self.element_size) as u64;
@@ -10087,7 +10115,7 @@ impl AccelProvider for WgpuProvider {
         staging.unmap();
         Ok(HostTensorOwned {
             data: out,
-            shape: entry.shape,
+            shape: h.shape.clone(),
         })
     }
 

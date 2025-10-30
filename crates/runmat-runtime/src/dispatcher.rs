@@ -23,6 +23,15 @@ pub fn value_contains_gpu(value: &Value) -> bool {
 pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
     match value {
         Value::GpuTensor(handle) => {
+            // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
+            #[cfg(all(test, feature = "wgpu"))]
+            {
+                if handle.device_id != 0 {
+                    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                    );
+                }
+            }
             let provider = runmat_accelerate_api::provider()
                 .ok_or_else(|| "gather: no acceleration provider registered".to_string())?;
             let is_logical = runmat_accelerate_api::handle_is_logical(handle);

@@ -44,6 +44,17 @@ where
 
 /// Gather a value (recursively) so assertions can operate on host tensors.
 pub fn gather(value: Value) -> Result<Tensor, String> {
+    // Ensure the correct provider is active for GPU handles created by the WGPU backend.
+    #[cfg(feature = "wgpu")]
+    {
+        if let Value::GpuTensor(ref h) = value {
+            if h.device_id != 0 {
+                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                );
+            }
+        }
+    }
     match crate::dispatcher::gather_if_needed(&value)? {
         Value::Tensor(t) => Ok(t),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("gather: {e}")),

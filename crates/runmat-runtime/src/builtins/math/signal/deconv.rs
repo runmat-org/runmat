@@ -545,6 +545,12 @@ fn finalize_real(data: Vec<f64>, shape: Vec<usize>, prefer_gpu: bool) -> Result<
     let tensor = Tensor::new(data, shape.clone())
         .map_err(|e| format!("deconv: failed to build tensor: {e}"))?;
     if prefer_gpu {
+        #[cfg(all(test, feature = "wgpu"))]
+        {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
         if let Some(provider) = runmat_accelerate_api::provider() {
             let view = HostTensorView {
                 data: &tensor.data,

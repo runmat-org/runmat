@@ -542,6 +542,14 @@ fn reduction_max_gpu(
     handle: GpuTensorHandle,
     args: &ReductionArgs,
 ) -> Result<Option<MaxEvaluation>, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     if args.nan_mode == ReductionNaN::Omit {
         return Ok(None);
     }
@@ -1705,8 +1713,24 @@ mod tests {
             let handle = provider.upload(&view).expect("upload");
             let eval_gpu = evaluate(Value::GpuTensor(handle), &[]).expect("gpu");
             let (values_gpu, indices_gpu) = eval_gpu.into_pair();
-            assert_eq!(values_gpu, values_cpu);
-            assert_eq!(indices_gpu, indices_cpu);
+            match (&values_gpu, &indices_gpu) {
+                (Value::GpuTensor(_), Value::GpuTensor(_)) => {}
+                other => panic!("expected GPU tensors, got {other:?}"),
+            }
+            let gathered_vals = test_support::gather(values_gpu).expect("gather values");
+            let gathered_idx = test_support::gather(indices_gpu).expect("gather indices");
+            let expected_vals = match values_cpu {
+                Value::Tensor(t) => t,
+                other => panic!("expected tensor values from cpu eval, got {other:?}"),
+            };
+            let expected_idx = match indices_cpu {
+                Value::Tensor(t) => t,
+                other => panic!("expected tensor indices from cpu eval, got {other:?}"),
+            };
+            assert_eq!(gathered_vals.shape, expected_vals.shape);
+            assert_eq!(gathered_vals.data, expected_vals.data);
+            assert_eq!(gathered_idx.shape, expected_idx.shape);
+            assert_eq!(gathered_idx.data, expected_idx.data);
         });
     }
 

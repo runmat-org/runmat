@@ -18,6 +18,10 @@ pub struct ScalarParamsF64 {
     pub total: u32,
     pub scalar: f64,
     pub _pad_scalar: f64,
+    pub _pad_tail: f64,
+    pub _pad_tail2: f64,
+    pub _pad_tail3: f64,
+    pub _pad_tail4: f64,
 }
 
 #[repr(C)]
@@ -29,6 +33,8 @@ pub struct ScalarParamsF32 {
     pub total: u32,
     pub scalar: f32,
     pub _pad_scalar: [f32; 3],
+    pub _pad_tail: [f32; 4],
+    pub _pad_tail2: [f32; 4],
 }
 
 #[repr(C)]
@@ -65,7 +71,7 @@ impl Default for PackedI32 {
     }
 }
 
-pub const PERMUTE_MAX_RANK: usize = 8;
+pub const PERMUTE_MAX_RANK: usize = 128;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Default)]
@@ -158,7 +164,7 @@ pub struct FilterParams {
     pub state_shape: [AlignedU32; FILTER_MAX_RANK],
 }
 
-pub const IMFILTER_MAX_RANK: usize = 8;
+pub const IMFILTER_MAX_RANK: usize = 512;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -257,6 +263,7 @@ pub struct SymmetryParamsF64 {
     pub mode: u32,
     pub tolerance: f64,
     pub _pad: f64,
+    pub _pad2: f64,
 }
 
 #[repr(C, align(16))]

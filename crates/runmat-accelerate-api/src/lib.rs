@@ -1535,7 +1535,8 @@ pub trait AccelProvider: Send + Sync {
     }
 }
 
-static mut GLOBAL_PROVIDER: Option<&'static dyn AccelProvider> = None;
+static GLOBAL_PROVIDER: Lazy<RwLock<Option<&'static dyn AccelProvider>>> =
+    Lazy::new(|| RwLock::new(None));
 
 /// Register a global acceleration provider.
 ///
@@ -1545,11 +1546,16 @@ static mut GLOBAL_PROVIDER: Option<&'static dyn AccelProvider> = None;
 /// - Concurrent callers must ensure registration happens once or is properly
 ///   synchronized; this function does not enforce thread-safety for re-registration.
 pub unsafe fn register_provider(p: &'static dyn AccelProvider) {
-    GLOBAL_PROVIDER = Some(p);
+    if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
+        *guard = Some(p);
+    }
 }
 
 pub fn provider() -> Option<&'static dyn AccelProvider> {
-    unsafe { GLOBAL_PROVIDER }
+    GLOBAL_PROVIDER
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().copied())
 }
 
 /// Convenience: perform elementwise add via provider if possible; otherwise return None

@@ -578,6 +578,14 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
             acc.saturating_add(value_memory_bytes(v, seen))
         }),
         Value::GpuTensor(handle) => {
+            #[cfg(all(test, feature = "wgpu"))]
+            {
+                if handle.device_id != 0 {
+                    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                    );
+                }
+            }
             let elem_size = if handle_is_logical(handle) {
                 1
             } else {

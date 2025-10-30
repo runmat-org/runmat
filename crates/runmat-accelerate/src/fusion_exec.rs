@@ -32,10 +32,15 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
             request.inputs.len()
         ));
     }
-    let len = request
-        .plan
-        .element_count()
-        .ok_or_else(|| anyhow!("fusion: unknown element count"))?;
+    // Determine output shape from the fusion plan and derive the element count from it.
+    let output_shape = match &request.plan.group.shape {
+        ShapeInfo::Tensor(dims) if !dims.is_empty() => {
+            let resolved: Vec<usize> = dims.iter().map(|d| d.unwrap_or(1)).collect();
+            resolved
+        }
+        _ => return Err(anyhow!("fusion: unknown output shape")),
+    };
+    let len: usize = output_shape.iter().copied().product();
     if len == 0 {
         return Err(anyhow!("fusion: zero-length execution not supported"));
     }
@@ -101,7 +106,6 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
         .ok_or_else(|| anyhow!("fusion: WGSL generation failed"))?;
 
     let handles: Vec<GpuTensorHandle> = prepared.iter().map(|p| p.handle.clone()).collect();
-    let output_shape = infer_output_shape(&request.plan.group, len, &handles)?;
     let output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
     fusion_residency::mark(&output);
 
@@ -218,18 +222,4 @@ pub fn execute_reduction(
     }
 
     Ok(Value::GpuTensor(output))
-}
-
-fn infer_output_shape(
-    group: &crate::fusion::FusionGroup,
-    _len: usize,
-    _inputs: &[GpuTensorHandle],
-) -> Result<Vec<usize>> {
-    if let ShapeInfo::Tensor(dims) = &group.shape {
-        if !dims.is_empty() {
-            let resolved: Vec<usize> = dims.iter().map(|d| d.unwrap_or(1)).collect();
-            return Ok(resolved);
-        }
-    }
-    Err(anyhow::anyhow!("fusion: unknown output shape"))
 }

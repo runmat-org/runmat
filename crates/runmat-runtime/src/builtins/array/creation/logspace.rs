@@ -368,7 +368,15 @@ fn build_sequence(
     }
 
     let data = generate_real_log_sequence(start_re, stop_re, count);
-    if prefer_gpu && !data.is_empty() {
+    if prefer_gpu {
+        #[cfg(all(test, feature = "wgpu"))]
+        {
+            if runmat_accelerate_api::provider().is_none() {
+                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                );
+            }
+        }
         if let Some(provider) = runmat_accelerate_api::provider() {
             let shape = [1usize, count];
             let view = HostTensorView {
@@ -386,6 +394,14 @@ fn build_sequence(
 }
 
 fn try_gpu_logspace(start: f64, stop: f64, count: usize) -> Option<Value> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if runmat_accelerate_api::provider().is_none() {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     let provider = runmat_accelerate_api::provider()?;
     let exponents = provider.linspace(start, stop, count).ok()?;
 
@@ -732,8 +748,12 @@ mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(ct.shape, gt.shape);
+                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+                };
                 for (a, b) in ct.data.iter().zip(gt.data.iter()) {
-                    assert!((a - b).abs() < 1e-6);
+                    assert!((a - b).abs() < tol);
                 }
             }
             _ => panic!("unexpected value variants"),

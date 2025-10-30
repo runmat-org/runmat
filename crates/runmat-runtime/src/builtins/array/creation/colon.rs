@@ -313,6 +313,12 @@ fn build_sequence(
     let shape = vec![1usize, len];
 
     if prefer_gpu {
+        #[cfg(all(test, feature = "wgpu"))]
+        {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
         if let Some(provider) = runmat_accelerate_api::provider() {
             if len > 1 {
                 if let Ok(handle) = provider.linspace(start, final_end, len) {

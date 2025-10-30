@@ -109,7 +109,10 @@ impl InProcessProvider {
 
     fn allocate_tensor(&self, data: Vec<f64>, shape: Vec<usize>) -> GpuTensorHandle {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, data);
+        registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, data);
         GpuTensorHandle {
             shape,
             device_id: 0,
@@ -1033,7 +1036,7 @@ impl AccelProvider for InProcessProvider {
 
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut guard = registry().lock().unwrap();
+        let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(id, host.data.to_vec());
         let handle = GpuTensorHandle {
             shape: host.shape.to_vec(),
@@ -1045,7 +1048,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn download(&self, h: &GpuTensorHandle) -> Result<HostTensorOwned> {
-        let guard = registry().lock().unwrap();
+        let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(buf) = guard.get(&h.buffer_id) {
             Ok(HostTensorOwned {
                 data: buf.clone(),
@@ -1057,7 +1060,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
-        let mut guard = registry().lock().unwrap();
+        let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_logical(h);
         Ok(())
@@ -1337,14 +1340,14 @@ impl AccelProvider for InProcessProvider {
         let len: usize = shape.iter().copied().product();
         let mut data = vec![0.0; len];
         {
-            let mut guard = rng_state().lock().unwrap();
+            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
             for slot in &mut data {
                 *slot = next_uniform(&mut *guard);
             }
         }
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut buf_guard = registry().lock().unwrap();
+        let mut buf_guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         buf_guard.insert(id, data);
         Ok(GpuTensorHandle {
             shape: shape.to_vec(),
@@ -1357,7 +1360,7 @@ impl AccelProvider for InProcessProvider {
         let len: usize = shape.iter().copied().product();
         let mut data = Vec::with_capacity(len);
         if len > 0 {
-            let mut guard = rng_state().lock().unwrap();
+            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
             while data.len() < len {
                 let (z0, z1) = next_normal_pair(&mut *guard);
                 data.push(z0);
@@ -1368,7 +1371,10 @@ impl AccelProvider for InProcessProvider {
         }
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        registry().lock().unwrap().insert(id, data);
+        registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, data);
         Ok(GpuTensorHandle {
             shape: shape.to_vec(),
             device_id: 0,
@@ -1451,7 +1457,7 @@ impl AccelProvider for InProcessProvider {
         if span == 1 {
             data.resize(len, lower as f64);
         } else if len > 0 {
-            let mut guard = rng_state().lock().unwrap();
+            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
             let span_f64 = span as f64;
             for _ in 0..len {
                 let mut offset = (next_uniform(&mut *guard) * span_f64).floor() as u64;
@@ -1482,7 +1488,7 @@ impl AccelProvider for InProcessProvider {
         };
 
         if k > 0 {
-            let mut guard = rng_state().lock().unwrap();
+            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
             for i in 0..k {
                 let span = n - i;
                 if span == 0 {
@@ -4245,7 +4251,7 @@ static INSTANCE: OnceCell<InProcessProvider> = OnceCell::new();
 /// Safe to call multiple times; only the first call installs the provider.
 pub fn register_inprocess_provider() {
     let provider: &'static InProcessProvider = INSTANCE.get_or_init(InProcessProvider::new);
-    // Safety: we intentionally install a reference with 'static lifetime
+    // Safety: we intentionally install a reference with 'static lifetime. Always reassert.
     unsafe { runmat_accelerate_api::register_provider(provider) };
 }
 

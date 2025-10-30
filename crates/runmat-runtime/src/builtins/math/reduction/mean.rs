@@ -578,6 +578,14 @@ fn mean_host_complex_tensor(
 }
 
 fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
     if args.nan_mode == ReductionNaN::Include {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Some(device_result) = mean_gpu_try(provider, &handle, &args.axes) {

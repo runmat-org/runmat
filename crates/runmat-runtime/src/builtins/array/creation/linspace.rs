@@ -351,15 +351,35 @@ fn build_sequence(
     }
 
     if prefer_gpu {
+        #[cfg(all(test, feature = "wgpu"))]
+        {
+            if runmat_accelerate_api::provider().is_none() {
+                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                );
+            }
+        }
         if let Some(provider) = runmat_accelerate_api::provider() {
+            if count == 0 {
+                // Skip provider.linspace for zero-length; fall back to upload path below.
+            } else {
             if let Ok(handle) = provider.linspace(start_re, stop_re, count) {
                 return Ok(Value::GpuTensor(handle));
+            }
             }
         }
     }
 
     let data = generate_real_sequence(start_re, stop_re, count);
-    if prefer_gpu && !data.is_empty() {
+    if prefer_gpu {
+        #[cfg(all(test, feature = "wgpu"))]
+        {
+            if runmat_accelerate_api::provider().is_none() {
+                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                );
+            }
+        }
         if let Some(provider) = runmat_accelerate_api::provider() {
             let shape = [1usize, count];
             let view = HostTensorView {
