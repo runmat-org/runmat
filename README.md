@@ -10,7 +10,7 @@
 
 ---
 
-## What is RunMat?
+## What is RunMat? 
 
 RunMat is a **modern, high-performance runtime** for MATLAB® and GNU Octave code that eliminates license fees, vendor lock-in, and performance bottlenecks. Built from the ground up in Rust with a **V8-inspired architecture**, it delivers:
 
