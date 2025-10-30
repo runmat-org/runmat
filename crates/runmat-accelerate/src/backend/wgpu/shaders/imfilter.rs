@@ -13,6 +13,11 @@ struct KernelValues {
     data: array<f64>,
 };
 
+struct PackedValueU32 { value: u32, _pad: vec3<u32> }
+struct PackedValueI32 { value: i32, _pad: vec3<i32> }
+alias PackedArrayU32 = array<PackedValueU32, MAX_RANK>;
+alias PackedArrayI32 = array<PackedValueI32, MAX_RANK>;
+
 struct Params {
     len: u32,
     offset: u32,
@@ -24,10 +29,10 @@ struct Params {
     _pad1: u32,
     constant_value: f64,
     _pad_const: f64,
-    image_shape: array<vec4<u32>, MAX_RANK>,
-    image_strides: array<vec4<u32>, MAX_RANK>,
-    output_shape: array<vec4<u32>, MAX_RANK>,
-    base_offset: array<vec4<i32>, MAX_RANK>,
+    image_shape: PackedArrayU32,
+    image_strides: PackedArrayU32,
+    output_shape: PackedArrayU32,
+    base_offset: PackedArrayI32,
 };
 
 fn clamp_index(coord: i32, len: i32) -> u32 {
@@ -90,7 +95,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.output_shape[dim].x;
+        let size = params.output_shape[dim].value;
         if size == 0u {
             coords[dim] = 0;
         } else {
@@ -115,9 +120,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if dim >= params.rank {
                 break;
             }
-            let len = i32(params.image_shape[dim].x);
-            let stride_val = params.image_strides[dim].x;
-            var coord = coords[dim] + params.base_offset[dim].x;
+            let len = i32(params.image_shape[dim].value);
+            let stride_val = params.image_strides[dim].value;
+            var coord = coords[dim] + params.base_offset[dim].value;
             let offset_index = kp * stride + dim;
             coord = coord + KernelOffsets.data[offset_index];
             if len <= 0 {
@@ -186,6 +191,11 @@ struct KernelValues {
     data: array<f32>,
 };
 
+struct PackedValueU32 { value: u32, _pad: vec3<u32> }
+struct PackedValueI32 { value: i32, _pad: vec3<i32> }
+alias PackedArrayU32 = array<PackedValueU32, MAX_RANK>;
+alias PackedArrayI32 = array<PackedValueI32, MAX_RANK>;
+
 struct Params {
     len: u32,
     offset: u32,
@@ -197,10 +207,10 @@ struct Params {
     _pad1: u32,
     constant_value: f32,
     _pad_const: vec3<f32>,
-    image_shape: array<vec4<u32>, MAX_RANK>,
-    image_strides: array<vec4<u32>, MAX_RANK>,
-    output_shape: array<vec4<u32>, MAX_RANK>,
-    base_offset: array<vec4<i32>, MAX_RANK>,
+    image_shape: PackedArrayU32,
+    image_strides: PackedArrayU32,
+    output_shape: PackedArrayU32,
+    base_offset: PackedArrayI32,
 };
 
 fn clamp_index(coord: i32, len: i32) -> u32 {
@@ -263,7 +273,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let size = params.output_shape[dim].x;
+        let size = params.output_shape[dim].value;
         if size == 0u {
             coords[dim] = 0;
         } else {
@@ -288,9 +298,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if dim >= params.rank {
                 break;
             }
-            let len = i32(params.image_shape[dim].x);
-            let stride_val = params.image_strides[dim].x;
-            var coord = coords[dim] + params.base_offset[dim].x;
+            let len = i32(params.image_shape[dim].value);
+            let stride_val = params.image_strides[dim].value;
+            var coord = coords[dim] + params.base_offset[dim].value;
             let offset_index = kp * stride + dim;
             coord = coord + KernelOffsets.data[offset_index];
             if len <= 0 {

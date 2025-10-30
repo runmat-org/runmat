@@ -2114,9 +2114,6 @@ impl Compiler {
                         }
                     }
                     let row_lengths: Vec<usize> = matrix_data.iter().map(|row| row.len()).collect();
-                    for &row_len in &row_lengths {
-                        self.emit(Instr::LoadConst(row_len as f64));
-                    }
                     if matches!(expr.kind, HirExprKind::Cell(_)) {
                         // For 2D cells, we know rows and row lengths; emit 2D version when rectangular
                         let rectangular = row_lengths.iter().all(|&c| c == row_lengths[0]);
@@ -2129,6 +2126,9 @@ impl Compiler {
                             self.emit(Instr::CreateCell2D(1, total));
                         }
                     } else {
+                        for &row_len in &row_lengths {
+                            self.emit(Instr::LoadConst(row_len as f64));
+                        }
                         self.emit(Instr::CreateMatrixDynamic(rows));
                     }
                 } else {

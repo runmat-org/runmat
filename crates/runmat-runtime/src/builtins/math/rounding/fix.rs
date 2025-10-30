@@ -447,15 +447,7 @@ mod tests {
             .unwrap();
         let gpu = fix_gpu(handle).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
-        match gathered {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, cpu.shape);
-                assert_eq!(t.data, cpu.data);
-            }
-            Value::Num(v) => {
-                assert_eq!(vec![v], cpu.data);
-            }
-            other => panic!("unexpected GPU result {other:?}"),
-        }
+        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.data, cpu.data);
     }
 }

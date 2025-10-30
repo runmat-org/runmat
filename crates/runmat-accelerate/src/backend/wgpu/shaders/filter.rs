@@ -67,7 +67,7 @@ fn compute_after_coords(
     if params.rank <= params.dim_idx + 1u {
         return 0u;
     }
-    let leading = params.leading.max(1u);
+    let leading = max(params.leading, 1u);
     var idx: u32 = channel / leading;
     var axis: u32 = params.dim_idx + 1u;
     var offset: u32 = 0u;
@@ -117,7 +117,7 @@ fn state_linear_index(
             after_axis = after_axis + 1u;
         }
         offset = offset + coord * stride;
-        stride = stride * shape.max(1u);
+        stride = stride * max(shape, 1u);
         axis = axis + 1u;
     }
     return offset;
@@ -138,7 +138,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let dim_len = params.dim_len;
     let leading = params.leading;
     let base_before = channel % leading;
-    let trailing_index = if leading == 0u { 0u } else { channel / leading };
+    let trailing_index: u32 = select(channel / leading, 0u, leading == 0u);
     let base = trailing_index * dim_len * leading;
 
     let zi_len = arrayLength(&Zi.data);
@@ -177,7 +177,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var before_coords: array<u32, MAX_RANK>;
     var after_coords: array<u32, MAX_RANK>;
-    let _ = compute_before_coords(channel, &before_coords);
+    _ = compute_before_coords(channel, &before_coords);
     let after_len = compute_after_coords(channel, &after_coords);
 
     let state_base = channel * state_len;
@@ -335,7 +335,7 @@ fn compute_after_coords(
     if params.rank <= params.dim_idx + 1u {
         return 0u;
     }
-    let leading = params.leading.max(1u);
+    let leading = max(params.leading, 1u);
     var idx: u32 = channel / leading;
     var axis: u32 = params.dim_idx + 1u;
     var offset: u32 = 0u;
@@ -385,7 +385,7 @@ fn state_linear_index(
             after_axis = after_axis + 1u;
         }
         offset = offset + coord * stride;
-        stride = stride * shape.max(1u);
+        stride = stride * max(shape, 1u);
         axis = axis + 1u;
     }
     return offset;
@@ -406,7 +406,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let dim_len = params.dim_len;
     let leading = params.leading;
     let base_before = channel % leading;
-    let trailing_index = if leading == 0u { 0u } else { channel / leading };
+    let trailing_index: u32 = select(channel / leading, 0u, leading == 0u);
     let base = trailing_index * dim_len * leading;
 
     let zi_len = arrayLength(&Zi.data);
@@ -445,7 +445,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var before_coords: array<u32, MAX_RANK>;
     var after_coords: array<u32, MAX_RANK>;
-    let _ = compute_before_coords(channel, &before_coords);
+    _ = compute_before_coords(channel, &before_coords);
     let after_len = compute_after_coords(channel, &after_coords);
 
     let state_base = channel * state_len;
