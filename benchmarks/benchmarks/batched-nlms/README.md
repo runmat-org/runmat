@@ -22,7 +22,7 @@ and we report an `MSE` against the most recent step.
 
 ---
 
-## Core implementation in RunMat (MATLAB‑syntax)
+## Core implementation in RunMat (MATLAB-syntax)
 
 ```matlab
 rng(0);
@@ -56,7 +56,7 @@ Full sources:
 
 Workloads like this are a perfect fit for RunMat’s fusion and device residency: per‑column reductions plus long elementwise chains executed entirely on the GPU, with weights staying resident across steps.
 
-See how RunMat works in practice in the [Introduction to RunMat on the GPU](https://github.com/runmat-org/runmat/blob/main/docs/INTRODUCTION_TO_RUNMAT_GPU.md).
+See how RunMat Accelerate works in practice in the [Introduction to RunMat on the GPU](https://github.com/runmat-org/runmat/blob/main/docs/INTRODUCTION_TO_RUNMAT_GPU.md).
 
 ---
 

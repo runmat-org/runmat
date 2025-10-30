@@ -14,7 +14,7 @@ The math is deliberately simple and realistic: compute a per‑image mean and st
 
 ---
 
-## Core implementation in RunMat (MATLAB‑syntax)
+## Core implementation in RunMat (MATLAB-syntax)
 
 We'll use a simple pipeline: compute a per‑image mean and standard deviation, normalize, apply a modest gain/bias and a gamma curve, then validate with a mean‑squared error.
 
