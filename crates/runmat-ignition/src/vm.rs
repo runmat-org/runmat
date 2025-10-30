@@ -301,7 +301,6 @@ macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
         _ => { let bb: f64 = (&b).try_into()?; let aa: f64 = (&a).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) }
     }
 }}; }
-
 pub fn interpret_with_vars(
     bytecode: &Bytecode,
     initial_vars: &mut [Value],
@@ -386,7 +385,7 @@ pub fn interpret_with_vars(
     fn bench_end(_label: &str, _start: Option<std::time::Instant>) {}
     macro_rules! vm_bail {
         ($err:expr) => {{
-            let e: String = $err;
+            let e: String = $err.to_string();
             if let Some((catch_pc, catch_var)) = try_stack.pop() {
                 if let Some(var_idx) = catch_var {
                     if var_idx >= vars.len() {
@@ -909,8 +908,7 @@ pub fn interpret_with_vars(
                         }
                     }
                     _ => {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
                         let v = runmat_runtime::elementwise_sub(&a_acc, &b_acc)?;
                         stack.push(v)
                     }
@@ -1757,7 +1755,7 @@ pub fn interpret_with_vars(
             Instr::CallBuiltin(name, arg_count) => {
                 if name == "nargin" {
                     if arg_count != 0 {
-                        vm_bail!(mex("TooManyInputs", "nargin takes no arguments"));
+                        vm_bail!(mex("TooManyInputs", "nargin takes no arguments").to_string());
                     }
                     let (nin, _) =
                         CALL_COUNTS.with(|cc| cc.borrow().last().cloned().unwrap_or((0, 0)));
@@ -1767,7 +1765,7 @@ pub fn interpret_with_vars(
                 }
                 if name == "nargout" {
                     if arg_count != 0 {
-                        vm_bail!(mex("TooManyInputs", "nargout takes no arguments"));
+                        vm_bail!(mex("TooManyInputs", "nargout takes no arguments").to_string());
                     }
                     let (_, nout) =
                         CALL_COUNTS.with(|cc| cc.borrow().last().cloned().unwrap_or((0, 0)));
@@ -1809,7 +1807,7 @@ pub fn interpret_with_vars(
                                 .map(|(q, _, _)| q.clone())
                                 .collect::<Vec<_>>()
                                 .join(", ");
-                            vm_bail!(format!("ambiguous builtin '{}' via imports: {}", name, msg));
+                            vm_bail!(format!("ambiguous builtin '{}' via imports: {}", name, msg).to_string());
                         }
                         if let Some((_, _, value)) = specific_matches.pop() {
                             stack.push(value);
@@ -1847,7 +1845,7 @@ pub fn interpret_with_vars(
                                 vm_bail!(format!(
                                     "ambiguous builtin '{}' via wildcard imports: {}",
                                     name, msg
-                                ));
+                                ).to_string());
                             }
                             if let Some((_, _, value)) = wildcard_matches.pop() {
                                 stack.push(value);
@@ -1855,7 +1853,7 @@ pub fn interpret_with_vars(
                                 // Special-case: rethrow() without explicit e uses last caught
                                 if name == "rethrow" && args.is_empty() {
                                     if let Some(le) = &last_exception {
-                                        vm_bail!(format!("{}: {}", le.identifier, le.message));
+                                        vm_bail!(format!("{}: {}", le.identifier, le.message).to_string());
                                     }
                                 }
                                 if let Some((catch_pc, catch_var)) = try_stack.pop() {
@@ -3175,8 +3173,7 @@ pub fn interpret_with_vars(
                     continue;
                 }
                 if name == "setenv" {
-                    let eval = match runmat_runtime::builtins::io::repl_fs::setenv::evaluate(&args)
-                    {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::setenv::evaluate(&args) {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -3607,7 +3604,7 @@ pub fn interpret_with_vars(
                                 args[0].clone(),
                                 args[1].clone(),
                             ),
-                            _ => vm_bail!("polyder: too many input arguments."),
+                            _ => vm_bail!("polyder: too many input arguments.".to_string()),
                         };
                         match result {
                             Ok(value) => {
@@ -3815,7 +3812,7 @@ pub fn interpret_with_vars(
                             &args[1..],
                         ) {
                             Ok(eval) => eval,
-                            Err(err) => vm_bail!(err),
+                            Err(err) => vm_bail!(err.to_string()),
                         };
                     if out_count == 0 {
                         continue;
@@ -3840,7 +3837,7 @@ pub fn interpret_with_vars(
                             &args[2..],
                         ) {
                             Ok(eval) => eval,
-                            Err(err) => vm_bail!(err),
+                            Err(err) => vm_bail!(err.to_string()),
                         };
                     if out_count == 0 {
                         continue;
@@ -3867,7 +3864,7 @@ pub fn interpret_with_vars(
                             &args[2..],
                         ) {
                             Ok(eval) => eval,
-                            Err(err) => vm_bail!(err),
+                            Err(err) => vm_bail!(err.to_string()),
                         };
                     if out_count == 0 {
                         continue;
@@ -3900,7 +3897,7 @@ pub fn interpret_with_vars(
                         &args[2..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => vm_bail!(err.to_string()),
                     };
                     if out_count == 0 {
                         continue;
@@ -3932,7 +3929,7 @@ pub fn interpret_with_vars(
                         &args[1..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => vm_bail!(err.to_string()),
                     };
                     if out_count == 0 {
                         continue;
@@ -3958,7 +3955,7 @@ pub fn interpret_with_vars(
                         &args[2..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => vm_bail!(err.to_string()),
                     };
                     if out_count == 0 {
                         continue;
@@ -3990,7 +3987,7 @@ pub fn interpret_with_vars(
                         &args[1..],
                     ) {
                         Ok(eval) => eval,
-                        Err(err) => vm_bail!(err),
+                        Err(err) => vm_bail!(err.to_string()),
                     };
                     if out_count == 0 {
                         continue;
@@ -4108,7 +4105,7 @@ pub fn interpret_with_vars(
                                 }
                             }
                         } else {
-                            vm_bail!(e);
+                            vm_bail!(e.to_string());
                         }
                     }
                 }
@@ -4231,13 +4228,13 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     other => {
                         let result = match runmat_runtime::perform_indexing(&other, &indices) {
                             Ok(v) => v,
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         };
                         stack.push(result);
                     }
@@ -4273,7 +4270,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::Tensor(t) => {
@@ -5469,7 +5466,9 @@ pub fn interpret_with_vars(
                                             Value::Tensor(idx_t) => {
                                                 let len = idx_t.shape.iter().product::<usize>();
                                                 if len == total {
-                                                    for (i, &val) in idx_t.data.iter().enumerate() {
+                                                    for (i, &val) in
+                                                        idx_t.data.iter().enumerate()
+                                                    {
                                                         if val != 0.0 {
                                                             idxs.push(i + 1);
                                                         }
@@ -5905,7 +5904,7 @@ pub fn interpret_with_vars(
                                         );
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             }
                             stack.push(Value::Tensor(t));
                         } else {
@@ -6019,11 +6018,11 @@ pub fn interpret_with_vars(
                                                     }
                                                 } else {
                                                     vm_bail!(
-                                                        "shape mismatch for slice assign".into()
+                                                        "shape mismatch for slice assign".to_string()
                                                     );
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                         }
                                         stack.push(Value::Tensor(t));
                                         bench_end("StoreSlice2D.fast_col", __b);
@@ -6067,11 +6066,11 @@ pub fn interpret_with_vars(
                                                     }
                                                 } else {
                                                     vm_bail!(
-                                                        "shape mismatch for slice assign".into()
+                                                        "shape mismatch for slice assign".to_string()
                                                     );
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                         }
                                         stack.push(Value::Tensor(t));
                                         bench_end("StoreSlice2D.fast_row", __b);
@@ -6131,7 +6130,7 @@ pub fn interpret_with_vars(
                                     }
                                     if shape.len() > dims {
                                         if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         shape.truncate(dims);
                                     }
@@ -6145,7 +6144,7 @@ pub fn interpret_with_vars(
                                         }
                                     }
                                     if !ok {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     let mut rstrides = vec![0usize; dims];
                                     let mut racc = 1usize;
@@ -6159,7 +6158,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             };
                             // Iterate and scatter
                             let mut _k = 0usize;
@@ -6401,7 +6400,7 @@ pub fn interpret_with_vars(
                                         );
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             }
                             let view = runmat_accelerate_api::HostTensorView {
                                 data: &t.data,
@@ -6521,11 +6520,11 @@ pub fn interpret_with_vars(
                                                     }
                                                 } else {
                                                     vm_bail!(
-                                                        "shape mismatch for slice assign".into()
+                                                        "shape mismatch for slice assign".to_string()
                                                     );
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                         }
                                         let view = runmat_accelerate_api::HostTensorView {
                                             data: &t.data,
@@ -6575,11 +6574,11 @@ pub fn interpret_with_vars(
                                                     }
                                                 } else {
                                                     vm_bail!(
-                                                        "shape mismatch for slice assign".into()
+                                                        "shape mismatch for slice assign".to_string()
                                                     );
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                         }
                                         let view = runmat_accelerate_api::HostTensorView {
                                             data: &t.data,
@@ -6646,7 +6645,7 @@ pub fn interpret_with_vars(
                                     }
                                     if shape.len() > dims {
                                         if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         shape.truncate(dims);
                                     }
@@ -6660,7 +6659,7 @@ pub fn interpret_with_vars(
                                         }
                                     }
                                     if !ok {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     let mut rstrides = vec![0usize; dims];
                                     let mut racc = 1usize;
@@ -6674,7 +6673,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             };
                             // Iterate and scatter
                             let mut _k = 0usize;
@@ -6825,7 +6824,7 @@ pub fn interpret_with_vars(
                                         sa.data[li - 1] = s.clone();
                                     }
                                 }
-                                _ => vm_bail!("rhs must be string or string array".into()),
+                                _ => vm_bail!("rhs must be string or string array".to_string()),
                             }
                             stack.push(Value::StringArray(sa));
                         } else {
@@ -6941,7 +6940,7 @@ pub fn interpret_with_vars(
                                     }
                                     if shape.len() > dims {
                                         if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         shape.truncate(dims);
                                     }
@@ -6949,7 +6948,7 @@ pub fn interpret_with_vars(
                                         let out_len = per_dim_indices[d].len();
                                         let rhs_len = shape[d];
                                         if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                     }
                                     let mut rstrides = vec![0usize; dims];
@@ -6974,7 +6973,7 @@ pub fn interpret_with_vars(
                                     }
                                     if shape.len() > dims {
                                         if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         shape.truncate(dims);
                                     }
@@ -6982,7 +6981,7 @@ pub fn interpret_with_vars(
                                         let out_len = per_dim_indices[d].len();
                                         let rhs_len = shape[d];
                                         if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                     }
                                     let mut rstrides = vec![0usize; dims];
@@ -6999,7 +6998,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be string or string array".into()),
+                                _ => vm_bail!("rhs must be string or string array".to_string()),
                             };
                             // Iterate and scatter
                             let mut idx = vec![0usize; dims];
@@ -7047,7 +7046,7 @@ pub fn interpret_with_vars(
                         }
                     }
                     _ => vm_bail!(
-                        "Slicing assignment only supported on tensors or string arrays".into()
+                        "Slicing assignment only supported on tensors or string arrays".to_string()
                     ),
                 }
                 bench_end("StoreSlice", __b);
@@ -7218,7 +7217,7 @@ pub fn interpret_with_vars(
                                         }
                                         if rshape.len() > dims {
                                             if rshape.iter().skip(dims).any(|&s| s != 1) {
-                                                vm_bail!("shape mismatch for slice assign".into());
+                                                vm_bail!("shape mismatch for slice assign".to_string());
                                             }
                                             rshape.truncate(dims);
                                         }
@@ -7226,7 +7225,7 @@ pub fn interpret_with_vars(
                                             let out_len = per_dim_indices[d].len();
                                             let rhs_len = rshape[d];
                                             if !(rhs_len == 1 || rhs_len == out_len) {
-                                                vm_bail!("shape mismatch for slice assign".into());
+                                                vm_bail!("shape mismatch for slice assign".to_string());
                                             }
                                         }
                                         let mut rstrides = vec![0usize; dims];
@@ -7241,7 +7240,7 @@ pub fn interpret_with_vars(
                                             strides: rstrides,
                                         }
                                     }
-                                    _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                    _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                 };
                                 // Map absolute indices to selection positions per dimension
                                 use std::collections::HashMap;
@@ -7527,7 +7526,7 @@ pub fn interpret_with_vars(
                                 Value::Num(n) => RhsView::Scalar(n),
                                 Value::Tensor(rt) => {
                                     if rt.data.is_empty() {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     // Normalize RHS shape to dims by padding with ones or validating extra dims are ones
                                     let mut rshape = rt.shape.clone();
@@ -7536,7 +7535,7 @@ pub fn interpret_with_vars(
                                     }
                                     if rshape.len() > dims {
                                         if rshape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         rshape.truncate(dims);
                                     }
@@ -7545,7 +7544,7 @@ pub fn interpret_with_vars(
                                         let out_len = per_dim_indices[d].len();
                                         let rhs_len = rshape[d];
                                         if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                     }
                                     // Build column-major strides for RHS
@@ -7556,7 +7555,7 @@ pub fn interpret_with_vars(
                                         racc *= rshape[d];
                                     }
                                     if racc != rt.data.len() {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     RhsView::Tensor {
                                         data: rt.data,
@@ -7564,7 +7563,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             };
                             // Precompute mapping from absolute index to position-in-selection per dimension to ensure column-major consistent mapping
                             use std::collections::HashMap;
@@ -7806,7 +7805,7 @@ pub fn interpret_with_vars(
                                 Value::Num(n) => RhsView::Scalar(n),
                                 Value::Tensor(rt) => {
                                     if rt.data.is_empty() {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     // Normalize RHS shape to dims by padding with ones or validating extra dims are ones
                                     let mut rshape = rt.shape.clone();
@@ -7815,7 +7814,7 @@ pub fn interpret_with_vars(
                                     }
                                     if rshape.len() > dims {
                                         if rshape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         rshape.truncate(dims);
                                     }
@@ -7824,7 +7823,7 @@ pub fn interpret_with_vars(
                                         let out_len = per_dim_indices[d].len();
                                         let rhs_len = rshape[d];
                                         if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                     }
                                     // Build column-major strides for RHS
@@ -7835,7 +7834,7 @@ pub fn interpret_with_vars(
                                         racc *= rshape[d];
                                     }
                                     if racc != rt.data.len() {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     RhsView::Tensor {
                                         data: rt.data,
@@ -7843,7 +7842,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             };
                             // Precompute mapping from absolute index to position-in-selection per dimension to ensure column-major consistent mapping
                             use std::collections::HashMap;
@@ -8120,7 +8119,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::Cell(ca) => match indices.len() {
@@ -8232,7 +8231,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => v,
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         };
                         // Push returned value and pad to out_count
                         stack.push(v);
@@ -8409,7 +8408,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::Tensor(mut t) => {
@@ -8629,7 +8628,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::Cell(mut ca) => match indices.len() {
@@ -8725,7 +8724,7 @@ pub fn interpret_with_vars(
                                     ],
                                 ) {
                                     Ok(v) => stack.push(v),
-                                    Err(e) => vm_bail!(e),
+                                    Err(e) => vm_bail!(e.to_string()),
                                 }
                             } else {
                                 vm_bail!(format!(
@@ -8765,7 +8764,7 @@ pub fn interpret_with_vars(
                             .map_err(|e| format!("cell field gather: {e}"))?;
                         stack.push(Value::Cell(new_cell));
                     }
-                    _ => vm_bail!("LoadMember on non-object".into()),
+                    _ => vm_bail!("LoadMember on non-object".to_string()),
                 }
             }
             Instr::LoadMemberDynamic => {
@@ -8805,7 +8804,7 @@ pub fn interpret_with_vars(
                                     ],
                                 ) {
                                     Ok(v) => stack.push(v),
-                                    Err(e) => vm_bail!(e),
+                                    Err(e) => vm_bail!(e.to_string()),
                                 }
                             } else {
                                 vm_bail!(format!(
@@ -8824,7 +8823,7 @@ pub fn interpret_with_vars(
                             vm_bail!(format!("Undefined field '{}'", name));
                         }
                     }
-                    _ => vm_bail!("LoadMemberDynamic on non-struct/object".into()),
+                    _ => vm_bail!("LoadMemberDynamic on non-struct/object".to_string()),
                 }
             }
             Instr::StoreMember(field) => {
@@ -8956,7 +8955,7 @@ pub fn interpret_with_vars(
                         }
                         stack.push(Value::Cell(ca));
                     }
-                    _ => vm_bail!("StoreMember on non-object".into()),
+                    _ => vm_bail!("StoreMember on non-object".to_string()),
                 }
             }
             Instr::StoreMemberDynamic => {
@@ -9037,7 +9036,7 @@ pub fn interpret_with_vars(
                         }
                         stack.push(Value::Cell(ca));
                     }
-                    _ => vm_bail!("StoreMemberDynamic on non-struct/object".into()),
+                    _ => vm_bail!("StoreMemberDynamic on non-struct/object".to_string()),
                 }
             }
             Instr::CallMethod(name, arg_count) => {
@@ -9093,7 +9092,7 @@ pub fn interpret_with_vars(
                             }
                         }
                     }
-                    _ => vm_bail!("CallMethod on non-object".into()),
+                    _ => vm_bail!("CallMethod on non-object".to_string()),
                 }
             }
             Instr::LoadMethod(name) => {
@@ -9123,7 +9122,7 @@ pub fn interpret_with_vars(
                             vm_bail!(format!("Unknown static method '{}' on class {}", name, cls));
                         }
                     }
-                    _ => vm_bail!("LoadMethod requires object or classref".into()),
+                    _ => vm_bail!("LoadMethod requires object or classref".to_string()),
                 }
             }
             Instr::CreateClosure(func_name, capture_count) => {
@@ -9264,7 +9263,6 @@ pub fn interpret_with_vars(
     }
     Ok(vars)
 }
-
 #[cfg(feature = "native-accel")]
 fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,

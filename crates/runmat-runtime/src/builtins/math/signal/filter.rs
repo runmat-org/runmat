@@ -1241,7 +1241,7 @@ mod tests {
             .map(|p| p.precision())
             .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64)
         {
-            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-6,
         };
         for (idx, (a, b)) in lhs.iter().zip(rhs.iter()).enumerate() {

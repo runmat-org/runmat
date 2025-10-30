@@ -272,12 +272,6 @@ enum Conv2Mode {
 }
 
 fn try_conv2_gpu(a: &Value, b: &Value, mode: Conv2Mode) -> Result<Option<Value>, String> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-    }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -287,6 +281,15 @@ fn try_conv2_gpu(a: &Value, b: &Value, mode: Conv2Mode) -> Result<Option<Value>,
         (Value::GpuTensor(lhs), Value::GpuTensor(rhs)) => (lhs, rhs),
         _ => return Ok(None),
     };
+
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if lhs.device_id != 0 || rhs.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
 
     let _lhs_dims = match conv2_dimensions(&lhs.shape) {
         Some(dims) => dims,

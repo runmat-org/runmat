@@ -976,6 +976,14 @@ mod tests {
         )
         .expect("register wgpu provider");
 
+        let tol = match runmat_accelerate_api::provider()
+            .expect("provider")
+            .precision()
+        {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
+
         let tensor = Matrix::new(
             vec![
                 10.0, 2.0, 3.0, //
@@ -1000,7 +1008,7 @@ mod tests {
         assert_eq!(gpu_eval.flag_index(), 0, "gpu chol should succeed");
         let gpu_factor = test_support::gather(gpu_eval.factor()).expect("gather factor");
 
-        tensor_close(&gpu_factor, &host_factor, 1e-10);
+        tensor_close(&gpu_factor, &host_factor, tol);
     }
 
     #[test]

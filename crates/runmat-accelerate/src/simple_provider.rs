@@ -13,8 +13,7 @@ use runmat_accelerate_api::{
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderNanMode,
     ProviderNormOrder, ProviderPinvOptions, ProviderQrOptions, ProviderQrPivot,
     ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind,
-    ProviderPolyderQuotient, ProviderPrecision, SetdiffOptions, SetdiffResult,
-    SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    ProviderPolyderQuotient,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;

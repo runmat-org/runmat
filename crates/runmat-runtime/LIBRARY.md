@@ -32,7 +32,7 @@
 |-----------|---------------------|----------------------------------------------------------------------------------|-----------------------------|-----|--------|------------------|------------------------------|
 |     ✅     | math/elementwise    | abs, sign, real, imag, conj, angle                                              | Complex helpers             | ✓   | E      | —                | Complex tensors supported.   |
 |     ✅     | math/elementwise    | exp, expm1, log, log1p, log10, log2, sqrt, hypot, pow2                          | Exponentials & roots        | ✓   | E      | —                | Provider hooks unary_*.      |
-|            | math/trigonometry   | sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh   | Trig & hyperbolic           | ✓   | E      | —                | sin, asinh, acosh, atanh implemented; others mirror. |
+|     ✅     | math/trigonometry   | sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh   | Trig & hyperbolic           | ✓   | E      | —                | sin, asinh, acosh, atanh implemented; others mirror. |
 |     ✅     | math/rounding       | round, floor, ceil, fix, mod, rem                                               | Rounding & modulo           | ✓   | E      | —                | mod/rem MATLAB semantics.    |
 |     ✅     | math/reduction      | sum, prod, mean, median, min, max, any, all, std, var, cumsum, cumprod, cummin, cummax, diff, nnz | Reductions & cumulatives    | ✓   | R      | —                | omitnan host fallback initially; GPU reductions via hooks. |
 
@@ -58,7 +58,7 @@
 
 | Completed | Path       | Name(s)                                         | Purpose           | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                  |
 |-----------|------------|--------------------------------------------------|-------------------|-----|--------|------------------|----------------------------------------|
-|           | math/poly  | polyval, polyfit, roots, polyder, polyint        | Poly utilities    | —   | P      | LAPACK (QR)      | polyfit via least squares (\/QR).      |
+|     ✅    | math/poly  | polyval, polyfit, roots, polyder, polyint        | Poly utilities    | —   | P      | LAPACK (QR)      | polyfit via least squares (\/QR).      |
 
 ## Statistics (core)
 

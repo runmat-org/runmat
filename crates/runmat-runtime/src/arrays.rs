@@ -6,35 +6,6 @@
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-/// Generate logarithmically spaced vector
-/// logspace(a, b, n) generates n points between 10^a and 10^b
-#[runtime_builtin(
-    name = "logspace",
-    category = "array/creation",
-    summary = "Logarithmically spaced vector.",
-    examples = "x = logspace(1, 3, 3)  % [10 100 1000]"
-)]
-fn logspace_builtin(a: f64, b: f64, n: i32) -> Result<Tensor, String> {
-    if n < 1 {
-        return Err("Number of points must be positive".to_string());
-    }
-
-    let n_usize = n as usize;
-    let mut data = Vec::with_capacity(n_usize);
-
-    if n == 1 {
-        data.push(10.0_f64.powf(b));
-    } else {
-        let log_step = (b - a) / ((n - 1) as f64);
-        for i in 0..n_usize {
-            let log_val = a + (i as f64) * log_step;
-            data.push(10.0_f64.powf(log_val));
-        }
-    }
-
-    Tensor::new_2d(data, 1, n_usize)
-}
-
 /// Generate meshgrid for 2D plotting
 /// [X, Y] = meshgrid(x, y) creates 2D coordinate arrays
 #[runtime_builtin(name = "meshgrid")]
@@ -95,18 +66,4 @@ pub fn create_range(start: f64, step: Option<f64>, end: f64) -> Result<Value, St
     let cols = values.len();
     let matrix = Tensor::new_2d(values, 1, cols)?;
     Ok(Value::Tensor(matrix))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_logspace() {
-        let result = logspace_builtin(1.0, 3.0, 3).unwrap();
-        assert_eq!(result.cols, 3);
-        assert!((result.data[0] - 10.0).abs() < f64::EPSILON);
-        assert!((result.data[1] - 100.0).abs() < f64::EPSILON);
-        assert!((result.data[2] - 1000.0).abs() < f64::EPSILON);
-    }
 }

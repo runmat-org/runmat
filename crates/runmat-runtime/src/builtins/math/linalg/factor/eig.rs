@@ -960,6 +960,10 @@ mod tests {
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
         let tensor = Tensor::new(vec![4.0, 2.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.data,
@@ -1002,10 +1006,10 @@ mod tests {
             other => panic!("expected tensor left eigenvectors, got {other:?}"),
         };
 
-        assert_tensor_close(&eig_gpu, &eig_host, 1e-10);
-        assert_tensor_close(&diag_gpu, &diag_host, 1e-10);
-        assert_tensor_close(&right_gpu, &right_host, 1e-10);
-        assert_tensor_close(&left_gpu, &left_host, 1e-10);
+        assert_tensor_close(&eig_gpu, &eig_host, tol);
+        assert_tensor_close(&diag_gpu, &diag_host, tol);
+        assert_tensor_close(&right_gpu, &right_host, tol);
+        assert_tensor_close(&left_gpu, &left_host, tol);
     }
 
     #[test]

@@ -509,6 +509,13 @@ mod tests {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
+        let tol = match runmat_accelerate_api::provider()
+            .expect("wgpu provider")
+            .precision()
+        {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
         let tensor = Tensor::new(vec![3.0, 0.0, 0.0, 0.25], vec![2, 2]).unwrap();
         let cpu_value = rcond_builtin(Value::Tensor(tensor.clone())).expect("cpu rcond");
         let cpu_scalar = match cpu_value {
@@ -526,7 +533,7 @@ mod tests {
         let gpu_value = rcond_builtin(Value::GpuTensor(handle)).expect("gpu rcond");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, vec![1, 1]);
-        assert!((gathered.data[0] - cpu_scalar).abs() < 1e-12);
+        assert!((gathered.data[0] - cpu_scalar).abs() < tol);
     }
 
     #[test]

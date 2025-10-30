@@ -5,7 +5,6 @@ use num_complex::Complex64;
 use runmat_accelerate_api::ProviderPolyfitResult;
 use runmat_builtins::{ComplexTensor, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
-use std::collections::HashMap;
 
 use crate::builtins::common::tensor;
 #[cfg(feature = "doc_export")]
@@ -871,11 +870,11 @@ fn coefficients_to_value(coeffs: &[Complex64]) -> Result<Value, String> {
 
 fn build_stats(r: &[f64], n: usize, normr: f64, df: f64) -> Result<Value, String> {
     let tensor = Tensor::new(r.to_vec(), vec![n, n]).map_err(|e| format!("polyfit: {e}"))?;
-    let mut fields = HashMap::new();
-    fields.insert("R".to_string(), Value::Tensor(tensor));
-    fields.insert("df".to_string(), Value::Num(df));
-    fields.insert("normr".to_string(), Value::Num(normr));
-    Ok(Value::Struct(StructValue { fields }))
+    let mut st = StructValue::new();
+    st.fields.insert("R".to_string(), Value::Tensor(tensor));
+    st.fields.insert("df".to_string(), Value::Num(df));
+    st.fields.insert("normr".to_string(), Value::Num(normr));
+    Ok(Value::Struct(st))
 }
 
 fn build_mu(mean: f64, scale: f64) -> Result<Value, String> {

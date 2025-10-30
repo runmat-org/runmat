@@ -318,6 +318,9 @@ fn solve_roots(coeffs: &[Complex64]) -> Result<Vec<Complex64>, String> {
     }
 
     let degree = coeffs.len() - 1;
+    if degree == 3 {
+        return Ok(cubic_roots(coeffs[0], coeffs[1], coeffs[2], coeffs[3]));
+    }
     let leading = coeffs[0];
     if leading.norm() <= LEADING_ZERO_TOL {
         return Err("roots: leading coefficient must be non-zero after trimming".to_string());
@@ -340,6 +343,30 @@ fn solve_roots(coeffs: &[Complex64]) -> Result<Vec<Complex64>, String> {
         "roots: failed to compute eigenvalues of the companion matrix".to_string()
     })?;
     Ok(eigenvalues.iter().map(|&z| canonicalize_root(z)).collect())
+}
+
+fn cubic_roots(a: Complex64, b: Complex64, c: Complex64, d: Complex64) -> Vec<Complex64> {
+    // Depressed cubic via Cardano: x = y - b/(3a), y^3 + p y + q = 0
+    let three = 3.0;
+    let nine = 9.0;
+    let twenty_seven = 27.0;
+    let a2 = a * a;
+    let a3 = a2 * a;
+    let p = (three * a * c - b * b) / (three * a2);
+    let q = (twenty_seven * a2 * d - nine * a * b * c + Complex64::new(2.0, 0.0) * b * b * b)
+        / (twenty_seven * a3);
+    let half = Complex64::new(0.5, 0.0);
+    let disc = (q * q) * half * half + (p * p * p) / Complex64::new(27.0, 0.0);
+    let sqrt_disc = disc.sqrt();
+    let u = (-q * half + sqrt_disc).powf(1.0 / 3.0);
+    let v = (-q * half - sqrt_disc).powf(1.0 / 3.0);
+    let omega = Complex64::new(-0.5, (3.0f64).sqrt() * 0.5);
+    let omega2 = omega * omega;
+    let shift = b / (three * a);
+    let y0 = u + v;
+    let y1 = u * omega + v * omega.conj();
+    let y2 = u * omega2 + v * omega;
+    vec![y0 - shift, y1 - shift, y2 - shift]
 }
 
 fn canonicalize_root(z: Complex64) -> Complex64 {
@@ -390,7 +417,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{Tensor, ComplexTensor, LogicalArray};
 
     #[test]
     fn roots_quadratic_real() {
@@ -437,6 +464,79 @@ mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn roots_quartic_all_zero_roots() {
+        // p(x) = x^4 => 4 roots at 0
+        let coeffs = Tensor::new(vec![1.0, 0.0, 0.0, 0.0, 0.0], vec![5, 1]).unwrap();
+        let result = roots_builtin(Value::Tensor(coeffs)).expect("roots quartic");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![4, 1]);
+                for &r in &t.data {
+                    assert!(r.abs() < 1e-8);
+                }
+            }
+            Value::ComplexTensor(t) => {
+                assert_eq!(t.shape, vec![4, 1]);
+                for &(re, im) in &t.data {
+                    assert!(re.abs() < 1e-7 && im.abs() < 1e-7);
+                }
+            }
+            other => panic!("unexpected output {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roots_accepts_complex_coefficients_input() {
+        // p(x) = x^2 + 1 with complex coefficients path
+        let coeffs = ComplexTensor::new(vec![(1.0, 0.0), (0.0, 0.0), (1.0, 0.0)], vec![3, 1]).unwrap();
+        let result = roots_builtin(Value::ComplexTensor(coeffs)).expect("roots complex input");
+        match result {
+            Value::ComplexTensor(t) => {
+                assert_eq!(t.shape, vec![2, 1]);
+                // roots at i and -i
+                let mut roots = t.data;
+                roots.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                assert!(roots[0].0.abs() < 1e-10 && (roots[0].1 + 1.0).abs() < 1e-6);
+                assert!(roots[1].0.abs() < 1e-10 && (roots[1].1 - 1.0).abs() < 1e-6);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roots_accepts_logical_coefficients() {
+        // p(x) = x with logical coefficients [1 0]
+        let la = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
+        let result = roots_builtin(Value::LogicalArray(la)).expect("roots logical");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 1]);
+                assert!(t.data[0].abs() < 1e-12);
+            }
+            other => panic!("expected real tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roots_scalar_num_returns_empty() {
+        let result = roots_builtin(Value::Num(5.0)).expect("roots scalar num");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![0, 1]);
+                assert!(t.data.is_empty());
+            }
+            other => panic!("expected empty tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roots_rejects_non_vector_input() {
+        let coeffs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+        let err = roots_builtin(Value::Tensor(coeffs)).expect_err("expected vector-shape error");
+        assert!(err.to_lowercase().contains("vector"));
     }
 
     #[test]

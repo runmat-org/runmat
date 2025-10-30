@@ -766,11 +766,15 @@ mod tests {
             other => panic!("unexpected cpu result {other:?}"),
         };
         assert_eq!(gathered.shape, expected.shape);
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
         gathered
             .data
             .iter()
             .zip(expected.data.iter())
-            .for_each(|(lhs, rhs)| assert!((lhs - rhs).abs() < 1e-12));
+            .for_each(|(lhs, rhs)| assert!((lhs - rhs).abs() < tol));
     }
 
     #[test]

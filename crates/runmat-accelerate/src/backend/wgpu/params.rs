@@ -287,7 +287,6 @@ pub struct SymmetryParamsF64 {
     pub mode: u32,
     pub tolerance: f64,
     pub _pad: f64,
-    pub _pad2: f64,
 }
 
 #[repr(C, align(16))]

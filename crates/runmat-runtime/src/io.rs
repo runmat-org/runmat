@@ -5,17 +5,6 @@
 use regex::Regex;
 use runmat_macros::runtime_builtin;
 
-/// Display a string to the console (language fprintf with single string argument)
-#[runtime_builtin(name = "fprintf", sink = true)]
-pub fn fprintf_string_builtin(format_str: String) -> Result<f64, String> {
-    print!("{format_str}");
-    use std::io::{self, Write};
-    io::stdout()
-        .flush()
-        .map_err(|e| format!("Failed to flush stdout: {e}"))?;
-    Ok(format_str.len() as f64) // fprintf returns number of characters written
-}
-
 /// Format and display string with one numeric argument (fprintf with %d, %f, %.4f etc.)
 // merged into single fprintf below if needed
 pub fn fprintf_format_builtin(format_str: String, value: f64) -> Result<f64, String> {
@@ -94,13 +83,6 @@ pub fn disp_number_builtin(n: f64) -> Result<f64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_fprintf() {
-        let result = fprintf_string_builtin("Hello, world!".to_string());
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 13.0);
-    }
 
     #[test]
     fn test_disp_string() {

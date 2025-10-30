@@ -981,6 +981,14 @@ mod tests {
         )
         .expect("register wgpu provider");
 
+        let tol = match runmat_accelerate_api::provider()
+            .expect("provider")
+            .precision()
+        {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
+
         let tensor = Matrix::new(vec![3.0, 0.0, 4.0, 4.0, 0.0, 5.0], vec![3, 2]).unwrap();
         let host_eval = evaluate(Value::Tensor(tensor.clone()), &[]).expect("host eval");
         let host_q = tensor_from_value(host_eval.q());
@@ -1001,11 +1009,11 @@ mod tests {
         let gpu_vec =
             test_support::gather(gpu_eval.permutation_vector()).expect("gather pivot vector");
 
-        tensor_close(&gpu_q, &host_q, 1e-10);
-        tensor_close(&gpu_r, &host_r, 1e-10);
-        tensor_close(&gpu_p, &host_p, 1e-10);
+        tensor_close(&gpu_q, &host_q, tol);
+        tensor_close(&gpu_r, &host_r, tol);
+        tensor_close(&gpu_p, &host_p, tol);
         let host_vec = tensor_from_value(host_eval.permutation_vector());
-        tensor_close(&gpu_vec, &host_vec, 1e-10);
+        tensor_close(&gpu_vec, &host_vec, tol);
     }
 
     #[test]

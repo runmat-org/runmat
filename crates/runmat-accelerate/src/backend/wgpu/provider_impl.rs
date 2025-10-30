@@ -796,9 +796,7 @@ struct Params {
 @group(0) @binding(0) var<storage, read> input0: Tensor;
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
-
 fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }
-
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
@@ -5744,7 +5742,7 @@ impl WgpuProvider {
         );
         ensure!(
             segments <= u32::MAX as usize,
-            "cumsum: segment count exceeds GPU kernel limits"
+            "cumsum: segment count exceeds GPU limits"
         );
         ensure!(
             block <= u32::MAX as usize,
@@ -7639,7 +7637,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, vec![diag_len, 1], diag_len))
     }
-
     pub(crate) fn binary_op_exec(
         &self,
         op: crate::backend::wgpu::types::BinaryOpCode,
@@ -8428,7 +8425,6 @@ impl WgpuProvider {
             indices: indices_handle,
         })
     }
-
     pub(crate) fn reduce_std_dim_exec(
         &self,
         a: &GpuTensorHandle,
@@ -9077,7 +9073,6 @@ impl WgpuProvider {
         })
     }
 }
-
 impl AccelProvider for WgpuProvider {
     fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         self.zeros_exec(shape)
@@ -9193,7 +9188,7 @@ impl AccelProvider for WgpuProvider {
         let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
         let host_result =
             polyfit_host_real_for_provider(&x_host.data, &y_host.data, degree, weights_slice)
-                .map_err(|e| anyhow(e))?;
+                .map_err(|e| anyhow!(e))?;
         Ok(ProviderPolyfitResult {
             coefficients: host_result.coefficients,
             r_matrix: host_result.r_matrix,
@@ -9708,11 +9703,6 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn lu(&self, a: &GpuTensorHandle) -> Result<ProviderLuResult> {
-        if self.precision != NumericPrecision::F64 {
-            return Err(anyhow!(
-                "lu: wgpu provider currently supports only f64 precision tensors"
-            ));
-        }
         let host = self.download(a)?;
         let LuHostFactors {
             combined,
@@ -9756,11 +9746,6 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn chol(&self, a: &GpuTensorHandle, lower: bool) -> Result<ProviderCholResult> {
-        if self.precision != NumericPrecision::F64 {
-            return Err(anyhow!(
-                "chol: wgpu provider currently supports only f64 precision tensors"
-            ));
-        }
         let host = self.download(a)?;
         let tensor =
             Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("chol: {e}"))?;
@@ -9785,11 +9770,6 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn qr(&self, handle: &GpuTensorHandle, options: ProviderQrOptions) -> Result<ProviderQrResult> {
-        if self.precision != NumericPrecision::F64 {
-            return Err(anyhow!(
-                "qr: wgpu provider currently supports only f64 precision tensors"
-            ));
-        }
         let host = self.download(handle)?;
         let tensor =
             Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("qr: {e}"))?;
@@ -9842,7 +9822,6 @@ impl AccelProvider for WgpuProvider {
     fn pagefun(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
         self.pagefun_exec(request)
     }
-
     fn covariance(
         &self,
         matrix: &GpuTensorHandle,
@@ -10079,12 +10058,6 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn eig(&self, handle: &GpuTensorHandle, compute_left: bool) -> Result<ProviderEigResult> {
-        if self.precision != NumericPrecision::F64 {
-            return Err(anyhow!(
-                "eig: wgpu provider currently supports only f64 precision tensors"
-            ));
-        }
-
         let host = self.download(handle)?;
         let tensor =
             Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("eig: {e}"))?;
@@ -10427,7 +10400,6 @@ impl AccelProvider for WgpuProvider {
                     mode,
                     tolerance,
                     _pad: 0.0,
-                    _pad2: 0.0,
                 };
                 let params_buffer = self.uniform_buffer(&params, "runmat-issymmetric-params-f64");
                 let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -10643,7 +10615,6 @@ impl AccelProvider for WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         self.scatter_column_exec(matrix, col_index, values)
     }
-
     fn scatter_row(
         &self,
         matrix: &GpuTensorHandle,

@@ -1027,7 +1027,6 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::StructValue;
-    use std::collections::HashMap;
 
     #[test]
     fn polyval_scalar() {
@@ -1107,16 +1106,17 @@ mod tests {
     fn polyval_delta_computation() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
-        let mut fields = HashMap::new();
+        let mut st = StructValue::new();
         let r = Tensor::new(
             vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             vec![3, 3],
         )
         .unwrap();
-        fields.insert("R".to_string(), Value::Tensor(r));
-        fields.insert("df".to_string(), Value::Num(4.0));
-        fields.insert("normr".to_string(), Value::Num(2.0));
-        let stats = Value::Struct(StructValue { fields });
+        st.fields.insert("R".to_string(), Value::Tensor(r));
+        st.fields.insert("df".to_string(), Value::Num(4.0));
+        st.fields
+            .insert("normr".to_string(), Value::Num(2.0));
+        let stats = Value::Struct(st);
         let eval = evaluate(Value::Tensor(coeffs), Value::Tensor(points), &[stats], true)
             .expect("polyval");
         let (_, delta) = eval.into_pair().expect("delta available");
@@ -1173,10 +1173,10 @@ mod tests {
     fn polyval_invalid_stats_missing_r() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-        let mut fields = HashMap::new();
-        fields.insert("df".to_string(), Value::Num(1.0));
-        fields.insert("normr".to_string(), Value::Num(1.0));
-        let stats = Value::Struct(StructValue { fields });
+        let mut st = StructValue::new();
+        st.fields.insert("df".to_string(), Value::Num(1.0));
+        st.fields.insert("normr".to_string(), Value::Num(1.0));
+        let stats = Value::Struct(st);
         let err = polyval_builtin(Value::Tensor(coeffs), Value::Tensor(points), vec![stats])
             .expect_err("expected missing R error");
         assert!(err.contains("missing the field 'R'"));

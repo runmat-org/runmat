@@ -1058,14 +1058,10 @@ mod tests {
         let b = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
         let result =
             linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
-                approx_eq(t.data[0], 1.0);
-                approx_eq(t.data[1], 2.0);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        let t = test_support::gather(result).expect("gather");
+        assert_eq!(t.shape, vec![2, 1]);
+        approx_eq(t.data[0], 1.0);
+        approx_eq(t.data[1], 2.0);
     }
 
     #[test]
@@ -1225,6 +1221,10 @@ mod tests {
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
 
         let a = Tensor::new(vec![3.0, 1.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
@@ -1259,7 +1259,7 @@ mod tests {
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
-            assert!((gpu - cpu).abs() < 1e-10);
+            assert!((gpu - cpu).abs() < tol);
         }
     }
 

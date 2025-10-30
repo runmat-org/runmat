@@ -254,18 +254,29 @@ fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> 
 }
 
 fn issymmetric_gpu(handle: GpuTensorHandle, mode: SymmetryMode, tol: f64) -> Result<Value, String> {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
+
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let provider_mode = match mode {
+        let kind = match mode {
             SymmetryMode::Symmetric => ProviderSymmetryKind::Symmetric,
             SymmetryMode::Skew => ProviderSymmetryKind::Skew,
         };
-        match provider.issymmetric(&handle, provider_mode, tol) {
-            Ok(result) => return Ok(Value::Bool(result)),
-            Err(err) => {
-                log::debug!("issymmetric: provider hook unavailable, falling back to host: {err}");
-            }
+        let tried = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            provider.issymmetric(&handle, kind, tol)
+        }));
+        if let Ok(Ok(flag)) = tried {
+            return Ok(Value::Bool(flag));
         }
+        log::debug!("issymmetric: provider path failed or panicked; falling back to host");
     }
+
     let tensor = gpu_helpers::gather_tensor(&handle)?;
     let matrix = MatrixInput::from_value(Value::Tensor(tensor))?;
     let result = evaluate_matrix(matrix, mode, tol);

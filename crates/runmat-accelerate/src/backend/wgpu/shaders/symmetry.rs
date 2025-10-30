@@ -14,7 +14,6 @@ struct SymmetryParams {
     mode: u32,
     tolerance: f64,
     _pad: f64,
-    _pad2: f64,
 };
 
 @group(0) @binding(0) var<storage, read> input0: Tensor;

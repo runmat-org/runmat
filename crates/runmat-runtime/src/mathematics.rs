@@ -7,29 +7,6 @@
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-#[runtime_builtin(name = "asin")]
-fn asin_builtin(x: f64) -> Result<f64, String> {
-    if !(-1.0..=1.0).contains(&x) {
-        Err("Input must be in range [-1, 1] for asin".to_string())
-    } else {
-        Ok(x.asin())
-    }
-}
-
-#[runtime_builtin(name = "acos")]
-fn acos_builtin(x: f64) -> Result<f64, String> {
-    if !(-1.0..=1.0).contains(&x) {
-        Err("Input must be in range [-1, 1] for acos".to_string())
-    } else {
-        Ok(x.acos())
-    }
-}
-
-#[runtime_builtin(name = "atan2")]
-fn atan2_builtin(y: f64, x: f64) -> Result<f64, String> {
-    Ok(y.atan2(x))
-}
-
 // Logarithmic and exponential functions
 
 #[runtime_builtin(name = "ln")]
@@ -38,36 +15,6 @@ fn ln_builtin(x: f64) -> Result<f64, String> {
         Err("Input must be positive for ln".to_string())
     } else {
         Ok(x.ln())
-    }
-}
-
-#[runtime_builtin(name = "exp", accel = "unary")]
-fn exp_builtin(x: Value) -> Result<Value, String> {
-    match x {
-        Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider() {
-                if let Ok(hc) = p.unary_exp(&h) {
-                    return Ok(Value::GpuTensor(hc));
-                }
-            }
-            Err("exp: unsupported for gpuArray".to_string())
-        }
-        Value::Num(n) => Ok(Value::Num(n.exp())),
-        Value::Int(i) => Ok(Value::Num(i.to_f64().exp())),
-        Value::Tensor(t) => {
-            let data: Vec<f64> = t.data.iter().map(|&v| v.exp()).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, t.rows(), t.cols())?))
-        }
-        other => Err(format!("exp: unsupported input {other:?}")),
-    }
-}
-
-#[runtime_builtin(name = "log2")]
-fn log2_builtin(x: f64) -> Result<f64, String> {
-    if x <= 0.0 {
-        Err("Input must be positive for log2".to_string())
-    } else {
-        Ok(x.log2())
     }
 }
 

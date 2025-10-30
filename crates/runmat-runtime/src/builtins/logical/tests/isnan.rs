@@ -222,11 +222,6 @@ register_builtin_doc_text!("isnan", DOC_MD);
 fn isnan_builtin(value: Value) -> Result<Value, String> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(provider) = runmat_accelerate_api::provider() {
-                if let Ok(mask) = provider.logical_isnan(&handle) {
-                    return Ok(gpu_helpers::logical_gpu_value(mask));
-                }
-            }
             let tensor = gpu_helpers::gather_tensor(&handle)?;
             isnan_tensor("isnan", tensor)
         }
