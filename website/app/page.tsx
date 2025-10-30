@@ -93,6 +93,9 @@ export default function HomePage() {
               <Button variant="outline" size="lg" asChild className="h-12 px-8 text-lg">
                 <Link href="/docs/getting-started">Get Started</Link>
               </Button>
+              <Button variant="secondary" size="lg" asChild className="h-12 px-8 text-lg">
+                <Link href="#benchmarks">View Benchmarks</Link>
+              </Button>
             </div>
           </div>
         </div>
@@ -335,7 +338,7 @@ export default function HomePage() {
       </section>
 
       {/* Benchmarks Section */}
-      <section className="w-full py-16 md:py-24 lg:py-32">
+      <section id="benchmarks" className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">Blazing Fast Performance</h2>
