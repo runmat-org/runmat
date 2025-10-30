@@ -3594,6 +3594,121 @@ pub fn interpret_with_vars(
                     }
                     continue;
                 }
+                if name == "polyder" {
+                    if args.is_empty() {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    if out_count <= 1 {
+                        let result = match args.len() {
+                            1 => runmat_runtime::builtins::math::poly::polyder::derivative_single(
+                                args[0].clone(),
+                            ),
+                            2 => runmat_runtime::builtins::math::poly::polyder::derivative_product(
+                                args[0].clone(),
+                                args[1].clone(),
+                            ),
+                            _ => vm_bail!("polyder: too many input arguments."),
+                        };
+                        match result {
+                            Ok(value) => {
+                                if out_count == 0 {
+                                    continue;
+                                }
+                                stack.push(value);
+                            }
+                            Err(err) => vm_bail!(err),
+                        }
+                        if out_count > 1 {
+                            for _ in 1..out_count {
+                                stack.push(Value::Num(0.0));
+                            }
+                        }
+                        continue;
+                    }
+                    if args.len() != 2 {
+                        vm_bail!(mex(
+                            "MATLAB:minrhs",
+                            "Not enough input arguments for quotient form."
+                        ));
+                    }
+                    let eval =
+                        match runmat_runtime::builtins::math::poly::polyder::evaluate_quotient(
+                            args[0].clone(),
+                            args[1].clone(),
+                        ) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    stack.push(eval.numerator());
+                    stack.push(eval.denominator());
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "polyval" {
+                    if args.len() < 2 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::poly::polyval::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        &args[2..],
+                        out_count >= 2,
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    stack.push(eval.value());
+                    if out_count >= 2 {
+                        let delta = match eval.delta() {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(delta);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "polyfit" {
+                    if args.len() < 3 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::poly::polyfit::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        args[2].clone(),
+                        &args[3..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    stack.push(eval.coefficients());
+                    if out_count >= 2 {
+                        stack.push(eval.stats());
+                    }
+                    if out_count >= 3 {
+                        stack.push(eval.mu());
+                    }
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
                 if name == "filter" {
                     if args.len() < 3 {
                         vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));

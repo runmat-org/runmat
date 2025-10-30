@@ -1,4 +1,4 @@
-//! MATLAB-compatible `sin` builtin with GPU-aware semantics for RunMat.
+//! MATLAB-compatible `cos` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
@@ -17,17 +17,17 @@ use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
-title: "sin"
+title: "cos"
 category: "math/trigonometry"
-keywords: ["sin", "sine", "trigonometry", "gpu", "elementwise", "like"]
-summary: "Sine of scalars, vectors, matrices, complex numbers, or character arrays with MATLAB broadcasting and GPU acceleration."
+keywords: ["cos", "cosine", "trigonometry", "elementwise", "gpu", "like"]
+summary: "Cosine of scalars, vectors, matrices, complex numbers, or character arrays with MATLAB broadcasting and GPU acceleration."
 references: []
 gpu_support:
   elementwise: true
   reduction: false
   precisions: ["f32", "f64"]
   broadcasting: "matlab"
-  notes: "Prefers provider unary_sin hooks; falls back to the host path when a provider is unavailable or cannot service the operand type."
+  notes: "Prefers provider unary_cos hooks; falls back to the host path when a provider is unavailable or cannot service the operand type."
 fusion:
   elementwise: true
   reduction: false
@@ -35,32 +35,32 @@ fusion:
   constants: "inline"
 requires_feature: null
 tested:
-  unit: "builtins::math::trigonometry::sin::tests"
-  integration: "builtins::math::trigonometry::sin::tests::sin_gpu_provider_roundtrip"
+  unit: "builtins::math::trigonometry::cos::tests"
+  integration: "builtins::math::trigonometry::cos::tests::cos_gpu_provider_roundtrip"
 ---
 
-# What does the `sin` function do in MATLAB / RunMat?
-`y = sin(x)` evaluates the sine of each element in `x`, using radians and preserving MATLAB’s column-major layout and broadcasting rules.
+# What does the `cos` function do in MATLAB / RunMat?
+`y = cos(x)` evaluates the cosine of each element in `x`, interpreting angles in radians while preserving MATLAB’s column-major layout and broadcasting rules.
 
-## How does the `sin` function behave in MATLAB / RunMat?
+## How does the `cos` function behave in MATLAB / RunMat?
 - Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.
-- Logical and integer inputs are promoted to double precision before evaluation so that downstream arithmetic matches MATLAB’s numeric tower.
-- Complex values use the analytic extension `sin(a + bi) = sin(a)cosh(b) + i·cos(a)sinh(b)` while propagating `NaN`/`Inf` components independently.
+- Logical and integer inputs are promoted to double precision before evaluation so downstream arithmetic matches MATLAB’s numeric tower.
+- Complex values use the analytic extension `cos(a + bi) = cos(a)cosh(b) - i·sin(a)sinh(b)` while propagating `NaN`/`Inf` components independently.
 - Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB’s behaviour.
 - Appending `'like', prototype` mirrors the prototype’s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.
 - Empty inputs and singleton dimensions are preserved without introducing extraneous allocations.
 
-## `sin` Function GPU Execution Behaviour
-- With RunMat Accelerate active, tensors remain on the device and execute through the provider’s `unary_sin` hook (or fused elementwise kernels) without leaving GPU memory.
+## `cos` Function GPU Execution Behaviour
+- With RunMat Accelerate active, tensors remain on the device and execute through the provider’s `unary_cos` hook (or fused elementwise kernels) without leaving GPU memory.
 - If the provider declines the operation—for example, when only CPU precision is available or the operand type is unsupported—RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).
 - Fusion planning keeps neighbouring elementwise operators grouped, reducing host↔device transfers even when an intermediate fallback occurs.
 
-## Examples of using the `sin` function in MATLAB / RunMat
+## Examples of using the `cos` function in MATLAB / RunMat
 
-### Computing the sine of a scalar
+### Cosine of zero
 
 ```matlab
-y = sin(pi/2);
+y = cos(0);
 ```
 
 Expected output:
@@ -69,106 +69,111 @@ Expected output:
 y = 1
 ```
 
-### Computing the sine of a vector
+### Cosine of evenly spaced angles
 
 ```matlab
-angles = [0 pi/6 pi/4 pi/3];
-values = sin(angles);
+theta = linspace(0, 2*pi, 5);
+values = cos(theta);
 ```
 
 Expected output:
 
 ```matlab
-values = [0 0.5 0.7071 0.8660]
+values = [1 0.3090 -0.8090 -0.8090 0.3090]
 ```
 
-### Computing the sine of a complex number
+### Cosine of complex data
 
 ```matlab
-z = sin(1 + 2i);
+z = cos(1 + 2i);
 ```
 
 Expected output:
 
 ```matlab
-z = 3.1658 + 1.9596i
+z = 2.0327 - 3.0519i
 ```
 
-### Computing the sine of a matrix on a GPU
+### Cosine on a GPU tensor without manual residency
 
 ```matlab
 A = reshape(0:5, [3 2]);
-G = gpuArray(A);
-R = sin(G);
-result = gather(R);
+result = cos(A);        % planner keeps the tensor on device when beneficial
 ```
 
-Expected output:
+Expected output (after `gather(result)`):
 
 ```matlab
 result =
-         0    0.1411
-    0.8415   -0.7568
-    0.9093   -0.9589
+    1.0000   -0.9899
+    0.5403   -0.6536
+   -0.4161    0.2837
 ```
 
 ### Keeping results on the GPU with a `'like'` prototype
 
 ```matlab
 proto = gpuArray.zeros(1, 1, 'single');
-angles = [0 pi/2];
-deviceResult = sin(angles, 'like', proto);
-gathered = gather(deviceResult);
+angles = [0 pi/2 pi];
+deviceResult = cos(angles, 'like', proto);
+```
+
+Expected output (after `gather(deviceResult)`):
+
+```matlab
+deviceResult = single([1 0 -1])
+```
+
+### Matching a host prototype while inputs live on the GPU
+
+```matlab
+G = gpuArray([0 1 2]);
+hostLike = cos(G, 'like', zeros(1, 'double'));
 ```
 
 Expected output:
 
 ```matlab
-gathered =
-  1x2 single
-     0     1
+hostLike = [1 0.5403 -0.4161]
 ```
 
 ## GPU residency in RunMat (Do I need `gpuArray`?)
-You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the necessary kernels (such as `unary_sin`). Manual `gpuArray` / `gather` calls remain supported for MATLAB compatibility or when you need to pin residency before interacting with external code.
+You usually do **not** need to call `gpuArray` in RunMat. The fusion planner keeps tensors on the GPU whenever it is profitable and the provider exposes the required kernels. Explicit `gpuArray` / `gather` calls remain available for compatibility with MathWorks MATLAB workflows and for interacting with legacy code that relies on manual residency control.
 
 ## FAQ
 
-### When should I use the `sin` function?
-Whenever you need the elementwise sine for signals, control systems, geometry, or any workflow that depends on periodic functions across scalars, vectors, or higher-dimensional tensors.
+### When should I use the `cos` function?
+Use `cos` whenever you need the cosine of angles expressed in radians—whether those angles are scalars, vectors, matrices, or higher-dimensional tensors.
 
-### Does `sin` expect radians or degrees?
-Radians are required, just like in MATLAB. Use `sin(deg2rad(theta))` or the `sind` builtin if you want to work in degrees.
+### Does `cos` promote inputs to double precision?
+Yes. Unless you request otherwise with `'like'`, RunMat promotes numeric inputs to double precision, matching MATLAB’s default behaviour.
 
-### How are logical, integer, or character inputs handled?
-Logical and integer inputs are promoted to double precision before evaluation, and character arrays are converted to their Unicode code points. The result is always floating-point, matching MATLAB’s behaviour.
+### How does `cos` handle complex inputs?
+Complex numbers follow MATLAB’s analytic definition `cos(a + bi) = cos(a)cosh(b) - i·sin(a)sinh(b)` so both the real and imaginary parts are handled correctly.
 
-### Can the result stay on the GPU automatically?
-Yes. If your inputs are already on the GPU—or you pass `'like', gpuArray(…)`—RunMat keeps the output on the device. When a fallback is required, the runtime re-uploads the result so downstream consumers still see a GPU tensor.
+### What happens if the GPU provider lacks `unary_cos`?
+RunMat gathers the tensor to the host, evaluates cosine with the CPU reference path, and then reapplies residency rules. If a `'like'` prototype targets the GPU, the result is uploaded back before returning.
 
-### What happens if the provider does not implement `unary_sin`?
-RunMat gathers the tensor to the host, computes `sin` with the reference implementation, and applies the requested residency rules (including `'like'` re-uploads) before returning.
+### Can I rely on MATLAB broadcasting rules?
+Yes. Scalar and singleton dimensions implicitly expand just as they do in MATLAB.
 
-### Does `sin` support complex numbers?
-Absolutely. Real and imaginary parts are handled according to the analytic extension, and NaNs/Infs propagate component-wise exactly as in MATLAB.
-
-### Can I use complex prototypes with `'like'`?
-Not yet. Provide real-valued prototypes (host or GPU) when using `'like'`; complex prototypes raise a descriptive error so you can fall back to the default output rules.
+### Does `cos` work with character arrays?
+Yes. Character arrays are converted to their Unicode code points before cosine is evaluated, and the result is returned as a dense double array of the same size.
 
 ## See Also
-[cos](./cos), [tan](./tan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+[sin](./sin), [tan](./tan), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
 
 ## Source & Feedback
-- The full source code for the implementation of the `sin` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sin.rs)
-- Found a bug or behavioral difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
+- The full source code for the implementation of the `cos` function is available at: [`crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/cos.rs)
+- Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "sin",
+    name: "cos",
     op_kind: GpuOpKind::Elementwise,
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[ProviderHook::Unary { name: "unary_sin" }],
+    provider_hooks: &[ProviderHook::Unary { name: "unary_cos" }],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
@@ -176,102 +181,102 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Providers may execute sin in-place on the device; runtimes gather to host when unary_sin is unavailable.",
+        "Providers may execute cosine directly on device; runtimes gather to host when unary_cos is unavailable.",
 };
 
 register_builtin_gpu_spec!(GPU_SPEC);
 
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "sin",
+    name: "cos",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
             let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("sin({input})"))
+            Ok(format!("cos({input})"))
         },
     }),
     reduction: None,
     emits_nan: false,
-    notes: "Fusion planner emits WGSL `sin` calls; providers may override via fused elementwise kernels.",
+    notes: "Fusion planner emits WGSL `cos` calls; providers can override via fused elementwise kernels.",
 };
 
 register_builtin_fusion_spec!(FUSION_SPEC);
 
 #[cfg(feature = "doc_export")]
-register_builtin_doc_text!("sin", DOC_MD);
+register_builtin_doc_text!("cos", DOC_MD);
 
 #[runtime_builtin(
-    name = "sin",
+    name = "cos",
     category = "math/trigonometry",
-    summary = "Sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
-    keywords = "sin,sine,trigonometry,gpu",
+    summary = "Cosine of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    keywords = "cos,cosine,trigonometry,gpu",
     accel = "unary"
 )]
-fn sin_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
-    let output = parse_output_template(&rest)?;
+fn cos_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+    let template = parse_output_template(&rest)?;
     let base = match value {
-        Value::GpuTensor(handle) => sin_gpu(handle)?,
-        Value::Complex(re, im) => Value::Complex(sin_complex_re(re, im), sin_complex_im(re, im)),
-        Value::ComplexTensor(ct) => sin_complex_tensor(ct)?,
-        Value::CharArray(ca) => sin_char_array(ca)?,
+        Value::GpuTensor(handle) => cos_gpu(handle)?,
+        Value::Complex(re, im) => Value::Complex(cos_complex_re(re, im), cos_complex_im(re, im)),
+        Value::ComplexTensor(ct) => cos_complex_tensor(ct)?,
+        Value::CharArray(ca) => cos_char_array(ca)?,
         Value::String(_) | Value::StringArray(_) => {
-            return Err("sin: expected numeric input".to_string())
+            return Err("cos: expected numeric input".to_string())
         }
-        other => sin_real(other)?,
+        other => cos_real(other)?,
     };
-    apply_output_template(base, &output)
+    apply_output_template(base, &template)
 }
 
-fn sin_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
+fn cos_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(out) = provider.unary_sin(&handle) {
+        if let Ok(out) = provider.unary_cos(&handle) {
             return Ok(Value::GpuTensor(out));
         }
     }
     let tensor = gpu_helpers::gather_tensor(&handle)?;
-    sin_tensor(tensor).map(tensor::tensor_into_value)
+    cos_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn sin_real(value: Value) -> Result<Value, String> {
-    let tensor = tensor::value_into_tensor_for("sin", value)?;
-    sin_tensor(tensor).map(tensor::tensor_into_value)
+fn cos_real(value: Value) -> Result<Value, String> {
+    let tensor = tensor::value_into_tensor_for("cos", value)?;
+    cos_tensor(tensor).map(tensor::tensor_into_value)
 }
 
-fn sin_tensor(tensor: Tensor) -> Result<Tensor, String> {
-    let data = tensor.data.iter().map(|&v| v.sin()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("sin: {e}"))
+fn cos_tensor(tensor: Tensor) -> Result<Tensor, String> {
+    let data = tensor.data.iter().map(|&v| v.cos()).collect::<Vec<_>>();
+    Tensor::new(data, tensor.shape.clone()).map_err(|e| format!("cos: {e}"))
 }
 
-fn sin_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
+fn cos_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
     let mapped = ct
         .data
         .iter()
-        .map(|&(re, im)| (sin_complex_re(re, im), sin_complex_im(re, im)))
+        .map(|&(re, im)| (cos_complex_re(re, im), cos_complex_im(re, im)))
         .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("sin: {e}"))?;
+    let tensor = ComplexTensor::new(mapped, ct.shape.clone()).map_err(|e| format!("cos: {e}"))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn sin_char_array(ca: CharArray) -> Result<Value, String> {
+fn cos_char_array(ca: CharArray) -> Result<Value, String> {
     let data = ca
         .data
         .iter()
-        .map(|&ch| (ch as u32 as f64).sin())
+        .map(|&ch| (ch as u32 as f64).cos())
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("sin: {e}"))?;
+    let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| format!("cos: {e}"))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 #[inline]
-fn sin_complex_re(re: f64, im: f64) -> f64 {
-    re.sin() * im.cosh()
+fn cos_complex_re(re: f64, im: f64) -> f64 {
+    re.cos() * im.cosh()
 }
 
 #[inline]
-fn sin_complex_im(re: f64, im: f64) -> f64 {
-    re.cos() * im.sinh()
+fn cos_complex_im(re: f64, im: f64) -> f64 {
+    -re.sin() * im.sinh()
 }
 
 #[derive(Clone)]
@@ -285,19 +290,19 @@ fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err("sin: expected prototype after 'like'".to_string())
+                Err("cos: expected prototype after 'like'".to_string())
             } else {
-                Err("sin: unrecognised argument for sin".to_string())
+                Err("cos: unrecognised argument for cos".to_string())
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err("sin: unsupported option; only 'like' is accepted".to_string())
+                Err("cos: unsupported option; only 'like' is accepted".to_string())
             }
         }
-        _ => Err("sin: too many input arguments".to_string()),
+        _ => Err("cos: too many input arguments".to_string()),
     }
 }
 
@@ -312,10 +317,10 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Valu
             | Value::Bool(_)
             | Value::LogicalArray(_) => convert_to_host_like(value),
             Value::Complex(_, _) | Value::ComplexTensor(_) => {
-                Err("sin: complex prototypes for 'like' are not supported yet".to_string())
+                Err("cos: complex prototypes for 'like' are not supported yet".to_string())
             }
             _ => Err(
-                "sin: unsupported prototype for 'like'; provide a numeric or gpuArray prototype"
+                "cos: unsupported prototype for 'like'; provide a numeric or gpuArray prototype"
                     .to_string(),
             ),
         },
@@ -324,7 +329,7 @@ fn apply_output_template(value: Value, template: &OutputTemplate) -> Result<Valu
 
 fn convert_to_gpu(value: Value) -> Result<Value, String> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        "sin: GPU output requested via 'like' but no acceleration provider is active".to_string()
+        "cos: GPU output requested via 'like' but no acceleration provider is active".to_string()
     })?;
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
@@ -333,11 +338,11 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
-            let handle = provider.upload(&view).map_err(|e| format!("sin: {e}"))?;
+            let handle = provider.upload(&view).map_err(|e| format!("cos: {e}"))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("sin: {e}"))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(|e| format!("cos: {e}"))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
@@ -347,10 +352,10 @@ fn convert_to_gpu(value: Value) -> Result<Value, String> {
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("sin: GPU prototypes for 'like' only support real numeric outputs".to_string())
+            Err("cos: GPU prototypes for 'like' only support real numeric outputs".to_string())
         }
         other => Err(format!(
-            "sin: unsupported result type for GPU output via 'like' ({other:?})"
+            "cos: unsupported result type for GPU output via 'like' ({other:?})"
         )),
     }
 }
@@ -359,7 +364,7 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
     match value {
         Value::GpuTensor(handle) => {
             let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value(&proxy).map_err(|e| format!("sin: {e}"))
+            gpu_helpers::gather_value(&proxy).map_err(|e| format!("cos: {e}"))
         }
         other => Ok(other),
     }
@@ -369,14 +374,13 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 mod tests {
     use super::*;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, StringArray, Tensor};
 
     use crate::builtins::common::test_support;
 
     #[test]
-    fn sin_scalar() {
-        let value = Value::Num(std::f64::consts::PI / 2.0);
-        let result = sin_builtin(value, Vec::new()).expect("sin");
+    fn cos_scalar_zero() {
+        let result = cos_builtin(Value::Num(0.0), Vec::new()).expect("cos");
         match result {
             Value::Num(v) => assert!((v - 1.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
@@ -384,50 +388,50 @@ mod tests {
     }
 
     #[test]
-    fn sin_tensor_elements() {
+    fn cos_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, std::f64::consts::PI], vec![2, 1]).unwrap();
-        let result = sin_builtin(Value::Tensor(tensor), Vec::new()).expect("sin");
+        let result = cos_builtin(Value::Tensor(tensor), Vec::new()).expect("cos");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 0.0).abs() < 1e-12);
-                assert!((t.data[1] - 0.0).abs() < 1e-12);
+                assert!((t.data[0] - 1.0).abs() < 1e-12);
+                assert!((t.data[1] + 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
 
     #[test]
-    fn sin_int_value_promotes() {
+    fn cos_int_value_promotes() {
         let value = Value::Int(IntValue::I32(1));
-        let result = sin_builtin(value, Vec::new()).expect("sin");
+        let result = cos_builtin(value, Vec::new()).expect("cos");
         match result {
-            Value::Num(v) => assert!((v - 1.0_f64.sin()).abs() < 1e-12),
+            Value::Num(v) => assert!((v - 1.0f64.cos()).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
     }
 
     #[test]
-    fn sin_complex_scalar() {
-        let result = sin_builtin(Value::Complex(1.0, 2.0), Vec::new()).expect("sin");
+    fn cos_complex_scalar() {
+        let result = cos_builtin(Value::Complex(1.0, 2.0), Vec::new()).expect("cos");
         match result {
             Value::Complex(re, im) => {
-                assert!((re - (1.0f64.sin() * 2.0f64.cosh())).abs() < 1e-12);
-                assert!((im - (1.0f64.cos() * 2.0f64.sinh())).abs() < 1e-12);
+                assert!((re - (1.0f64.cos() * 2.0f64.cosh())).abs() < 1e-12);
+                assert!((im + (1.0f64.sin() * 2.0f64.sinh())).abs() < 1e-12);
             }
             other => panic!("expected complex result, got {other:?}"),
         }
     }
 
     #[test]
-    fn sin_char_array_roundtrip() {
+    fn cos_char_array_roundtrip() {
         let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
-        let result = sin_builtin(Value::CharArray(chars), Vec::new()).expect("sin");
+        let result = cos_builtin(Value::CharArray(chars), Vec::new()).expect("cos");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
                 for (idx, ch) in ['a', 'b', 'c'].into_iter().enumerate() {
-                    let expected = (ch as u32 as f64).sin();
+                    let expected = (ch as u32 as f64).cos();
                     assert!((t.data[idx] - expected).abs() < 1e-12);
                 }
             }
@@ -436,32 +440,32 @@ mod tests {
     }
 
     #[test]
-    fn sin_gpu_provider_roundtrip() {
+    fn cos_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
+            let view = HostTensorView {
                 data: &tensor.data,
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = sin_builtin(Value::GpuTensor(handle), Vec::new()).expect("sin");
+            let result = cos_builtin(Value::GpuTensor(handle), Vec::new()).expect("cos");
             let gathered = test_support::gather(result).expect("gather");
-            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.cos()).collect();
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, expected);
         });
     }
 
     #[test]
-    fn sin_like_missing_prototype_errors() {
+    fn cos_like_missing_prototype_errors() {
         let err =
-            sin_builtin(Value::Num(1.0), vec![Value::from("like")]).expect_err("expected error");
+            cos_builtin(Value::Num(1.0), vec![Value::from("like")]).expect_err("expected error");
         assert!(err.contains("prototype"));
     }
 
     #[test]
-    fn sin_like_complex_prototype_errors() {
-        let err = sin_builtin(
+    fn cos_like_complex_prototype_errors() {
+        let err = cos_builtin(
             Value::Num(1.0),
             vec![Value::from("like"), Value::Complex(0.0, 1.0)],
         )
@@ -470,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn sin_like_gpu_prototype() {
+    fn cos_like_gpu_prototype() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
             let proto_view = HostTensorView {
@@ -478,15 +482,15 @@ mod tests {
                 shape: &[1, 1],
             };
             let proto = provider.upload(&proto_view).expect("upload");
-            let result = sin_builtin(
+            let result = cos_builtin(
                 Value::Tensor(tensor.clone()),
                 vec![Value::from("like"), Value::GpuTensor(proto.clone())],
             )
-            .expect("sin");
+            .expect("cos");
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+                    let expected: Vec<f64> = tensor.data.iter().map(|&v| v.cos()).collect();
                     assert_eq!(gathered.shape, vec![4, 1]);
                     assert_eq!(gathered.data, expected);
                 }
@@ -496,7 +500,7 @@ mod tests {
     }
 
     #[test]
-    fn sin_like_host_with_gpu_input_gathers() {
+    fn cos_like_host_with_gpu_input_gathers() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
@@ -504,14 +508,14 @@ mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = sin_builtin(
+            let result = cos_builtin(
                 Value::GpuTensor(handle),
                 vec![Value::from("like"), Value::Num(0.0)],
             )
-            .expect("sin");
+            .expect("cos");
             match result {
                 Value::Tensor(t) => {
-                    let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+                    let expected: Vec<f64> = tensor.data.iter().map(|&v| v.cos()).collect();
                     assert_eq!(t.shape, vec![2, 1]);
                     assert_eq!(t.data, expected);
                 }
@@ -523,8 +527,8 @@ mod tests {
     }
 
     #[test]
-    fn sin_like_rejects_extra_arguments() {
-        let err = sin_builtin(
+    fn cos_like_rejects_extra_arguments() {
+        let err = cos_builtin(
             Value::Num(0.0),
             vec![Value::from("like"), Value::Num(0.0), Value::Num(1.0)],
         )
@@ -533,16 +537,16 @@ mod tests {
     }
 
     #[test]
-    fn sin_like_keyword_case_insensitive() {
+    fn cos_like_keyword_case_insensitive() {
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
-        let result = sin_builtin(
+        let result = cos_builtin(
             Value::Tensor(tensor.clone()),
             vec![Value::from("LIKE"), Value::Num(0.0)],
         )
-        .expect("sin");
+        .expect("cos");
         match result {
             Value::Tensor(out) => {
-                let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+                let expected: Vec<f64> = tensor.data.iter().map(|&v| v.cos()).collect();
                 assert_eq!(out.shape, vec![2, 1]);
                 assert_eq!(out.data, expected);
             }
@@ -551,17 +555,38 @@ mod tests {
     }
 
     #[test]
-    fn sin_like_char_array_keyword() {
+    fn cos_like_char_array_keyword() {
         let keyword = CharArray::new_row("like");
-        let result = sin_builtin(
+        let result = cos_builtin(
             Value::Num(0.0),
             vec![Value::CharArray(keyword), Value::Num(0.0)],
         )
-        .expect("sin");
+        .expect("cos");
         match result {
-            Value::Num(v) => assert!(v.abs() < 1e-12),
+            Value::Num(v) => assert!((v - 1.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cos_like_string_array_keyword() {
+        let keyword = StringArray::new(vec!["LIKE".to_string()], vec![1]).unwrap();
+        let result = cos_builtin(
+            Value::Num(0.0),
+            vec![Value::StringArray(keyword), Value::Num(0.0)],
+        )
+        .expect("cos");
+        match result {
+            Value::Num(v) => assert!((v - 1.0).abs() < 1e-12),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cos_unrecognised_option_errors() {
+        let err =
+            cos_builtin(Value::Num(0.0), vec![Value::from("invalid")]).expect_err("expected error");
+        assert!(err.contains("unrecognised argument"));
     }
 
     #[test]
@@ -573,13 +598,13 @@ mod tests {
 
     #[test]
     #[cfg(feature = "wgpu")]
-    fn sin_wgpu_matches_cpu_elementwise() {
+    fn cos_wgpu_matches_cpu_elementwise() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let t = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
-        let cpu = sin_real(Value::Tensor(t.clone())).unwrap();
-        let view = runmat_accelerate_api::HostTensorView {
+        let cpu = cos_real(Value::Tensor(t.clone())).unwrap();
+        let view = HostTensorView {
             data: &t.data,
             shape: &t.shape,
         };
@@ -587,7 +612,7 @@ mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = sin_gpu(h).unwrap();
+        let gpu = cos_gpu(h).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

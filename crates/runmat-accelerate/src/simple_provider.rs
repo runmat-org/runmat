@@ -13,6 +13,8 @@ use runmat_accelerate_api::{
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderNanMode,
     ProviderNormOrder, ProviderPinvOptions, ProviderQrOptions, ProviderQrPivot,
     ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind,
+    ProviderPolyderQuotient, ProviderPrecision, SetdiffOptions, SetdiffResult,
+    SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -51,6 +53,123 @@ static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
 
 fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+const POLYDER_EPS: f64 = 1.0e-12;
+
+#[derive(Clone, Copy)]
+enum PolyOrientation {
+    Scalar,
+    Row,
+    Column,
+}
+
+fn poly_orientation_from_shape(shape: &[usize]) -> Result<PolyOrientation> {
+    let mut non_unit = 0usize;
+    let mut orientation = PolyOrientation::Scalar;
+    for (idx, &dim) in shape.iter().enumerate() {
+        if dim > 1 {
+            non_unit += 1;
+            orientation = if idx == 0 {
+                PolyOrientation::Column
+            } else {
+                PolyOrientation::Row
+            };
+        }
+    }
+    if non_unit > 1 {
+        Err(anyhow!("polyder: coefficient inputs must be vectors"))
+    } else {
+        Ok(orientation)
+    }
+}
+
+fn poly_shape_for_len(orientation: PolyOrientation, len: usize) -> Vec<usize> {
+    if len <= 1 {
+        return vec![1, 1];
+    }
+    match orientation {
+        PolyOrientation::Scalar | PolyOrientation::Row => vec![1, len],
+        PolyOrientation::Column => vec![len, 1],
+    }
+}
+
+fn poly_trim_slice(coeffs: &[f64]) -> Vec<f64> {
+    if coeffs.is_empty() {
+        return vec![0.0];
+    }
+    if let Some(idx) = coeffs.iter().position(|c| c.abs() > POLYDER_EPS) {
+        coeffs[idx..].to_vec()
+    } else {
+        vec![0.0]
+    }
+}
+
+fn poly_raw_derivative(coeffs: &[f64]) -> Vec<f64> {
+    if coeffs.len() <= 1 {
+        return vec![0.0];
+    }
+    let mut out = Vec::with_capacity(coeffs.len() - 1);
+    let mut power = coeffs.len() - 1;
+    for coeff in coeffs.iter().take(coeffs.len() - 1) {
+        out.push(*coeff * power as f64);
+        power -= 1;
+    }
+    out
+}
+
+fn poly_integral_real(coeffs: &[f64], constant: f64) -> Vec<f64> {
+    if coeffs.is_empty() {
+        return vec![constant];
+    }
+    let mut out = Vec::with_capacity(coeffs.len() + 1);
+    for (idx, &coeff) in coeffs.iter().enumerate() {
+        let power = (coeffs.len() - idx) as f64;
+        if power == 0.0 {
+            out.push(0.0);
+        } else {
+            out.push(coeff / power);
+        }
+    }
+    out.push(constant);
+    out
+}
+
+fn poly_convolve_real(a: &[f64], b: &[f64]) -> Vec<f64> {
+    if a.is_empty() || b.is_empty() {
+        return Vec::new();
+    }
+    let mut result = vec![0.0; a.len() + b.len() - 1];
+    for (i, &ai) in a.iter().enumerate() {
+        for (j, &bj) in b.iter().enumerate() {
+            result[i + j] += ai * bj;
+        }
+    }
+    result
+}
+
+fn poly_add_real(a: &[f64], b: &[f64]) -> Vec<f64> {
+    let len = a.len().max(b.len());
+    let mut result = vec![0.0; len];
+    for (idx, &value) in a.iter().enumerate() {
+        result[len - a.len() + idx] += value;
+    }
+    for (idx, &value) in b.iter().enumerate() {
+        result[len - b.len() + idx] += value;
+    }
+    result
+}
+
+fn poly_sub_real(a: &[f64], b: &[f64]) -> Vec<f64> {
+    let len = a.len().max(b.len());
+    let mut result = vec![0.0; len];
+    for (idx, &value) in a.iter().enumerate() {
+        result[len - a.len() + idx] += value;
+    }
+    for (idx, &value) in b.iter().enumerate() {
+        result[len - b.len() + idx] -= value;
+    }
+    result
 }
 
 fn rng_state() -> &'static Mutex<u64> {
@@ -118,6 +237,28 @@ impl InProcessProvider {
             device_id: 0,
             buffer_id: id,
         }
+    }
+
+    fn load_polynomial(&self, handle: &GpuTensorHandle) -> Result<(Vec<f64>, PolyOrientation)> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("polyder: unknown tensor handle {}", handle.buffer_id))?
+        };
+        let orientation = poly_orientation_from_shape(&handle.shape)?;
+        let coeffs = if data.is_empty() { vec![0.0] } else { data };
+        Ok((coeffs, orientation))
+    }
+
+    fn allocate_polynomial(
+        &self,
+        coeffs: Vec<f64>,
+        orientation: PolyOrientation,
+    ) -> GpuTensorHandle {
+        let shape = poly_shape_for_len(orientation, coeffs.len());
+        self.allocate_tensor(coeffs, shape)
     }
 }
 
@@ -1108,6 +1249,59 @@ impl AccelProvider for InProcessProvider {
                 shape: indices_shape,
             },
         })
+    }
+
+    fn polyder_single(&self, polynomial: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (coeffs, orientation) = self.load_polynomial(polynomial)?;
+        let raw = poly_raw_derivative(&coeffs);
+        let trimmed = poly_trim_slice(&raw);
+        Ok(self.allocate_polynomial(trimmed, orientation))
+    }
+
+    fn polyder_product(&self, p: &GpuTensorHandle, q: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (p_coeffs, orientation) = self.load_polynomial(p)?;
+        let (q_coeffs, _) = self.load_polynomial(q)?;
+        let dp = poly_raw_derivative(&p_coeffs);
+        let dq = poly_raw_derivative(&q_coeffs);
+        let term1 = poly_convolve_real(&dp, &q_coeffs);
+        let term2 = poly_convolve_real(&p_coeffs, &dq);
+        let sum = poly_add_real(&term1, &term2);
+        let trimmed = poly_trim_slice(&sum);
+        Ok(self.allocate_polynomial(trimmed, orientation))
+    }
+
+    fn polyder_quotient(
+        &self,
+        u: &GpuTensorHandle,
+        v: &GpuTensorHandle,
+    ) -> Result<ProviderPolyderQuotient> {
+        let (u_coeffs, orientation_u) = self.load_polynomial(u)?;
+        let (v_coeffs, orientation_v) = self.load_polynomial(v)?;
+        let du = poly_raw_derivative(&u_coeffs);
+        let dv = poly_raw_derivative(&v_coeffs);
+        let term1 = poly_convolve_real(&du, &v_coeffs);
+        let term2 = poly_convolve_real(&u_coeffs, &dv);
+        let numerator_vec = poly_trim_slice(&poly_sub_real(&term1, &term2));
+        let denominator_vec = poly_trim_slice(&poly_convolve_real(&v_coeffs, &v_coeffs));
+        let numerator = self.allocate_polynomial(numerator_vec, orientation_u);
+        let denominator = self.allocate_polynomial(denominator_vec, orientation_v);
+        Ok(ProviderPolyderQuotient {
+            numerator,
+            denominator,
+        })
+    }
+
+    fn polyint(&self, polynomial: &GpuTensorHandle, constant: f64) -> Result<GpuTensorHandle> {
+        let orientation = poly_orientation_from_shape(&polynomial.shape)?;
+        let coeffs = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&polynomial.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("polyint: unknown tensor handle {}", polynomial.buffer_id))?
+        };
+        let integrated = poly_integral_real(&coeffs, constant);
+        Ok(self.allocate_polynomial(integrated, orientation))
     }
 
     fn diag_from_vector(&self, vector: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
@@ -2230,6 +2424,31 @@ impl AccelProvider for InProcessProvider {
             buffer_id: id,
         })
     }
+    fn elem_atan2(&self, y: &GpuTensorHandle, x: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let ybuf = guard
+            .get(&y.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", y.buffer_id))?;
+        let xbuf = guard
+            .get(&x.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", x.buffer_id))?;
+        if y.shape != x.shape {
+            return Err(anyhow::anyhow!("shape mismatch"));
+        }
+        let mut out = vec![0.0; ybuf.len()];
+        for idx in 0..ybuf.len() {
+            out[idx] = ybuf[idx].atan2(xbuf[idx]);
+        }
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: y.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
 
     fn unary_sin(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let guard = registry().lock().unwrap();
@@ -2237,6 +2456,169 @@ impl AccelProvider for InProcessProvider {
             .get(&a.buffer_id)
             .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
         let out: Vec<f64> = abuf.iter().map(|&x| x.sin()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+    fn unary_asinh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.asinh()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+    fn unary_sinh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.sinh()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+    fn unary_cosh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.cosh()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_asin(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.asin()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+    fn unary_acos(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.acos()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+    fn unary_acosh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.acosh()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_tan(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.tan()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+    fn unary_tanh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.tanh()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_atan(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.atan()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+    fn unary_atanh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.atanh()).collect();
         drop(guard);
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard2 = registry().lock().unwrap();

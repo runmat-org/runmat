@@ -1412,10 +1412,7 @@ mod tests {
             Value::Tensor(b),
             Value::Tensor(a),
             Value::Tensor(x),
-            &[
-                Value::Tensor(placeholder),
-                Value::Int(IntValue::I32(2)),
-            ],
+            &[Value::Tensor(placeholder), Value::Int(IntValue::I32(2))],
         )
         .expect("filter");
         let (y, zf) = eval.into_pair();

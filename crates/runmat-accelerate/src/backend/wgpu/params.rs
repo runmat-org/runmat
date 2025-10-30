@@ -206,6 +206,30 @@ pub struct ImfilterParamsF32 {
     pub _pad_tail: AlignedU32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PolyvalParamsF64 {
+    pub len: u32,
+    pub coeff_len: u32,
+    pub offset: u32,
+    pub has_mu: u32,
+    pub mu_mean: f64,
+    pub mu_scale: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PolyvalParamsF32 {
+    pub len: u32,
+    pub coeff_len: u32,
+    pub offset: u32,
+    pub has_mu: u32,
+    pub mu_mean: f32,
+    pub mu_scale: f32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
 pub const REPMAT_MAX_RANK: usize = PERMUTE_MAX_RANK;
 
 #[repr(C)]

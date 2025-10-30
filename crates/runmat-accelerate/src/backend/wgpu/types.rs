@@ -11,6 +11,7 @@ pub enum BinaryOpCode {
     Mul = 2,
     Div = 3,
     Hypot = 4,
+    Atan2 = 5,
 }
 
 #[derive(Clone, Copy)]
@@ -34,6 +35,16 @@ pub enum UnaryOpCode {
     Floor = 16,
     Ceil = 17,
     Fix = 18,
+    Tan = 19,
+    Asin = 20,
+    Acos = 21,
+    Atan = 22,
+    Sinh = 23,
+    Cosh = 24,
+    Tanh = 25,
+    Asinh = 26,
+    Acosh = 27,
+    Atanh = 28,
 }
 
 #[derive(Clone, Copy)]

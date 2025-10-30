@@ -13,8 +13,8 @@
 | Completed | Path                | Name(s)                                     | Purpose                       | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                         |
 |-----------|---------------------|---------------------------------------------|-------------------------------|-----|--------|------------------|-----------------------------------------------|
 |     ✅     | acceleration/gpu    | gpuArray, gather, gpuDevice, gpuInfo        | Move to/from device; query device | ✓   | P      | —                | Residency-aware; gpuArray/gather. |
-|           | acceleration/gpu    | arrayfun                                    | Elementwise map on GPU        | ✓   | E      | —                | Provider hook (unary_map) + fusion inline constants. |
-|           | acceleration/gpu    | pagefun                                     | Batched page-wise ops         | ✓   | P      | —                | Maps batched BLAS/FFT when present. |
+|     ✅     | acceleration/gpu    | arrayfun                                    | Elementwise map on GPU        | ✓   | E      | —                | Provider hook (unary_map) + fusion inline constants. |
+|     ✅     | acceleration/gpu    | pagefun                                     | Batched page-wise ops         | ✓   | P      | —                | Maps batched BLAS/FFT when present. |
 
 ## Arrays — creation, shape, indexing
 
@@ -32,7 +32,7 @@
 |-----------|---------------------|----------------------------------------------------------------------------------|-----------------------------|-----|--------|------------------|------------------------------|
 |     ✅     | math/elementwise    | abs, sign, real, imag, conj, angle                                              | Complex helpers             | ✓   | E      | —                | Complex tensors supported.   |
 |     ✅     | math/elementwise    | exp, expm1, log, log1p, log10, log2, sqrt, hypot, pow2                          | Exponentials & roots        | ✓   | E      | —                | Provider hooks unary_*.      |
-|            | math/trigonometry   | sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh   | Trig & hyperbolic           | ✓   | E      | —                | sin implemented; others mirror. |
+|            | math/trigonometry   | sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh   | Trig & hyperbolic           | ✓   | E      | —                | sin, asinh, acosh, atanh implemented; others mirror. |
 |     ✅     | math/rounding       | round, floor, ceil, fix, mod, rem                                               | Rounding & modulo           | ✓   | E      | —                | mod/rem MATLAB semantics.    |
 |     ✅     | math/reduction      | sum, prod, mean, median, min, max, any, all, std, var, cumsum, cumprod, cummin, cummax, diff, nnz | Reductions & cumulatives    | ✓   | R      | —                | omitnan host fallback initially; GPU reductions via hooks. |
 
@@ -89,7 +89,7 @@
 
 | Completed | Path            | Name(s)                                          | Purpose               | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                            |
 |-----------|-----------------|--------------------------------------------------|-----------------------|-----|--------|------------------|--------------------------------------------------|
-|            | structs/core    | struct, fieldnames, isfield, getfield, setfield, rmfield, orderfields | Struct manipulation | —   | —      | —                |                                                  |
+|     ✅      | structs/core    | struct, fieldnames, isfield, getfield, setfield, rmfield, orderfields | Struct manipulation | —   | —      | —                |                                                  |
 |     ✅     | cells/core      | cell, cell2mat, mat2cell, cellfun                 | Cell arrays & ops     | —   | P      | —                | cellfun maps to fusion where trivial.            |
 |     ✅     | containers/map  | containers.Map (constructor)                      | String→value map      | —   | —      | —                | Handy; small footprint.             |
 
@@ -99,7 +99,7 @@
 |-----------|------------------|---------------------------------------------------------------------------------|----------------------------|-----|--------|------------------|------------------------------------------|
 |     ✅     | introspection    | class, isa, which, whos, who                                                    | Type & workspace queries   | N/A | —      | —                | which resolves builtins/files.            |
 |     ✅     | diagnostics      | error, warning, assert                                                           | Errors & checks            | N/A | —      | —                | Integrate with MException.                |
-|           | timing           | tic, toc, timeit, pause                                                          | Timing utilities           | N/A | —      | —                | timeit microbenchmark helper.             |
+|     ✅     | timing           | tic, toc, timeit, pause                                                          | Timing utilities           | N/A | —      | —                | timeit microbenchmark helper.             |
 
 ## I/O — filesystem and files
 

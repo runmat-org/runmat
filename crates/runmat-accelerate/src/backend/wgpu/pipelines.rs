@@ -59,6 +59,12 @@ const RANDPERM_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDP
 const RANDPERM_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDPERM_SHADER_F32;
 const FSPECIAL_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::FSPECIAL_SHADER_F64;
 const FSPECIAL_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::FSPECIAL_SHADER_F32;
+const POLYVAL_SHADER_F64: &str = crate::backend::wgpu::shaders::polyval::POLYVAL_SHADER_F64;
+const POLYVAL_SHADER_F32: &str = crate::backend::wgpu::shaders::polyval::POLYVAL_SHADER_F32;
+const POLYDER_SHADER_F64: &str = crate::backend::wgpu::shaders::polyder::POLYDER_SHADER_F64;
+const POLYDER_SHADER_F32: &str = crate::backend::wgpu::shaders::polyder::POLYDER_SHADER_F32;
+const POLYINT_SHADER_F64: &str = crate::backend::wgpu::shaders::polyint::POLYINT_SHADER_F64;
+const POLYINT_SHADER_F32: &str = crate::backend::wgpu::shaders::polyint::POLYINT_SHADER_F32;
 const DIAG_FROM_VECTOR_SHADER_F64: &str =
     crate::backend::wgpu::shaders::diag::DIAG_FROM_VECTOR_SHADER_F64;
 const DIAG_FROM_VECTOR_SHADER_F32: &str =
@@ -121,6 +127,9 @@ pub struct WgpuPipelines {
     pub randperm: PipelineBundle,
     pub fspecial: PipelineBundle,
     pub imfilter: PipelineBundle,
+    pub polyval: PipelineBundle,
+    pub polyder: PipelineBundle,
+    pub polyint: PipelineBundle,
     pub diag_from_vector: PipelineBundle,
     pub diag_extract: PipelineBundle,
     pub find: PipelineBundle,
@@ -607,6 +616,55 @@ impl WgpuPipelines {
             },
         );
 
+        let polyval = create_pipeline(
+            device,
+            "runmat-polyval-layout",
+            "runmat-polyval-shader",
+            "runmat-polyval-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => POLYVAL_SHADER_F64,
+                NumericPrecision::F32 => POLYVAL_SHADER_F32,
+            },
+        );
+
+        let polyder = create_pipeline(
+            device,
+            "runmat-polyder-layout",
+            "runmat-polyder-shader",
+            "runmat-polyder-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => POLYDER_SHADER_F64,
+                NumericPrecision::F32 => POLYDER_SHADER_F32,
+            },
+        );
+
+        let polyint = create_pipeline(
+            device,
+            "runmat-polyint-layout",
+            "runmat-polyint-shader",
+            "runmat-polyint-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => POLYINT_SHADER_F64,
+                NumericPrecision::F32 => POLYINT_SHADER_F32,
+            },
+        );
+
         let diag_from_vector = create_pipeline(
             device,
             "runmat-diag-vec-layout",
@@ -723,6 +781,9 @@ impl WgpuPipelines {
             randperm,
             fspecial,
             imfilter,
+            polyval,
+            polyder,
+            polyint,
             diag_from_vector,
             diag_extract,
             find,

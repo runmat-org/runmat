@@ -198,8 +198,41 @@ impl Default for ProviderPinvOptions {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ProviderPolyvalMu {
+    pub mean: f64,
+    pub scale: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ProviderPolyvalOptions {
+    pub mu: Option<ProviderPolyvalMu>,
+}
+
+impl Default for ProviderPolyvalOptions {
+    fn default() -> Self {
+        Self { mu: None }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderInvOptions {}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderPolyfitResult {
+    pub coefficients: Vec<f64>,
+    pub r_matrix: Vec<f64>,
+    pub normr: f64,
+    pub df: f64,
+    pub mu: [f64; 2],
+}
+
+/// Numerator/denominator payload returned by provider-backed `polyder` quotient rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderPolyderQuotient {
+    pub numerator: GpuTensorHandle,
+    pub denominator: GpuTensorHandle,
+}
 
 /// Supported norm specifications for the `cond` builtin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -713,6 +746,61 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow!("triu not supported by provider"))
     }
 
+    /// Evaluate a polynomial expressed by `coefficients` at each element in `points`.
+    fn polyval(
+        &self,
+        _coefficients: &GpuTensorHandle,
+        _points: &GpuTensorHandle,
+        _options: &ProviderPolyvalOptions,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("polyval not supported by provider"))
+    }
+
+    /// Fit a polynomial of degree `degree` to `(x, y)` samples. Optional weights must match `x`.
+    fn polyfit(
+        &self,
+        _x: &GpuTensorHandle,
+        _y: &GpuTensorHandle,
+        _degree: usize,
+        _weights: Option<&GpuTensorHandle>,
+    ) -> anyhow::Result<ProviderPolyfitResult> {
+        Err(anyhow::anyhow!("polyfit not supported by provider"))
+    }
+
+    /// Differentiate a polynomial represented as a vector of coefficients.
+    fn polyder_single(&self, _polynomial: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("polyder_single not supported by provider"))
+    }
+
+    /// Apply the product rule to polynomials `p` and `q`.
+    fn polyder_product(
+        &self,
+        _p: &GpuTensorHandle,
+        _q: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("polyder_product not supported by provider"))
+    }
+
+    /// Apply the quotient rule to polynomials `u` and `v`.
+    fn polyder_quotient(
+        &self,
+        _u: &GpuTensorHandle,
+        _v: &GpuTensorHandle,
+    ) -> anyhow::Result<ProviderPolyderQuotient> {
+        Err(anyhow::anyhow!(
+            "polyder_quotient not supported by provider"
+        ))
+    }
+
+    /// Integrate a polynomial represented as a vector of coefficients and append a constant term.
+    fn polyint(
+        &self,
+        _polynomial: &GpuTensorHandle,
+        _constant: f64,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("polyint not supported by provider"))
+    }
+
     /// Allocate a tensor filled with random values drawn from U(0, 1).
     fn random_uniform(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("random_uniform not supported by provider"))
@@ -933,9 +1021,46 @@ pub trait AccelProvider: Send + Sync {
     fn logical_isinf(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("logical_isinf not supported by provider"))
     }
+    fn elem_atan2(
+        &self,
+        _y: &GpuTensorHandle,
+        _x: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_atan2 not supported by provider"))
+    }
     // Unary elementwise operations (optional)
     fn unary_sin(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_sin not supported by provider"))
+    }
+    fn unary_asinh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_asinh not supported by provider"))
+    }
+    fn unary_sinh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_sinh not supported by provider"))
+    }
+    fn unary_cosh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_cosh not supported by provider"))
+    }
+    fn unary_asin(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_asin not supported by provider"))
+    }
+    fn unary_acos(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_acos not supported by provider"))
+    }
+    fn unary_acosh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_acosh not supported by provider"))
+    }
+    fn unary_tan(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_tan not supported by provider"))
+    }
+    fn unary_tanh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_tanh not supported by provider"))
+    }
+    fn unary_atan(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_atan not supported by provider"))
+    }
+    fn unary_atanh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_atanh not supported by provider"))
     }
     fn unary_ceil(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_ceil not supported by provider"))
@@ -1572,6 +1697,16 @@ pub fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTenso
 pub fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
         if let Ok(h) = p.elem_hypot(a, b) {
+            return Some(h);
+        }
+    }
+    None
+}
+
+/// Convenience: perform elementwise atan2 via provider if possible; otherwise return None
+pub fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+    if let Some(p) = provider() {
+        if let Ok(h) = p.elem_atan2(y, x) {
             return Some(h);
         }
     }

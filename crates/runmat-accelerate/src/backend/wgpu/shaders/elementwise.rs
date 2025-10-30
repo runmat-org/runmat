@@ -26,6 +26,7 @@ fn apply(a: f64, b: f64) -> f64 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
+        case 5u: { return atan2(a, b); }
         default: { return a; }
     }
 }
@@ -72,6 +73,7 @@ fn apply(a: f32, b: f32) -> f32 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
+        case 5u: { return atan2(a, b); }
         default: { return pow(a, b); }
     }
 }
@@ -134,6 +136,10 @@ fn apply(a: f64) -> f64 {
     switch params.op {
         case 0u: { return sin(a); }
         case 1u: { return cos(a); }
+        case 19u: { return tan(a); }
+        case 20u: { return asin(a); }
+        case 21u: { return acos(a); }
+        case 22u: { return atan(a); }
         case 2u: { return abs(a); }
         case 3u: { return exp(a); }
         case 4u: { return log(a); }
@@ -168,6 +174,12 @@ fn apply(a: f64) -> f64 {
             }
             return t;
         }
+        case 23u: { return sinh(a); }
+        case 24u: { return cosh(a); }
+        case 25u: { return tanh(a); }
+        case 26u: { return asinh(a); }
+        case 27u: { return acosh(a); }
+        case 28u: { return atanh(a); }
         default: { return a; }
     }
 }
@@ -230,6 +242,10 @@ fn apply(a: f32) -> f32 {
     switch params.op {
         case 0u: { return sin(a); }
         case 1u: { return cos(a); }
+        case 19u: { return tan(a); }
+        case 20u: { return asin(a); }
+        case 21u: { return acos(a); }
+        case 22u: { return atan(a); }
         case 2u: { return abs(a); }
         case 3u: { return exp(a); }
         case 4u: { return log(a); }
@@ -264,6 +280,12 @@ fn apply(a: f32) -> f32 {
             }
             return t;
         }
+        case 23u: { return sinh(a); }
+        case 24u: { return cosh(a); }
+        case 25u: { return tanh(a); }
+        case 26u: { return asinh(a); }
+        case 27u: { return acosh(a); }
+        case 28u: { return atanh(a); }
         default: { return a; }
     }
 }
