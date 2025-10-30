@@ -10,7 +10,7 @@ RunMat eliminates this gap entirely. Write your mathematical operations in clean
 
 Let's see RunMat in action with a common problem: processing high-resolution images in batches. Whether you're analyzing satellite imagery, medical scans, or camera sensor data, the pipeline is always the same—normalize the data, apply corrections, and enhance the signal. The math is straightforward. 
 
-This pipeline mirrors common image preprocessing (remote sensing, medical, photography): per-image z-score normalization, radiometric gain/bias correction, gamma correction, and a simple quality check using MSE. We use 16 single-precision 4K tiles to avoid I/O effects and to stress the pattern GPUs handle well: long elementwise chains with light reductions. In RunMat, the MATLAB-style code remains as written, while Accelerate fuses elementwise steps and keeps arrays on the device, reducing kernel launches and transfers. 
+This pipeline mirrors common image preprocessing (remote sensing, medical, photography): per-image z-score normalization, radiometric gain/bias correction, gamma correction, and a simple quality check using MSE. We use 16 single-precision 4K tiles to avoid I/O effects and to stress the pattern GPUs handle well: long elementwise chains with light reductions. In RunMat, the MATLAB-style code remains as written, while Accelerate fuses elementwise steps and keeps arrays on the device, reducing kernel launches and transfers.  
 
 
 `rng(0); B \= 16; H \= 2160; W \= 3840;  
