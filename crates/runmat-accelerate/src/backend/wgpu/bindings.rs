@@ -96,6 +96,73 @@ pub fn build_bgl_for_layout_tag(device: &wgpu::Device, tag: &str) -> Option<wgpu
                 }),
             );
         }
+        "runmat-cumsum-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-cumsum-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-cumprod-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-cumprod-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-diff-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-diff-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-cummin-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-cummin-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-cummax-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-cummax-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
         "runmat-tril-layout" => {
             let entries = [
                 storage_read_entry(0),
@@ -133,6 +200,38 @@ pub fn build_bgl_for_layout_tag(device: &wgpu::Device, tag: &str) -> Option<wgpu
             return Some(
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("warmup-imfilter-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-conv1d-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-conv1d-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-iir-filter-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_entry(3),
+                storage_read_write_entry(4),
+                storage_read_write_entry(5),
+                storage_read_write_entry(6),
+                uniform_entry(7),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-iir-filter-bgl"),
                     entries: &entries,
                 }),
             );

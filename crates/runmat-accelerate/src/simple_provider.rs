@@ -1,3 +1,4 @@
+use crate::host_lu::{lu_factor_host, LuHostFactors};
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
@@ -6,8 +7,14 @@ use runmat_accelerate_api::{
     GpuTensorHandle, HostTensorOwned, HostTensorView, ImfilterOptions, PagefunRequest,
     ProviderFindResult, ProviderPrecision, SetdiffOptions, SetdiffResult, SortComparison,
     SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    ProviderBandwidth, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderConvMode, ProviderConvOrientation, ProviderEigResult,
+    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
+    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderNanMode,
+    ProviderNormOrder, ProviderPinvOptions, ProviderQrOptions, ProviderQrPivot,
+    ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind,
 };
-use runmat_builtins::Tensor;
+use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
 use runmat_runtime::builtins::common::broadcast::{
     broadcast_index as runtime_broadcast_index, broadcast_shapes as runtime_broadcast_shapes,
@@ -18,10 +25,27 @@ use runmat_runtime::builtins::stats::summary::{
     cov_from_tensors as runtime_cov_from_tensors, CovWeightSpec,
 };
 
-const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
+use runmat_runtime::builtins::math::linalg::ops::{
+    mldivide_host_real_for_provider, mrdivide_host_real_for_provider,
+};
+use runmat_runtime::builtins::math::linalg::solve::cond::cond_host_real_for_provider;
+use runmat_runtime::builtins::math::linalg::solve::inv::inv_host_real_for_provider;
+use runmat_runtime::builtins::math::linalg::solve::linsolve::linsolve_host_real_for_provider;
+use runmat_runtime::builtins::math::linalg::solve::norm::norm_host_real_for_provider;
+use runmat_runtime::builtins::math::linalg::solve::pinv::pinv_host_real_for_provider;
+use runmat_runtime::builtins::math::linalg::solve::rank_host_real_for_provider;
+use runmat_runtime::builtins::math::linalg::solve::rcond::rcond_host_real_for_provider;
+use runmat_runtime::builtins::math::linalg::structure::bandwidth::bandwidth_host_real_data;
+use runmat_runtime::builtins::math::linalg::structure::ishermitian::ishermitian_host_real_data;
+use runmat_runtime::builtins::math::linalg::structure::issymmetric::issymmetric_host_real_data;
+use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
+use runmat_runtime::builtins::math::reduction::compute_median_inplace;
+use runmat_runtime::builtins::math::reduction::diff_tensor_host;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+
+const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
 
 static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
 
@@ -123,6 +147,169 @@ fn compute_strides(shape: &[usize]) -> Vec<usize> {
 
 fn product(shape: &[usize]) -> usize {
     shape.iter().copied().product()
+}
+
+fn decode_indices(mut index: usize, dims: &[usize]) -> Vec<usize> {
+    if dims.is_empty() {
+        return Vec::new();
+    }
+    let mut coords = Vec::with_capacity(dims.len());
+    for &dim in dims {
+        if dim == 0 {
+            coords.push(0);
+        } else {
+            let coord = index % dim;
+            coords.push(coord);
+            index /= dim.max(1);
+        }
+    }
+    coords
+}
+
+fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
+    let max_len = expected.len().max(actual.len());
+    for i in 0..max_len {
+        let e = expected.get(i).copied().unwrap_or(1);
+        let a = actual.get(i).copied().unwrap_or(1);
+        if e != a {
+            return false;
+        }
+    }
+    true
+}
+
+fn filter_state_shape(mut base: Vec<usize>, dim_idx: usize, state_len: usize) -> Vec<usize> {
+    if base.len() <= dim_idx {
+        base.extend(std::iter::repeat(1).take(dim_idx + 1 - base.len()));
+    }
+    if !base.is_empty() {
+        base[dim_idx] = state_len;
+    }
+    base
+}
+
+fn states_from_column_major(
+    data: &[f64],
+    state_len: usize,
+    dim_idx: usize,
+    shape_ext: &[usize],
+) -> Vec<f64> {
+    if state_len == 0 {
+        return Vec::new();
+    }
+    let dims_before = &shape_ext[..dim_idx];
+    let dims_after = if dim_idx + 1 < shape_ext.len() {
+        &shape_ext[dim_idx + 1..]
+    } else {
+        &[]
+    };
+    let leading = if dims_before.is_empty() {
+        1
+    } else {
+        dims_before.iter().copied().product()
+    };
+    let trailing = if dims_after.is_empty() {
+        1
+    } else {
+        dims_after.iter().copied().product()
+    };
+    let channel_count = leading * trailing;
+    let shape = filter_state_shape(shape_ext.to_vec(), dim_idx, state_len);
+    let mut states = vec![0.0; state_len * channel_count];
+    for channel in 0..channel_count {
+        let before_idx = if dims_before.is_empty() {
+            0
+        } else {
+            channel % leading
+        };
+        let after_idx = if dims_after.is_empty() {
+            0
+        } else {
+            channel / leading
+        };
+        let before_coords = decode_indices(before_idx, dims_before);
+        let after_coords = decode_indices(after_idx, dims_after);
+        for s in 0..state_len {
+            let mut offset = 0usize;
+            let mut stride = 1usize;
+            for d in 0..shape.len() {
+                let coord = if d < dim_idx {
+                    before_coords.get(d).copied().unwrap_or(0)
+                } else if d == dim_idx {
+                    s
+                } else {
+                    let idx = d - dim_idx - 1;
+                    after_coords.get(idx).copied().unwrap_or(0)
+                };
+                offset += coord * stride;
+                stride *= shape[d];
+            }
+            states[channel * state_len + s] = data[offset];
+        }
+    }
+    states
+}
+
+fn states_to_column_major(
+    states: &[f64],
+    state_len: usize,
+    dim_idx: usize,
+    shape_ext: &[usize],
+) -> Vec<f64> {
+    if state_len == 0 {
+        return Vec::new();
+    }
+    let dims_before = &shape_ext[..dim_idx];
+    let dims_after = if dim_idx + 1 < shape_ext.len() {
+        &shape_ext[dim_idx + 1..]
+    } else {
+        &[]
+    };
+    let leading = if dims_before.is_empty() {
+        1
+    } else {
+        dims_before.iter().copied().product()
+    };
+    let trailing = if dims_after.is_empty() {
+        1
+    } else {
+        dims_after.iter().copied().product()
+    };
+    let channel_count = leading * trailing;
+    let shape = filter_state_shape(shape_ext.to_vec(), dim_idx, state_len);
+    let mut out = vec![0.0; states.len()];
+    for channel in 0..channel_count {
+        let before_idx = if dims_before.is_empty() {
+            0
+        } else {
+            channel % leading
+        };
+        let after_idx = if dims_after.is_empty() {
+            0
+        } else {
+            channel / leading
+        };
+        let before_coords = decode_indices(before_idx, dims_before);
+        let after_coords = decode_indices(after_idx, dims_after);
+        for s in 0..state_len {
+            let mut offset = 0usize;
+            let mut stride = 1usize;
+            for d in 0..shape.len() {
+                let coord = if d < dim_idx {
+                    before_coords.get(d).copied().unwrap_or(0)
+                } else if d == dim_idx {
+                    s
+                } else {
+                    let idx = d - dim_idx - 1;
+                    after_coords.get(idx).copied().unwrap_or(0)
+                };
+                offset += coord * stride;
+                stride *= shape[d];
+            }
+            out[offset] = states[channel * state_len + s];
+        }
+    }
+    out
 }
 
 fn permute_data(data: &[f64], shape: &[usize], order: &[usize]) -> Result<(Vec<f64>, Vec<usize>)> {
@@ -233,6 +420,195 @@ fn flip_data(data: &[f64], shape: &[usize], axes: &[usize]) -> Result<Vec<f64>> 
         out.push(data[src_idx]);
     }
     Ok(out)
+}
+
+fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<usize> {
+    match (orientation, len) {
+        (ProviderConvOrientation::Row, 0) => vec![1, 0],
+        (ProviderConvOrientation::Row, _) => vec![1, len],
+        (ProviderConvOrientation::Column, 0) => vec![0, 1],
+        (ProviderConvOrientation::Column, _) => vec![len, 1],
+    }
+}
+
+fn convolve_real(signal: &[f64], kernel: &[f64]) -> Result<Vec<f64>> {
+    if signal.is_empty() || kernel.is_empty() {
+        return Ok(Vec::new());
+    }
+    let full_len = signal
+        .len()
+        .checked_add(kernel.len())
+        .and_then(|v| v.checked_sub(1))
+        .ok_or_else(|| anyhow!("conv1d: length overflow"))?;
+    let mut out = vec![0.0; full_len];
+    for (i, &ai) in signal.iter().enumerate() {
+        for (j, &bj) in kernel.iter().enumerate() {
+            out[i + j] += ai * bj;
+        }
+    }
+    Ok(out)
+}
+
+fn apply_conv_mode_real(
+    full: &[f64],
+    mode: ProviderConvMode,
+    len_a: usize,
+    len_b: usize,
+) -> Vec<f64> {
+    match mode {
+        ProviderConvMode::Full => full.to_vec(),
+        ProviderConvMode::Same => {
+            if len_a == 0 {
+                return Vec::new();
+            }
+            let start = if len_b == 0 { 0 } else { (len_b - 1) / 2 };
+            let end = (start + len_a).min(full.len());
+            if start >= end {
+                Vec::new()
+            } else {
+                full[start..end].to_vec()
+            }
+        }
+        ProviderConvMode::Valid => {
+            if len_a < len_b {
+                Vec::new()
+            } else {
+                let start = len_b - 1;
+                let valid_len = len_a - len_b + 1;
+                let end = (start + valid_len).min(full.len());
+                if start >= end {
+                    Vec::new()
+                } else {
+                    full[start..end].to_vec()
+                }
+            }
+        }
+    }
+}
+
+fn conv2d_full_real(
+    signal: &[f64],
+    signal_rows: usize,
+    signal_cols: usize,
+    kernel: &[f64],
+    kernel_rows: usize,
+    kernel_cols: usize,
+    full_rows: usize,
+    full_cols: usize,
+) -> Vec<f64> {
+    let mut out = vec![0.0; full_rows * full_cols];
+    for sc in 0..signal_cols {
+        for sr in 0..signal_rows {
+            let aval = signal[sc * signal_rows + sr];
+            if aval == 0.0 {
+                continue;
+            }
+            for kc in 0..kernel_cols {
+                let out_c = sc + kc;
+                for kr in 0..kernel_rows {
+                    let out_r = sr + kr;
+                    let kval = kernel[kc * kernel_rows + kr];
+                    out[out_c * full_rows + out_r] += aval * kval;
+                }
+            }
+        }
+    }
+    out
+}
+
+fn slice_matrix_real(
+    full: &[f64],
+    full_rows: usize,
+    full_cols: usize,
+    row_start: usize,
+    row_end: usize,
+    col_start: usize,
+    col_end: usize,
+) -> (Vec<f64>, usize, usize) {
+    let row_end = row_end.min(full_rows);
+    let col_end = col_end.min(full_cols);
+    if row_start >= row_end || col_start >= col_end {
+        let rows = row_end.saturating_sub(row_start);
+        let cols = col_end.saturating_sub(col_start);
+        return (vec![0.0; rows * cols], rows, cols);
+    }
+    let rows = row_end - row_start;
+    let cols = col_end - col_start;
+    let mut out = vec![0.0; rows * cols];
+    for c in 0..cols {
+        for r in 0..rows {
+            let src = (col_start + c) * full_rows + (row_start + r);
+            let dst = c * rows + r;
+            out[dst] = full[src];
+        }
+    }
+    (out, rows, cols)
+}
+
+fn apply_conv2_mode_real_2d(
+    full: &[f64],
+    full_rows: usize,
+    full_cols: usize,
+    mode: ProviderConvMode,
+    a_rows: usize,
+    a_cols: usize,
+    b_rows: usize,
+    b_cols: usize,
+) -> (Vec<f64>, usize, usize) {
+    match mode {
+        ProviderConvMode::Full => (full.to_vec(), full_rows, full_cols),
+        ProviderConvMode::Same => {
+            if a_rows == 0 || a_cols == 0 {
+                return (Vec::new(), a_rows, a_cols);
+            }
+            let row_start = if b_rows == 0 { 0 } else { (b_rows - 1) / 2 };
+            let col_start = if b_cols == 0 { 0 } else { (b_cols - 1) / 2 };
+            slice_matrix_real(
+                full,
+                full_rows,
+                full_cols,
+                row_start,
+                row_start + a_rows,
+                col_start,
+                col_start + a_cols,
+            )
+        }
+        ProviderConvMode::Valid => {
+            if a_rows < b_rows || a_cols < b_cols {
+                (Vec::new(), 0, 0)
+            } else {
+                let rows = a_rows - b_rows + 1;
+                let cols = a_cols - b_cols + 1;
+                let row_start = b_rows.saturating_sub(1);
+                let col_start = b_cols.saturating_sub(1);
+                slice_matrix_real(
+                    full,
+                    full_rows,
+                    full_cols,
+                    row_start,
+                    row_start + rows,
+                    col_start,
+                    col_start + cols,
+                )
+            }
+        }
+    }
+}
+
+fn tensor_from_value(label: &str, value: Value) -> Result<Tensor> {
+    match value {
+        Value::Tensor(tensor) => Ok(tensor),
+        Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| anyhow!("{label}: {e}")),
+        Value::Int(i) => {
+            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| anyhow!("{label}: {e}"))
+        }
+        Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
+            .map_err(|e| anyhow!("{label}: {e}")),
+        Value::ComplexTensor(_) => Err(anyhow!(
+            "{label}: complex outputs are not supported by the in-process provider"
+        )),
+        other => Err(anyhow!("{label}: unexpected value {other:?}")),
+    }
 }
 
 fn tril_data(data: &[f64], shape: &[usize], offset: isize) -> Result<Vec<f64>> {
@@ -819,6 +1195,67 @@ impl AccelProvider for InProcessProvider {
         };
         let masked = triu_data(&data, &handle.shape, offset)?;
         Ok(self.allocate_tensor(masked, handle.shape.clone()))
+    }
+
+    fn issymmetric(
+        &self,
+        matrix: &GpuTensorHandle,
+        kind: ProviderSymmetryKind,
+        tolerance: f64,
+    ) -> Result<bool> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("issymmetric: unknown tensor handle {}", matrix.buffer_id))?
+        };
+        let skew = matches!(kind, ProviderSymmetryKind::Skew);
+        issymmetric_host_real_data(&matrix.shape, &data, skew, tolerance).map_err(|e| anyhow!(e))
+    }
+
+    fn ishermitian(
+        &self,
+        matrix: &GpuTensorHandle,
+        kind: ProviderHermitianKind,
+        tolerance: f64,
+    ) -> Result<bool> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("ishermitian: unknown tensor handle {}", matrix.buffer_id))?
+        };
+        let skew = matches!(kind, ProviderHermitianKind::Skew);
+        ishermitian_host_real_data(&matrix.shape, &data, skew, tolerance).map_err(|e| anyhow!(e))
+    }
+
+    fn bandwidth(&self, matrix: &GpuTensorHandle) -> Result<ProviderBandwidth> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("bandwidth: unknown tensor handle {}", matrix.buffer_id))?
+        };
+        let (lower, upper) =
+            bandwidth_host_real_data(&matrix.shape, &data).map_err(|e| anyhow!(e))?;
+        Ok(ProviderBandwidth {
+            lower: lower as u32,
+            upper: upper as u32,
+        })
+    }
+
+    fn sym_rcm(&self, matrix: &GpuTensorHandle) -> Result<Vec<usize>> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("symrcm: unknown tensor handle {}", matrix.buffer_id))?
+        };
+        symrcm_host_real_data(&matrix.shape, &data).map_err(|e| anyhow!(e))
     }
 
     fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -1762,12 +2199,120 @@ impl AccelProvider for InProcessProvider {
         Ok(self.allocate_tensor(out, shape))
     }
 
+    fn elem_hypot(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let bbuf = guard
+            .get(&b.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+        if a.shape != b.shape {
+            return Err(anyhow::anyhow!("shape mismatch"));
+        }
+        let mut out = vec![0.0; abuf.len()];
+        for i in 0..abuf.len() {
+            out[i] = abuf[i].hypot(bbuf[i]);
+        }
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
     fn unary_sin(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let guard = registry().lock().unwrap();
         let abuf = guard
             .get(&a.buffer_id)
             .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
         let out: Vec<f64> = abuf.iter().map(|&x| x.sin()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_ceil(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.ceil()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_floor(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.floor()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_round(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.round()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_fix(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf
+            .iter()
+            .map(|&x| {
+                if !x.is_finite() {
+                    x
+                } else {
+                    let truncated = x.trunc();
+                    if truncated == 0.0 {
+                        0.0
+                    } else {
+                        truncated
+                    }
+                }
+            })
+            .collect();
         drop(guard);
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard2 = registry().lock().unwrap();
@@ -1859,6 +2404,53 @@ impl AccelProvider for InProcessProvider {
         guard2.insert(id, out);
         Ok(GpuTensorHandle {
             shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_pow2(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| x.exp2()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn pow2_scale(
+        &self,
+        mantissa: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let mbuf = guard
+            .get(&mantissa.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", mantissa.buffer_id))?;
+        let ebuf = guard
+            .get(&exponent.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", exponent.buffer_id))?;
+        if mantissa.shape != exponent.shape {
+            return Err(anyhow::anyhow!("shape mismatch"));
+        }
+        let mut out = vec![0.0f64; mbuf.len()];
+        for i in 0..mbuf.len() {
+            out[i] = mbuf[i] * ebuf[i].exp2();
+        }
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: mantissa.shape.clone(),
             device_id: 0,
             buffer_id: id,
         })
@@ -1994,7 +2586,9 @@ impl AccelProvider for InProcessProvider {
         let mut out = vec![0.0; abuf.len()];
         for i in 0..rows {
             for j in 0..cols {
-                out[j * rows + i] = abuf[i + j * rows];
+                let src = i + j * rows;
+                let dst = j + i * cols;
+                out[dst] = abuf[src];
             }
         }
         drop(guard);
@@ -2005,6 +2599,354 @@ impl AccelProvider for InProcessProvider {
             shape: vec![cols, rows],
             device_id: 0,
             buffer_id: id,
+        })
+    }
+    fn conv1d(
+        &self,
+        signal: &GpuTensorHandle,
+        kernel: &GpuTensorHandle,
+        options: ProviderConv1dOptions,
+    ) -> Result<GpuTensorHandle> {
+        let signal_len: usize = signal.shape.iter().copied().product();
+        let kernel_len: usize = kernel.shape.iter().copied().product();
+
+        if signal_len == 0 || kernel_len == 0 {
+            let shape = conv1d_output_shape(0, options.orientation);
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        if matches!(options.mode, ProviderConvMode::Valid) && signal_len < kernel_len {
+            let shape = conv1d_output_shape(0, options.orientation);
+            return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+
+        let (signal_data, kernel_data) = {
+            let guard = registry().lock().unwrap();
+            let signal_buf = guard
+                .get(&signal.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("conv1d: unknown signal buffer {}", signal.buffer_id))?;
+            let kernel_buf = guard
+                .get(&kernel.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("conv1d: unknown kernel buffer {}", kernel.buffer_id))?;
+            (signal_buf, kernel_buf)
+        };
+
+        ensure!(
+            signal_data.len() == signal_len,
+            "conv1d: signal length mismatch (shape implies {}, buffer has {})",
+            signal_len,
+            signal_data.len()
+        );
+        ensure!(
+            kernel_data.len() == kernel_len,
+            "conv1d: kernel length mismatch (shape implies {}, buffer has {})",
+            kernel_len,
+            kernel_data.len()
+        );
+
+        let full = convolve_real(&signal_data, &kernel_data)?;
+        let shaped = apply_conv_mode_real(&full, options.mode, signal_len, kernel_len);
+        let shape = conv1d_output_shape(shaped.len(), options.orientation);
+        Ok(self.allocate_tensor(shaped, shape))
+    }
+    fn conv2d(
+        &self,
+        signal: &GpuTensorHandle,
+        kernel: &GpuTensorHandle,
+        mode: ProviderConvMode,
+    ) -> Result<GpuTensorHandle> {
+        ensure_diag_shape("conv2d", &signal.shape)?;
+        ensure_diag_shape("conv2d", &kernel.shape)?;
+        let (signal_rows, signal_cols) = rows_cols(&signal.shape);
+        let (kernel_rows, kernel_cols) = rows_cols(&kernel.shape);
+
+        let signal_len: usize = signal.shape.iter().copied().product();
+        let kernel_len: usize = kernel.shape.iter().copied().product();
+
+        let empty_shape = match mode {
+            ProviderConvMode::Full | ProviderConvMode::Valid => vec![0, 0],
+            ProviderConvMode::Same => vec![signal_rows, signal_cols],
+        };
+
+        if signal_len == 0
+            || kernel_len == 0
+            || signal_rows == 0
+            || signal_cols == 0
+            || kernel_rows == 0
+            || kernel_cols == 0
+        {
+            let len = empty_shape.iter().copied().product::<usize>();
+            return Ok(self.allocate_tensor(vec![0.0; len], empty_shape));
+        }
+
+        let (signal_data, kernel_data) = {
+            let guard = registry().lock().unwrap();
+            let signal_buf = guard
+                .get(&signal.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("conv2d: unknown signal buffer {}", signal.buffer_id))?;
+            let kernel_buf = guard
+                .get(&kernel.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("conv2d: unknown kernel buffer {}", kernel.buffer_id))?;
+            (signal_buf, kernel_buf)
+        };
+
+        ensure!(
+            signal_data.len() == signal_len,
+            "conv2d: signal length mismatch (shape implies {}, buffer has {})",
+            signal_len,
+            signal_data.len()
+        );
+        ensure!(
+            kernel_data.len() == kernel_len,
+            "conv2d: kernel length mismatch (shape implies {}, buffer has {})",
+            kernel_len,
+            kernel_data.len()
+        );
+
+        let full_rows = signal_rows
+            .checked_add(kernel_rows)
+            .and_then(|v| v.checked_sub(1))
+            .ok_or_else(|| anyhow!("conv2d: row size overflow"))?;
+        let full_cols = signal_cols
+            .checked_add(kernel_cols)
+            .and_then(|v| v.checked_sub(1))
+            .ok_or_else(|| anyhow!("conv2d: column size overflow"))?;
+        full_rows
+            .checked_mul(full_cols)
+            .ok_or_else(|| anyhow!("conv2d: output size overflow"))?;
+
+        let full = conv2d_full_real(
+            &signal_data,
+            signal_rows,
+            signal_cols,
+            &kernel_data,
+            kernel_rows,
+            kernel_cols,
+            full_rows,
+            full_cols,
+        );
+
+        let (shaped, out_rows, out_cols) = apply_conv2_mode_real_2d(
+            &full,
+            full_rows,
+            full_cols,
+            mode,
+            signal_rows,
+            signal_cols,
+            kernel_rows,
+            kernel_cols,
+        );
+        Ok(self.allocate_tensor(shaped, vec![out_rows, out_cols]))
+    }
+    fn iir_filter(
+        &self,
+        b: &GpuTensorHandle,
+        a: &GpuTensorHandle,
+        x: &GpuTensorHandle,
+        options: ProviderIirFilterOptions,
+    ) -> Result<ProviderIirFilterResult> {
+        let ProviderIirFilterOptions { dim, zi } = options;
+
+        let nb = product(&b.shape);
+        let na = product(&a.shape);
+        ensure!(
+            nb > 0,
+            "iir_filter: numerator coefficients must not be empty"
+        );
+        ensure!(
+            na > 0,
+            "iir_filter: denominator coefficients must not be empty"
+        );
+
+        let signal_elems = product(&x.shape);
+        let zi_shape = zi.as_ref().map(|handle| handle.shape.clone());
+
+        let (b_data, a_data, x_data, zi_data) =
+            {
+                let guard = registry().lock().unwrap();
+                let b_buf = guard.get(&b.buffer_id).cloned().ok_or_else(|| {
+                    anyhow!("iir_filter: unknown numerator buffer {}", b.buffer_id)
+                })?;
+                let a_buf = guard.get(&a.buffer_id).cloned().ok_or_else(|| {
+                    anyhow!("iir_filter: unknown denominator buffer {}", a.buffer_id)
+                })?;
+                let x_buf = guard
+                    .get(&x.buffer_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("iir_filter: unknown signal buffer {}", x.buffer_id))?;
+                ensure!(
+                    b_buf.len() == nb,
+                    "iir_filter: numerator length mismatch (shape implies {}, buffer has {})",
+                    nb,
+                    b_buf.len()
+                );
+                ensure!(
+                    a_buf.len() == na,
+                    "iir_filter: denominator length mismatch (shape implies {}, buffer has {})",
+                    na,
+                    a_buf.len()
+                );
+                ensure!(
+                    x_buf.len() == signal_elems,
+                    "iir_filter: signal length mismatch (shape implies {}, buffer has {})",
+                    signal_elems,
+                    x_buf.len()
+                );
+                let zi_buf = if let Some(ref zi_handle) = zi {
+                    Some(guard.get(&zi_handle.buffer_id).cloned().ok_or_else(|| {
+                        anyhow!(
+                            "iir_filter: unknown initial state buffer {}",
+                            zi_handle.buffer_id
+                        )
+                    })?)
+                } else {
+                    None
+                };
+                (b_buf, a_buf, x_buf, zi_buf)
+            };
+
+        ensure!(
+            !a_data.is_empty() && a_data[0] != 0.0,
+            "iir_filter: denominator coefficient a(1) must be non-zero"
+        );
+
+        let mut shape_ext = x.shape.clone();
+        if dim >= shape_ext.len() {
+            shape_ext.extend(std::iter::repeat(1).take(dim + 1 - shape_ext.len()));
+        }
+        let dim_idx = dim;
+        let dim_len = shape_ext.get(dim_idx).copied().unwrap_or(1);
+
+        let leading = if dim_idx == 0 {
+            1
+        } else {
+            shape_ext[..dim_idx].iter().copied().product()
+        };
+        let trailing = if dim_idx + 1 >= shape_ext.len() {
+            1
+        } else {
+            shape_ext[dim_idx + 1..].iter().copied().product()
+        };
+        let channel_count = leading * trailing;
+
+        let order = nb.max(na);
+        let state_len = order.saturating_sub(1);
+        let state_shape = filter_state_shape(shape_ext.clone(), dim_idx, state_len);
+        let expected_states = state_len.saturating_mul(channel_count);
+
+        if let Some(ref shape) = zi_shape {
+            ensure!(
+                shapes_compatible(&state_shape, shape),
+                "iir_filter: initial conditions are not compatible with the signal shape"
+            );
+            let zi_dim = if dim_idx < shape.len() {
+                shape[dim_idx]
+            } else {
+                1
+            };
+            ensure!(
+                zi_dim == state_len,
+                "iir_filter: initial conditions must have {} states along dimension {}",
+                state_len,
+                dim + 1
+            );
+        }
+
+        let mut states = if state_len == 0 {
+            Vec::new()
+        } else if let Some(ref zi_buf) = zi_data {
+            ensure!(
+                zi_buf.len() == expected_states,
+                "iir_filter: initial state vector length mismatch (expected {}, found {})",
+                expected_states,
+                zi_buf.len()
+            );
+            states_from_column_major(zi_buf, state_len, dim_idx, &shape_ext)
+        } else {
+            vec![0.0; expected_states]
+        };
+
+        let mut b_norm = vec![0.0f64; order];
+        let mut a_norm = vec![0.0f64; order];
+        let a0 = a_data[0];
+        for i in 0..order {
+            let b_coeff = if i < nb { b_data[i] } else { 0.0 };
+            b_norm[i] = b_coeff / a0;
+            if i == 0 {
+                a_norm[0] = 1.0;
+            } else {
+                let a_coeff = if i < na { a_data[i] } else { 0.0 };
+                a_norm[i] = a_coeff / a0;
+            }
+        }
+
+        let mut output = vec![0.0f64; x_data.len()];
+
+        if state_len == 0 {
+            let gain = b_norm[0];
+            for (dst, &src) in output.iter_mut().zip(x_data.iter()) {
+                *dst = gain * src;
+            }
+        } else if dim_len == 0 || channel_count == 0 {
+            // No samples to process; states remain unchanged.
+        } else {
+            for t in 0..trailing {
+                let base = t
+                    .checked_mul(dim_len)
+                    .and_then(|v| v.checked_mul(leading))
+                    .ok_or_else(|| anyhow!("iir_filter: index overflow"))?;
+                for l in 0..leading {
+                    let channel_idx = t
+                        .checked_mul(leading)
+                        .and_then(|v| v.checked_add(l))
+                        .ok_or_else(|| anyhow!("iir_filter: index overflow"))?;
+                    if channel_idx >= channel_count {
+                        continue;
+                    }
+                    let state_base = channel_idx
+                        .checked_mul(state_len)
+                        .ok_or_else(|| anyhow!("iir_filter: state index overflow"))?;
+                    for step in 0..dim_len {
+                        let idx = base
+                            .checked_add(l)
+                            .and_then(|v| v.checked_add(step.saturating_mul(leading)))
+                            .ok_or_else(|| anyhow!("iir_filter: signal index overflow"))?;
+                        if idx >= x_data.len() {
+                            break;
+                        }
+                        let x_n = x_data[idx];
+                        let y = b_norm[0] * x_n + states.get(state_base).copied().unwrap_or(0.0);
+                        output[idx] = y;
+                        for i in 1..order {
+                            let next_state = if i < state_len {
+                                states[state_base + i]
+                            } else {
+                                0.0
+                            };
+                            let new_state = b_norm[i] * x_n + next_state - a_norm[i] * y;
+                            states[state_base + i - 1] = new_state;
+                        }
+                    }
+                }
+            }
+        }
+
+        let final_state_data = if state_len == 0 {
+            Vec::new()
+        } else {
+            states_to_column_major(&states, state_len, dim_idx, &shape_ext)
+        };
+
+        let output_handle = self.allocate_tensor(output, x.shape.clone());
+        let final_state_handle = self.allocate_tensor(final_state_data, state_shape);
+
+        Ok(ProviderIirFilterResult {
+            output: output_handle,
+            final_state: Some(final_state_handle),
         })
     }
     fn permute(&self, handle: &GpuTensorHandle, order: &[usize]) -> Result<GpuTensorHandle> {
@@ -2051,6 +2993,30 @@ impl AccelProvider for InProcessProvider {
         }
         let rotated = circshift_data(&data, &shape, &full_shifts)?;
         Ok(self.allocate_tensor(rotated, shape))
+    }
+
+    fn diff_dim(
+        &self,
+        handle: &GpuTensorHandle,
+        order: usize,
+        dim: usize,
+    ) -> Result<GpuTensorHandle> {
+        if order == 0 {
+            return Ok(handle.clone());
+        }
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .ok_or_else(|| anyhow!("diff_dim: unknown tensor handle {}", handle.buffer_id))?
+                .clone()
+        };
+        let tensor =
+            Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("diff_dim: {e}"))?;
+        let diffed =
+            diff_tensor_host(tensor, order, Some(dim + 1)).map_err(|e| anyhow!("diff_dim: {e}"))?;
+        let Tensor { data, shape, .. } = diffed;
+        Ok(self.allocate_tensor(data, shape))
     }
 
     fn unique(&self, handle: &GpuTensorHandle, options: &UniqueOptions) -> Result<UniqueResult> {
@@ -2174,6 +3140,70 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn reduce_prod(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let p: f64 = abuf.iter().product();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, vec![p]);
+        Ok(GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn reduce_prod_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
+        if a.shape.len() != 2 {
+            return Err(anyhow::anyhow!("reduce_prod_dim: only 2D supported"));
+        }
+        let rows = a.shape[0];
+        let cols = a.shape[1];
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out = if dim <= 1 {
+            let mut v = vec![1.0f64; cols];
+            for c in 0..cols {
+                let mut prod = 1.0;
+                for r in 0..rows {
+                    prod *= abuf[r + c * rows];
+                }
+                v[c] = prod;
+            }
+            v
+        } else {
+            let mut v = vec![1.0f64; rows];
+            for r in 0..rows {
+                let mut prod = 1.0;
+                for c in 0..cols {
+                    prod *= abuf[r + c * rows];
+                }
+                v[r] = prod;
+            }
+            v
+        };
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        let shape = if dim <= 1 {
+            vec![1, cols]
+        } else {
+            vec![rows, 1]
+        };
+        Ok(GpuTensorHandle {
+            shape,
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
     fn reduce_mean(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let guard = registry().lock().unwrap();
         let abuf = guard
@@ -2222,6 +3252,291 @@ impl AccelProvider for InProcessProvider {
                     s += abuf[r + c * rows];
                 }
                 v[r] = s / (cols as f64);
+            }
+            v
+        };
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, out);
+        let shape = if dim <= 1 {
+            vec![1, cols]
+        } else {
+            vec![rows, 1]
+        };
+        Ok(GpuTensorHandle {
+            shape,
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn reduce_any(&self, a: &GpuTensorHandle, omit_nan: bool) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("reduce_any: unknown tensor handle {}", a.buffer_id))?
+        };
+        let mut truthy = false;
+        for v in &data {
+            if v.is_nan() {
+                if !omit_nan {
+                    truthy = true;
+                    break;
+                }
+            } else if *v != 0.0 {
+                truthy = true;
+                break;
+            }
+        }
+        let result = if truthy { 1.0 } else { 0.0 };
+        Ok(self.allocate_tensor(vec![result], vec![1, 1]))
+    }
+
+    fn reduce_any_dim(
+        &self,
+        a: &GpuTensorHandle,
+        dim: usize,
+        omit_nan: bool,
+    ) -> Result<GpuTensorHandle> {
+        if a.shape.len() != 2 {
+            return Err(anyhow!("reduce_any_dim: only 2D supported"));
+        }
+        let rows = a.shape[0];
+        let cols = a.shape[1];
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("reduce_any_dim: unknown tensor handle {}", a.buffer_id))?
+        };
+        let (out, shape) = if dim == 0 {
+            let mut v = vec![0.0f64; cols];
+            for c in 0..cols {
+                let mut truth = false;
+                for r in 0..rows {
+                    let val = data[r + c * rows];
+                    if val.is_nan() {
+                        if !omit_nan {
+                            truth = true;
+                            break;
+                        }
+                    } else if val != 0.0 {
+                        truth = true;
+                        break;
+                    }
+                }
+                v[c] = if truth { 1.0 } else { 0.0 };
+            }
+            (v, vec![1, cols])
+        } else if dim == 1 {
+            let mut v = vec![0.0f64; rows];
+            for r in 0..rows {
+                let mut truth = false;
+                for c in 0..cols {
+                    let val = data[r + c * rows];
+                    if val.is_nan() {
+                        if !omit_nan {
+                            truth = true;
+                            break;
+                        }
+                    } else if val != 0.0 {
+                        truth = true;
+                        break;
+                    }
+                }
+                v[r] = if truth { 1.0 } else { 0.0 };
+            }
+            (v, vec![rows, 1])
+        } else {
+            return Err(anyhow!("reduce_any_dim: invalid dimension {}", dim));
+        };
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn reduce_all(&self, a: &GpuTensorHandle, omit_nan: bool) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("reduce_all: unknown tensor handle {}", a.buffer_id))?
+        };
+        let mut all_true = true;
+        let mut saw_value = false;
+        for v in &data {
+            if v.is_nan() {
+                if omit_nan {
+                    continue;
+                }
+            } else {
+                saw_value = true;
+                if *v == 0.0 {
+                    all_true = false;
+                    break;
+                }
+                continue;
+            }
+        }
+        if omit_nan && !saw_value {
+            all_true = true;
+        }
+        let result = if all_true { 1.0 } else { 0.0 };
+        Ok(self.allocate_tensor(vec![result], vec![1, 1]))
+    }
+
+    fn reduce_all_dim(
+        &self,
+        a: &GpuTensorHandle,
+        dim: usize,
+        omit_nan: bool,
+    ) -> Result<GpuTensorHandle> {
+        if a.shape.len() != 2 {
+            return Err(anyhow!("reduce_all_dim: only 2D supported"));
+        }
+        let rows = a.shape[0];
+        let cols = a.shape[1];
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("reduce_all_dim: unknown tensor handle {}", a.buffer_id))?
+        };
+        let (out, shape) = if dim == 0 {
+            let mut v = vec![0.0f64; cols];
+            for c in 0..cols {
+                let mut all_true = true;
+                let mut saw_value = false;
+                for r in 0..rows {
+                    let val = data[r + c * rows];
+                    if val.is_nan() {
+                        if omit_nan {
+                            continue;
+                        }
+                    } else {
+                        saw_value = true;
+                        if val == 0.0 {
+                            all_true = false;
+                            break;
+                        }
+                        continue;
+                    }
+                }
+                if omit_nan && !saw_value {
+                    all_true = true;
+                }
+                v[c] = if all_true { 1.0 } else { 0.0 };
+            }
+            (v, vec![1, cols])
+        } else if dim == 1 {
+            let mut v = vec![0.0f64; rows];
+            for r in 0..rows {
+                let mut all_true = true;
+                let mut saw_value = false;
+                for c in 0..cols {
+                    let val = data[r + c * rows];
+                    if val.is_nan() {
+                        if omit_nan {
+                            continue;
+                        }
+                    } else {
+                        saw_value = true;
+                        if val == 0.0 {
+                            all_true = false;
+                            break;
+                        }
+                        continue;
+                    }
+                }
+                if omit_nan && !saw_value {
+                    all_true = true;
+                }
+                v[r] = if all_true { 1.0 } else { 0.0 };
+            }
+            (v, vec![rows, 1])
+        } else {
+            return Err(anyhow!("reduce_all_dim: invalid dimension {}", dim));
+        };
+        Ok(self.allocate_tensor(out, shape))
+    }
+
+    fn reduce_median(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?
+                .clone()
+        };
+        let median = if data.is_empty() || data.iter().any(|v| v.is_nan()) {
+            f64::NAN
+        } else {
+            let mut scratch = data.clone();
+            compute_median_inplace(&mut scratch)
+        };
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry().lock().unwrap().insert(id, vec![median]);
+        Ok(GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn reduce_median_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
+        if a.shape.len() != 2 {
+            return Err(anyhow::anyhow!("reduce_median_dim: only 2D supported"));
+        }
+        let rows = a.shape[0];
+        let cols = a.shape[1];
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let mut scratch = Vec::<f64>::with_capacity(rows.max(cols));
+        let out = if dim <= 1 {
+            let mut v = vec![f64::NAN; cols];
+            for c in 0..cols {
+                scratch.clear();
+                let mut saw_nan = false;
+                for r in 0..rows {
+                    let val = abuf[r + c * rows];
+                    if val.is_nan() {
+                        saw_nan = true;
+                        scratch.clear();
+                        break;
+                    }
+                    scratch.push(val);
+                }
+                v[c] = if saw_nan || scratch.is_empty() {
+                    f64::NAN
+                } else {
+                    compute_median_inplace(&mut scratch)
+                };
+            }
+            v
+        } else {
+            let mut v = vec![f64::NAN; rows];
+            for r in 0..rows {
+                scratch.clear();
+                let mut saw_nan = false;
+                for c in 0..cols {
+                    let val = abuf[r + c * rows];
+                    if val.is_nan() {
+                        saw_nan = true;
+                        scratch.clear();
+                        break;
+                    }
+                    scratch.push(val);
+                }
+                v[r] = if saw_nan || scratch.is_empty() {
+                    f64::NAN
+                } else {
+                    compute_median_inplace(&mut scratch)
+                };
             }
             v
         };
@@ -2398,6 +3713,26 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn cumsum_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+        _nan_mode: ProviderNanMode,
+    ) -> Result<GpuTensorHandle> {
+        Err(anyhow!("cumsum_scan not supported by provider"))
+    }
+
+    fn cummin_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+        _nan_mode: ProviderNanMode,
+    ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
+        Err(anyhow!("cummin_scan not supported by provider"))
+    }
+
     fn find(
         &self,
         a: &GpuTensorHandle,
@@ -2475,6 +3810,112 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn lu(&self, a: &GpuTensorHandle) -> Result<ProviderLuResult> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("lu: unknown buffer {}", a.buffer_id))?
+        };
+        let LuHostFactors {
+            combined,
+            lower,
+            upper,
+            perm_matrix,
+            pivot_vector,
+            combined_shape,
+            lower_shape,
+            upper_shape,
+            perm_shape,
+            pivot_shape,
+        } = lu_factor_host(&data, &a.shape)?;
+        let combined = self.allocate_tensor(combined, combined_shape);
+        let lower = self.allocate_tensor(lower, lower_shape);
+        let upper = self.allocate_tensor(upper, upper_shape);
+        let perm_matrix = self.allocate_tensor(perm_matrix, perm_shape);
+        let perm_vector = self.allocate_tensor(pivot_vector, pivot_shape);
+        Ok(ProviderLuResult {
+            combined,
+            lower,
+            upper,
+            perm_matrix,
+            perm_vector,
+        })
+    }
+
+    fn chol(&self, a: &GpuTensorHandle, lower: bool) -> Result<ProviderCholResult> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("chol: unknown buffer {}", a.buffer_id))?
+        };
+        let tensor = Tensor::new(data, a.shape.clone()).map_err(|e| anyhow!("chol: {e}"))?;
+        let mut args = Vec::new();
+        if lower {
+            args.push(Value::from("lower"));
+        }
+        let eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+            Value::Tensor(tensor),
+            &args,
+        )
+        .map_err(|e| anyhow!("chol: {e}"))?;
+        let factor_tensor = tensor_from_value("chol", eval.factor())?;
+        let factor = self.allocate_tensor(factor_tensor.data.clone(), factor_tensor.shape.clone());
+        Ok(ProviderCholResult {
+            factor,
+            info: eval.flag_index() as u32,
+        })
+    }
+
+    fn qr(&self, handle: &GpuTensorHandle, options: ProviderQrOptions) -> Result<ProviderQrResult> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("qr: unknown buffer {}", handle.buffer_id))?
+        };
+        let tensor = Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("qr: {e}"))?;
+        let mut args = Vec::new();
+        if options.economy {
+            args.push(Value::Num(0.0));
+        }
+        if matches!(options.pivot, ProviderQrPivot::Vector) {
+            args.push(Value::from("vector"));
+        }
+        let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
+            Value::Tensor(tensor),
+            &args,
+        )
+        .map_err(|e| anyhow!("qr: {e}"))?;
+
+        let q_tensor = tensor_from_value("qr", eval.q())?;
+        let r_tensor = tensor_from_value("qr", eval.r())?;
+        let perm_matrix_tensor = tensor_from_value("qr", eval.permutation_matrix())?;
+        let perm_vector_tensor = tensor_from_value("qr", eval.permutation_vector())?;
+
+        let q_handle = self.allocate_tensor(q_tensor.data.clone(), q_tensor.shape.clone());
+        let r_handle = self.allocate_tensor(r_tensor.data.clone(), r_tensor.shape.clone());
+        let perm_matrix_handle = self.allocate_tensor(
+            perm_matrix_tensor.data.clone(),
+            perm_matrix_tensor.shape.clone(),
+        );
+        let perm_vector_handle = self.allocate_tensor(
+            perm_vector_tensor.data.clone(),
+            perm_vector_tensor.shape.clone(),
+        );
+
+        Ok(ProviderQrResult {
+            q: q_handle,
+            r: r_handle,
+            perm_matrix: perm_matrix_handle,
+            perm_vector: perm_vector_handle,
+        })
+    }
+
     fn matmul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         // Only support 2D shapes for reference provider
         if a.shape.len() != 2 || b.shape.len() != 2 {
@@ -2518,6 +3959,190 @@ impl AccelProvider for InProcessProvider {
         Err(anyhow::anyhow!(
             "pagefun: in-process provider does not implement GPU page operations"
         ))
+    }
+
+    fn linsolve(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        options: &ProviderLinsolveOptions,
+    ) -> Result<ProviderLinsolveResult> {
+        let (lhs_data, rhs_data) = {
+            let guard = registry().lock().unwrap();
+            let lhs_buf = guard
+                .get(&lhs.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("linsolve: unknown buffer {}", lhs.buffer_id))?;
+            let rhs_buf = guard
+                .get(&rhs.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("linsolve: unknown buffer {}", rhs.buffer_id))?;
+            (lhs_buf, rhs_buf)
+        };
+
+        let lhs_tensor =
+            Tensor::new(lhs_data, lhs.shape.clone()).map_err(|e| anyhow!("linsolve: {e}"))?;
+        let rhs_tensor =
+            Tensor::new(rhs_data, rhs.shape.clone()).map_err(|e| anyhow!("linsolve: {e}"))?;
+
+        let (solution, rcond) = linsolve_host_real_for_provider(&lhs_tensor, &rhs_tensor, options)
+            .map_err(|e| anyhow!("{e}"))?;
+
+        let Tensor { data, shape, .. } = solution;
+        let handle = self.allocate_tensor(data, shape);
+        Ok(ProviderLinsolveResult {
+            solution: handle,
+            reciprocal_condition: rcond,
+        })
+    }
+
+    fn inv(
+        &self,
+        matrix: &GpuTensorHandle,
+        _options: ProviderInvOptions,
+    ) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("inv: unknown buffer {}", matrix.buffer_id))?
+        };
+        let tensor = Tensor::new(data, matrix.shape.clone()).map_err(|e| anyhow!("inv: {e}"))?;
+        let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
+        let Tensor { data, shape, .. } = result;
+        Ok(self.allocate_tensor(data, shape))
+    }
+
+    fn pinv(
+        &self,
+        matrix: &GpuTensorHandle,
+        options: ProviderPinvOptions,
+    ) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("pinv: unknown buffer {}", matrix.buffer_id))?
+        };
+        let tensor = Tensor::new(data, matrix.shape.clone()).map_err(|e| anyhow!("pinv: {e}"))?;
+        let result =
+            pinv_host_real_for_provider(&tensor, options.tolerance).map_err(|e| anyhow!("{e}"))?;
+        let Tensor { data, shape, .. } = result;
+        Ok(self.allocate_tensor(data, shape))
+    }
+
+    fn cond(&self, matrix: &GpuTensorHandle, norm: ProviderCondNorm) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("cond: unknown buffer {}", matrix.buffer_id))?
+        };
+        let tensor = Tensor::new(data, matrix.shape.clone()).map_err(|e| anyhow!("cond: {e}"))?;
+        let cond_value = cond_host_real_for_provider(&tensor, norm).map_err(|e| anyhow!("{e}"))?;
+        Ok(self.allocate_tensor(vec![cond_value], vec![1, 1]))
+    }
+
+    fn norm(&self, tensor: &GpuTensorHandle, order: ProviderNormOrder) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&tensor.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("norm: unknown buffer {}", tensor.buffer_id))?
+        };
+        let host_tensor =
+            Tensor::new(data, tensor.shape.clone()).map_err(|e| anyhow!("norm: {e}"))?;
+        let value = norm_host_real_for_provider(&host_tensor, order).map_err(|e| anyhow!("{e}"))?;
+        Ok(self.allocate_tensor(vec![value], vec![1, 1]))
+    }
+
+    fn rank(&self, matrix: &GpuTensorHandle, tolerance: Option<f64>) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("rank: unknown buffer {}", matrix.buffer_id))?
+        };
+
+        let tensor = Tensor::new(data, matrix.shape.clone()).map_err(|e| anyhow!("rank: {e}"))?;
+        let rank =
+            rank_host_real_for_provider(&tensor, tolerance).map_err(|e| anyhow!("{e}"))? as f64;
+
+        Ok(self.allocate_tensor(vec![rank], vec![1, 1]))
+    }
+
+    fn rcond(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&matrix.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("rcond: unknown buffer {}", matrix.buffer_id))?
+        };
+        let tensor = Tensor::new(data, matrix.shape.clone()).map_err(|e| anyhow!("rcond: {e}"))?;
+        let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
+        Ok(self.allocate_tensor(vec![estimate], vec![1, 1]))
+    }
+
+    fn mldivide(&self, lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (lhs_data, rhs_data) = {
+            let guard = registry().lock().unwrap();
+            let lhs_buf = guard
+                .get(&lhs.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("mldivide: unknown buffer {}", lhs.buffer_id))?;
+            let rhs_buf = guard
+                .get(&rhs.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("mldivide: unknown buffer {}", rhs.buffer_id))?;
+            (lhs_buf, rhs_buf)
+        };
+
+        let lhs_tensor =
+            Tensor::new(lhs_data, lhs.shape.clone()).map_err(|e| anyhow!("mldivide: {e}"))?;
+        let rhs_tensor =
+            Tensor::new(rhs_data, rhs.shape.clone()).map_err(|e| anyhow!("mldivide: {e}"))?;
+
+        let result = mldivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
+            .map_err(|e| anyhow!("{e}"))?;
+
+        let Tensor { data, shape, .. } = result;
+        Ok(self.allocate_tensor(data, shape))
+    }
+
+    fn mrdivide(&self, lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let (lhs_data, rhs_data) = {
+            let guard = registry().lock().unwrap();
+            let lhs_buf = guard
+                .get(&lhs.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("mrdivide: unknown buffer {}", lhs.buffer_id))?;
+            let rhs_buf = guard
+                .get(&rhs.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("mrdivide: unknown buffer {}", rhs.buffer_id))?;
+            (lhs_buf, rhs_buf)
+        };
+
+        let lhs_tensor =
+            Tensor::new(lhs_data, lhs.shape.clone()).map_err(|e| anyhow!("mrdivide: {e}"))?;
+        let rhs_tensor =
+            Tensor::new(rhs_data, rhs.shape.clone()).map_err(|e| anyhow!("mrdivide: {e}"))?;
+
+        let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
+            .map_err(|e| anyhow!("{e}"))?;
+
+        let Tensor { data, shape, .. } = result;
+        Ok(self.allocate_tensor(data, shape))
+    }
+
+    fn eig(&self, _a: &GpuTensorHandle, _compute_left: bool) -> Result<ProviderEigResult> {
+        Err(anyhow!("eig: not supported by in-process provider"))
     }
 
     fn sub2ind(

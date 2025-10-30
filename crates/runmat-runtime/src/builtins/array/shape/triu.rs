@@ -552,6 +552,7 @@ mod tests {
             .expect("upload");
         let gpu = triu_gpu(handle, 1).expect("gpu triu");
         let gathered = test_support::gather(gpu).expect("gather");
-        assert_eq!(cpu.data, gathered.data);
+        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.data, cpu.data);
     }
 }

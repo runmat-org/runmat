@@ -455,8 +455,173 @@ pub fn interpret_with_vars(
                 stack.push(a);
                 stack.push(b);
             }
-            Instr::CallFeval(_argc) => {
-                vm_bail!("feval not supported in this execution mode".to_string());
+            Instr::CallFeval(argc) => {
+                // Pop explicit args
+                let mut args = Vec::with_capacity(argc);
+                for _ in 0..argc {
+                    args.push(
+                        stack
+                            .pop()
+                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                    );
+                }
+                args.reverse();
+                // Pop function value
+                let func_val = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                match func_val {
+                    Value::Closure(c) => {
+                        // User-defined function via closure: prepend captures then dispatch like CallFunction
+                        let name = c.function_name;
+                        let mut call_args = c.captures.clone();
+                        call_args.extend(args);
+                        // Try runtime builtin target for closures (e.g., call_method)
+                        if let Ok(result) = runmat_runtime::call_builtin(&name, &call_args) {
+                            stack.push(result);
+                            pc += 1;
+                            continue;
+                        }
+                        let func: UserFunction = match context.functions.get(&name)
+                            .or_else(|| bytecode.functions.get(&name))
+                        {
+                            Some(f) => f.clone(),
+                            None => vm_bail!(mex(
+                                "UndefinedFunction",
+                                &format!("Undefined function: {name}")
+                            )),
+                        };
+                        let arg_count = call_args.len();
+                        if !func.has_varargin {
+                            if arg_count < func.params.len() {
+                                vm_bail!(mex(
+                                    "NotEnoughInputs",
+                                    &format!(
+                                        "Function '{name}' expects {} inputs, got {arg_count}",
+                                        func.params.len()
+                                    )
+                                ));
+                            }
+                            if arg_count > func.params.len() {
+                                vm_bail!(mex(
+                                    "TooManyInputs",
+                                    &format!(
+                                        "Function '{name}' expects {} inputs, got {arg_count}",
+                                        func.params.len()
+                                    )
+                                ));
+                            }
+                        }
+                        let var_map = runmat_hir::remapping::create_complete_function_var_map(
+                            &func.params,
+                            &func.outputs,
+                            &func.body,
+                        );
+                        let local_var_count = var_map.len();
+                        let remapped_body =
+                            runmat_hir::remapping::remap_function_body(&func.body, &var_map);
+                        let func_vars_count = local_var_count.max(func.params.len());
+                        let mut func_vars = vec![Value::Num(0.0); func_vars_count];
+                        if func.has_varargin {
+                            let fixed = func.params.len().saturating_sub(1);
+                            for i in 0..fixed {
+                                if i < call_args.len() && i < func_vars.len() {
+                                    func_vars[i] = call_args[i].clone();
+                                }
+                            }
+                            let mut rest: Vec<Value> = if call_args.len() > fixed {
+                                call_args[fixed..].to_vec()
+                            } else {
+                                Vec::new()
+                            };
+                            let cell = runmat_builtins::CellArray::new(
+                                std::mem::take(&mut rest),
+                                1,
+                                if call_args.len() > fixed {
+                                    call_args.len() - fixed
+                                } else {
+                                    0
+                                },
+                            )
+                            .map_err(|e| format!("varargin: {e}"))?;
+                            if fixed < func_vars.len() {
+                                func_vars[fixed] = Value::Cell(cell);
+                            }
+                        } else {
+                            for (i, _param_id) in func.params.iter().enumerate() {
+                                if i < call_args.len() && i < func_vars.len() {
+                                    func_vars[i] = call_args[i].clone();
+                                }
+                            }
+                        }
+                        // Copy referenced globals into local frame
+                        for (original_var_id, local_var_id) in &var_map {
+                            let local_index = local_var_id.0;
+                            let global_index = original_var_id.0;
+                            if local_index < func_vars.len() && global_index < vars.len() {
+                                let is_parameter = func
+                                    .params
+                                    .iter()
+                                    .any(|param_id| param_id == original_var_id);
+                                if !is_parameter {
+                                    func_vars[local_index] = vars[global_index].clone();
+                                }
+                            }
+                        }
+                        // Initialize varargout if needed
+                        if func.has_varargout {
+                            if let Some(varargout_oid) = func.outputs.last() {
+                                if let Some(local_id) = var_map.get(varargout_oid) {
+                                    if local_id.0 < func_vars.len() {
+                                        let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
+                                            .map_err(|e| format!("varargout init: {e}"))?;
+                                        func_vars[local_id.0] = Value::Cell(empty);
+                                    }
+                                }
+                            }
+                        }
+                        let mut func_var_types = func.var_types.clone();
+                        if func_var_types.len() < local_var_count {
+                            func_var_types.resize(local_var_count, Type::Unknown);
+                        }
+                        let func_program = runmat_hir::HirProgram {
+                            body: remapped_body,
+                            var_types: func_var_types,
+                        };
+                        let func_bytecode =
+                            crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                        // Merge nested functions into current execution context for future closure calls
+                        for (k, v) in func_bytecode.functions.iter() {
+                            context.functions.insert(k.clone(), v.clone());
+                        }
+                        let func_result_vars =
+                            match interpret_function(&func_bytecode, func_vars) {
+                                Ok(v) => v,
+                                Err(e) => vm_bail!(e),
+                            };
+                        if let Some(output_var_id) = func.outputs.first() {
+                            let local_output_index =
+                                var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
+                            if local_output_index < func_result_vars.len() {
+                                stack.push(func_result_vars[local_output_index].clone());
+                            } else {
+                                stack.push(Value::Num(0.0));
+                            }
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    other => {
+                        // Forward to runtime feval for string/char handles and builtins
+                        let mut argv = Vec::with_capacity(1 + args.len());
+                        argv.push(other);
+                        argv.extend(args);
+                        match runmat_runtime::call_builtin("feval", &argv) {
+                            Ok(result) => stack.push(result),
+                            Err(err) => vm_bail!(err),
+                        }
+                    }
+                }
             }
             Instr::CallFevalExpandMulti(_specs) => {
                 vm_bail!("feval expand not supported in this execution mode".to_string());
@@ -2316,6 +2481,10 @@ pub fn interpret_with_vars(
                 };
                 let func_bytecode =
                     crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                // Make nested closures visible to outer frames
+                for (k, v) in func_bytecode.functions.iter() {
+                    context.functions.insert(k.clone(), v.clone());
+                }
                 let func_result_vars = match interpret_function(&func_bytecode, func_vars) {
                     Ok(v) => v,
                     Err(e) => vm_bail!(e),
@@ -2332,6 +2501,28 @@ pub fn interpret_with_vars(
                 }
             }
             Instr::CallFunction(name, arg_count) => {
+                // First, try runtime builtin fallback (some helpers like call_method)
+                {
+                    let mut args = Vec::new();
+                    for _ in 0..arg_count {
+                        args.push(
+                            stack
+                                .pop()
+                                .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                        );
+                    }
+                    args.reverse();
+                    let prepared_primary = accel_prepare_args(&name, &args)?;
+                    if let Ok(result) = runmat_runtime::call_builtin(&name, &prepared_primary) {
+                        stack.push(result);
+                        pc += 1;
+                        continue;
+                    }
+                    // Put args back if not a builtin: we'll handle as user function below
+                    for v in prepared_primary.into_iter().rev() {
+                        stack.push(v);
+                    }
+                }
                 let func: UserFunction = match bytecode.functions.get(&name) {
                     Some(f) => f.clone(),
                     None => vm_bail!(mex(
@@ -3100,6 +3291,212 @@ pub fn interpret_with_vars(
                     }
                     continue;
                 }
+                if name == "chol" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "chol requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            if !eval.is_positive_definite() {
+                                vm_bail!("Matrix must be positive definite.".to_string());
+                            }
+                            stack.push(eval.factor());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.factor());
+                            stack.push(eval.flag());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "chol currently supports at most two outputs"
+                        )),
+                    }
+                }
+                if name == "lu" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "lu requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::lu::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.combined());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.lower());
+                            stack.push(eval.upper());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.lower());
+                            stack.push(eval.upper());
+                            stack.push(eval.permutation());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "lu currently supports at most three outputs"
+                        )),
+                    }
+                }
+                if name == "linsolve" {
+                    if args.len() < 2 {
+                        vm_bail!(mex(
+                            "NotEnoughInputs",
+                            "linsolve requires coefficient and right-hand side inputs"
+                        ));
+                    }
+                    let eval =
+                        match runmat_runtime::builtins::math::linalg::solve::linsolve::evaluate_args(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        ) {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.solution());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.solution());
+                            stack.push(eval.reciprocal_condition());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "linsolve currently supports at most two outputs"
+                        )),
+                    }
+                }
+                if name == "qr" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "qr requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.r());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.q());
+                            stack.push(eval.r());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.q());
+                            stack.push(eval.r());
+                            stack.push(eval.permutation());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "qr currently supports at most three outputs"
+                        )),
+                    }
+                }
+                if name == "svd" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "svd requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::svd::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.singular_values());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.u());
+                            stack.push(eval.sigma());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.u());
+                            stack.push(eval.sigma());
+                            stack.push(eval.v());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "svd currently supports at most three outputs"
+                        )),
+                    }
+                }
+                if name == "eig" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "eig requires an input matrix"));
+                    }
+                    let require_left = out_count >= 3;
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                        require_left,
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.eigenvalues());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.right());
+                            stack.push(eval.diagonal());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.right());
+                            stack.push(eval.diagonal());
+                            let left = match eval.left() {
+                                Ok(value) => value,
+                                Err(err) => vm_bail!(err),
+                            };
+                            stack.push(left);
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "eig currently supports at most three outputs"
+                        )),
+                    }
+                }
                 // Special-case for 'find' to support [i,j,v] = find(A)
                 if name == "find" && !args.is_empty() {
                     let eval = match runmat_runtime::builtins::array::indexing::find::evaluate(
@@ -3172,6 +3569,61 @@ pub fn interpret_with_vars(
                     }
                     continue;
                 }
+                if name == "deconv" {
+                    if args.len() < 2 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::signal::deconv::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    stack.push(eval.quotient());
+                    if out_count >= 2 {
+                        stack.push(eval.remainder());
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "filter" {
+                    if args.len() < 3 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::signal::filter::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        args[2].clone(),
+                        &args[3..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_value());
+                    } else {
+                        let (output, final_state) = eval.into_pair();
+                        stack.push(output);
+                        stack.push(final_state);
+                        if out_count > 2 {
+                            for _ in 2..out_count {
+                                stack.push(Value::Num(0.0));
+                            }
+                        }
+                    }
+                    continue;
+                }
                 if name == "sort" && !args.is_empty() {
                     let eval = match runmat_runtime::builtins::array::sorting_sets::sort::evaluate(
                         args[0].clone(),
@@ -3185,6 +3637,52 @@ pub fn interpret_with_vars(
                     }
                     let (sorted, indices) = eval.into_values();
                     stack.push(sorted);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "cummin" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::math::reduction::evaluate_cummin(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (values, indices) = eval.into_pair();
+                    stack.push(values);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "min" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::math::reduction::evaluate_min(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (values, indices) = eval.into_pair();
+                    stack.push(values);
                     if out_count >= 2 {
                         stack.push(indices);
                     }

@@ -4,7 +4,8 @@ use runmat_accelerate::fusion_residency;
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, CorrcoefOptions, FspecialRequest, GpuTensorHandle,
     HostTensorOwned, HostTensorView, PagefunRequest, ProviderPrecision, UniqueOptions,
-    UniqueResult,
+    UniqueResult, ProviderCondNorm, ProviderConvMode, ProviderEigResult, ProviderLinsolveOptions,
+    ProviderLinsolveResult, ProviderNormOrder, ProviderPinvOptions,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
@@ -13,6 +14,7 @@ use runmat_ignition::vm::interpret_function;
 use runmat_ignition::{compile, interpret, Instr};
 use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
+use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::gather_if_needed;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -102,6 +104,43 @@ impl AccelProvider for TestProvider {
         Ok(self.push(tensor.data.clone(), tensor.shape.clone()))
     }
 
+    fn eig(&self, _a: &GpuTensorHandle, _compute_left: bool) -> anyhow::Result<ProviderEigResult> {
+        bail!("eig not supported by test provider")
+    }
+
+    fn linsolve(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+        _options: &ProviderLinsolveOptions,
+    ) -> anyhow::Result<ProviderLinsolveResult> {
+        bail!("linsolve not supported by test provider")
+    }
+
+    fn pinv(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _options: ProviderPinvOptions,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        bail!("pinv not supported by test provider")
+    }
+
+    fn cond(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _norm: ProviderCondNorm,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        bail!("cond not supported by test provider")
+    }
+
+    fn norm(
+        &self,
+        _tensor: &GpuTensorHandle,
+        _order: ProviderNormOrder,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        bail!("norm not supported by test provider")
+    }
+
     fn reduce_sum_dim(&self, a: &GpuTensorHandle, dim: usize) -> anyhow::Result<GpuTensorHandle> {
         let (data, shape) = self.pull(a)?;
         if shape.len() != 2 {
@@ -148,6 +187,63 @@ impl AccelProvider for TestProvider {
             }
             _ => bail!("reduce_sum_dim: only dims 0 or 1 supported in test provider"),
         }
+    }
+
+    fn reduce_any_dim(
+        &self,
+        _a: &GpuTensorHandle,
+        _dim: usize,
+        _omit_nan: bool,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        bail!("reduce_any_dim not supported by test provider")
+    }
+
+    fn reduce_any(&self, _a: &GpuTensorHandle, _omit_nan: bool) -> anyhow::Result<GpuTensorHandle> {
+        bail!("reduce_any not supported by test provider")
+    }
+
+    fn reduce_all_dim(
+        &self,
+        _a: &GpuTensorHandle,
+        _dim: usize,
+        _omit_nan: bool,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        bail!("reduce_all_dim not supported by test provider")
+    }
+
+    fn reduce_all(&self, _a: &GpuTensorHandle, _omit_nan: bool) -> anyhow::Result<GpuTensorHandle> {
+        bail!("reduce_all not supported by test provider")
+    }
+
+    fn conv2d(
+        &self,
+        _signal: &GpuTensorHandle,
+        _kernel: &GpuTensorHandle,
+        _mode: ProviderConvMode,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        bail!("conv2d not supported by test provider")
+    }
+
+    fn mrdivide(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let (lhs_data, lhs_shape) = self.pull(lhs)?;
+        let (rhs_data, rhs_shape) = self.pull(rhs)?;
+
+        let lhs_tensor = Tensor::new(lhs_data, lhs_shape)
+            .map_err(|e| anyhow!("mrdivide (test provider): {e}"))?;
+        let rhs_tensor = Tensor::new(rhs_data, rhs_shape)
+            .map_err(|e| anyhow!("mrdivide (test provider): {e}"))?;
+        let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
+            .map_err(|e| anyhow!("{e}"))?;
+        let Tensor { data, shape, .. } = result;
+        Ok(self.push(data, shape))
+    }
+
+    fn sym_rcm(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<Vec<usize>> {
+        bail!("symrcm not supported by test provider")
     }
 
     fn unique(

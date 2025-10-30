@@ -1,6 +1,7 @@
 use runmat_builtins::Value;
 use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
+use crate::builtins::common::format::format_variadic;
 
 pub mod dispatcher;
 
@@ -1329,6 +1330,21 @@ fn feval_builtin(f: Value, rest: Vec<Value>) -> Result<Value, String> {
                 ))
             }
         }
+        // Also accept character row vector handles like '@max'
+        Value::CharArray(ca) => {
+            if ca.rows == 1 {
+                let s: String = ca.data.iter().collect();
+                if let Some(name) = s.strip_prefix('@') {
+                    crate::call_builtin(name, &rest)
+                } else {
+                    Err(format!(
+                        "feval: expected function handle string starting with '@', got {s}"
+                    ))
+                }
+            } else {
+                Err("feval: function handle char array must be a row vector".to_string())
+            }
+        }
         Value::Closure(c) => {
             let mut args = c.captures.clone();
             args.extend(rest);
@@ -1470,39 +1486,6 @@ fn max_vector_builtin(a: Value) -> Result<Value, String> {
     }
 }
 
-fn min_vector_builtin(a: Value) -> Result<Value, String> {
-    match a {
-        Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider() {
-                if let Ok(hc) = p.reduce_min(&h) {
-                    return Ok(Value::GpuTensor(hc));
-                }
-            }
-            Err("min: unsupported for gpuArray".to_string())
-        }
-        Value::Tensor(t) => {
-            if t.shape.len() == 2 && t.shape[1] == 1 {
-                let mut min_val = f64::INFINITY;
-                let mut idx = 1usize;
-                for (i, &v) in t.data.iter().enumerate() {
-                    if v < min_val {
-                        min_val = v;
-                        idx = i + 1;
-                    }
-                }
-                let out = runmat_builtins::Tensor::new(vec![min_val, idx as f64], vec![2, 1])
-                    .map_err(|e| format!("min: {e}"))?;
-                Ok(Value::Tensor(out))
-            } else {
-                let min_val = t.data.iter().cloned().fold(f64::INFINITY, f64::min);
-                Ok(Value::Num(min_val))
-            }
-        }
-        Value::Num(n) => Ok(Value::Num(n)),
-        _ => Err("min: unsupported input".to_string()),
-    }
-}
-
 fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
     if let Value::GpuTensor(h) = a {
         if let Some(p) = runmat_accelerate_api::provider() {
@@ -1569,73 +1552,6 @@ fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
     }
 }
 
-fn min_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
-    if let Value::GpuTensor(h) = a {
-        if let Some(p) = runmat_accelerate_api::provider() {
-            let d = if dim < 1.0 { 1 } else { dim as usize };
-            if let Ok(res) = p.reduce_min_dim(&h, d) {
-                return make_cell(
-                    vec![Value::GpuTensor(res.values), Value::GpuTensor(res.indices)],
-                    1,
-                    2,
-                );
-            }
-        }
-        return Err("min: unsupported for gpuArray".to_string());
-    }
-    let t = match a {
-        Value::Tensor(t) => t,
-        _ => return Err("min: expected tensor for dim variant".to_string()),
-    };
-    let dim = if dim < 1.0 { 1usize } else { dim as usize };
-    if t.shape.len() < 2 {
-        return Err("min: dim variant expects 2D tensor".to_string());
-    }
-    let rows = t.shape[0];
-    let cols = t.shape[1];
-    if dim == 1 {
-        let mut m: Vec<f64> = vec![f64::INFINITY; cols];
-        let mut idx: Vec<f64> = vec![1.0; cols];
-        for c in 0..cols {
-            for r in 0..rows {
-                let v = t.data[r + c * rows];
-                if v < m[c] {
-                    m[c] = v;
-                    idx[c] = (r + 1) as f64;
-                }
-            }
-        }
-        let m_t =
-            runmat_builtins::Tensor::new(m, vec![1, cols]).map_err(|e| format!("min: {e}"))?;
-        let i_t =
-            runmat_builtins::Tensor::new(idx, vec![1, cols]).map_err(|e| format!("min: {e}"))?;
-        make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
-    } else if dim == 2 {
-        let mut m: Vec<f64> = vec![f64::INFINITY; rows];
-        let mut idx: Vec<f64> = vec![1.0; rows];
-        for r in 0..rows {
-            for c in 0..cols {
-                let v = t.data[r + c * rows];
-                if v < m[r] {
-                    m[r] = v;
-                    idx[r] = (c + 1) as f64;
-                }
-            }
-        }
-        let m_t =
-            runmat_builtins::Tensor::new(m, vec![rows, 1]).map_err(|e| format!("min: {e}"))?;
-        let i_t =
-            runmat_builtins::Tensor::new(idx, vec![rows, 1]).map_err(|e| format!("min: {e}"))?;
-        make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
-    } else {
-        Err("min: dim out of range".to_string())
-    }
-}
-
-fn min_scalar(a: f64, b: f64) -> f64 {
-    a.min(b)
-}
-
 #[runmat_macros::runtime_builtin(name = "max", accel = "reduction")]
 fn max_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.is_empty() {
@@ -1660,26 +1576,6 @@ fn max_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
         }
     }
     Err("max: unsupported arguments".to_string())
-}
-
-#[runmat_macros::runtime_builtin(name = "min", accel = "reduction")]
-fn min_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
-    if rest.is_empty() {
-        return min_vector_builtin(a);
-    }
-    if rest.len() == 1 {
-        let r0 = &rest[0];
-        // Scalar pair min(a,b)
-        if let (Value::Num(a0), Value::Num(b0)) = (a.clone(), r0.clone()) {
-            return Ok(Value::Num(min_scalar(a0, b0)));
-        }
-        match r0 {
-            Value::Num(d) => return min_dim_builtin(a, *d),
-            Value::Int(i) => return min_dim_builtin(a, i.to_i64() as f64),
-            _ => {}
-        }
-    }
-    Err("min: unsupported arguments".to_string())
 }
 
 #[runtime_builtin(name = "sqrt")]
@@ -1878,6 +1774,7 @@ fn mean_dim(a: Value, dim: f64) -> Result<Value, String> {
 
 // legacy mean removed; new implementation lives under builtins/math/reduction/mean.rs
 
+
 fn any_all_or_cols(a: Value) -> Result<Value, String> {
     match a {
         Value::Tensor(t) => {
@@ -2058,6 +1955,37 @@ fn all_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
         }
     }
     Err("all: unsupported arguments".to_string())
+}
+
+#[runmat_macros::runtime_builtin(name = "fprintf", sink = true)]
+fn fprintf_builtin(first: Value, rest: Vec<Value>) -> Result<Value, String> {
+    // MATLAB: fprintf(fid, fmt, ...) or fprintf(fmt, ...)
+    let (fmt, args) = match first {
+        Value::String(s) => (s, rest),
+        Value::Num(_) | Value::Int(_) => {
+            // File IDs not supported yet; treat as stdout and expect format string next
+            if rest.is_empty() {
+                return Err("fprintf: missing format string".to_string());
+            }
+            let fmt = match &rest[0] {
+                Value::String(s) => s.clone(),
+                _ => return Err("fprintf: expected format string".to_string()),
+            };
+            (fmt, rest[1..].to_vec())
+        }
+        other => return Err(format!("fprintf: unsupported first argument {other:?}")),
+    };
+    let s = format_variadic(&fmt, &args)?;
+    println!("{s}");
+    Ok(Value::Num(s.len() as f64))
+}
+
+#[runmat_macros::runtime_builtin(name = "warning", sink = true)]
+fn warning_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
+    let s = format_variadic(&fmt, &rest)?;
+    eprintln!("Warning: {s}");
+    Ok(Value::Num(0.0))
+
 }
 
 #[runmat_macros::runtime_builtin(name = "disp", sink = true)]

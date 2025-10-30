@@ -72,6 +72,18 @@ pub struct ReduceDimResult {
     pub indices: GpuTensorHandle,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderCumminResult {
+    pub values: GpuTensorHandle,
+    pub indices: GpuTensorHandle,
+}
+
+/// Result payload returned by provider-side `cummax` scans.
+///
+/// Alias of [`ProviderCumminResult`] because both operations return the same pair of tensors
+/// (running values and MATLAB-compatible indices).
+pub type ProviderCummaxResult = ProviderCumminResult;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PagefunOp {
     Mtimes,
@@ -98,6 +110,146 @@ pub struct ProviderFindResult {
     pub rows: GpuTensorHandle,
     pub cols: GpuTensorHandle,
     pub values: Option<GpuTensorHandle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderBandwidth {
+    pub lower: u32,
+    pub upper: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderSymmetryKind {
+    Symmetric,
+    Skew,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderHermitianKind {
+    Hermitian,
+    Skew,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderLuResult {
+    pub combined: GpuTensorHandle,
+    pub lower: GpuTensorHandle,
+    pub upper: GpuTensorHandle,
+    pub perm_matrix: GpuTensorHandle,
+    pub perm_vector: GpuTensorHandle,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderCholResult {
+    pub factor: GpuTensorHandle,
+    /// MATLAB-compatible failure index (0 indicates success).
+    pub info: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderQrResult {
+    pub q: GpuTensorHandle,
+    pub r: GpuTensorHandle,
+    pub perm_matrix: GpuTensorHandle,
+    pub perm_vector: GpuTensorHandle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ProviderLinsolveOptions {
+    pub lower: bool,
+    pub upper: bool,
+    pub rectangular: bool,
+    pub transposed: bool,
+    pub conjugate: bool,
+    pub symmetric: bool,
+    pub posdef: bool,
+    pub rcond: Option<f64>,
+}
+
+impl Default for ProviderLinsolveOptions {
+    fn default() -> Self {
+        Self {
+            lower: false,
+            upper: false,
+            rectangular: false,
+            transposed: false,
+            conjugate: false,
+            symmetric: false,
+            posdef: false,
+            rcond: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderLinsolveResult {
+    pub solution: GpuTensorHandle,
+    pub reciprocal_condition: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ProviderPinvOptions {
+    pub tolerance: Option<f64>,
+}
+
+impl Default for ProviderPinvOptions {
+    fn default() -> Self {
+        Self { tolerance: None }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderInvOptions {}
+
+/// Supported norm specifications for the `cond` builtin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderCondNorm {
+    Two,
+    One,
+    Inf,
+    Fro,
+}
+
+/// Supported norm orders for the `norm` builtin.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ProviderNormOrder {
+    Two,
+    One,
+    Inf,
+    NegInf,
+    Zero,
+    Fro,
+    Nuc,
+    P(f64),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderEigResult {
+    pub eigenvalues: GpuTensorHandle,
+    pub diagonal: GpuTensorHandle,
+    pub right: GpuTensorHandle,
+    pub left: Option<GpuTensorHandle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderQrPivot {
+    Matrix,
+    Vector,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderQrOptions {
+    pub economy: bool,
+    pub pivot: ProviderQrPivot,
+}
+
+impl Default for ProviderQrOptions {
+    fn default() -> Self {
+        Self {
+            economy: false,
+            pivot: ProviderQrPivot::Matrix,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +320,27 @@ impl Default for CovarianceOptions {
             has_weight_vector: false,
         }
     }
+}
+
+/// Normalization strategy used by provider-backed standard deviation reductions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderStdNormalization {
+    Sample,
+    Population,
+}
+
+/// NaN handling mode for provider-backed reductions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderNanMode {
+    Include,
+    Omit,
+}
+
+/// Direction used when computing prefix sums on the device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderScanDirection {
+    Forward,
+    Reverse,
 }
 
 /// Sort direction used by acceleration providers.
@@ -376,6 +549,41 @@ pub struct HostLogicalOwned {
 pub struct IsMemberResult {
     pub mask: HostLogicalOwned,
     pub loc: HostTensorOwned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderConvMode {
+    Full,
+    Same,
+    Valid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderConvOrientation {
+    Row,
+    Column,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderConv1dOptions {
+    pub mode: ProviderConvMode,
+    pub orientation: ProviderConvOrientation,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderIirFilterOptions {
+    /// Zero-based dimension along which filtering should be applied.
+    pub dim: usize,
+    /// Optional initial conditions (state vector) residing on the device.
+    pub zi: Option<GpuTensorHandle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderIirFilterResult {
+    /// Filtered output tensor, matching the input signal shape.
+    pub output: GpuTensorHandle,
+    /// Final conditions for the filter state (same shape as the requested `zi` layout).
+    pub final_state: Option<GpuTensorHandle>,
 }
 
 /// Device/provider interface that backends implement and register into the runtime layer
@@ -634,6 +842,14 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_div not supported by provider"))
     }
+
+    fn elem_hypot(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_hypot not supported by provider"))
+    }
     fn elem_ge(
         &self,
         _a: &GpuTensorHandle,
@@ -721,20 +937,69 @@ pub trait AccelProvider: Send + Sync {
     fn unary_sin(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_sin not supported by provider"))
     }
+    fn unary_ceil(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_ceil not supported by provider"))
+    }
+    fn unary_floor(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_floor not supported by provider"))
+    }
+    fn unary_round(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_round not supported by provider"))
+    }
+    fn unary_fix(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_fix not supported by provider"))
+    }
     fn unary_cos(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_cos not supported by provider"))
+    }
+    fn unary_angle(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_angle not supported by provider"))
+    }
+    fn unary_imag(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_imag not supported by provider"))
+    }
+    fn unary_real(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_real not supported by provider"))
+    }
+    fn unary_conj(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_conj not supported by provider"))
     }
     fn unary_abs(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_abs not supported by provider"))
     }
+    fn unary_sign(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_sign not supported by provider"))
+    }
     fn unary_exp(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_exp not supported by provider"))
+    }
+    fn unary_expm1(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_expm1 not supported by provider"))
     }
     fn unary_log(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_log not supported by provider"))
     }
+    fn unary_log2(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_log2 not supported by provider"))
+    }
+    fn unary_log10(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_log10 not supported by provider"))
+    }
+    fn unary_log1p(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_log1p not supported by provider"))
+    }
     fn unary_sqrt(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_sqrt not supported by provider"))
+    }
+    fn unary_pow2(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_pow2 not supported by provider"))
+    }
+    fn pow2_scale(
+        &self,
+        _mantissa: &GpuTensorHandle,
+        _exponent: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("pow2_scale not supported by provider"))
     }
     // Left-scalar operations (broadcast with scalar on the left)
     fn scalar_rsub(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
@@ -783,8 +1048,110 @@ pub trait AccelProvider: Send + Sync {
     fn pagefun(&self, _request: &PagefunRequest) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("pagefun not supported by provider"))
     }
+    fn linsolve(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+        _options: &ProviderLinsolveOptions,
+    ) -> anyhow::Result<ProviderLinsolveResult> {
+        Err(anyhow::anyhow!("linsolve not supported by provider"))
+    }
+    fn inv(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _options: ProviderInvOptions,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("inv not supported by provider"))
+    }
+    fn pinv(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _options: ProviderPinvOptions,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("pinv not supported by provider"))
+    }
+    fn cond(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _norm: ProviderCondNorm,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cond not supported by provider"))
+    }
+    fn norm(
+        &self,
+        _tensor: &GpuTensorHandle,
+        _order: ProviderNormOrder,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("norm not supported by provider"))
+    }
+    fn rank(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _tolerance: Option<f64>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("rank not supported by provider"))
+    }
+    fn rcond(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("rcond not supported by provider"))
+    }
+    fn mldivide(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("mldivide not supported by provider"))
+    }
+    fn mrdivide(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("mrdivide not supported by provider"))
+    }
+    fn eig(&self, _a: &GpuTensorHandle, _compute_left: bool) -> anyhow::Result<ProviderEigResult> {
+        Err(anyhow::anyhow!("eig not supported by provider"))
+    }
+    fn lu(&self, _a: &GpuTensorHandle) -> anyhow::Result<ProviderLuResult> {
+        Err(anyhow::anyhow!("lu not supported by provider"))
+    }
+
+    fn chol(&self, _a: &GpuTensorHandle, _lower: bool) -> anyhow::Result<ProviderCholResult> {
+        Err(anyhow::anyhow!("chol not supported by provider"))
+    }
+    fn qr(
+        &self,
+        _a: &GpuTensorHandle,
+        _options: ProviderQrOptions,
+    ) -> anyhow::Result<ProviderQrResult> {
+        Err(anyhow::anyhow!("qr not supported by provider"))
+    }
     fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("transpose not supported by provider"))
+    }
+    fn conv1d(
+        &self,
+        _signal: &GpuTensorHandle,
+        _kernel: &GpuTensorHandle,
+        _options: ProviderConv1dOptions,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("conv1d not supported by provider"))
+    }
+    fn conv2d(
+        &self,
+        _signal: &GpuTensorHandle,
+        _kernel: &GpuTensorHandle,
+        _mode: ProviderConvMode,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("conv2d not supported by provider"))
+    }
+    fn iir_filter(
+        &self,
+        _b: &GpuTensorHandle,
+        _a: &GpuTensorHandle,
+        _x: &GpuTensorHandle,
+        _options: ProviderIirFilterOptions,
+    ) -> anyhow::Result<ProviderIirFilterResult> {
+        Err(anyhow::anyhow!("iir_filter not supported by provider"))
     }
     /// Reorder tensor dimensions according to `order`, expressed as zero-based indices.
     fn permute(
@@ -803,6 +1170,31 @@ pub trait AccelProvider: Send + Sync {
         _shifts: &[isize],
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("circshift not supported by provider"))
+    }
+    fn diff_dim(
+        &self,
+        _handle: &GpuTensorHandle,
+        _order: usize,
+        _dim: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("diff_dim not supported by provider"))
+    }
+    /// Perform an in-place FFT along a zero-based dimension, optionally padding/truncating to `len`.
+    fn fft_dim(
+        &self,
+        _handle: &GpuTensorHandle,
+        _len: Option<usize>,
+        _dim: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("fft_dim not supported by provider"))
+    }
+    fn ifft_dim(
+        &self,
+        _handle: &GpuTensorHandle,
+        _len: Option<usize>,
+        _dim: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("ifft_dim not supported by provider"))
     }
     fn unique(
         &self,
@@ -865,6 +1257,22 @@ pub trait AccelProvider: Send + Sync {
     fn reduce_sum_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_sum_dim not supported by provider"))
     }
+    fn reduce_nnz(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_nnz not supported by provider"))
+    }
+    fn reduce_nnz_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_nnz_dim not supported by provider"))
+    }
+    fn reduce_prod(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_prod not supported by provider"))
+    }
+    fn reduce_prod_dim(
+        &self,
+        _a: &GpuTensorHandle,
+        _dim: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_prod_dim not supported by provider"))
+    }
     fn reduce_mean(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_mean not supported by provider"))
     }
@@ -874,6 +1282,57 @@ pub trait AccelProvider: Send + Sync {
         _dim: usize,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_mean_dim not supported by provider"))
+    }
+    fn reduce_std(
+        &self,
+        _a: &GpuTensorHandle,
+        _normalization: ProviderStdNormalization,
+        _nan_mode: ProviderNanMode,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_std not supported by provider"))
+    }
+    fn reduce_std_dim(
+        &self,
+        _a: &GpuTensorHandle,
+        _dim: usize,
+        _normalization: ProviderStdNormalization,
+        _nan_mode: ProviderNanMode,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_std_dim not supported by provider"))
+    }
+    fn reduce_any(&self, _a: &GpuTensorHandle, _omit_nan: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_any not supported by provider"))
+    }
+    fn reduce_any_dim(
+        &self,
+        _a: &GpuTensorHandle,
+        _dim: usize,
+        _omit_nan: bool,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_any_dim not supported by provider"))
+    }
+    fn reduce_all(&self, _a: &GpuTensorHandle, _omit_nan: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_all not supported by provider"))
+    }
+    fn reduce_all_dim(
+        &self,
+        _a: &GpuTensorHandle,
+        _dim: usize,
+        _omit_nan: bool,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_all_dim not supported by provider"))
+    }
+    fn reduce_median(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_median not supported by provider"))
+    }
+    fn reduce_median_dim(
+        &self,
+        _a: &GpuTensorHandle,
+        _dim: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "reduce_median_dim not supported by provider"
+        ))
     }
     fn reduce_min(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_min not supported by provider"))
@@ -886,6 +1345,42 @@ pub trait AccelProvider: Send + Sync {
     }
     fn reduce_max_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<ReduceDimResult> {
         Err(anyhow::anyhow!("reduce_max_dim not supported by provider"))
+    }
+    fn cumsum_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+        _nan_mode: ProviderNanMode,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cumsum_scan not supported by provider"))
+    }
+    fn cumprod_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+        _nan_mode: ProviderNanMode,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cumprod_scan not supported by provider"))
+    }
+    fn cummin_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+        _nan_mode: ProviderNanMode,
+    ) -> anyhow::Result<ProviderCumminResult> {
+        Err(anyhow::anyhow!("cummin_scan not supported by provider"))
+    }
+    fn cummax_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+        _nan_mode: ProviderNanMode,
+    ) -> anyhow::Result<ProviderCummaxResult> {
+        Err(anyhow::anyhow!("cummax_scan not supported by provider"))
     }
 
     fn find(
@@ -1001,6 +1496,43 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<Vec<GpuTensorHandle>> {
         Err(anyhow::anyhow!("ind2sub not supported by provider"))
     }
+
+    /// Determine if a matrix is symmetric (or skew-symmetric) without gathering it to the host.
+    fn issymmetric(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _kind: ProviderSymmetryKind,
+        _tolerance: f64,
+    ) -> anyhow::Result<bool> {
+        Err(anyhow::anyhow!(
+            "issymmetric predicate not supported by provider"
+        ))
+    }
+
+    /// Determine if a matrix is Hermitian (or skew-Hermitian) without gathering it to the host.
+    fn ishermitian(
+        &self,
+        _matrix: &GpuTensorHandle,
+        _kind: ProviderHermitianKind,
+        _tolerance: f64,
+    ) -> anyhow::Result<bool> {
+        Err(anyhow::anyhow!(
+            "ishermitian predicate not supported by provider"
+        ))
+    }
+
+    /// Inspect the bandwidth of a matrix without gathering it back to the host.
+    fn bandwidth(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<ProviderBandwidth> {
+        Err(anyhow::anyhow!("bandwidth not supported by provider"))
+    }
+
+    /// Compute the symmetric reverse Cuthill-McKee permutation for the matrix.
+    ///
+    /// Implementations may execute on the device or gather to the host. The permutation should be
+    /// returned as zero-based indices.
+    fn sym_rcm(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<Vec<usize>> {
+        Err(anyhow::anyhow!("sym_rcm not supported by provider"))
+    }
 }
 
 static mut GLOBAL_PROVIDER: Option<&'static dyn AccelProvider> = None;
@@ -1024,6 +1556,16 @@ pub fn provider() -> Option<&'static dyn AccelProvider> {
 pub fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
         if let Ok(h) = p.elem_add(a, b) {
+            return Some(h);
+        }
+    }
+    None
+}
+
+/// Convenience: perform elementwise hypot via provider if possible; otherwise return None
+pub fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+    if let Some(p) = provider() {
+        if let Ok(h) = p.elem_hypot(a, b) {
             return Some(h);
         }
     }

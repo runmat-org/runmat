@@ -17,12 +17,18 @@ const FLIP_SHADER_F64: &str = crate::backend::wgpu::shaders::flip::FLIP_SHADER_F
 const FLIP_SHADER_F32: &str = crate::backend::wgpu::shaders::flip::FLIP_SHADER_F32;
 const CIRCSHIFT_SHADER_F64: &str = crate::backend::wgpu::shaders::circshift::CIRCSHIFT_SHADER_F64;
 const CIRCSHIFT_SHADER_F32: &str = crate::backend::wgpu::shaders::circshift::CIRCSHIFT_SHADER_F32;
+const DIFF_SHADER_F64: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F64;
+const DIFF_SHADER_F32: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F32;
+const CUMSUM_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F64;
+const CUMSUM_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F32;
 const REPMAT_SHADER_F64: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F64;
 const REPMAT_SHADER_F32: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F32;
 const KRON_SHADER_F64: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F64;
 const KRON_SHADER_F32: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F32;
 const MATMUL_SHADER_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F64;
 const MATMUL_SHADER_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F32;
+const CONV1D_SHADER_F64: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F64;
+const CONV1D_SHADER_F32: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F32;
 const REDUCE_GLOBAL_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F64;
 const REDUCE_GLOBAL_SHADER_F32: &str =
@@ -67,6 +73,16 @@ const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
 const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
 const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
+const BANDWIDTH_SHADER_F64: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F64;
+const BANDWIDTH_SHADER_F32: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F32;
+const SYMMETRY_SHADER_F64: &str = crate::backend::wgpu::shaders::symmetry::SYMMETRY_SHADER_F64;
+const SYMMETRY_SHADER_F32: &str = crate::backend::wgpu::shaders::symmetry::SYMMETRY_SHADER_F32;
+const CUMPROD_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMPROD_SHADER_F64;
+const CUMPROD_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMPROD_SHADER_F32;
+const CUMMIN_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMMIN_SHADER_F64;
+const CUMMIN_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMMIN_SHADER_F32;
+const CUMMAX_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMMAX_SHADER_F64;
+const CUMMAX_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMMAX_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -80,6 +96,13 @@ pub struct WgpuPipelines {
     pub transpose: PipelineBundle,
     pub permute: PipelineBundle,
     pub flip: PipelineBundle,
+    pub diff: PipelineBundle,
+    pub conv1d: PipelineBundle,
+    pub filter: PipelineBundle,
+    pub cumsum: PipelineBundle,
+    pub cumprod: PipelineBundle,
+    pub cummin: PipelineBundle,
+    pub cummax: PipelineBundle,
     pub circshift: PipelineBundle,
     pub tril: PipelineBundle,
     pub triu: PipelineBundle,
@@ -101,6 +124,8 @@ pub struct WgpuPipelines {
     pub diag_from_vector: PipelineBundle,
     pub diag_extract: PipelineBundle,
     pub find: PipelineBundle,
+    pub bandwidth: PipelineBundle,
+    pub symmetry: PipelineBundle,
 }
 
 impl WgpuPipelines {
@@ -199,6 +224,126 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => FLIP_SHADER_F64,
                 NumericPrecision::F32 => FLIP_SHADER_F32,
+            },
+        );
+
+        let conv1d = create_pipeline(
+            device,
+            "runmat-conv1d-layout",
+            "runmat-conv1d-shader",
+            "runmat-conv1d-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => CONV1D_SHADER_F64,
+                NumericPrecision::F32 => CONV1D_SHADER_F32,
+            },
+        );
+
+        let filter = create_pipeline(
+            device,
+            "runmat-iir-filter-layout",
+            "runmat-iir-filter-shader",
+            "runmat-iir-filter-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_entry(3),
+                storage_read_write_entry(4),
+                storage_read_write_entry(5),
+                storage_read_write_entry(6),
+                uniform_entry(7),
+            ],
+            match precision {
+                NumericPrecision::F64 => crate::backend::wgpu::shaders::filter::FILTER_SHADER_F64,
+                NumericPrecision::F32 => crate::backend::wgpu::shaders::filter::FILTER_SHADER_F32,
+            },
+        );
+
+        let diff = create_pipeline(
+            device,
+            "runmat-diff-layout",
+            "runmat-diff-shader",
+            "runmat-diff-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => DIFF_SHADER_F64,
+                NumericPrecision::F32 => DIFF_SHADER_F32,
+            },
+        );
+
+        let cumsum = create_pipeline(
+            device,
+            "runmat-cumsum-layout",
+            "runmat-cumsum-shader",
+            "runmat-cumsum-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => CUMSUM_SHADER_F64,
+                NumericPrecision::F32 => CUMSUM_SHADER_F32,
+            },
+        );
+
+        let cumprod = create_pipeline(
+            device,
+            "runmat-cumprod-layout",
+            "runmat-cumprod-shader",
+            "runmat-cumprod-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => CUMPROD_SHADER_F64,
+                NumericPrecision::F32 => CUMPROD_SHADER_F32,
+            },
+        );
+
+        let cummin = create_pipeline(
+            device,
+            "runmat-cummin-layout",
+            "runmat-cummin-shader",
+            "runmat-cummin-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => CUMMIN_SHADER_F64,
+                NumericPrecision::F32 => CUMMIN_SHADER_F32,
+            },
+        );
+
+        let cummax = create_pipeline(
+            device,
+            "runmat-cummax-layout",
+            "runmat-cummax-shader",
+            "runmat-cummax-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => CUMMAX_SHADER_F64,
+                NumericPrecision::F32 => CUMMAX_SHADER_F32,
             },
         );
 
@@ -514,6 +659,38 @@ impl WgpuPipelines {
             },
         );
 
+        let bandwidth = create_pipeline(
+            device,
+            "runmat-bandwidth-layout",
+            "runmat-bandwidth-shader",
+            "runmat-bandwidth-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => BANDWIDTH_SHADER_F64,
+                NumericPrecision::F32 => BANDWIDTH_SHADER_F32,
+            },
+        );
+
+        let symmetry = create_pipeline(
+            device,
+            "runmat-symmetry-layout",
+            "runmat-symmetry-shader",
+            "runmat-symmetry-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => SYMMETRY_SHADER_F64,
+                NumericPrecision::F32 => SYMMETRY_SHADER_F32,
+            },
+        );
+
         Self {
             binary,
             unary,
@@ -521,9 +698,16 @@ impl WgpuPipelines {
             transpose,
             permute,
             flip,
+            conv1d,
+            filter,
+            diff,
+            cumsum,
+            cumprod,
+            cummin,
+            cummax,
+            circshift,
             tril,
             triu,
-            circshift,
             repmat,
             kron,
             matmul,
@@ -542,6 +726,8 @@ impl WgpuPipelines {
             diag_from_vector,
             diag_extract,
             find,
+            bandwidth,
+            symmetry,
         }
     }
 }

@@ -1,6 +1,13 @@
 pub const KRON_SHADER_F64: &str = r#"
 const MAX_RANK: u32 = 8u;
 
+struct PackedValue {
+    value: u32,
+    _pad: vec3<u32>,
+};
+
+alias PackedArray = array<PackedValue, MAX_RANK>;
+
 struct Tensor {
     data: array<f64>,
 };
@@ -10,11 +17,11 @@ struct Params {
     offset: u32,
     rank: u32,
     _pad: u32,
-    shape_a: array<vec4<u32>, MAX_RANK>,
-    shape_b: array<vec4<u32>, MAX_RANK>,
-    shape_out: array<vec4<u32>, MAX_RANK>,
-    stride_a: array<vec4<u32>, MAX_RANK>,
-    stride_b: array<vec4<u32>, MAX_RANK>,
+    shape_a: PackedArray,
+    shape_b: PackedArray,
+    shape_out: PackedArray,
+    stride_a: PackedArray,
+    stride_b: PackedArray,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -39,14 +46,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let out_dim = params.shape_out[dim].x;
+        let out_dim = params.shape_out[dim].value;
         var coord_out: u32 = 0u;
         if out_dim != 0u {
             coord_out = remaining % out_dim;
             remaining = remaining / out_dim;
         }
 
-        let dim_b = params.shape_b[dim].x;
+        let dim_b = params.shape_b[dim].value;
         var coord_b: u32 = 0u;
         var coord_a: u32 = 0u;
         if dim_b != 0u {
@@ -54,8 +61,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             coord_a = coord_out / dim_b;
         }
 
-        let stride_a = params.stride_a[dim].x;
-        let stride_b = params.stride_b[dim].x;
+        let stride_a = params.stride_a[dim].value;
+        let stride_b = params.stride_b[dim].value;
         index_a = index_a + coord_a * stride_a;
         index_b = index_b + coord_b * stride_b;
 
@@ -69,6 +76,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 pub const KRON_SHADER_F32: &str = r#"
 const MAX_RANK: u32 = 8u;
 
+struct PackedValue {
+    value: u32,
+    _pad: vec3<u32>,
+};
+
+alias PackedArray = array<PackedValue, MAX_RANK>;
+
 struct Tensor {
     data: array<f32>,
 };
@@ -78,11 +92,11 @@ struct Params {
     offset: u32,
     rank: u32,
     _pad: u32,
-    shape_a: array<vec4<u32>, MAX_RANK>,
-    shape_b: array<vec4<u32>, MAX_RANK>,
-    shape_out: array<vec4<u32>, MAX_RANK>,
-    stride_a: array<vec4<u32>, MAX_RANK>,
-    stride_b: array<vec4<u32>, MAX_RANK>,
+    shape_a: PackedArray,
+    shape_b: PackedArray,
+    shape_out: PackedArray,
+    stride_a: PackedArray,
+    stride_b: PackedArray,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -107,14 +121,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if dim >= params.rank {
             break;
         }
-        let out_dim = params.shape_out[dim].x;
+        let out_dim = params.shape_out[dim].value;
         var coord_out: u32 = 0u;
         if out_dim != 0u {
             coord_out = remaining % out_dim;
             remaining = remaining / out_dim;
         }
 
-        let dim_b = params.shape_b[dim].x;
+        let dim_b = params.shape_b[dim].value;
         var coord_b: u32 = 0u;
         var coord_a: u32 = 0u;
         if dim_b != 0u {
@@ -122,8 +136,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             coord_a = coord_out / dim_b;
         }
 
-        let stride_a = params.stride_a[dim].x;
-        let stride_b = params.stride_b[dim].x;
+        let stride_a = params.stride_a[dim].value;
+        let stride_b = params.stride_b[dim].value;
         index_a = index_a + coord_a * stride_a;
         index_b = index_b + coord_b * stride_b;
 

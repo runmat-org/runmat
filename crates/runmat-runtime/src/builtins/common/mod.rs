@@ -9,6 +9,7 @@ pub mod fs;
 pub mod gpu_helpers;
 pub mod path_search;
 pub mod path_state;
+pub mod linalg;
 pub mod random;
 pub mod random_args;
 pub mod shape;

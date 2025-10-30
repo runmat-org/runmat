@@ -532,6 +532,7 @@ mod tests {
             .expect("upload");
         let gpu = tril_gpu(handle, -1).expect("gpu tril");
         let gathered = test_support::gather(gpu).expect("gather");
-        assert_eq!(cpu.data, gathered.data);
+        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.data, cpu.data);
     }
 }

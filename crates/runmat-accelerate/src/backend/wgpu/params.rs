@@ -33,27 +33,20 @@ pub struct ScalarParamsF32 {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Conv1dParams {
+    pub signal_len: u32,
+    pub kernel_len: u32,
+    pub output_len: u32,
+    pub start_offset: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct FusionParams {
     pub len: u32,
     pub _pad0: u32,
     pub _pad1: u32,
     pub _pad2: u32,
-}
-
-#[repr(C, align(16))]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct PackedU32(pub [u32; 4]);
-
-impl PackedU32 {
-    pub fn from_scalar(value: u32) -> Self {
-        Self([value, 0, 0, 0])
-    }
-}
-
-impl Default for PackedU32 {
-    fn default() -> Self {
-        Self([0; 4])
-    }
 }
 
 #[repr(C, align(16))]
@@ -75,16 +68,32 @@ impl Default for PackedI32 {
 pub const PERMUTE_MAX_RANK: usize = 8;
 
 #[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
+pub struct AlignedU32 {
+    pub value: u32,
+    pub _pad: [u32; 3],
+}
+
+impl AlignedU32 {
+    pub const fn new(value: u32) -> Self {
+        Self {
+            value,
+            _pad: [0; 3],
+        }
+    }
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct PermuteParams {
     pub len: u32,
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub src_shape: [PackedU32; PERMUTE_MAX_RANK],
-    pub dst_shape: [PackedU32; PERMUTE_MAX_RANK],
-    pub order: [PackedU32; PERMUTE_MAX_RANK],
-    pub src_strides: [PackedU32; PERMUTE_MAX_RANK],
+    pub src_shape: [AlignedU32; PERMUTE_MAX_RANK],
+    pub dst_shape: [AlignedU32; PERMUTE_MAX_RANK],
+    pub order: [AlignedU32; PERMUTE_MAX_RANK],
+    pub src_strides: [AlignedU32; PERMUTE_MAX_RANK],
 }
 
 pub const FLIP_MAX_RANK: usize = PERMUTE_MAX_RANK;
@@ -96,9 +105,9 @@ pub struct FlipParams {
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub shape: [PackedU32; FLIP_MAX_RANK],
-    pub strides: [PackedU32; FLIP_MAX_RANK],
-    pub flags: [PackedU32; FLIP_MAX_RANK],
+    pub shape: [AlignedU32; FLIP_MAX_RANK],
+    pub strides: [AlignedU32; FLIP_MAX_RANK],
+    pub flags: [AlignedU32; FLIP_MAX_RANK],
 }
 
 pub const CIRCSHIFT_MAX_RANK: usize = PERMUTE_MAX_RANK;
@@ -110,9 +119,43 @@ pub struct CircshiftParams {
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub shape: [PackedU32; CIRCSHIFT_MAX_RANK],
-    pub strides: [PackedU32; CIRCSHIFT_MAX_RANK],
-    pub shifts: [PackedU32; CIRCSHIFT_MAX_RANK],
+    pub shape: [AlignedU32; CIRCSHIFT_MAX_RANK],
+    pub strides: [AlignedU32; CIRCSHIFT_MAX_RANK],
+    pub shifts: [AlignedU32; CIRCSHIFT_MAX_RANK],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct DiffParams {
+    pub stride_before: u32,
+    pub segments: u32,
+    pub segment_len: u32,
+    pub segment_out: u32,
+    pub block: u32,
+    pub total_out: u32,
+    pub total_in: u32,
+    pub _pad: u32,
+}
+
+pub const FILTER_MAX_RANK: usize = PERMUTE_MAX_RANK;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FilterParams {
+    pub dim_len: u32,
+    pub leading: u32,
+    pub trailing: u32,
+    pub order: u32,
+    pub state_len: u32,
+    pub signal_len: u32,
+    pub channel_count: u32,
+    pub zi_present: u32,
+    pub dim_idx: u32,
+    pub rank: u32,
+    pub state_rank: u32,
+    pub _pad: u32,
+    pub signal_shape: [AlignedU32; FILTER_MAX_RANK],
+    pub state_shape: [AlignedU32; FILTER_MAX_RANK],
 }
 
 pub const IMFILTER_MAX_RANK: usize = 8;
@@ -130,11 +173,11 @@ pub struct ImfilterParamsF64 {
     pub _pad1: u32,
     pub constant_value: f64,
     pub _pad_const: f64,
-    pub image_shape: [PackedU32; IMFILTER_MAX_RANK],
-    pub image_strides: [PackedU32; IMFILTER_MAX_RANK],
-    pub output_shape: [PackedU32; IMFILTER_MAX_RANK],
+    pub image_shape: [AlignedU32; IMFILTER_MAX_RANK],
+    pub image_strides: [AlignedU32; IMFILTER_MAX_RANK],
+    pub output_shape: [AlignedU32; IMFILTER_MAX_RANK],
     pub base_offset: [PackedI32; IMFILTER_MAX_RANK],
-    pub _pad_tail: PackedU32,
+    pub _pad_tail: AlignedU32,
 }
 
 #[repr(C)]
@@ -150,11 +193,11 @@ pub struct ImfilterParamsF32 {
     pub _pad1: u32,
     pub constant_value: f32,
     pub _pad_const: [f32; 3],
-    pub image_shape: [PackedU32; IMFILTER_MAX_RANK],
-    pub image_strides: [PackedU32; IMFILTER_MAX_RANK],
-    pub output_shape: [PackedU32; IMFILTER_MAX_RANK],
+    pub image_shape: [AlignedU32; IMFILTER_MAX_RANK],
+    pub image_strides: [AlignedU32; IMFILTER_MAX_RANK],
+    pub output_shape: [AlignedU32; IMFILTER_MAX_RANK],
     pub base_offset: [PackedI32; IMFILTER_MAX_RANK],
-    pub _pad_tail: PackedU32,
+    pub _pad_tail: AlignedU32,
 }
 
 pub const REPMAT_MAX_RANK: usize = PERMUTE_MAX_RANK;
@@ -166,9 +209,9 @@ pub struct RepmatParams {
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub base_shape: [PackedU32; REPMAT_MAX_RANK],
-    pub new_shape: [PackedU32; REPMAT_MAX_RANK],
-    pub base_strides: [PackedU32; REPMAT_MAX_RANK],
+    pub base_shape: [AlignedU32; REPMAT_MAX_RANK],
+    pub new_shape: [AlignedU32; REPMAT_MAX_RANK],
+    pub base_strides: [AlignedU32; REPMAT_MAX_RANK],
 }
 
 pub const KRON_MAX_RANK: usize = PERMUTE_MAX_RANK;
@@ -180,11 +223,11 @@ pub struct KronParams {
     pub offset: u32,
     pub rank: u32,
     pub _pad: u32,
-    pub shape_a: [PackedU32; KRON_MAX_RANK],
-    pub shape_b: [PackedU32; KRON_MAX_RANK],
-    pub shape_out: [PackedU32; KRON_MAX_RANK],
-    pub stride_a: [PackedU32; KRON_MAX_RANK],
-    pub stride_b: [PackedU32; KRON_MAX_RANK],
+    pub shape_a: [AlignedU32; KRON_MAX_RANK],
+    pub shape_b: [AlignedU32; KRON_MAX_RANK],
+    pub shape_out: [AlignedU32; KRON_MAX_RANK],
+    pub stride_a: [AlignedU32; KRON_MAX_RANK],
+    pub stride_b: [AlignedU32; KRON_MAX_RANK],
 }
 
 #[repr(C)]
@@ -194,6 +237,37 @@ pub struct TransposeParams {
     pub cols: u32,
     pub len: u32,
     pub offset: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct BandwidthParams {
+    pub rows: u32,
+    pub cols: u32,
+    pub len: u32,
+    pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct SymmetryParamsF64 {
+    pub rows: u32,
+    pub cols: u32,
+    pub len: u32,
+    pub mode: u32,
+    pub tolerance: f64,
+    pub _pad: f64,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct SymmetryParamsF32 {
+    pub rows: u32,
+    pub cols: u32,
+    pub len: u32,
+    pub mode: u32,
+    pub tolerance: f32,
+    pub _pad: [f32; 3],
 }
 
 #[repr(C)]
@@ -228,6 +302,47 @@ pub struct ReduceDimParams {
     pub dim: u32,
     pub op: u32,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CumsumParams {
+    pub segment_len: u32,
+    pub segments: u32,
+    pub stride_before: u32,
+    pub block: u32,
+    pub flags: u32,
+    pub total_len: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CumprodParams {
+    pub segment_len: u32,
+    pub segments: u32,
+    pub stride_before: u32,
+    pub block: u32,
+    pub flags: u32,
+    pub total_len: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CumminParams {
+    pub segment_len: u32,
+    pub segments: u32,
+    pub stride_before: u32,
+    pub block: u32,
+    pub flags: u32,
+    pub total_len: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+pub type CummaxParams = CumminParams;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
