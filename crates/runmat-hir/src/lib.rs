@@ -146,6 +146,7 @@ pub struct LoweringResult {
     pub variables: HashMap<String, usize>,
     pub functions: HashMap<String, HirStmt>,
     pub var_types: Vec<Type>,
+    pub var_names: HashMap<VarId, String>,
 }
 
 pub fn lower(prog: &AstProgram) -> Result<HirProgram, String> {
@@ -1900,6 +1901,10 @@ pub fn lower_with_full_context(
         while ctx.var_types.len() <= *var_id {
             ctx.var_types.push(Type::Unknown);
         }
+        while ctx.var_names.len() <= *var_id {
+            ctx.var_names.push(None);
+        }
+        ctx.var_names[*var_id] = Some(name.clone());
         // Update next_var to be at least one more than the highest existing var
         if *var_id >= ctx.next_var {
             ctx.next_var = var_id + 1;
@@ -1927,6 +1932,12 @@ pub fn lower_with_full_context(
         variables: all_vars,
         functions: ctx.functions,
         var_types: ctx.var_types,
+        var_names: ctx
+            .var_names
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, name)| name.map(|n| (VarId(idx), n)))
+            .collect(),
     })
 }
 
@@ -2422,6 +2433,7 @@ struct Ctx {
     var_types: Vec<Type>,
     next_var: usize,
     functions: HashMap<String, HirStmt>, // Track user-defined functions
+    var_names: Vec<Option<String>>,
 }
 
 impl Ctx {
@@ -2434,6 +2446,7 @@ impl Ctx {
             var_types: Vec::new(),
             next_var: 0,
             functions: HashMap::new(),
+            var_names: Vec::new(),
         }
     }
 
@@ -2454,8 +2467,9 @@ impl Ctx {
         let id = VarId(self.next_var);
         self.next_var += 1;
         let current = self.scopes.len() - 1;
-        self.scopes[current].bindings.insert(name, id);
+        self.scopes[current].bindings.insert(name.clone(), id);
         self.var_types.push(Type::Unknown);
+        self.var_names.push(Some(name));
         id
     }
 
