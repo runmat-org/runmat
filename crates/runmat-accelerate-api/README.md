@@ -30,7 +30,7 @@ This API is intentionally minimal; reverse-mode autograd and higher-level optimi
 
 ### API reference (concise)
 - `pub struct GpuTensorHandle { pub shape: Vec<usize>, pub device_id: u32, pub buffer_id: u64 }`
-- `pub trait AccelProvider { upload(&HostTensorView) -> Result<GpuTensorHandle>; download(&GpuTensorHandle) -> Result<HostTensorOwned>; free(&GpuTensorHandle) -> Result<()>; device_info() -> String }`
+- `pub trait AccelProvider { upload(&HostTensorView) -> Result<GpuTensorHandle>; download(&GpuTensorHandle) -> Result<HostTensorOwned>; free(&GpuTensorHandle) -> Result<()>; device_info() -> String; logical_isreal(&GpuTensorHandle) -> Result<bool> }`
 - `pub struct HostTensorView<'a> { pub data: &'a [f64], pub shape: &'a [usize] }`
 - `pub struct HostTensorOwned { pub data: Vec<f64>, pub shape: Vec<usize> }`
 - `pub unsafe fn register_provider(&'static dyn AccelProvider)`
@@ -53,6 +53,10 @@ impl AccelProvider for MyProvider {
     }
     fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> { Ok(()) }
     fn device_info(&self) -> String { "MyDevice 0".to_string() }
+    fn logical_isreal(&self, _h: &GpuTensorHandle) -> anyhow::Result<bool> {
+        // return true when the handle is backed by real storage
+        Ok(true)
+    }
 }
 
 // at startup
@@ -69,5 +73,4 @@ unsafe { register_provider(&MyProvider); }
 - Extend provider API for streams/queues, memory pools, unified/pinned memory, and device events.
 - Multi-device provider model and selection heuristics.
 - Document autograd integration points and optional provider hooks for fused gradient kernels.
-
 

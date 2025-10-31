@@ -3,8 +3,11 @@
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
-use std::sync::{Mutex, OnceLock};
 
+use crate::builtins::common::random;
+use crate::builtins::common::random_args::{
+    complex_tensor_into_value, extract_dims, keyword_of, shape_from_value,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -259,7 +262,7 @@ impl ParsedRand {
                             return Err("rand: expected prototype after 'like'".to_string());
                         };
                         template = Some(RandTemplate::Like(proto.clone()));
-                        shape_source = Some(shape_from_value(&proto)?);
+                        shape_source = Some(shape_from_value(&proto, "rand")?);
                         idx += 2;
                         continue;
                     }
@@ -279,7 +282,7 @@ impl ParsedRand {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg)? {
+            if let Some(parsed_dims) = extract_dims(&arg, "rand")? {
                 saw_dims_arg = true;
                 if dims.is_empty() {
                     dims = parsed_dims;
@@ -291,7 +294,7 @@ impl ParsedRand {
             }
 
             if shape_source.is_none() {
-                shape_source = Some(shape_from_value(&arg)?);
+                shape_source = Some(shape_from_value(&arg, "rand")?);
             }
             if template.is_none() {
                 template = Some(RandTemplate::Like(arg.clone()));
@@ -328,7 +331,7 @@ fn build_output(parsed: ParsedRand) -> Result<Value, String> {
 
 fn rand_double(shape: &[usize]) -> Result<Value, String> {
     let len = tensor::element_count(shape);
-    let data = generate_uniform(len)?;
+    let data = random::generate_uniform(len, "rand")?;
     let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| format!("rand: {e}"))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -349,7 +352,7 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
 
 fn rand_complex(shape: &[usize]) -> Result<Value, String> {
     let len = tensor::element_count(shape);
-    let data = generate_complex(len)?;
+    let data = random::generate_complex(len, "rand")?;
     let tensor = ComplexTensor::new(data, shape.to_vec()).map_err(|e| format!("rand: {e}"))?;
     Ok(complex_tensor_into_value(tensor))
 }
@@ -366,7 +369,7 @@ fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Str
         }
 
         let len = tensor::element_count(shape);
-        let data = generate_uniform(len)?;
+        let data = random::generate_uniform(len, "rand")?;
         let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| format!("rand: {e}"))?;
         let view = HostTensorView {
             data: &tensor.data,
@@ -382,183 +385,17 @@ fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Str
     rand_like(&gathered, shape)
 }
 
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
-fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
-    match value {
-        Value::Int(i) => {
-            let dim = i.to_i64();
-            if dim < 0 {
-                return Err("rand: matrix dimensions must be non-negative".to_string());
-            }
-            Ok(Some(vec![dim as usize]))
-        }
-        Value::Num(n) => parse_numeric_dimension(*n).map(|d| Some(vec![d])),
-        Value::Tensor(t) => dims_from_tensor(t),
-        Value::LogicalArray(_) => Ok(None),
-        _ => Ok(None),
-    }
-}
-
-fn parse_numeric_dimension(n: f64) -> Result<usize, String> {
-    if !n.is_finite() {
-        return Err("rand: dimensions must be finite".to_string());
-    }
-    if n < 0.0 {
-        return Err("rand: matrix dimensions must be non-negative".to_string());
-    }
-    let rounded = n.round();
-    if (rounded - n).abs() > f64::EPSILON {
-        return Err("rand: dimensions must be integers".to_string());
-    }
-    Ok(rounded as usize)
-}
-
-fn dims_from_tensor(tensor: &Tensor) -> Result<Option<Vec<usize>>, String> {
-    let is_row = tensor.rows() == 1;
-    let is_column = tensor.cols() == 1;
-    let is_scalar = tensor.data.len() == 1;
-    if !(is_row || is_column || is_scalar || tensor.shape.len() == 1) {
-        return Ok(None);
-    }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for &v in &tensor.data {
-        match parse_numeric_dimension(v) {
-            Ok(dim) => dims.push(dim),
-            Err(_) => return Ok(None),
-        }
-    }
-    Ok(Some(dims))
-}
-
-fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
-    match value {
-        Value::Tensor(t) => Ok(t.shape.clone()),
-        Value::ComplexTensor(t) => Ok(t.shape.clone()),
-        Value::LogicalArray(l) => Ok(l.shape.clone()),
-        Value::GpuTensor(h) => Ok(h.shape.clone()),
-        Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
-        Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
-        other => Err(format!("rand: unsupported prototype {other:?}")),
-    }
-}
-
-fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
-    } else {
-        Value::ComplexTensor(tensor)
-    }
-}
-
-const DEFAULT_RNG_SEED: u64 = 0x9e3779b97f4a7c15;
-const RNG_MULTIPLIER: u64 = 6364136223846793005;
-const RNG_INCREMENT: u64 = 1;
-const RNG_SHIFT: u32 = 11;
-const RNG_SCALE: f64 = 1.0 / ((1u64 << 53) as f64);
-
-static RNG_STATE: OnceLock<Mutex<u64>> = OnceLock::new();
-
-fn rng_state() -> &'static Mutex<u64> {
-    RNG_STATE.get_or_init(|| Mutex::new(DEFAULT_RNG_SEED))
-}
-
-fn generate_uniform(len: usize) -> Result<Vec<f64>, String> {
-    let mut guard = rng_state()
-        .lock()
-        .map_err(|_| "rand: failed to acquire RNG lock".to_string())?;
-    let mut out = Vec::with_capacity(len);
-    for _ in 0..len {
-        out.push(next_uniform_state(&mut *guard));
-    }
-    Ok(out)
-}
-
-fn generate_complex(len: usize) -> Result<Vec<(f64, f64)>, String> {
-    let mut guard = rng_state()
-        .lock()
-        .map_err(|_| "rand: failed to acquire RNG lock".to_string())?;
-    let mut out = Vec::with_capacity(len);
-    for _ in 0..len {
-        let re = next_uniform_state(&mut *guard);
-        let im = next_uniform_state(&mut *guard);
-        out.push((re, im));
-    }
-    Ok(out)
-}
-
-fn next_uniform_state(state: &mut u64) -> f64 {
-    *state = state
-        .wrapping_mul(RNG_MULTIPLIER)
-        .wrapping_add(RNG_INCREMENT);
-    let bits = *state >> RNG_SHIFT;
-    (bits as f64) * RNG_SCALE
-}
-
-#[cfg(test)]
-fn reset_rng() {
-    if let Some(mutex) = RNG_STATE.get() {
-        if let Ok(mut guard) = mutex.lock() {
-            *guard = DEFAULT_RNG_SEED;
-        }
-    } else {
-        let _ = RNG_STATE.set(Mutex::new(DEFAULT_RNG_SEED));
-    }
-}
-
-#[cfg(test)]
-fn expected_uniform_sequence(count: usize) -> Vec<f64> {
-    let mut seed = DEFAULT_RNG_SEED;
-    let mut seq = Vec::with_capacity(count);
-    for _ in 0..count {
-        seq.push(next_uniform_state(&mut seed));
-    }
-    seq
-}
-
-#[cfg(test)]
-fn expected_complex_sequence(count: usize) -> Vec<(f64, f64)> {
-    let mut seed = DEFAULT_RNG_SEED;
-    let mut seq = Vec::with_capacity(count);
-    for _ in 0..count {
-        let re = next_uniform_state(&mut seed);
-        let im = next_uniform_state(&mut seed);
-        seq.push((re, im));
-    }
-    seq
-}
-
-#[cfg(test)]
-static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
-
-#[cfg(test)]
-fn test_lock() -> &'static Mutex<()> {
-    TEST_MUTEX.get_or_init(|| Mutex::new(()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
+    use crate::builtins::common::{random, test_support};
 
     #[test]
     fn rand_default_scalar() {
-        let _guard = test_lock().lock().unwrap();
-        reset_rng();
+        let _guard = random::test_lock().lock().unwrap();
+        random::reset_rng();
         let result = rand_builtin(Vec::new()).expect("rand");
-        let expected = expected_uniform_sequence(1)[0];
+        let expected = random::expected_uniform_sequence(1)[0];
         match result {
             Value::Num(v) => {
                 assert!(v >= 0.0 && v < 1.0);
@@ -570,14 +407,14 @@ mod tests {
 
     #[test]
     fn rand_square_from_single_dimension() {
-        let _guard = test_lock().lock().unwrap();
-        reset_rng();
+        let _guard = random::test_lock().lock().unwrap();
+        random::reset_rng();
         let args = vec![Value::Num(3.0)];
         let result = rand_builtin(args).expect("rand");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                let expected = expected_uniform_sequence(9);
+                let expected = random::expected_uniform_sequence(9);
                 assert_eq!(t.data.len(), expected.len());
                 for (observed, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((*observed - exp).abs() < 1e-12);
@@ -589,15 +426,15 @@ mod tests {
 
     #[test]
     fn rand_like_tensor_infers_shape() {
-        let _guard = test_lock().lock().unwrap();
-        reset_rng();
+        let _guard = random::test_lock().lock().unwrap();
+        random::reset_rng();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = rand_builtin(args).expect("rand");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected = expected_uniform_sequence(4);
+                let expected = random::expected_uniform_sequence(4);
                 for (observed, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((*observed - exp).abs() < 1e-12);
                 }
@@ -608,8 +445,8 @@ mod tests {
 
     #[test]
     fn rand_like_complex_produces_complex_tensor() {
-        let _guard = test_lock().lock().unwrap();
-        reset_rng();
+        let _guard = random::test_lock().lock().unwrap();
+        random::reset_rng();
         let args = vec![
             Value::Num(2.0),
             Value::Num(2.0),
@@ -620,7 +457,7 @@ mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected = expected_complex_sequence(4);
+                let expected = random::expected_complex_sequence(4);
                 for ((re, im), (eref, eim)) in t.data.iter().zip(expected.iter()) {
                     assert!((*re - *eref).abs() < 1e-12);
                     assert!((*im - *eim).abs() < 1e-12);
@@ -632,8 +469,8 @@ mod tests {
 
     #[test]
     fn rand_gpu_like_uniform() {
-        let _guard = test_lock().lock().unwrap();
-        reset_rng();
+        let _guard = random::test_lock().lock().unwrap();
+        random::reset_rng();
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {

@@ -21,3 +21,4 @@ website/content/builtins.json
 website/content/builtins-mdx/
 
 artifacts/
+.env

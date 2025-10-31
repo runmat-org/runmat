@@ -9,6 +9,13 @@ use crate::context::types::AuthoringContext;
 use crate::workspace::tests::{TestCommandReport, TestOutcome};
 
 #[derive(Debug, Serialize)]
+pub struct PassRecord {
+    pub name: String,
+    pub codex_summary: Option<String>,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub struct Transcript {
     pub builtin: String,
     pub model: Option<String>,
@@ -16,6 +23,7 @@ pub struct Transcript {
     pub doc_markdown: Option<String>,
     pub source_paths: Vec<String>,
     pub codex_summary: Option<String>,
+    pub passes: Vec<PassRecord>,
     pub tests: Vec<TestReportSummary>,
     pub test_log_dir: String,
     pub created_at: DateTime<Utc>,
@@ -37,6 +45,7 @@ impl Transcript {
         model: Option<String>,
         codex_summary: Option<String>,
         outcome: &TestOutcome,
+        passes: Vec<PassRecord>,
     ) -> Self {
         let tests = outcome
             .reports
@@ -55,6 +64,7 @@ impl Transcript {
                 .map(|path| path.display().to_string())
                 .collect(),
             codex_summary,
+            passes,
             tests,
             test_log_dir: outcome.log_dir.display().to_string(),
             created_at: Utc::now(),

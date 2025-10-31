@@ -3,7 +3,16 @@
 //! This module hosts small utility subsystems that new-style builtins
 //! can depend on without reaching back into the legacy runtime modules.
 
+pub mod broadcast;
+pub mod format;
+pub mod fs;
 pub mod gpu_helpers;
+pub mod path_search;
+pub mod path_state;
+pub mod linalg;
+pub mod random;
+pub mod random_args;
+pub mod shape;
 pub mod spec;
 pub mod tensor;
 

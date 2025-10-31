@@ -1,0 +1,1035 @@
+//! MATLAB-compatible `eig` builtin with host and GPU-aware semantics.
+//!
+//! Implements the dense eigenvalue decomposition for real and complex matrices,
+//! including the vector-only form, the `[V,D]` factorisation, and the
+//! three-output `[V,D,W]` variant that returns left eigenvectors. GPU inputs are
+//! currently gathered back to the host unless a provider implements the
+//! reserved `eig` hook; see the documentation string for full details.
+
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+};
+use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
+use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+use nalgebra::linalg::Schur;
+use nalgebra::{DMatrix, DVector};
+use num_complex::Complex64;
+use runmat_accelerate_api::GpuTensorHandle;
+use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_macros::runtime_builtin;
+
+const REAL_EPS: f64 = 1e-12;
+
+#[cfg(feature = "doc_export")]
+pub const DOC_MD: &str = r#"---
+title: "eig"
+category: "math/linalg/factor"
+keywords: ["eig", "eigenvalues", "eigenvectors", "linalg", "gpu"]
+summary: "Eigenvalue decomposition with MATLAB-compatible multi-output forms."
+references: []
+gpu_support:
+  elementwise: false
+  reduction: false
+  precisions: ["f64"]
+  broadcasting: "none"
+  notes: "Uses the provider `eig` hook when available (the WGPU backend reuploads host-computed results for real spectra) and falls back to the CPU path when complex storage or unsupported options are required."
+fusion:
+  elementwise: false
+  reduction: false
+  max_inputs: 1
+  constants: "inline"
+requires_feature: null
+tested:
+  unit: "builtins::math::linalg::factor::eig::tests"
+  integration: "builtins::math::linalg::factor::eig::tests::eig_three_outputs_biorthogonality"
+---
+
+# What does the `eig` function do in MATLAB / RunMat?
+`eig(A)` computes the eigenvalues of a square matrix `A`. With additional
+outputs it also returns right and left eigenvectors, matching MATLAB’s
+multi-output semantics (`A*V = V*D` and `W'*A = D*W'`).
+
+## How does the `eig` function behave in MATLAB / RunMat?
+- Single output `d = eig(A)` returns the eigenvalues as an `n × 1` column vector
+  (values may be complex even when `A` is real).
+- Two outputs `[V,D] = eig(A)` return the eigenvectors (columns of `V`) and the
+  diagonal eigenvalue matrix `D`.
+- Three outputs `[V,D,W] = eig(A)` additionally return the left eigenvectors `W`
+  satisfying `W' * A = D * W'`.
+- The selector `'vector'` may be supplied (`eig(A,'vector')`, `[V,d] = eig(A,'vector')`)
+  to request the eigenvalues as a column vector even when two outputs are
+  requested. `'matrix'` resets the second output to the diagonal-matrix form.
+- Logical and integer inputs are promoted to double precision. Complex inputs
+  remain complex throughout the factorisation.
+- Empty and scalar matrices follow MATLAB’s shape conventions (`eig([])` returns
+  `[]`, `eig(5)` returns `5`).
+- Generalised problems `eig(A,B)` are not yet implemented; RunMat emits a clear
+  error if you pass the second matrix argument.
+- Optional balancing keywords (`'balance'`, `'nobalance'`) are accepted. Balancing
+  defaults to on; the current implementation leaves balancing as a no-op while
+  retaining the option for forward compatibility.
+
+## `eig` Function GPU Execution Behaviour
+- The WGPU provider implements the reserved `eig` hook by downloading the input,
+  running the same CPU decomposition used by the host path, and immediately
+  re-uploading the double-precision eigenvalues, eigenvectors, and diagonal
+  matrix. When the spectrum is real, the outputs therefore remain on the GPU
+  without any user intervention.
+- If any output requires complex storage or you pass `'nobalance'`, RunMat
+  automatically falls back to the host implementation and returns CPU-resident
+  arrays. The `'vector'` selector also triggers this transparent host fallback
+  today. Reapply `gpuArray` if you want to continue on the device after such a
+  fallback.
+- Because `eig` is a residency sink, the fusion planner treats it as a barrier
+  and does not attempt to fuse surrounding elementwise work.
+
+## Examples of using the `eig` function in MATLAB / RunMat
+
+### Computing Eigenvalues of a 2x2 Matrix
+```matlab
+A = [2 1; 0 3];
+d = eig(A);
+```
+Expected output:
+```matlab
+d = [2; 3];
+```
+
+### Diagonalizing a Matrix with Two Outputs
+```matlab
+A = [0 1; -2 -3];
+[V,D] = eig(A);
+recon = V * D / V;
+```
+`recon` matches `A` (up to numerical precision).
+
+### Retrieving Left Eigenvectors with Three Outputs
+```matlab
+A = [4 2; 1 3];
+[V,D,W] = eig(A);
+check = W' * A - D * W';
+```
+All entries of `check` are numerically zero.
+
+### Eigenvalues of a Complex-Valued Matrix
+```matlab
+A = [1+2i, 2-1i; 0, -3i];
+[V,D] = eig(A);
+diag(D)      % Complex eigenvalues
+```
+
+### Eigenvalues of a Diagonal Matrix
+```matlab
+A = diag([10, -2, 7]);
+d = eig(A);
+```
+`d` equals the diagonal entries `[10; -2; 7]`.
+
+### Handling Repeated Eigenvalues
+```matlab
+A = [3 1 0; 0 3 0; 0 0 5];
+d = eig(A);
+```
+`d` contains the repeated eigenvalue `3` twice.
+
+### Using the 'nobalance' Option
+```matlab
+A = [1e6 1; 0 1e-6];
+d_balanced = eig(A);
+d_nobalance = eig(A, 'nobalance');
+```
+Both calls return the same eigenvalues in the current implementation; the
+keyword is accepted for MATLAB compatibility, but it currently forces the CPU
+fallback even when a GPU provider is active.
+
+### Returning Eigenvalues as a Vector with Two Outputs
+```matlab
+A = [0 1; -2 -3];
+[V,d] = eig(A, 'vector');
+size(d)    % 2 x 1 column vector
+```
+`d` is a 2×1 column vector containing the eigenvalues, while `V` still holds the
+corresponding eigenvectors.
+
+### Running eig on a gpuArray
+```matlab
+G = gpuArray(randn(128));
+d = eig(G);          % Real spectra stay on the GPU when the provider implements eig
+isa(d, 'gpuArray')   % logical 1 when the provider kept the result on device
+```
+For matrices whose eigenvalues or eigenvectors require complex storage (or when
+`'nobalance'` is requested) the call falls back to the CPU; reapply `gpuArray`
+if you need to continue on the device.
+
+## FAQ
+
+### What shapes does `eig` support?
+`eig` requires a square matrix. Scalars are treated as `1×1` matrices, and empty
+inputs return empty outputs. Non-square inputs raise an error, matching MATLAB.
+
+### Do I always get complex outputs?
+Eigenvalues and eigenvectors are returned as complex arrays when necessary. If
+all imaginary parts are numerically zero, RunMat returns real doubles for
+convenience, mirroring MATLAB behaviour.
+
+### How do I obtain the eigenvalues as a vector when requesting eigenvectors?
+Pass the `'vector'` selector. For example, `[V,d] = eig(A,'vector')` returns a
+column vector `d` and the right eigenvectors in `V`. Use `'matrix'` (or omit the
+selector) when you prefer the diagonal-matrix form.
+
+### What about the optional balancing keywords?
+`'balance'` (default) and `'nobalance'` are accepted. The current release treats
+balancing as a no-op; the option remains so future releases can introduce a
+true balancing implementation without breaking user code.
+
+### Are generalised eigenvalue problems supported?
+Not yet. Calling `eig(A,B)` raises a descriptive error. This builtin focuses on
+the standard eigenvalue problem; the generalised form will be added in a future
+update.
+
+### How are left eigenvectors normalised?
+RunMat scales left eigenvectors so that `W' * V = I` (bi-orthonormal columns),
+matching MATLAB’s conventions. When a provider supplies the GPU implementation
+the same normalisation is expected.
+
+### Does `eig` participate in fusion or auto-offload?
+No. Eigenvalue decomposition executes eagerly and acts as a residency sink. The
+fusion planner will gather any GPU-resident inputs before factorisation.
+
+### How can I continue on the GPU after calling `eig` today?
+When the active provider implements the `eig` hook (the WGPU backend does for
+real spectra), the outputs remain on the GPU automatically. If the decomposition
+falls back to the CPU—because the spectrum is complex or `'nobalance'` was
+requested—call `gpuArray` on whichever results you need on the device.
+
+### What happens if the eigenvector matrix is singular?
+When the right eigenvectors form a singular matrix, RunMat falls back to
+computing left eigenvectors from the conjugate-transposed problem. If that
+fails, requesting the third output raises an error, matching MATLAB’s failure
+behaviour.
+
+## See Also
+[svd](./svd), [qr](./qr), [lu](./lu), [chol](./chol), [gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather)
+
+## Source & Feedback
+- Implementation: `crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs`
+- Feedback: [RunMat issue tracker](https://github.com/runmat-org/runmat/issues/new/choose)
+"#;
+
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "eig",
+    op_kind: GpuOpKind::Custom("eig-factor"),
+    supported_precisions: &[ScalarType::F64],
+    broadcast: BroadcastSemantics::None,
+    provider_hooks: &[ProviderHook::Custom("eig")],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::NewHandle,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "Prefers the provider `eig` hook (WGPU reuploads host-computed results for real spectra) and falls back to the CPU implementation for complex spectra or unsupported options.",
+};
+
+register_builtin_gpu_spec!(GPU_SPEC);
+
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "eig",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "Eigenvalue decomposition executes eagerly and never participates in fusion.",
+};
+
+register_builtin_fusion_spec!(FUSION_SPEC);
+
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("eig", DOC_MD);
+
+#[runtime_builtin(
+    name = "eig",
+    category = "math/linalg/factor",
+    summary = "Eigenvalue decomposition with MATLAB-compatible multi-output forms.",
+    keywords = "eig,eigenvalues,eigenvectors,linalg",
+    accel = "sink",
+    sink = true
+)]
+fn eig_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+    let eval = evaluate(value, &rest, false)?;
+    Ok(eval.eigenvalues())
+}
+
+#[derive(Clone, Debug)]
+pub struct EigEval {
+    eigenvalues: Value,
+    diagonal_matrix: Value,
+    diagonal_output: Value,
+    right: Value,
+    left: Option<Value>,
+}
+
+impl EigEval {
+    pub fn eigenvalues(&self) -> Value {
+        self.eigenvalues.clone()
+    }
+
+    pub fn diagonal(&self) -> Value {
+        self.diagonal_output.clone()
+    }
+
+    pub fn diagonal_matrix(&self) -> Value {
+        self.diagonal_matrix.clone()
+    }
+
+    pub fn right(&self) -> Value {
+        self.right.clone()
+    }
+
+    pub fn left(&self) -> Result<Value, String> {
+        self.left.clone().ok_or_else(|| {
+            "eig: left eigenvectors are not available from the active acceleration provider"
+                .to_string()
+        })
+    }
+
+    fn from_provider(result: runmat_accelerate_api::ProviderEigResult) -> Self {
+        let runmat_accelerate_api::ProviderEigResult {
+            eigenvalues,
+            diagonal,
+            right,
+            left,
+        } = result;
+        EigEval {
+            eigenvalues: Value::GpuTensor(eigenvalues),
+            diagonal_matrix: Value::GpuTensor(diagonal.clone()),
+            diagonal_output: Value::GpuTensor(diagonal),
+            right: Value::GpuTensor(right),
+            left: left.map(Value::GpuTensor),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct EigOptions {
+    balance: bool,
+    vector_output: bool,
+}
+
+impl Default for EigOptions {
+    fn default() -> Self {
+        Self {
+            balance: true,
+            vector_output: false,
+        }
+    }
+}
+
+pub fn evaluate(value: Value, args: &[Value], require_left: bool) -> Result<EigEval, String> {
+    let options = parse_options(args)?;
+    match value {
+        Value::GpuTensor(handle) => {
+            if let Some(eval) = evaluate_gpu(&handle, options, require_left)? {
+                return Ok(eval);
+            }
+            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            evaluate_host(Value::Tensor(tensor), options, require_left)
+        }
+        other => evaluate_host(other, options, require_left),
+    }
+}
+
+fn evaluate_gpu(
+    handle: &GpuTensorHandle,
+    options: EigOptions,
+    require_left: bool,
+) -> Result<Option<EigEval>, String> {
+    if options.vector_output {
+        return Ok(None);
+    }
+    if !options.balance {
+        return Ok(None);
+    }
+    let provider = match runmat_accelerate_api::provider() {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    match provider.eig(handle, require_left) {
+        Ok(result) => {
+            if require_left && result.left.is_none() {
+                Ok(None)
+            } else {
+                Ok(Some(EigEval::from_provider(result)))
+            }
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+fn evaluate_host(value: Value, options: EigOptions, require_left: bool) -> Result<EigEval, String> {
+    let matrix = value_to_complex_matrix(value)?;
+    compute_eigen(matrix, options, require_left)
+}
+
+fn parse_options(args: &[Value]) -> Result<EigOptions, String> {
+    let mut opts = EigOptions::default();
+    for (idx, arg) in args.iter().enumerate() {
+        if let Some(text) = tensor::value_to_string(arg) {
+            match text.trim().to_ascii_lowercase().as_str() {
+                "balance" => opts.balance = true,
+                "nobalance" => opts.balance = false,
+                "vector" => opts.vector_output = true,
+                "matrix" => opts.vector_output = false,
+                other => {
+                    return Err(format!("eig: unknown option '{other}'"));
+                }
+            }
+        } else if idx == 0 {
+            return Err(
+                "eig: generalized eigenvalue decomposition (eig(A,B)) is not implemented"
+                    .to_string(),
+            );
+        } else {
+            return Err(
+                "eig: option arguments must be character vectors or string scalars".to_string(),
+            );
+        }
+    }
+    Ok(opts)
+}
+
+fn compute_eigen(
+    matrix: DMatrix<Complex64>,
+    options: EigOptions,
+    require_left: bool,
+) -> Result<EigEval, String> {
+    if matrix.nrows() != matrix.ncols() {
+        return Err("eig: input matrix must be square".to_string());
+    }
+    let n = matrix.nrows();
+    if n == 0 {
+        let empty_vals = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
+        let empty_mat = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
+        let eigenvalues_value = Value::Tensor(empty_vals.clone());
+        let diagonal_matrix_value = Value::Tensor(empty_mat.clone());
+        let diagonal_output = if options.vector_output {
+            eigenvalues_value.clone()
+        } else {
+            diagonal_matrix_value.clone()
+        };
+        return Ok(EigEval {
+            eigenvalues: eigenvalues_value,
+            diagonal_matrix: diagonal_matrix_value,
+            diagonal_output,
+            right: Value::Tensor(empty_mat.clone()),
+            left: if require_left {
+                Some(Value::Tensor(empty_mat))
+            } else {
+                None
+            },
+        });
+    }
+
+    let balanced = maybe_balance(&matrix, options.balance);
+    let (eigenvalues, right) = schur_eigendecompose(&balanced).map_err(|e| format!("eig: {e}"))?;
+
+    let eigenvalue_value = vector_to_value(&eigenvalues)?;
+    let diag_value = diag_matrix_value(&eigenvalues)?;
+    let right_value = matrix_to_value(&right)?;
+
+    let left_value = if require_left {
+        let left_matrix =
+            compute_left_vectors(&balanced, &right, &eigenvalues).ok_or_else(|| {
+                "eig: unable to compute left eigenvectors for the requested matrix".to_string()
+            })?;
+        Some(matrix_to_value(&left_matrix)?)
+    } else {
+        None
+    };
+
+    let spectral_output = if options.vector_output {
+        eigenvalue_value.clone()
+    } else {
+        diag_value.clone()
+    };
+
+    Ok(EigEval {
+        eigenvalues: eigenvalue_value,
+        diagonal_matrix: diag_value,
+        diagonal_output: spectral_output,
+        right: right_value,
+        left: left_value,
+    })
+}
+
+fn maybe_balance(matrix: &DMatrix<Complex64>, balance: bool) -> DMatrix<Complex64> {
+    if balance {
+        matrix.clone()
+    } else {
+        matrix.clone()
+    }
+}
+
+fn schur_eigendecompose(
+    matrix: &DMatrix<Complex64>,
+) -> Result<(DVector<Complex64>, DMatrix<Complex64>), String> {
+    let n = matrix.nrows();
+    if n == 0 {
+        return Ok((DVector::from(vec![]), DMatrix::zeros(0, 0)));
+    }
+    let schur = Schur::new(matrix.clone());
+    let (q, t) = schur.unpack();
+    let diag = t.diagonal().clone_owned();
+    let mut eigenvectors = DMatrix::<Complex64>::zeros(n, n);
+
+    for idx in 0..n {
+        let lambda = diag[idx];
+        let mut z = DVector::<Complex64>::zeros(n);
+        let mut success = false;
+
+        for attempt in 0..2 {
+            for k in (0..n).rev() {
+                let mut sum = Complex64::new(0.0, 0.0);
+                for j in (k + 1)..n {
+                    sum += t[(k, j)] * z[j];
+                }
+                let coeff = t[(k, k)] - lambda;
+                if coeff.norm() <= REAL_EPS {
+                    if sum.norm() <= REAL_EPS {
+                        if attempt == 0 && k == idx {
+                            z[k] = Complex64::new(1.0, 0.0);
+                        }
+                    } else {
+                        z[k] = -sum / Complex64::new(REAL_EPS, 0.0);
+                    }
+                } else {
+                    z[k] = -sum / coeff;
+                }
+            }
+            let norm = z.norm();
+            if norm > REAL_EPS {
+                let scale = Complex64::new(norm, 0.0);
+                z /= scale;
+                success = true;
+                break;
+            } else {
+                z.fill(Complex64::new(0.0, 0.0));
+                z[idx] = Complex64::new(1.0, 0.0);
+            }
+        }
+        if !success {
+            z.fill(Complex64::new(0.0, 0.0));
+            z[idx] = Complex64::new(1.0, 0.0);
+        }
+        let vec = q.clone() * z;
+        let norm = vec.norm();
+        let final_vec = if norm > REAL_EPS {
+            vec / Complex64::new(norm, 0.0)
+        } else {
+            vec
+        };
+        eigenvectors.set_column(idx, &final_vec);
+    }
+
+    Ok((diag, eigenvectors))
+}
+
+fn compute_left_vectors(
+    matrix: &DMatrix<Complex64>,
+    right: &DMatrix<Complex64>,
+    eigenvalues: &DVector<Complex64>,
+) -> Option<DMatrix<Complex64>> {
+    if let Some(inv) = right.clone().try_inverse() {
+        let mut left = inv.adjoint();
+        normalize_left(&mut left, right);
+        return Some(left);
+    }
+
+    let (left_vals, left_vecs) = schur_eigendecompose(&matrix.adjoint()).ok()?;
+    let n = eigenvalues.len();
+    let mut left = DMatrix::<Complex64>::zeros(n, n);
+    let mut used = vec![false; n];
+
+    for i in 0..n {
+        let target = eigenvalues[i].conj();
+        let mut best_idx = None;
+        let mut best_err = f64::MAX;
+        for j in 0..n {
+            if used[j] {
+                continue;
+            }
+            let err = (left_vals[j] - target).norm();
+            if err < best_err {
+                best_err = err;
+                best_idx = Some(j);
+            }
+        }
+        let idx = best_idx.unwrap_or(i);
+        used[idx] = true;
+        left.set_column(i, &left_vecs.column(idx));
+    }
+
+    normalize_left(&mut left, right);
+    Some(left)
+}
+
+fn normalize_left(left: &mut DMatrix<Complex64>, right: &DMatrix<Complex64>) {
+    for i in 0..right.ncols() {
+        let dot = left.column(i).dot(&right.column(i));
+        let finite = dot.re.is_finite() && dot.im.is_finite();
+        if dot.norm() > REAL_EPS && finite {
+            let scale = dot.conj();
+            for r in 0..left.nrows() {
+                left[(r, i)] /= scale;
+            }
+        }
+    }
+}
+
+fn value_to_complex_matrix(value: Value) -> Result<DMatrix<Complex64>, String> {
+    match value {
+        Value::Tensor(tensor) => tensor_to_matrix(&tensor),
+        Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct),
+        Value::LogicalArray(logical) => {
+            let tensor = tensor::logical_to_tensor(&logical)?;
+            tensor_to_matrix(&tensor)
+        }
+        Value::Num(n) => Ok(DMatrix::from_element(1, 1, Complex64::new(n, 0.0))),
+        Value::Int(i) => Ok(DMatrix::from_element(1, 1, Complex64::new(i.to_f64(), 0.0))),
+        Value::Bool(b) => Ok(DMatrix::from_element(
+            1,
+            1,
+            Complex64::new(if b { 1.0 } else { 0.0 }, 0.0),
+        )),
+        Value::Complex(re, im) => Ok(DMatrix::from_element(1, 1, Complex64::new(re, im))),
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            tensor_to_matrix(&tensor)
+        }
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(
+            "eig: input must be numeric or logical; convert character data with double() first"
+                .to_string(),
+        ),
+        other => Err(format!(
+            "eig: unsupported input type {other:?}; expected numeric or logical values"
+        )),
+    }
+}
+
+fn tensor_to_matrix(tensor: &Tensor) -> Result<DMatrix<Complex64>, String> {
+    if tensor.shape.len() > 2 {
+        return Err("eig: input must be 2-D".to_string());
+    }
+    let rows = tensor.rows();
+    let cols = tensor.cols();
+    let mut data = Vec::with_capacity(tensor.data.len());
+    for &value in &tensor.data {
+        data.push(Complex64::new(value, 0.0));
+    }
+    Ok(DMatrix::from_column_slice(rows, cols, &data))
+}
+
+fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> Result<DMatrix<Complex64>, String> {
+    if tensor.shape.len() > 2 {
+        return Err("eig: input must be 2-D".to_string());
+    }
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    let mut data = Vec::with_capacity(tensor.data.len());
+    for &(re, im) in &tensor.data {
+        data.push(Complex64::new(re, im));
+    }
+    Ok(DMatrix::from_column_slice(rows, cols, &data))
+}
+
+fn vector_to_value(values: &DVector<Complex64>) -> Result<Value, String> {
+    if values.len() == 0 {
+        let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
+        return Ok(Value::Tensor(tensor));
+    }
+    if is_all_real(values.iter().copied()) {
+        let mut data = Vec::with_capacity(values.len());
+        for value in values.iter() {
+            data.push(value.re);
+        }
+        let tensor = Tensor::new(data, vec![values.len(), 1]).map_err(|e| format!("eig: {e}"))?;
+        Ok(tensor::tensor_into_value(tensor))
+    } else {
+        let mut data = Vec::with_capacity(values.len());
+        for value in values.iter() {
+            data.push((value.re, value.im));
+        }
+        let tensor =
+            ComplexTensor::new(data, vec![values.len(), 1]).map_err(|e| format!("eig: {e}"))?;
+        Ok(Value::ComplexTensor(tensor))
+    }
+}
+
+fn diag_matrix_value(values: &DVector<Complex64>) -> Result<Value, String> {
+    if values.len() == 0 {
+        let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
+        return Ok(Value::Tensor(tensor));
+    }
+    let size = values.len();
+    if is_all_real(values.iter().copied()) {
+        let mut data = vec![0.0f64; size * size];
+        for i in 0..size {
+            data[i + i * size] = values[i].re;
+        }
+        let tensor = Tensor::new(data, vec![size, size]).map_err(|e| format!("eig: {e}"))?;
+        Ok(Value::Tensor(tensor))
+    } else {
+        let mut data = vec![(0.0f64, 0.0f64); size * size];
+        for i in 0..size {
+            data[i + i * size] = (values[i].re, values[i].im);
+        }
+        let tensor = ComplexTensor::new(data, vec![size, size]).map_err(|e| format!("eig: {e}"))?;
+        Ok(Value::ComplexTensor(tensor))
+    }
+}
+
+fn matrix_to_value(matrix: &DMatrix<Complex64>) -> Result<Value, String> {
+    if is_all_real(matrix.iter().copied()) {
+        let mut data = Vec::with_capacity(matrix.len());
+        for value in matrix.iter() {
+            data.push(value.re);
+        }
+        let tensor = Tensor::new(data, vec![matrix.nrows(), matrix.ncols()])
+            .map_err(|e| format!("eig: {e}"))?;
+        Ok(Value::Tensor(tensor))
+    } else {
+        let mut data = Vec::with_capacity(matrix.len());
+        for value in matrix.iter() {
+            data.push((value.re, value.im));
+        }
+        let tensor = ComplexTensor::new(data, vec![matrix.nrows(), matrix.ncols()])
+            .map_err(|e| format!("eig: {e}"))?;
+        Ok(Value::ComplexTensor(tensor))
+    }
+}
+
+fn is_all_real<I>(iter: I) -> bool
+where
+    I: IntoIterator<Item = Complex64>,
+{
+    iter.into_iter()
+        .all(|value| value.im.is_nan() || value.im.abs() <= REAL_EPS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtins::common::test_support;
+    use runmat_builtins::{IntValue, Tensor};
+
+    fn matrix_from_value(value: Value) -> DMatrix<Complex64> {
+        match value {
+            Value::Tensor(t) => tensor_to_matrix(&t).expect("matrix"),
+            Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct).expect("matrix"),
+            other => panic!("expected matrix value, got {other:?}"),
+        }
+    }
+
+    fn column_vector_from_value(value: Value) -> Vec<Complex64> {
+        match value {
+            Value::Tensor(t) => t
+                .data
+                .iter()
+                .map(|&v| Complex64::new(v, 0.0))
+                .collect::<Vec<_>>(),
+            Value::ComplexTensor(ct) => ct
+                .data
+                .iter()
+                .map(|&(re, im)| Complex64::new(re, im))
+                .collect::<Vec<_>>(),
+            other => panic!("expected tensor for eigenvalues, got {other:?}"),
+        }
+    }
+
+    fn assert_matrix_close(a: &DMatrix<Complex64>, b: &DMatrix<Complex64>, tol: f64) {
+        assert_eq!(a.nrows(), b.nrows(), "row mismatch");
+        assert_eq!(a.ncols(), b.ncols(), "column mismatch");
+        for r in 0..a.nrows() {
+            for c in 0..a.ncols() {
+                let diff = (a[(r, c)] - b[(r, c)]).norm();
+                assert!(
+                    diff <= tol,
+                    "matrix mismatch at ({r},{c}): {} vs {} (diff {diff})",
+                    a[(r, c)],
+                    b[(r, c)]
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn assert_tensor_close(a: &Tensor, b: &Tensor, tol: f64) {
+        assert_eq!(
+            a.shape, b.shape,
+            "shape mismatch: {:?} vs {:?}",
+            a.shape, b.shape
+        );
+        for (idx, (lhs, rhs)) in a.data.iter().zip(b.data.iter()).enumerate() {
+            let diff = (lhs - rhs).abs();
+            assert!(
+                diff <= tol,
+                "tensor mismatch at index {}: {} vs {} (diff {diff})",
+                idx,
+                lhs,
+                rhs
+            );
+        }
+    }
+
+    #[test]
+    fn eig_scalar_real() {
+        let result = eig_builtin(Value::Num(5.0), Vec::new()).expect("eig");
+        match result {
+            Value::Num(v) => assert!((v - 5.0).abs() < 1e-12),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eig_two_outputs_reconstruct() {
+        let tensor = Tensor::new(vec![0.0, -2.0, 1.0, -3.0], vec![2, 2]).unwrap();
+        let eval = evaluate(Value::Tensor(tensor.clone()), &[], false).expect("evaluate");
+        let v = matrix_from_value(eval.right());
+        let d = matrix_from_value(eval.diagonal_matrix());
+        let a = matrix_from_value(Value::Tensor(tensor));
+        let recon = &v * &d * v.try_inverse().unwrap();
+        assert_matrix_close(&a, &recon, 1e-10);
+    }
+
+    #[test]
+    fn eig_three_outputs_biorthogonality() {
+        let tensor = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
+        let eval = evaluate(Value::Tensor(tensor), &[], true).expect("evaluate");
+        let v = matrix_from_value(eval.right());
+        let d = matrix_from_value(eval.diagonal_matrix());
+        let w = matrix_from_value(eval.left().expect("left eigenvectors"));
+        let vw = w.adjoint() * &v;
+        let identity = DMatrix::<Complex64>::identity(v.ncols(), v.ncols());
+        assert_matrix_close(&vw, &identity, 1e-10);
+        let tensor = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
+        let a = matrix_from_value(Value::Tensor(tensor));
+        let lhs = w.adjoint() * &a;
+        let rhs = &d * w.adjoint();
+        assert_matrix_close(&lhs, &rhs, 1e-10);
+    }
+
+    #[test]
+    fn eig_complex_matrix() {
+        let data = vec![(1.0, 2.0), (0.0, 0.0), (2.0, -1.0), (0.0, -3.0)];
+        let tensor = ComplexTensor::new(data, vec![2, 2]).unwrap();
+        let result = eig_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("eig");
+        let values = column_vector_from_value(result);
+        assert_eq!(values.len(), 2);
+        assert!((values[0] - Complex64::new(1.0, 2.0)).norm() < 1e-10);
+        assert!((values[1] - Complex64::new(0.0, -3.0)).norm() < 1e-10);
+    }
+
+    #[test]
+    fn eig_errors_on_non_square() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let err = eig_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
+        assert!(err.contains("square"));
+    }
+
+    #[test]
+    fn eig_accepts_nobalance_option() {
+        let tensor = Tensor::new(vec![1.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
+        let base = eig_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("eig");
+        let opt = eig_builtin(
+            Value::Tensor(tensor),
+            vec![Value::String("nobalance".into())],
+        )
+        .expect("eig with option");
+        let base_vals = column_vector_from_value(base);
+        let opt_vals = column_vector_from_value(opt);
+        for (a, b) in base_vals.iter().zip(opt_vals.iter()) {
+            assert!((a - b).norm() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn eig_vector_option_returns_column_vector() {
+        let tensor = Tensor::new(vec![0.0, 1.0, -2.0, -3.0], vec![2, 2]).unwrap();
+        let eval =
+            evaluate(Value::Tensor(tensor), &[Value::from("vector")], false).expect("evaluate");
+        match eval.diagonal() {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 1]);
+            }
+            other => panic!("expected vector second output, got {other:?}"),
+        }
+        // Matrix form stays available for reconstruction.
+        let _ = matrix_from_value(eval.diagonal_matrix());
+    }
+
+    #[test]
+    fn eig_vector_option_allows_left_eigenvectors() {
+        let tensor = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
+        let eval =
+            evaluate(Value::Tensor(tensor), &[Value::from("vector")], true).expect("evaluate");
+        match eval.diagonal() {
+            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 1]),
+            other => panic!("expected vector second output, got {other:?}"),
+        }
+        let left = eval.left().expect("left eigenvectors");
+        match left {
+            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 2]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![2, 2]),
+            other => panic!("unexpected type for left eigenvectors: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eig_vector_option_gpu_falls_back_to_host() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![2.0, 1.0, 0.0, 3.0], vec![2, 2]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let eval = evaluate(Value::GpuTensor(handle), &[Value::from("vector")], false)
+                .expect("evaluate");
+            match eval.diagonal() {
+                Value::Tensor(t) => assert_eq!(t.shape, vec![2, 1]),
+                Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![2, 1]),
+                Value::GpuTensor(_) => panic!("expected host fallback for 'vector' option"),
+                other => panic!("unexpected eigenvalue output: {other:?}"),
+            }
+            match eval.right() {
+                Value::GpuTensor(_) => panic!("expected right eigenvectors on host after fallback"),
+                _ => {}
+            }
+        });
+    }
+
+    #[test]
+    fn eig_gpu_provider_roundtrip_gathers_to_host() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![2.0, 0.0, 0.0, 3.0], vec![2, 2]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let result =
+                eig_builtin(Value::GpuTensor(handle), vec![Value::from("nobalance")]).expect("eig");
+            match result {
+                Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0]),
+                Value::ComplexTensor(ct) => {
+                    assert_eq!(ct.data[0], (2.0, 0.0));
+                    assert_eq!(ct.data[1], (3.0, 0.0));
+                }
+                other => panic!("expected tensor result, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "doc_export")]
+    fn doc_examples_present() {
+        let blocks = test_support::doc_examples(DOC_MD);
+        assert!(!blocks.is_empty());
+    }
+
+    #[test]
+    fn eig_handles_single_numeric_argument() {
+        let args = vec![Value::Int(IntValue::I32(3))];
+        let err = evaluate(Value::Num(4.0), &args, false).unwrap_err();
+        assert!(
+            err.contains("generalized")
+                || err.contains("option arguments must be")
+                || err.contains("unknown option"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn eig_wgpu_matches_cpu_for_real_spectrum() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
+        let tensor = Tensor::new(vec![4.0, 2.0, 1.0, 3.0], vec![2, 2]).unwrap();
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+
+        let gpu_eval = evaluate(Value::GpuTensor(handle), &[], true).expect("gpu evaluate");
+
+        let eig_gpu_value = gpu_eval.eigenvalues();
+        assert!(matches!(eig_gpu_value, Value::GpuTensor(_)));
+        let diag_gpu_value = gpu_eval.diagonal_matrix();
+        assert!(matches!(diag_gpu_value, Value::GpuTensor(_)));
+        let right_gpu_value = gpu_eval.right();
+        assert!(matches!(right_gpu_value, Value::GpuTensor(_)));
+        let left_gpu_value = gpu_eval.left().expect("left eigenvectors");
+        assert!(matches!(left_gpu_value, Value::GpuTensor(_)));
+
+        let eig_gpu = test_support::gather(eig_gpu_value).expect("gather eigenvalues");
+        let diag_gpu = test_support::gather(diag_gpu_value).expect("gather diagonal");
+        let right_gpu = test_support::gather(right_gpu_value).expect("gather right vectors");
+        let left_gpu = test_support::gather(left_gpu_value).expect("gather left vectors");
+
+        let host_eval = evaluate(Value::Tensor(tensor.clone()), &[], true).expect("host evaluate");
+
+        let eig_host = match host_eval.eigenvalues() {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor eigenvalues, got {other:?}"),
+        };
+        let diag_host = match host_eval.diagonal_matrix() {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor diagonal, got {other:?}"),
+        };
+        let right_host = match host_eval.right() {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor right eigenvectors, got {other:?}"),
+        };
+        let left_host = match host_eval.left().expect("host left eigenvectors") {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor left eigenvectors, got {other:?}"),
+        };
+
+        assert_tensor_close(&eig_gpu, &eig_host, tol);
+        assert_tensor_close(&diag_gpu, &diag_host, tol);
+        assert_tensor_close(&right_gpu, &right_host, tol);
+        assert_tensor_close(&left_gpu, &left_host, tol);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn eig_wgpu_nobalance_falls_back_to_host() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let tensor = Tensor::new(vec![1.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let eval = evaluate(Value::GpuTensor(handle), &[Value::from("nobalance")], false)
+            .expect("evaluate");
+        match eval.eigenvalues() {
+            Value::GpuTensor(_) => panic!("expected host fallback for 'nobalance' option"),
+            _ => {}
+        }
+    }
+}

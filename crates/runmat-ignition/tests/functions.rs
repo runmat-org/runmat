@@ -1171,7 +1171,7 @@ fn class_dependent_property_get_set() {
 fn struct_isfield_multi_and_fieldnames() {
     let program = r#"
         s = struct(); s = setfield(s, 'a', 1); s = setfield(s, 'b', 2);
-        c = {'a','x';'b','a'}; r = isfield(c, s); f = fieldnames(s);
+        c = {'a','x';'b','a'}; r = isfield(s, c); f = fieldnames(s);
     "#;
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
@@ -1180,10 +1180,8 @@ fn struct_isfield_multi_and_fieldnames() {
     let mut found_f_ok = false;
     for v in &vars {
         match v {
-            runmat_builtins::Value::Tensor(t) => {
-                if t.shape == vec![2, 2]
-                    && (t.data == vec![1.0, 0.0, 1.0, 0.0] || t.data == vec![1.0, 1.0, 0.0, 1.0])
-                {
+            runmat_builtins::Value::LogicalArray(arr) => {
+                if arr.shape == vec![2, 2] && arr.data == vec![1, 1, 0, 1] {
                     found_r_ok = true;
                 }
             }
@@ -1213,7 +1211,7 @@ fn struct_isfield_string_array_placeholder() {
     println!("vars: {vars:?}");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-12)));
+        .any(|v| matches!(v, runmat_builtins::Value::Bool(true))));
 }
 
 #[test]

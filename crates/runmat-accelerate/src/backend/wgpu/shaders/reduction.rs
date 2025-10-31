@@ -46,8 +46,10 @@ var<workgroup> tile: array<f64, 256>;
 fn combine(a: f64, b: f64, op: u32) -> f64 {
     switch op {
         case 0u: { return a + b; }
-        case 1u: { if b < a { return b; } return a; }
-        case 2u: { if b > a { return b; } return a; }
+        case 1u: { return a * b; }
+        case 2u: { if b < a { return b; } return a; }
+        case 3u: { if b > a { return b; } return a; }
+        case 4u: { return a + b; }
         default: { return a; }
     }
 }
@@ -55,10 +57,21 @@ fn combine(a: f64, b: f64, op: u32) -> f64 {
 fn identity(op: u32) -> f64 {
     switch op {
         case 0u: { return 0.0; }
-        case 1u: { return f64(1.0) / f64(0.0); }
-        case 2u: { return -f64(1.0) / f64(0.0); }
+        case 1u: { return 1.0; }
+        case 2u: { return f64(1.0) / f64(0.0); }
+        case 3u: { return -f64(1.0) / f64(0.0); }
+        case 4u: { return 0.0; }
         default: { return 0.0; }
     }
+}
+
+fn map_value(v: f64, op: u32) -> f64 {
+    if op == 4u {
+        if v != v { return 1.0; }
+        if v != 0.0 { return 1.0; }
+        return 0.0;
+    }
+    return v;
 }
 
 @compute @workgroup_size(256)
@@ -70,10 +83,12 @@ fn main(
     let idx = base + lid.x;
     var acc = identity(params.op);
     if idx < params.len {
-        acc = InBuf.data[idx];
+        let mapped = map_value(InBuf.data[idx], params.op);
+        acc = combine(acc, mapped, params.op);
     }
     if idx + 256u < params.len {
-        acc = combine(acc, InBuf.data[idx + 256u], params.op);
+        let mapped = map_value(InBuf.data[idx + 256u], params.op);
+        acc = combine(acc, mapped, params.op);
     }
     tile[lid.x] = acc;
     workgroupBarrier();
@@ -110,8 +125,10 @@ var<workgroup> tile: array<f32, 256>;
 fn combine(a: f32, b: f32, op: u32) -> f32 {
     switch op {
         case 0u: { return a + b; }
-        case 1u: { return select(a, b, b < a); }
-        case 2u: { return select(a, b, b > a); }
+        case 1u: { return a * b; }
+        case 2u: { return select(a, b, b < a); }
+        case 3u: { return select(a, b, b > a); }
+        case 4u: { return a + b; }
         default: { return a; }
     }
 }
@@ -119,10 +136,21 @@ fn combine(a: f32, b: f32, op: u32) -> f32 {
 fn identity(op: u32) -> f32 {
     switch op {
         case 0u: { return 0.0f; }
-        case 1u: { return 1.0f / 0.0f; }
-        case 2u: { return -1.0f / 0.0f; }
+        case 1u: { return 1.0f; }
+        case 2u: { return 1.0f / 0.0f; }
+        case 3u: { return -1.0f / 0.0f; }
+        case 4u: { return 0.0f; }
         default: { return 0.0f; }
     }
+}
+
+fn map_value(v: f32, op: u32) -> f32 {
+    if op == 4u {
+        if v != v { return 1.0f; }
+        if v != 0.0f { return 1.0f; }
+        return 0.0f;
+    }
+    return v;
 }
 
 @compute @workgroup_size(256)
@@ -134,10 +162,12 @@ fn main(
     let idx = base + lid.x;
     var acc = identity(params.op);
     if idx < params.len {
-        acc = InBuf.data[idx];
+        let mapped = map_value(InBuf.data[idx], params.op);
+        acc = combine(acc, mapped, params.op);
     }
     if idx + 256u < params.len {
-        acc = combine(acc, InBuf.data[idx + 256u], params.op);
+        let mapped = map_value(InBuf.data[idx + 256u], params.op);
+        acc = combine(acc, mapped, params.op);
     }
     tile[lid.x] = acc;
     workgroupBarrier();
@@ -174,28 +204,181 @@ fn isNan(x: f64) -> bool { return x != x; }
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
+    let op_any_include = params.op == 3u;
+    let op_any_omit = params.op == 4u;
+    let op_all_include = params.op == 5u;
+    let op_all_omit = params.op == 6u;
+    let op_nnz = params.op == 7u;
+    let is_any = op_any_include || op_any_omit;
+    let is_all = op_all_include || op_all_omit;
     if params.dim == 1u {
         if idx >= params.cols { return; }
+        if op_nnz {
+            var count: f64 = 0.0;
+            for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
+                let linear = r + idx * params.rows;
+                let v = InBuf.data[linear];
+                if isNan(v) || v != 0.0 {
+                    count = count + 1.0;
+                }
+            }
+            OutBuf.data[idx] = count;
+            return;
+        }
+        if is_any {
+            var any_true: bool = false;
+            for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
+                let linear = r + idx * params.rows;
+                let v = InBuf.data[linear];
+                if op_any_include {
+                    if isNan(v) || v != 0.0 {
+                        any_true = true;
+                        break;
+                    }
+                } else {
+                    if (!isNan(v)) && v != 0.0 {
+                        any_true = true;
+                        break;
+                    }
+                }
+            }
+            if any_true { OutBuf.data[idx] = 1.0; } else { OutBuf.data[idx] = 0.0; }
+            return;
+        }
+        if is_all {
+            var all_true: bool = true;
+            var saw_value: bool = false;
+            for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
+                let linear = r + idx * params.rows;
+                let v = InBuf.data[linear];
+                if isNan(v) {
+                    if op_all_omit {
+                        continue;
+                    } else {
+                        continue;
+                    }
+                }
+                saw_value = true;
+                if v == 0.0 {
+                    all_true = false;
+                    break;
+                }
+            }
+            if op_all_omit && !saw_value {
+                all_true = true;
+            }
+            if all_true { OutBuf.data[idx] = 1.0; } else { OutBuf.data[idx] = 0.0; }
+            return;
+        }
         var acc: f64 = 0.0;
+        if params.op == 2u { acc = 1.0; }
         var saw_nan: bool = false;
+        var any: bool = false;
         for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
             let linear = r + idx * params.rows;
             let v = InBuf.data[linear];
-            if isNan(v) { saw_nan = true; } else { acc = acc + v; }
+            if isNan(v) {
+                saw_nan = true;
+            } else {
+                any = true;
+                if params.op == 2u { acc = acc * v; }
+                else { acc = acc + v; }
+            }
         }
-        if saw_nan { OutBuf.data[idx] = f64(0.0) / f64(0.0); }
-        else { if params.op == 1u { acc = acc / f64(params.rows); } OutBuf.data[idx] = acc; }
+        if saw_nan {
+            OutBuf.data[idx] = f64(0.0) / f64(0.0);
+        } else if params.op == 1u {
+            OutBuf.data[idx] = acc / f64(params.rows);
+        } else if params.op == 2u {
+            if (!any) { OutBuf.data[idx] = 1.0; }
+            else { OutBuf.data[idx] = acc; }
+        } else {
+            OutBuf.data[idx] = acc;
+        }
     } else {
         if idx >= params.rows { return; }
+        if op_nnz {
+            var count: f64 = 0.0;
+            for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
+                let linear = idx + c * params.rows;
+                let v = InBuf.data[linear];
+                if isNan(v) || v != 0.0 {
+                    count = count + 1.0;
+                }
+            }
+            OutBuf.data[idx] = count;
+            return;
+        }
+        if is_any {
+            var any_true: bool = false;
+            for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
+                let linear = idx + c * params.rows;
+                let v = InBuf.data[linear];
+                if op_any_include {
+                    if isNan(v) || v != 0.0 {
+                        any_true = true;
+                        break;
+                    }
+                } else {
+                    if (!isNan(v)) && v != 0.0 {
+                        any_true = true;
+                        break;
+                    }
+                }
+            }
+            if any_true { OutBuf.data[idx] = 1.0; } else { OutBuf.data[idx] = 0.0; }
+            return;
+        }
+        if is_all {
+            var all_true: bool = true;
+            var saw_value: bool = false;
+            for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
+                let linear = idx + c * params.rows;
+                let v = InBuf.data[linear];
+                if isNan(v) {
+                    if op_all_omit {
+                        continue;
+                    } else {
+                        continue;
+                    }
+                }
+                saw_value = true;
+                if v == 0.0 {
+                    all_true = false;
+                    break;
+                }
+            }
+            if op_all_omit && !saw_value {
+                all_true = true;
+            }
+            if all_true { OutBuf.data[idx] = 1.0; } else { OutBuf.data[idx] = 0.0; }
+            return;
+        }
         var acc: f64 = 0.0;
+        if params.op == 2u { acc = 1.0; }
         var saw_nan: bool = false;
+        var any: bool = false;
         for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
             let linear = idx + c * params.rows;
             let v = InBuf.data[linear];
-            if isNan(v) { saw_nan = true; } else { acc = acc + v; }
+            if isNan(v) {
+                saw_nan = true;
+            } else {
+                any = true;
+                if params.op == 2u { acc = acc * v; }
+                else { acc = acc + v; }
+            }
         }
-        if saw_nan { OutBuf.data[idx] = f64(0.0) / f64(0.0); }
-        else { if params.op == 1u { acc = acc / f64(params.cols); } OutBuf.data[idx] = acc; }
+        if saw_nan {
+            OutBuf.data[idx] = f64(0.0) / f64(0.0);
+        } else if params.op == 1u {
+            OutBuf.data[idx] = acc / f64(params.cols);
+        } else if params.op == 2u {
+            if (!any) { OutBuf.data[idx] = 1.0; }
+            else { OutBuf.data[idx] = acc; }
+        } else {
+            OutBuf.data[idx] = acc;
+        }
     }
 }
 "#;
@@ -221,28 +404,181 @@ fn isNan(x: f32) -> bool { return x != x; }
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
+    let op_any_include = params.op == 3u;
+    let op_any_omit = params.op == 4u;
+    let op_all_include = params.op == 5u;
+    let op_all_omit = params.op == 6u;
+    let op_nnz = params.op == 7u;
+    let is_any = op_any_include || op_any_omit;
+    let is_all = op_all_include || op_all_omit;
     if params.dim == 1u {
         if idx >= params.cols { return; }
-        var acc: f32 = 0.0;
+        if op_nnz {
+            var count: f32 = 0.0f;
+            for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
+                let linear = r + idx * params.rows;
+                let v = InBuf.data[linear];
+                if isNan(v) || v != 0.0f {
+                    count = count + 1.0f;
+                }
+            }
+            OutBuf.data[idx] = count;
+            return;
+        }
+        if is_any {
+            var any_true: bool = false;
+            for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
+                let linear = r + idx * params.rows;
+                let v = InBuf.data[linear];
+                if op_any_include {
+                    if isNan(v) || v != 0.0f {
+                        any_true = true;
+                        break;
+                    }
+                } else {
+                    if (!isNan(v)) && v != 0.0f {
+                        any_true = true;
+                        break;
+                    }
+                }
+            }
+            if any_true { OutBuf.data[idx] = 1.0f; } else { OutBuf.data[idx] = 0.0f; }
+            return;
+        }
+        if is_all {
+            var all_true: bool = true;
+            var saw_value: bool = false;
+            for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
+                let linear = r + idx * params.rows;
+                let v = InBuf.data[linear];
+                if isNan(v) {
+                    if op_all_omit {
+                        continue;
+                    } else {
+                        continue;
+                    }
+                }
+                saw_value = true;
+                if v == 0.0f {
+                    all_true = false;
+                    break;
+                }
+            }
+            if op_all_omit && !saw_value {
+                all_true = true;
+            }
+            if all_true { OutBuf.data[idx] = 1.0f; } else { OutBuf.data[idx] = 0.0f; }
+            return;
+        }
+        var acc: f32 = 0.0f;
+        if params.op == 2u { acc = 1.0f; }
         var saw_nan: bool = false;
+        var any: bool = false;
         for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
             let linear = r + idx * params.rows;
             let v = InBuf.data[linear];
-            if isNan(v) { saw_nan = true; } else { acc = acc + v; }
+            if isNan(v) {
+                saw_nan = true;
+            } else {
+                any = true;
+                if params.op == 2u { acc = acc * v; }
+                else { acc = acc + v; }
+            }
         }
-        if saw_nan { OutBuf.data[idx] = f32(0.0) / f32(0.0); }
-        else { if params.op == 1u { acc = acc / f32(params.rows); } OutBuf.data[idx] = acc; }
+        if saw_nan {
+            OutBuf.data[idx] = f32(0.0) / f32(0.0);
+        } else if params.op == 1u {
+            OutBuf.data[idx] = acc / f32(params.rows);
+        } else if params.op == 2u {
+            if (!any) { OutBuf.data[idx] = 1.0f; }
+            else { OutBuf.data[idx] = acc; }
+        } else {
+            OutBuf.data[idx] = acc;
+        }
     } else {
         if idx >= params.rows { return; }
-        var acc: f32 = 0.0;
+        if op_nnz {
+            var count: f32 = 0.0f;
+            for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
+                let linear = idx + c * params.rows;
+                let v = InBuf.data[linear];
+                if isNan(v) || v != 0.0f {
+                    count = count + 1.0f;
+                }
+            }
+            OutBuf.data[idx] = count;
+            return;
+        }
+        if is_any {
+            var any_true: bool = false;
+            for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
+                let linear = idx + c * params.rows;
+                let v = InBuf.data[linear];
+                if op_any_include {
+                    if isNan(v) || v != 0.0f {
+                        any_true = true;
+                        break;
+                    }
+                } else {
+                    if (!isNan(v)) && v != 0.0f {
+                        any_true = true;
+                        break;
+                    }
+                }
+            }
+            if any_true { OutBuf.data[idx] = 1.0f; } else { OutBuf.data[idx] = 0.0f; }
+            return;
+        }
+        if is_all {
+            var all_true: bool = true;
+            var saw_value: bool = false;
+            for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
+                let linear = idx + c * params.rows;
+                let v = InBuf.data[linear];
+                if isNan(v) {
+                    if op_all_omit {
+                        continue;
+                    } else {
+                        continue;
+                    }
+                }
+                saw_value = true;
+                if v == 0.0f {
+                    all_true = false;
+                    break;
+                }
+            }
+            if op_all_omit && !saw_value {
+                all_true = true;
+            }
+            if all_true { OutBuf.data[idx] = 1.0f; } else { OutBuf.data[idx] = 0.0f; }
+            return;
+        }
+        var acc: f32 = 0.0f;
+        if params.op == 2u { acc = 1.0f; }
         var saw_nan: bool = false;
+        var any: bool = false;
         for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
             let linear = idx + c * params.rows;
             let v = InBuf.data[linear];
-            if isNan(v) { saw_nan = true; } else { acc = acc + v; }
+            if isNan(v) {
+                saw_nan = true;
+            } else {
+                any = true;
+                if params.op == 2u { acc = acc * v; }
+                else { acc = acc + v; }
+            }
         }
-        if saw_nan { OutBuf.data[idx] = f32(0.0) / f32(0.0); }
-        else { if params.op == 1u { acc = acc / f32(params.cols); } OutBuf.data[idx] = acc; }
+        if saw_nan {
+            OutBuf.data[idx] = f32(0.0) / f32(0.0);
+        } else if params.op == 1u {
+            OutBuf.data[idx] = acc / f32(params.cols);
+        } else if params.op == 2u {
+            if (!any) { OutBuf.data[idx] = 1.0f; }
+            else { OutBuf.data[idx] = acc; }
+        } else {
+            OutBuf.data[idx] = acc;
+        }
     }
 }
 "#;

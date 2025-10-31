@@ -16,8 +16,10 @@ pub mod fusion;
 pub mod fusion_exec;
 pub mod fusion_residency;
 pub mod graph;
+mod host_lu;
 pub mod native_auto;
 pub mod simple_provider;
+mod sortrows_host;
 pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
@@ -319,6 +321,16 @@ pub trait AccelerateBackend: Send + Sync {
         b: &dyn DeviceMatrix,
     ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
     fn elem_mul(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_ne(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_eq(
         &self,
         a: &dyn DeviceMatrix,
         b: &dyn DeviceMatrix,

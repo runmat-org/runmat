@@ -10,8 +10,10 @@ struct Params {
     lda: u32,
     ldb: u32,
     ldc: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset_a: u32,
+    offset_b: u32,
+    offset_out: u32,
+    _pad: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -32,12 +34,15 @@ fn main(
     let lda = params.lda;
     let ldb = params.ldb;
     let ldc = params.ldc;
+    let base_a = params.offset_a;
+    let base_b = params.offset_b;
+    let base_out = params.offset_out;
     for (var kk: u32 = 0u; kk < params.k; kk = kk + 1u) {
-        let a_idx = row + kk * lda;
-        let b_idx = kk + col * ldb;
+        let a_idx = base_a + row + kk * lda;
+        let b_idx = base_b + kk + col * ldb;
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
-    let out_idx = row + col * ldc;
+    let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = acc;
 }
 "#;
@@ -54,8 +59,10 @@ struct Params {
     lda: u32,
     ldb: u32,
     ldc: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset_a: u32,
+    offset_b: u32,
+    offset_out: u32,
+    _pad: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -76,12 +83,15 @@ fn main(
     let lda = params.lda;
     let ldb = params.ldb;
     let ldc = params.ldc;
+    let base_a = params.offset_a;
+    let base_b = params.offset_b;
+    let base_out = params.offset_out;
     for (var kk: u32 = 0u; kk < params.k; kk = kk + 1u) {
-        let a_idx = row + kk * lda;
-        let b_idx = kk + col * ldb;
+        let a_idx = base_a + row + kk * lda;
+        let b_idx = base_b + kk + col * ldb;
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
-    let out_idx = row + col * ldc;
+    let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = acc;
 }
 "#;

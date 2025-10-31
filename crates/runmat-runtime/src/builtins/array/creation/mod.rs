@@ -1,3 +1,12 @@
+mod colon;
+mod eye;
+mod fill;
+mod linspace;
+mod logspace;
 mod ones;
 mod rand;
+mod randi;
+mod randn;
+mod randperm;
+mod range;
 mod zeros;

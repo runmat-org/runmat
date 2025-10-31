@@ -15,10 +15,14 @@ use runmat_accelerate::{
     active_group_plan_clone, FusionOp as AccelFusionOp, ShapeInfo, ValueOrigin, VarKind,
 };
 use runmat_builtins::{Type, Value};
-use runmat_runtime::call_builtin;
+use runmat_runtime::{
+    call_builtin,
+    workspace::{self as runtime_workspace, WorkspaceResolver},
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::sync::Once;
 
 #[cfg(feature = "native-accel")]
 struct FusionPlanGuard;
@@ -112,6 +116,177 @@ thread_local! {
     static PERSISTENTS_BY_NAME: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
 }
 
+struct WorkspaceState {
+    names: HashMap<String, usize>,
+    data_ptr: *const Value,
+    len: usize,
+}
+
+thread_local! {
+    static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = RefCell::new(None);
+    static PENDING_WORKSPACE: RefCell<Option<HashMap<String, usize>>> = RefCell::new(None);
+    static LAST_WORKSPACE_NAMES: RefCell<Option<HashMap<String, usize>>> = RefCell::new(None);
+}
+
+struct WorkspaceStateGuard;
+
+impl Drop for WorkspaceStateGuard {
+    fn drop(&mut self) {
+        WORKSPACE_STATE.with(|state| {
+            let mut state_mut = state.borrow_mut();
+            if let Some(ws) = state_mut.take() {
+                LAST_WORKSPACE_NAMES.with(|slot| {
+                    *slot.borrow_mut() = Some(ws.names);
+                });
+            }
+        });
+    }
+}
+
+fn set_workspace_state(names: HashMap<String, usize>, vars: &Vec<Value>) -> WorkspaceStateGuard {
+    WORKSPACE_STATE.with(|state| {
+        *state.borrow_mut() = Some(WorkspaceState {
+            names,
+            data_ptr: vars.as_ptr(),
+            len: vars.len(),
+        });
+    });
+    WorkspaceStateGuard
+}
+
+fn refresh_workspace_state(vars: &Vec<Value>) {
+    WORKSPACE_STATE.with(|state| {
+        if let Some(ws) = state.borrow_mut().as_mut() {
+            ws.data_ptr = vars.as_ptr();
+            ws.len = vars.len();
+        }
+    });
+}
+
+fn workspace_lookup(name: &str) -> Option<Value> {
+    WORKSPACE_STATE.with(|state| {
+        let state_ref = state.borrow();
+        let ws = state_ref.as_ref()?;
+        let idx = ws.names.get(name)?;
+        if *idx >= ws.len {
+            return None;
+        }
+        unsafe {
+            let ptr = ws.data_ptr.add(*idx);
+            Some((*ptr).clone())
+        }
+    })
+}
+
+fn workspace_snapshot() -> Vec<(String, Value)> {
+    WORKSPACE_STATE.with(|state| {
+        if let Some(ws) = state.borrow().as_ref() {
+            let mut entries: Vec<(String, Value)> = ws
+                .names
+                .iter()
+                .filter_map(|(name, idx)| {
+                    if *idx >= ws.len {
+                        return None;
+                    }
+                    unsafe {
+                        let ptr = ws.data_ptr.add(*idx);
+                        Some((name.clone(), (*ptr).clone()))
+                    }
+                })
+                .collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            entries
+        } else {
+            Vec::new()
+        }
+    })
+}
+
+fn workspace_global_names() -> Vec<String> {
+    let mut names = Vec::new();
+    GLOBALS.with(|globals| {
+        let map = globals.borrow();
+        for key in map.keys() {
+            if !key.starts_with("var_") {
+                names.push(key.clone());
+            }
+        }
+    });
+    names.sort();
+    names
+}
+
+fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> Result<(), String> {
+    let mut result = Ok(());
+    WORKSPACE_STATE.with(|state| {
+        let mut state_mut = state.borrow_mut();
+        match state_mut.as_mut() {
+            Some(ws) => {
+                let idx = if let Some(idx) = ws.names.get(name).copied() {
+                    idx
+                } else {
+                    let idx = vars.len();
+                    ws.names.insert(name.to_string(), idx);
+                    idx
+                };
+                if idx >= vars.len() {
+                    vars.resize(idx + 1, Value::Num(0.0));
+                }
+                vars[idx] = value;
+                ws.data_ptr = vars.as_ptr();
+                ws.len = vars.len();
+            }
+            None => {
+                result = Err("load: workspace state unavailable".to_string());
+            }
+        }
+    });
+    result
+}
+
+fn assign_loaded_variables(
+    vars: &mut Vec<Value>,
+    entries: &[(String, Value)],
+) -> Result<(), String> {
+    for (name, value) in entries {
+        set_workspace_variable(name, value.clone(), vars)?;
+    }
+    refresh_workspace_state(vars);
+    Ok(())
+}
+
+fn ensure_workspace_resolver_registered() {
+    static REGISTER: Once = Once::new();
+    REGISTER.call_once(|| {
+        runtime_workspace::register_workspace_resolver(WorkspaceResolver {
+            lookup: workspace_lookup,
+            snapshot: workspace_snapshot,
+            globals: workspace_global_names,
+        });
+    });
+}
+
+pub struct PendingWorkspaceGuard;
+
+impl Drop for PendingWorkspaceGuard {
+    fn drop(&mut self) {
+        PENDING_WORKSPACE.with(|slot| {
+            slot.borrow_mut().take();
+        });
+    }
+}
+
+pub fn push_pending_workspace(names: HashMap<String, usize>) -> PendingWorkspaceGuard {
+    PENDING_WORKSPACE.with(|slot| {
+        *slot.borrow_mut() = Some(names);
+    });
+    PendingWorkspaceGuard
+}
+
+pub fn take_updated_workspace_names() -> Option<HashMap<String, usize>> {
+    LAST_WORKSPACE_NAMES.with(|slot| slot.borrow_mut().take())
+}
+
 thread_local! {
     // (nargin, nargout) for current call
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
@@ -126,12 +301,12 @@ macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
         _ => { let bb: f64 = (&b).try_into()?; let aa: f64 = (&a).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) }
     }
 }}; }
-
 pub fn interpret_with_vars(
     bytecode: &Bytecode,
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
 ) -> Result<Vec<Value>, String> {
+    ensure_workspace_resolver_registered();
     #[cfg(feature = "native-accel")]
     let fusion_plan = prepare_fusion_plan(bytecode.accel_graph.as_ref(), &bytecode.fusion_groups);
     #[cfg(feature = "native-accel")]
@@ -143,6 +318,9 @@ pub fn interpret_with_vars(
     if vars.len() < bytecode.var_count {
         vars.resize(bytecode.var_count, Value::Num(0.0));
     }
+    let pending_names = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
+    let _workspace_guard = pending_names.map(|names| set_workspace_state(names, &vars));
+    refresh_workspace_state(&vars);
     let mut pc: usize = 0;
     let mut context = ExecutionContext {
         call_stack: Vec::new(),
@@ -207,11 +385,12 @@ pub fn interpret_with_vars(
     fn bench_end(_label: &str, _start: Option<std::time::Instant>) {}
     macro_rules! vm_bail {
         ($err:expr) => {{
-            let e: String = $err;
+            let e: String = $err.to_string();
             if let Some((catch_pc, catch_var)) = try_stack.pop() {
                 if let Some(var_idx) = catch_var {
                     if var_idx >= vars.len() {
                         vars.resize(var_idx + 1, Value::Num(0.0));
+                        refresh_workspace_state(&vars);
                     }
                     let mex = parse_exception(&e);
                     last_exception = Some(mex.clone());
@@ -275,8 +454,173 @@ pub fn interpret_with_vars(
                 stack.push(a);
                 stack.push(b);
             }
-            Instr::CallFeval(_argc) => {
-                vm_bail!("feval not supported in this execution mode".to_string());
+            Instr::CallFeval(argc) => {
+                // Pop explicit args
+                let mut args = Vec::with_capacity(argc);
+                for _ in 0..argc {
+                    args.push(
+                        stack
+                            .pop()
+                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                    );
+                }
+                args.reverse();
+                // Pop function value
+                let func_val = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                match func_val {
+                    Value::Closure(c) => {
+                        // User-defined function via closure: prepend captures then dispatch like CallFunction
+                        let name = c.function_name;
+                        let mut call_args = c.captures.clone();
+                        call_args.extend(args);
+                        // Try runtime builtin target for closures (e.g., call_method)
+                        if let Ok(result) = runmat_runtime::call_builtin(&name, &call_args) {
+                            stack.push(result);
+                            pc += 1;
+                            continue;
+                        }
+                        let func: UserFunction = match context.functions.get(&name)
+                            .or_else(|| bytecode.functions.get(&name))
+                        {
+                            Some(f) => f.clone(),
+                            None => vm_bail!(mex(
+                                "UndefinedFunction",
+                                &format!("Undefined function: {name}")
+                            )),
+                        };
+                        let arg_count = call_args.len();
+                        if !func.has_varargin {
+                            if arg_count < func.params.len() {
+                                vm_bail!(mex(
+                                    "NotEnoughInputs",
+                                    &format!(
+                                        "Function '{name}' expects {} inputs, got {arg_count}",
+                                        func.params.len()
+                                    )
+                                ));
+                            }
+                            if arg_count > func.params.len() {
+                                vm_bail!(mex(
+                                    "TooManyInputs",
+                                    &format!(
+                                        "Function '{name}' expects {} inputs, got {arg_count}",
+                                        func.params.len()
+                                    )
+                                ));
+                            }
+                        }
+                        let var_map = runmat_hir::remapping::create_complete_function_var_map(
+                            &func.params,
+                            &func.outputs,
+                            &func.body,
+                        );
+                        let local_var_count = var_map.len();
+                        let remapped_body =
+                            runmat_hir::remapping::remap_function_body(&func.body, &var_map);
+                        let func_vars_count = local_var_count.max(func.params.len());
+                        let mut func_vars = vec![Value::Num(0.0); func_vars_count];
+                        if func.has_varargin {
+                            let fixed = func.params.len().saturating_sub(1);
+                            for i in 0..fixed {
+                                if i < call_args.len() && i < func_vars.len() {
+                                    func_vars[i] = call_args[i].clone();
+                                }
+                            }
+                            let mut rest: Vec<Value> = if call_args.len() > fixed {
+                                call_args[fixed..].to_vec()
+                            } else {
+                                Vec::new()
+                            };
+                            let cell = runmat_builtins::CellArray::new(
+                                std::mem::take(&mut rest),
+                                1,
+                                if call_args.len() > fixed {
+                                    call_args.len() - fixed
+                                } else {
+                                    0
+                                },
+                            )
+                            .map_err(|e| format!("varargin: {e}"))?;
+                            if fixed < func_vars.len() {
+                                func_vars[fixed] = Value::Cell(cell);
+                            }
+                        } else {
+                            for (i, _param_id) in func.params.iter().enumerate() {
+                                if i < call_args.len() && i < func_vars.len() {
+                                    func_vars[i] = call_args[i].clone();
+                                }
+                            }
+                        }
+                        // Copy referenced globals into local frame
+                        for (original_var_id, local_var_id) in &var_map {
+                            let local_index = local_var_id.0;
+                            let global_index = original_var_id.0;
+                            if local_index < func_vars.len() && global_index < vars.len() {
+                                let is_parameter = func
+                                    .params
+                                    .iter()
+                                    .any(|param_id| param_id == original_var_id);
+                                if !is_parameter {
+                                    func_vars[local_index] = vars[global_index].clone();
+                                }
+                            }
+                        }
+                        // Initialize varargout if needed
+                        if func.has_varargout {
+                            if let Some(varargout_oid) = func.outputs.last() {
+                                if let Some(local_id) = var_map.get(varargout_oid) {
+                                    if local_id.0 < func_vars.len() {
+                                        let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
+                                            .map_err(|e| format!("varargout init: {e}"))?;
+                                        func_vars[local_id.0] = Value::Cell(empty);
+                                    }
+                                }
+                            }
+                        }
+                        let mut func_var_types = func.var_types.clone();
+                        if func_var_types.len() < local_var_count {
+                            func_var_types.resize(local_var_count, Type::Unknown);
+                        }
+                        let func_program = runmat_hir::HirProgram {
+                            body: remapped_body,
+                            var_types: func_var_types,
+                        };
+                        let func_bytecode =
+                            crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                        // Merge nested functions into current execution context for future closure calls
+                        for (k, v) in func_bytecode.functions.iter() {
+                            context.functions.insert(k.clone(), v.clone());
+                        }
+                        let func_result_vars =
+                            match interpret_function(&func_bytecode, func_vars) {
+                                Ok(v) => v,
+                                Err(e) => vm_bail!(e),
+                            };
+                        if let Some(output_var_id) = func.outputs.first() {
+                            let local_output_index =
+                                var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
+                            if local_output_index < func_result_vars.len() {
+                                stack.push(func_result_vars[local_output_index].clone());
+                            } else {
+                                stack.push(Value::Num(0.0));
+                            }
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    other => {
+                        // Forward to runtime feval for string/char handles and builtins
+                        let mut argv = Vec::with_capacity(1 + args.len());
+                        argv.push(other);
+                        argv.extend(args);
+                        match runmat_runtime::call_builtin("feval", &argv) {
+                            Ok(result) => stack.push(result),
+                            Err(err) => vm_bail!(err),
+                        }
+                    }
+                }
             }
             Instr::CallFevalExpandMulti(_specs) => {
                 vm_bail!("feval expand not supported in this execution mode".to_string());
@@ -331,6 +675,7 @@ pub fn interpret_with_vars(
                 }
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
+                    refresh_workspace_state(&vars);
                 }
                 vars[i] = val;
                 // If this var is declared global, update the global table entry
@@ -378,6 +723,7 @@ pub fn interpret_with_vars(
                 } else {
                     if offset >= vars.len() {
                         vars.resize(offset + 1, Value::Num(0.0));
+                        refresh_workspace_state(&vars);
                     }
                     #[cfg(feature = "native-accel")]
                     if offset < vars.len() {
@@ -423,6 +769,7 @@ pub fn interpret_with_vars(
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
                             vars.resize(i + 1, Value::Num(0.0));
+                            refresh_workspace_state(&vars);
                         }
                         vars[i] = v;
                     }
@@ -438,6 +785,7 @@ pub fn interpret_with_vars(
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
                             vars.resize(i + 1, Value::Num(0.0));
+                            refresh_workspace_state(&vars);
                         }
                         vars[i] = v;
                     }
@@ -459,6 +807,7 @@ pub fn interpret_with_vars(
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
                             vars.resize(i + 1, Value::Num(0.0));
+                            refresh_workspace_state(&vars);
                         }
                         vars[i] = v;
                     }
@@ -478,6 +827,7 @@ pub fn interpret_with_vars(
                     if let Some(v) = val_opt {
                         if i >= vars.len() {
                             vars.resize(i + 1, Value::Num(0.0));
+                            refresh_workspace_state(&vars);
                         }
                         vars[i] = v;
                     }
@@ -558,8 +908,7 @@ pub fn interpret_with_vars(
                         }
                     }
                     _ => {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
                         let v = runmat_runtime::elementwise_sub(&a_acc, &b_acc)?;
                         stack.push(v)
                     }
@@ -1406,7 +1755,7 @@ pub fn interpret_with_vars(
             Instr::CallBuiltin(name, arg_count) => {
                 if name == "nargin" {
                     if arg_count != 0 {
-                        vm_bail!(mex("TooManyInputs", "nargin takes no arguments"));
+                        vm_bail!(mex("TooManyInputs", "nargin takes no arguments").to_string());
                     }
                     let (nin, _) =
                         CALL_COUNTS.with(|cc| cc.borrow().last().cloned().unwrap_or((0, 0)));
@@ -1416,7 +1765,7 @@ pub fn interpret_with_vars(
                 }
                 if name == "nargout" {
                     if arg_count != 0 {
-                        vm_bail!(mex("TooManyInputs", "nargout takes no arguments"));
+                        vm_bail!(mex("TooManyInputs", "nargout takes no arguments").to_string());
                     }
                     let (_, nout) =
                         CALL_COUNTS.with(|cc| cc.borrow().last().cloned().unwrap_or((0, 0)));
@@ -1458,7 +1807,7 @@ pub fn interpret_with_vars(
                                 .map(|(q, _, _)| q.clone())
                                 .collect::<Vec<_>>()
                                 .join(", ");
-                            vm_bail!(format!("ambiguous builtin '{}' via imports: {}", name, msg));
+                            vm_bail!(format!("ambiguous builtin '{}' via imports: {}", name, msg).to_string());
                         }
                         if let Some((_, _, value)) = specific_matches.pop() {
                             stack.push(value);
@@ -1496,7 +1845,7 @@ pub fn interpret_with_vars(
                                 vm_bail!(format!(
                                     "ambiguous builtin '{}' via wildcard imports: {}",
                                     name, msg
-                                ));
+                                ).to_string());
                             }
                             if let Some((_, _, value)) = wildcard_matches.pop() {
                                 stack.push(value);
@@ -1504,13 +1853,14 @@ pub fn interpret_with_vars(
                                 // Special-case: rethrow() without explicit e uses last caught
                                 if name == "rethrow" && args.is_empty() {
                                     if let Some(le) = &last_exception {
-                                        vm_bail!(format!("{}: {}", le.identifier, le.message));
+                                        vm_bail!(format!("{}: {}", le.identifier, le.message).to_string());
                                     }
                                 }
                                 if let Some((catch_pc, catch_var)) = try_stack.pop() {
                                     if let Some(var_idx) = catch_var {
                                         if var_idx >= vars.len() {
                                             vars.resize(var_idx + 1, Value::Num(0.0));
+                                            refresh_workspace_state(&vars);
                                         }
                                         let mex = parse_exception(&e);
                                         last_exception = Some(mex.clone());
@@ -2129,6 +2479,10 @@ pub fn interpret_with_vars(
                 };
                 let func_bytecode =
                     crate::compile_with_functions(&func_program, &bytecode.functions)?;
+                // Make nested closures visible to outer frames
+                for (k, v) in func_bytecode.functions.iter() {
+                    context.functions.insert(k.clone(), v.clone());
+                }
                 let func_result_vars = match interpret_function(&func_bytecode, func_vars) {
                     Ok(v) => v,
                     Err(e) => vm_bail!(e),
@@ -2145,6 +2499,28 @@ pub fn interpret_with_vars(
                 }
             }
             Instr::CallFunction(name, arg_count) => {
+                // First, try runtime builtin fallback (some helpers like call_method)
+                {
+                    let mut args = Vec::new();
+                    for _ in 0..arg_count {
+                        args.push(
+                            stack
+                                .pop()
+                                .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                        );
+                    }
+                    args.reverse();
+                    let prepared_primary = accel_prepare_args(&name, &args)?;
+                    if let Ok(result) = runmat_runtime::call_builtin(&name, &prepared_primary) {
+                        stack.push(result);
+                        pc += 1;
+                        continue;
+                    }
+                    // Put args back if not a builtin: we'll handle as user function below
+                    for v in prepared_primary.into_iter().rev() {
+                        stack.push(v);
+                    }
+                }
                 let func: UserFunction = match bytecode.functions.get(&name) {
                     Some(f) => f.clone(),
                     None => vm_bail!(mex(
@@ -2282,6 +2658,7 @@ pub fn interpret_with_vars(
                             if let Some(var_idx) = catch_var {
                                 if var_idx >= vars.len() {
                                     vars.resize(var_idx + 1, Value::Num(0.0));
+                                    refresh_workspace_state(&vars);
                                 }
                                 let mex = parse_exception(&e);
                                 last_exception = Some(mex.clone());
@@ -2577,6 +2954,7 @@ pub fn interpret_with_vars(
                             if let Some(var_idx) = catch_var {
                                 if var_idx >= vars.len() {
                                     vars.resize(var_idx + 1, Value::Num(0.0));
+                                    refresh_workspace_state(&vars);
                                 }
                                 let mex = parse_exception(&e);
                                 last_exception = Some(mex.clone());
@@ -2659,68 +3037,981 @@ pub fn interpret_with_vars(
                     );
                 }
                 args.reverse();
-                // Special-case for 'find' to support [i,j,v] = find(A)
-                if name == "find" && !args.is_empty() {
-                    match &args[0] {
-                        Value::Tensor(t) => {
-                            let rows = *t.shape.first().unwrap_or(&1);
-                            let _cols = *t.shape.get(1).unwrap_or(&1);
-                            let mut lin_idx: Vec<usize> = Vec::new();
-                            for (k, &v) in t.data.iter().enumerate() {
-                                if v != 0.0 {
-                                    lin_idx.push(k + 1);
-                                }
+                if name == "gather" {
+                    let eval = match runmat_runtime::builtins::acceleration::gpu::gather::evaluate(
+                        &args,
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    let len = eval.len();
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if len == 1 {
+                        if out_count > 1 {
+                            vm_bail!(mex("TooManyOutputs", "gather: too many output arguments"));
+                        }
+                        stack.push(eval.into_first());
+                        continue;
+                    }
+                    if out_count != len {
+                        vm_bail!(mex(
+                            "TooManyOutputs",
+                            "gather: number of outputs must match number of inputs"
+                        ));
+                    }
+                    for value in eval.into_outputs() {
+                        stack.push(value);
+                    }
+                    continue;
+                }
+                if name == "load" {
+                    let eval = match runmat_runtime::builtins::io::mat::load::evaluate(&args) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        if let Err(err) = assign_loaded_variables(&mut vars, eval.variables()) {
+                            vm_bail!(err);
+                        }
+                        continue;
+                    }
+                    if out_count > 1 {
+                        vm_bail!(mex(
+                            "TooManyOutputs",
+                            "load supports at most one output argument"
+                        ));
+                    }
+                    stack.push(eval.first_output());
+                    for _ in 1..out_count {
+                        stack.push(Value::Num(0.0));
+                    }
+                    continue;
+                }
+                if name == "fopen" {
+                    let eval = match runmat_runtime::builtins::io::filetext::fopen::evaluate(&args)
+                    {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "fgets" {
+                    if args.is_empty() {
+                        vm_bail!(mex(
+                            "RuntimeError",
+                            "fgets requires at least one input argument"
+                        ));
+                    }
+                    let eval = match runmat_runtime::builtins::io::filetext::fgets::evaluate(
+                        &args[0],
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "fclose" {
+                    let eval = match runmat_runtime::builtins::io::filetext::fclose::evaluate(&args)
+                    {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "mkdir" {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::mkdir::evaluate(&args) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "setenv" {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::setenv::evaluate(&args) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "savepath" {
+                    let eval =
+                        match runmat_runtime::builtins::io::repl_fs::savepath::evaluate(&args) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "copyfile" {
+                    let eval =
+                        match runmat_runtime::builtins::io::repl_fs::copyfile::evaluate(&args) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "movefile" {
+                    let eval =
+                        match runmat_runtime::builtins::io::repl_fs::movefile::evaluate(&args) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "rmdir" {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::rmdir::evaluate(&args) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let outputs = eval.outputs();
+                    for i in 0..out_count {
+                        if let Some(value) = outputs.get(i) {
+                            stack.push(value.clone());
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "orderfields" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::structs::core::orderfields::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (ordered, permutation) = eval.into_values();
+                    stack.push(ordered);
+                    if out_count >= 2 {
+                        stack.push(permutation);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "chol" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "chol requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            if !eval.is_positive_definite() {
+                                vm_bail!("Matrix must be positive definite.".to_string());
                             }
-                            if out_count <= 1 {
-                                let data: Vec<f64> = lin_idx.iter().map(|&k| k as f64).collect();
-                                let tens =
-                                    runmat_builtins::Tensor::new(data, vec![lin_idx.len(), 1])
-                                        .map_err(|e| format!("find: {e}"))?;
-                                stack.push(Value::Tensor(tens));
-                                for _ in 1..out_count {
-                                    stack.push(Value::Num(0.0));
-                                }
-                            } else {
-                                let mut rows_out: Vec<f64> = Vec::with_capacity(lin_idx.len());
-                                let mut cols_out: Vec<f64> = Vec::with_capacity(lin_idx.len());
-                                for &k in &lin_idx {
-                                    let k0 = k - 1;
-                                    let r = (k0 % rows) + 1;
-                                    let c = (k0 / rows) + 1;
-                                    rows_out.push(r as f64);
-                                    cols_out.push(c as f64);
-                                }
-                                let r_t =
-                                    runmat_builtins::Tensor::new(rows_out, vec![lin_idx.len(), 1])
-                                        .map_err(|e| format!("find: {e}"))?;
-                                let c_t =
-                                    runmat_builtins::Tensor::new(cols_out, vec![lin_idx.len(), 1])
-                                        .map_err(|e| format!("find: {e}"))?;
-                                stack.push(Value::Tensor(r_t));
-                                if out_count >= 2 {
-                                    stack.push(Value::Tensor(c_t));
-                                }
-                                if out_count >= 3 {
-                                    let mut vals: Vec<f64> = Vec::with_capacity(lin_idx.len());
-                                    for &k in &lin_idx {
-                                        vals.push(t.data[k - 1]);
-                                    }
-                                    let v_t =
-                                        runmat_builtins::Tensor::new(vals, vec![lin_idx.len(), 1])
-                                            .map_err(|e| format!("find: {e}"))?;
-                                    stack.push(Value::Tensor(v_t));
-                                }
-                                // pad beyond 3 if requested
-                                if out_count > 3 {
-                                    for _ in 3..out_count {
-                                        stack.push(Value::Num(0.0));
-                                    }
-                                }
-                            }
+                            stack.push(eval.factor());
                             continue;
                         }
-                        _ => { /* fallthrough to generic */ }
+                        2 => {
+                            stack.push(eval.factor());
+                            stack.push(eval.flag());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "chol currently supports at most two outputs"
+                        )),
                     }
+                }
+                if name == "lu" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "lu requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::lu::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.combined());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.lower());
+                            stack.push(eval.upper());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.lower());
+                            stack.push(eval.upper());
+                            stack.push(eval.permutation());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "lu currently supports at most three outputs"
+                        )),
+                    }
+                }
+                if name == "linsolve" {
+                    if args.len() < 2 {
+                        vm_bail!(mex(
+                            "NotEnoughInputs",
+                            "linsolve requires coefficient and right-hand side inputs"
+                        ));
+                    }
+                    let eval =
+                        match runmat_runtime::builtins::math::linalg::solve::linsolve::evaluate_args(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        ) {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.solution());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.solution());
+                            stack.push(eval.reciprocal_condition());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "linsolve currently supports at most two outputs"
+                        )),
+                    }
+                }
+                if name == "qr" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "qr requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.r());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.q());
+                            stack.push(eval.r());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.q());
+                            stack.push(eval.r());
+                            stack.push(eval.permutation());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "qr currently supports at most three outputs"
+                        )),
+                    }
+                }
+                if name == "svd" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "svd requires an input matrix"));
+                    }
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::svd::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.singular_values());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.u());
+                            stack.push(eval.sigma());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.u());
+                            stack.push(eval.sigma());
+                            stack.push(eval.v());
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "svd currently supports at most three outputs"
+                        )),
+                    }
+                }
+                if name == "eig" {
+                    if args.is_empty() {
+                        vm_bail!(mex("NotEnoughInputs", "eig requires an input matrix"));
+                    }
+                    let require_left = out_count >= 3;
+                    let eval = match runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                        require_left,
+                    ) {
+                        Ok(v) => v,
+                        Err(err) => vm_bail!(err),
+                    };
+                    match out_count {
+                        0 => continue,
+                        1 => {
+                            stack.push(eval.eigenvalues());
+                            continue;
+                        }
+                        2 => {
+                            stack.push(eval.right());
+                            stack.push(eval.diagonal());
+                            continue;
+                        }
+                        3 => {
+                            stack.push(eval.right());
+                            stack.push(eval.diagonal());
+                            let left = match eval.left() {
+                                Ok(value) => value,
+                                Err(err) => vm_bail!(err),
+                            };
+                            stack.push(left);
+                            continue;
+                        }
+                        _ => vm_bail!(mex(
+                            "TooManyOutputs",
+                            "eig currently supports at most three outputs"
+                        )),
+                    }
+                }
+                // Special-case for 'find' to support [i,j,v] = find(A)
+                if name == "find" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::array::indexing::find::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count <= 1 {
+                        let linear = match eval.linear_value() {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(linear);
+                        for _ in 1..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    } else {
+                        let rows = match eval.row_value() {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(rows);
+                        let cols = match eval.column_value() {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(cols);
+                        if out_count >= 3 {
+                            let vals = match eval.values_value() {
+                                Ok(v) => v,
+                                Err(err) => vm_bail!(err),
+                            };
+                            stack.push(vals);
+                        }
+                        if out_count > 3 {
+                            for _ in 3..out_count {
+                                stack.push(Value::Num(0.0));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if name == "regexp" && args.len() >= 2 {
+                    let eval = match runmat_runtime::builtins::strings::regex::regexp::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        &args[2..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    let mut values = match eval.outputs_for_multi() {
+                        Ok(values) => values,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    for _ in 0..out_count {
+                        if !values.is_empty() {
+                            stack.push(values.remove(0));
+                        } else {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "deconv" {
+                    if args.len() < 2 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::signal::deconv::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    stack.push(eval.quotient());
+                    if out_count >= 2 {
+                        stack.push(eval.remainder());
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "polyder" {
+                    if args.is_empty() {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    if out_count <= 1 {
+                        let result = match args.len() {
+                            1 => runmat_runtime::builtins::math::poly::polyder::derivative_single(
+                                args[0].clone(),
+                            ),
+                            2 => runmat_runtime::builtins::math::poly::polyder::derivative_product(
+                                args[0].clone(),
+                                args[1].clone(),
+                            ),
+                            _ => vm_bail!("polyder: too many input arguments.".to_string()),
+                        };
+                        match result {
+                            Ok(value) => {
+                                if out_count == 0 {
+                                    continue;
+                                }
+                                stack.push(value);
+                            }
+                            Err(err) => vm_bail!(err),
+                        }
+                        if out_count > 1 {
+                            for _ in 1..out_count {
+                                stack.push(Value::Num(0.0));
+                            }
+                        }
+                        continue;
+                    }
+                    if args.len() != 2 {
+                        vm_bail!(mex(
+                            "MATLAB:minrhs",
+                            "Not enough input arguments for quotient form."
+                        ));
+                    }
+                    let eval =
+                        match runmat_runtime::builtins::math::poly::polyder::evaluate_quotient(
+                            args[0].clone(),
+                            args[1].clone(),
+                        ) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err),
+                        };
+                    stack.push(eval.numerator());
+                    stack.push(eval.denominator());
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "polyval" {
+                    if args.len() < 2 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::poly::polyval::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        &args[2..],
+                        out_count >= 2,
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    stack.push(eval.value());
+                    if out_count >= 2 {
+                        let delta = match eval.delta() {
+                            Ok(v) => v,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(delta);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "polyfit" {
+                    if args.len() < 3 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::poly::polyfit::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        args[2].clone(),
+                        &args[3..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    stack.push(eval.coefficients());
+                    if out_count >= 2 {
+                        stack.push(eval.stats());
+                    }
+                    if out_count >= 3 {
+                        stack.push(eval.mu());
+                    }
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "filter" {
+                    if args.len() < 3 {
+                        vm_bail!(mex("MATLAB:minrhs", "Not enough input arguments."));
+                    }
+                    let eval = match runmat_runtime::builtins::math::signal::filter::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        args[2].clone(),
+                        &args[3..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_value());
+                    } else {
+                        let (output, final_state) = eval.into_pair();
+                        stack.push(output);
+                        stack.push(final_state);
+                        if out_count > 2 {
+                            for _ in 2..out_count {
+                                stack.push(Value::Num(0.0));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if name == "sort" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::array::sorting_sets::sort::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (sorted, indices) = eval.into_values();
+                    stack.push(sorted);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "cummin" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::math::reduction::evaluate_cummin(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (values, indices) = eval.into_pair();
+                    stack.push(values);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "min" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::math::reduction::evaluate_min(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (values, indices) = eval.into_pair();
+                    stack.push(values);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "sortrows" && !args.is_empty() {
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::sortrows::evaluate(
+                            args[0].clone(),
+                            &args[1..],
+                        ) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err.to_string()),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let (sorted, indices) = eval.into_values();
+                    stack.push(sorted);
+                    if out_count >= 2 {
+                        stack.push(indices);
+                    }
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "ismember" && args.len() >= 2 {
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::ismember::evaluate(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        ) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err.to_string()),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_mask_value());
+                        continue;
+                    }
+                    let (mask, loc) = eval.into_pair();
+                    stack.push(mask);
+                    stack.push(loc);
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "intersect" && args.len() >= 2 {
+                    let eval =
+                        match runmat_runtime::builtins::array::sorting_sets::intersect::evaluate(
+                            args[0].clone(),
+                            args[1].clone(),
+                            &args[2..],
+                        ) {
+                            Ok(eval) => eval,
+                            Err(err) => vm_bail!(err.to_string()),
+                        };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_values_value());
+                        continue;
+                    }
+                    if out_count == 2 {
+                        let (values, ia) = eval.into_pair();
+                        stack.push(values);
+                        stack.push(ia);
+                        continue;
+                    }
+                    let (values, ia, ib) = eval.into_triple();
+                    stack.push(values);
+                    stack.push(ia);
+                    stack.push(ib);
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "union" && args.len() >= 2 {
+                    let eval = match runmat_runtime::builtins::array::sorting_sets::union::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        &args[2..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err.to_string()),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_values_value());
+                        continue;
+                    }
+                    if out_count == 2 {
+                        let (values, ia) = eval.into_pair();
+                        stack.push(values);
+                        stack.push(ia);
+                        continue;
+                    }
+                    let (values, ia, ib) = eval.into_triple();
+                    stack.push(values);
+                    stack.push(ia);
+                    stack.push(ib);
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "histcounts" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::stats::hist::histcounts::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err.to_string()),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_counts_value());
+                        continue;
+                    }
+                    let (counts, edges) = eval.into_pair();
+                    stack.push(counts);
+                    stack.push(edges);
+                    if out_count > 2 {
+                        for _ in 2..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "histcounts2" && args.len() >= 2 {
+                    let eval = match runmat_runtime::builtins::stats::hist::histcounts2::evaluate(
+                        args[0].clone(),
+                        args[1].clone(),
+                        &args[2..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err.to_string()),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_counts_value());
+                        continue;
+                    }
+                    if out_count == 2 {
+                        let (counts, xedges) = eval.into_pair();
+                        stack.push(counts);
+                        stack.push(xedges);
+                        continue;
+                    }
+                    let (counts, xedges, yedges) = eval.into_triple();
+                    stack.push(counts);
+                    stack.push(xedges);
+                    stack.push(yedges);
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
+                }
+                if name == "unique" && !args.is_empty() {
+                    let eval = match runmat_runtime::builtins::array::sorting_sets::unique::evaluate(
+                        args[0].clone(),
+                        &args[1..],
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err.to_string()),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    if out_count == 1 {
+                        stack.push(eval.into_values_value());
+                        continue;
+                    }
+                    if out_count == 2 {
+                        let (values, ia) = eval.into_pair();
+                        stack.push(values);
+                        stack.push(ia);
+                        continue;
+                    }
+                    let (values, ia, ic) = eval.into_triple();
+                    stack.push(values);
+                    stack.push(ia);
+                    stack.push(ic);
+                    if out_count > 3 {
+                        for _ in 3..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
+                    continue;
                 }
                 match call_builtin(&name, &args) {
                     Ok(v) => match v {
@@ -2814,7 +4105,7 @@ pub fn interpret_with_vars(
                                 }
                             }
                         } else {
-                            vm_bail!(e);
+                            vm_bail!(e.to_string());
                         }
                     }
                 }
@@ -2937,13 +4228,13 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     other => {
                         let result = match runmat_runtime::perform_indexing(&other, &indices) {
                             Ok(v) => v,
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         };
                         stack.push(result);
                     }
@@ -2979,7 +4270,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::Tensor(t) => {
@@ -4175,7 +5466,9 @@ pub fn interpret_with_vars(
                                             Value::Tensor(idx_t) => {
                                                 let len = idx_t.shape.iter().product::<usize>();
                                                 if len == total {
-                                                    for (i, &val) in idx_t.data.iter().enumerate() {
+                                                    for (i, &val) in
+                                                        idx_t.data.iter().enumerate()
+                                                    {
                                                         if val != 0.0 {
                                                             idxs.push(i + 1);
                                                         }
@@ -4611,7 +5904,7 @@ pub fn interpret_with_vars(
                                         );
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             }
                             stack.push(Value::Tensor(t));
                         } else {
@@ -4725,11 +6018,11 @@ pub fn interpret_with_vars(
                                                     }
                                                 } else {
                                                     vm_bail!(
-                                                        "shape mismatch for slice assign".into()
+                                                        "shape mismatch for slice assign".to_string()
                                                     );
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                         }
                                         stack.push(Value::Tensor(t));
                                         bench_end("StoreSlice2D.fast_col", __b);
@@ -4773,11 +6066,11 @@ pub fn interpret_with_vars(
                                                     }
                                                 } else {
                                                     vm_bail!(
-                                                        "shape mismatch for slice assign".into()
+                                                        "shape mismatch for slice assign".to_string()
                                                     );
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                         }
                                         stack.push(Value::Tensor(t));
                                         bench_end("StoreSlice2D.fast_row", __b);
@@ -4837,7 +6130,7 @@ pub fn interpret_with_vars(
                                     }
                                     if shape.len() > dims {
                                         if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         shape.truncate(dims);
                                     }
@@ -4851,7 +6144,7 @@ pub fn interpret_with_vars(
                                         }
                                     }
                                     if !ok {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     let mut rstrides = vec![0usize; dims];
                                     let mut racc = 1usize;
@@ -4865,7 +6158,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             };
                             // Iterate and scatter
                             let mut _k = 0usize;
@@ -5107,7 +6400,7 @@ pub fn interpret_with_vars(
                                         );
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             }
                             let view = runmat_accelerate_api::HostTensorView {
                                 data: &t.data,
@@ -5227,11 +6520,11 @@ pub fn interpret_with_vars(
                                                     }
                                                 } else {
                                                     vm_bail!(
-                                                        "shape mismatch for slice assign".into()
+                                                        "shape mismatch for slice assign".to_string()
                                                     );
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                         }
                                         let view = runmat_accelerate_api::HostTensorView {
                                             data: &t.data,
@@ -5281,11 +6574,11 @@ pub fn interpret_with_vars(
                                                     }
                                                 } else {
                                                     vm_bail!(
-                                                        "shape mismatch for slice assign".into()
+                                                        "shape mismatch for slice assign".to_string()
                                                     );
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                         }
                                         let view = runmat_accelerate_api::HostTensorView {
                                             data: &t.data,
@@ -5352,7 +6645,7 @@ pub fn interpret_with_vars(
                                     }
                                     if shape.len() > dims {
                                         if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         shape.truncate(dims);
                                     }
@@ -5366,7 +6659,7 @@ pub fn interpret_with_vars(
                                         }
                                     }
                                     if !ok {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     let mut rstrides = vec![0usize; dims];
                                     let mut racc = 1usize;
@@ -5380,7 +6673,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             };
                             // Iterate and scatter
                             let mut _k = 0usize;
@@ -5531,7 +6824,7 @@ pub fn interpret_with_vars(
                                         sa.data[li - 1] = s.clone();
                                     }
                                 }
-                                _ => vm_bail!("rhs must be string or string array".into()),
+                                _ => vm_bail!("rhs must be string or string array".to_string()),
                             }
                             stack.push(Value::StringArray(sa));
                         } else {
@@ -5647,7 +6940,7 @@ pub fn interpret_with_vars(
                                     }
                                     if shape.len() > dims {
                                         if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         shape.truncate(dims);
                                     }
@@ -5655,7 +6948,7 @@ pub fn interpret_with_vars(
                                         let out_len = per_dim_indices[d].len();
                                         let rhs_len = shape[d];
                                         if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                     }
                                     let mut rstrides = vec![0usize; dims];
@@ -5680,7 +6973,7 @@ pub fn interpret_with_vars(
                                     }
                                     if shape.len() > dims {
                                         if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         shape.truncate(dims);
                                     }
@@ -5688,7 +6981,7 @@ pub fn interpret_with_vars(
                                         let out_len = per_dim_indices[d].len();
                                         let rhs_len = shape[d];
                                         if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                     }
                                     let mut rstrides = vec![0usize; dims];
@@ -5705,7 +6998,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be string or string array".into()),
+                                _ => vm_bail!("rhs must be string or string array".to_string()),
                             };
                             // Iterate and scatter
                             let mut idx = vec![0usize; dims];
@@ -5753,7 +7046,7 @@ pub fn interpret_with_vars(
                         }
                     }
                     _ => vm_bail!(
-                        "Slicing assignment only supported on tensors or string arrays".into()
+                        "Slicing assignment only supported on tensors or string arrays".to_string()
                     ),
                 }
                 bench_end("StoreSlice", __b);
@@ -5924,7 +7217,7 @@ pub fn interpret_with_vars(
                                         }
                                         if rshape.len() > dims {
                                             if rshape.iter().skip(dims).any(|&s| s != 1) {
-                                                vm_bail!("shape mismatch for slice assign".into());
+                                                vm_bail!("shape mismatch for slice assign".to_string());
                                             }
                                             rshape.truncate(dims);
                                         }
@@ -5932,7 +7225,7 @@ pub fn interpret_with_vars(
                                             let out_len = per_dim_indices[d].len();
                                             let rhs_len = rshape[d];
                                             if !(rhs_len == 1 || rhs_len == out_len) {
-                                                vm_bail!("shape mismatch for slice assign".into());
+                                                vm_bail!("shape mismatch for slice assign".to_string());
                                             }
                                         }
                                         let mut rstrides = vec![0usize; dims];
@@ -5947,7 +7240,7 @@ pub fn interpret_with_vars(
                                             strides: rstrides,
                                         }
                                     }
-                                    _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                    _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                                 };
                                 // Map absolute indices to selection positions per dimension
                                 use std::collections::HashMap;
@@ -6233,7 +7526,7 @@ pub fn interpret_with_vars(
                                 Value::Num(n) => RhsView::Scalar(n),
                                 Value::Tensor(rt) => {
                                     if rt.data.is_empty() {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     // Normalize RHS shape to dims by padding with ones or validating extra dims are ones
                                     let mut rshape = rt.shape.clone();
@@ -6242,7 +7535,7 @@ pub fn interpret_with_vars(
                                     }
                                     if rshape.len() > dims {
                                         if rshape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         rshape.truncate(dims);
                                     }
@@ -6251,7 +7544,7 @@ pub fn interpret_with_vars(
                                         let out_len = per_dim_indices[d].len();
                                         let rhs_len = rshape[d];
                                         if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                     }
                                     // Build column-major strides for RHS
@@ -6262,7 +7555,7 @@ pub fn interpret_with_vars(
                                         racc *= rshape[d];
                                     }
                                     if racc != rt.data.len() {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     RhsView::Tensor {
                                         data: rt.data,
@@ -6270,7 +7563,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             };
                             // Precompute mapping from absolute index to position-in-selection per dimension to ensure column-major consistent mapping
                             use std::collections::HashMap;
@@ -6512,7 +7805,7 @@ pub fn interpret_with_vars(
                                 Value::Num(n) => RhsView::Scalar(n),
                                 Value::Tensor(rt) => {
                                     if rt.data.is_empty() {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     // Normalize RHS shape to dims by padding with ones or validating extra dims are ones
                                     let mut rshape = rt.shape.clone();
@@ -6521,7 +7814,7 @@ pub fn interpret_with_vars(
                                     }
                                     if rshape.len() > dims {
                                         if rshape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                         rshape.truncate(dims);
                                     }
@@ -6530,7 +7823,7 @@ pub fn interpret_with_vars(
                                         let out_len = per_dim_indices[d].len();
                                         let rhs_len = rshape[d];
                                         if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".into());
+                                            vm_bail!("shape mismatch for slice assign".to_string());
                                         }
                                     }
                                     // Build column-major strides for RHS
@@ -6541,7 +7834,7 @@ pub fn interpret_with_vars(
                                         racc *= rshape[d];
                                     }
                                     if racc != rt.data.len() {
-                                        vm_bail!("shape mismatch for slice assign".into());
+                                        vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     RhsView::Tensor {
                                         data: rt.data,
@@ -6549,7 +7842,7 @@ pub fn interpret_with_vars(
                                         strides: rstrides,
                                     }
                                 }
-                                _ => vm_bail!("rhs must be numeric or tensor".into()),
+                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
                             };
                             // Precompute mapping from absolute index to position-in-selection per dimension to ensure column-major consistent mapping
                             use std::collections::HashMap;
@@ -6826,7 +8119,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::Cell(ca) => match indices.len() {
@@ -6938,7 +8231,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => v,
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         };
                         // Push returned value and pad to out_count
                         stack.push(v);
@@ -7115,7 +8408,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::Tensor(mut t) => {
@@ -7335,7 +8628,7 @@ pub fn interpret_with_vars(
                             ],
                         ) {
                             Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::Cell(mut ca) => match indices.len() {
@@ -7431,7 +8724,7 @@ pub fn interpret_with_vars(
                                     ],
                                 ) {
                                     Ok(v) => stack.push(v),
-                                    Err(e) => vm_bail!(e),
+                                    Err(e) => vm_bail!(e.to_string()),
                                 }
                             } else {
                                 vm_bail!(format!(
@@ -7471,7 +8764,7 @@ pub fn interpret_with_vars(
                             .map_err(|e| format!("cell field gather: {e}"))?;
                         stack.push(Value::Cell(new_cell));
                     }
-                    _ => vm_bail!("LoadMember on non-object".into()),
+                    _ => vm_bail!("LoadMember on non-object".to_string()),
                 }
             }
             Instr::LoadMemberDynamic => {
@@ -7511,7 +8804,7 @@ pub fn interpret_with_vars(
                                     ],
                                 ) {
                                     Ok(v) => stack.push(v),
-                                    Err(e) => vm_bail!(e),
+                                    Err(e) => vm_bail!(e.to_string()),
                                 }
                             } else {
                                 vm_bail!(format!(
@@ -7530,7 +8823,7 @@ pub fn interpret_with_vars(
                             vm_bail!(format!("Undefined field '{}'", name));
                         }
                     }
-                    _ => vm_bail!("LoadMemberDynamic on non-struct/object".into()),
+                    _ => vm_bail!("LoadMemberDynamic on non-struct/object".to_string()),
                 }
             }
             Instr::StoreMember(field) => {
@@ -7662,7 +8955,7 @@ pub fn interpret_with_vars(
                         }
                         stack.push(Value::Cell(ca));
                     }
-                    _ => vm_bail!("StoreMember on non-object".into()),
+                    _ => vm_bail!("StoreMember on non-object".to_string()),
                 }
             }
             Instr::StoreMemberDynamic => {
@@ -7743,7 +9036,7 @@ pub fn interpret_with_vars(
                         }
                         stack.push(Value::Cell(ca));
                     }
-                    _ => vm_bail!("StoreMemberDynamic on non-struct/object".into()),
+                    _ => vm_bail!("StoreMemberDynamic on non-struct/object".to_string()),
                 }
             }
             Instr::CallMethod(name, arg_count) => {
@@ -7799,7 +9092,7 @@ pub fn interpret_with_vars(
                             }
                         }
                     }
-                    _ => vm_bail!("CallMethod on non-object".into()),
+                    _ => vm_bail!("CallMethod on non-object".to_string()),
                 }
             }
             Instr::LoadMethod(name) => {
@@ -7829,7 +9122,7 @@ pub fn interpret_with_vars(
                             vm_bail!(format!("Unknown static method '{}' on class {}", name, cls));
                         }
                     }
-                    _ => vm_bail!("LoadMethod requires object or classref".into()),
+                    _ => vm_bail!("LoadMethod requires object or classref".to_string()),
                 }
             }
             Instr::CreateClosure(func_name, capture_count) => {
@@ -7970,7 +9263,6 @@ pub fn interpret_with_vars(
     }
     Ok(vars)
 }
-
 #[cfg(feature = "native-accel")]
 fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,

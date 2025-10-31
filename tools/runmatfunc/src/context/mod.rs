@@ -2,6 +2,7 @@
 
 pub mod gather;
 pub mod manifest;
+pub mod passes;
 pub mod prompt;
 pub mod reference;
 pub mod serialize;

@@ -11,8 +11,24 @@ const SCALAR_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::SCAL
 const SCALAR_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F32;
 const TRANSPOSE_SHADER_F64: &str = crate::backend::wgpu::shaders::transpose::TRANSPOSE_SHADER_F64;
 const TRANSPOSE_SHADER_F32: &str = crate::backend::wgpu::shaders::transpose::TRANSPOSE_SHADER_F32;
+const PERMUTE_SHADER_F64: &str = crate::backend::wgpu::shaders::permute::PERMUTE_SHADER_F64;
+const PERMUTE_SHADER_F32: &str = crate::backend::wgpu::shaders::permute::PERMUTE_SHADER_F32;
+const FLIP_SHADER_F64: &str = crate::backend::wgpu::shaders::flip::FLIP_SHADER_F64;
+const FLIP_SHADER_F32: &str = crate::backend::wgpu::shaders::flip::FLIP_SHADER_F32;
+const CIRCSHIFT_SHADER_F64: &str = crate::backend::wgpu::shaders::circshift::CIRCSHIFT_SHADER_F64;
+const CIRCSHIFT_SHADER_F32: &str = crate::backend::wgpu::shaders::circshift::CIRCSHIFT_SHADER_F32;
+const DIFF_SHADER_F64: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F64;
+const DIFF_SHADER_F32: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F32;
+const CUMSUM_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F64;
+const CUMSUM_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F32;
+const REPMAT_SHADER_F64: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F64;
+const REPMAT_SHADER_F32: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F32;
+const KRON_SHADER_F64: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F64;
+const KRON_SHADER_F32: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F32;
 const MATMUL_SHADER_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F64;
 const MATMUL_SHADER_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F32;
+const CONV1D_SHADER_F64: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F64;
+const CONV1D_SHADER_F32: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F32;
 const REDUCE_GLOBAL_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F64;
 const REDUCE_GLOBAL_SHADER_F32: &str =
@@ -23,6 +39,56 @@ const REDUCE_DIM_MINMAX_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_DIM_MINMAX_SHADER_F64;
 const REDUCE_DIM_MINMAX_SHADER_F32: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_DIM_MINMAX_SHADER_F32;
+const EYE_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::EYE_SHADER_F64;
+const EYE_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::EYE_SHADER_F32;
+const FILL_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::FILL_SHADER_F64;
+const FILL_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::FILL_SHADER_F32;
+const LINSPACE_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::LINSPACE_SHADER_F64;
+const LINSPACE_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::LINSPACE_SHADER_F32;
+const RANDOM_INT_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F64;
+const RANDOM_INT_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F32;
+const RANDOM_UNIFORM_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_UNIFORM_SHADER_F64;
+const RANDOM_UNIFORM_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_UNIFORM_SHADER_F32;
+const RANDOM_NORMAL_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_NORMAL_SHADER_F64;
+const RANDOM_NORMAL_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_NORMAL_SHADER_F32;
+const RANDPERM_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDPERM_SHADER_F64;
+const RANDPERM_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDPERM_SHADER_F32;
+const FSPECIAL_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::FSPECIAL_SHADER_F64;
+const FSPECIAL_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::FSPECIAL_SHADER_F32;
+const POLYVAL_SHADER_F64: &str = crate::backend::wgpu::shaders::polyval::POLYVAL_SHADER_F64;
+const POLYVAL_SHADER_F32: &str = crate::backend::wgpu::shaders::polyval::POLYVAL_SHADER_F32;
+const POLYDER_SHADER_F64: &str = crate::backend::wgpu::shaders::polyder::POLYDER_SHADER_F64;
+const POLYDER_SHADER_F32: &str = crate::backend::wgpu::shaders::polyder::POLYDER_SHADER_F32;
+const POLYINT_SHADER_F64: &str = crate::backend::wgpu::shaders::polyint::POLYINT_SHADER_F64;
+const POLYINT_SHADER_F32: &str = crate::backend::wgpu::shaders::polyint::POLYINT_SHADER_F32;
+const DIAG_FROM_VECTOR_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::diag::DIAG_FROM_VECTOR_SHADER_F64;
+const DIAG_FROM_VECTOR_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::diag::DIAG_FROM_VECTOR_SHADER_F32;
+const DIAG_EXTRACT_SHADER_F64: &str = crate::backend::wgpu::shaders::diag::DIAG_EXTRACT_SHADER_F64;
+const DIAG_EXTRACT_SHADER_F32: &str = crate::backend::wgpu::shaders::diag::DIAG_EXTRACT_SHADER_F32;
+const FIND_SHADER_F64: &str = crate::backend::wgpu::shaders::find::FIND_SHADER_F64;
+const FIND_SHADER_F32: &str = crate::backend::wgpu::shaders::find::FIND_SHADER_F32;
+const TRIL_SHADER_F64: &str = crate::backend::wgpu::shaders::tril::TRIL_SHADER_F64;
+const TRIL_SHADER_F32: &str = crate::backend::wgpu::shaders::tril::TRIL_SHADER_F32;
+const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F64;
+const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
+const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
+const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
+const BANDWIDTH_SHADER_F64: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F64;
+const BANDWIDTH_SHADER_F32: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F32;
+const SYMMETRY_SHADER_F64: &str = crate::backend::wgpu::shaders::symmetry::SYMMETRY_SHADER_F64;
+const SYMMETRY_SHADER_F32: &str = crate::backend::wgpu::shaders::symmetry::SYMMETRY_SHADER_F32;
+const CUMPROD_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMPROD_SHADER_F64;
+const CUMPROD_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMPROD_SHADER_F32;
+const CUMMIN_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMMIN_SHADER_F64;
+const CUMMIN_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMMIN_SHADER_F32;
+const CUMMAX_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMMAX_SHADER_F64;
+const CUMMAX_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMMAX_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -34,10 +100,41 @@ pub struct WgpuPipelines {
     pub unary: PipelineBundle,
     pub scalar: PipelineBundle,
     pub transpose: PipelineBundle,
+    pub permute: PipelineBundle,
+    pub flip: PipelineBundle,
+    pub diff: PipelineBundle,
+    pub conv1d: PipelineBundle,
+    pub filter: PipelineBundle,
+    pub cumsum: PipelineBundle,
+    pub cumprod: PipelineBundle,
+    pub cummin: PipelineBundle,
+    pub cummax: PipelineBundle,
+    pub circshift: PipelineBundle,
+    pub tril: PipelineBundle,
+    pub triu: PipelineBundle,
+    pub repmat: PipelineBundle,
+    pub kron: PipelineBundle,
     pub matmul: PipelineBundle,
     pub reduce_global: PipelineBundle,
     pub reduce_dim_sum_mean: PipelineBundle,
     pub reduce_dim_minmax: PipelineBundle,
+    pub eye: PipelineBundle,
+    pub fill: PipelineBundle,
+    pub linspace: PipelineBundle,
+    pub random_int: PipelineBundle,
+    pub random_uniform: PipelineBundle,
+    pub random_normal: PipelineBundle,
+    pub randperm: PipelineBundle,
+    pub fspecial: PipelineBundle,
+    pub imfilter: PipelineBundle,
+    pub polyval: PipelineBundle,
+    pub polyder: PipelineBundle,
+    pub polyint: PipelineBundle,
+    pub diag_from_vector: PipelineBundle,
+    pub diag_extract: PipelineBundle,
+    pub find: PipelineBundle,
+    pub bandwidth: PipelineBundle,
+    pub symmetry: PipelineBundle,
 }
 
 impl WgpuPipelines {
@@ -107,6 +204,239 @@ impl WgpuPipelines {
             },
         );
 
+        let permute = create_pipeline(
+            device,
+            "runmat-permute-layout",
+            "runmat-permute-shader",
+            "runmat-permute-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => PERMUTE_SHADER_F64,
+                NumericPrecision::F32 => PERMUTE_SHADER_F32,
+            },
+        );
+
+        let flip = create_pipeline(
+            device,
+            "runmat-flip-layout",
+            "runmat-flip-shader",
+            "runmat-flip-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FLIP_SHADER_F64,
+                NumericPrecision::F32 => FLIP_SHADER_F32,
+            },
+        );
+
+        let conv1d = create_pipeline(
+            device,
+            "runmat-conv1d-layout",
+            "runmat-conv1d-shader",
+            "runmat-conv1d-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => CONV1D_SHADER_F64,
+                NumericPrecision::F32 => CONV1D_SHADER_F32,
+            },
+        );
+
+        let filter = create_pipeline(
+            device,
+            "runmat-iir-filter-layout",
+            "runmat-iir-filter-shader",
+            "runmat-iir-filter-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_entry(3),
+                storage_read_write_entry(4),
+                storage_read_write_entry(5),
+                storage_read_write_entry(6),
+                uniform_entry(7),
+            ],
+            match precision {
+                NumericPrecision::F64 => crate::backend::wgpu::shaders::filter::FILTER_SHADER_F64,
+                NumericPrecision::F32 => crate::backend::wgpu::shaders::filter::FILTER_SHADER_F32,
+            },
+        );
+
+        let diff = create_pipeline(
+            device,
+            "runmat-diff-layout",
+            "runmat-diff-shader",
+            "runmat-diff-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => DIFF_SHADER_F64,
+                NumericPrecision::F32 => DIFF_SHADER_F32,
+            },
+        );
+
+        let cumsum = create_pipeline(
+            device,
+            "runmat-cumsum-layout",
+            "runmat-cumsum-shader",
+            "runmat-cumsum-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => CUMSUM_SHADER_F64,
+                NumericPrecision::F32 => CUMSUM_SHADER_F32,
+            },
+        );
+
+        let cumprod = create_pipeline(
+            device,
+            "runmat-cumprod-layout",
+            "runmat-cumprod-shader",
+            "runmat-cumprod-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => CUMPROD_SHADER_F64,
+                NumericPrecision::F32 => CUMPROD_SHADER_F32,
+            },
+        );
+
+        let cummin = create_pipeline(
+            device,
+            "runmat-cummin-layout",
+            "runmat-cummin-shader",
+            "runmat-cummin-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => CUMMIN_SHADER_F64,
+                NumericPrecision::F32 => CUMMIN_SHADER_F32,
+            },
+        );
+
+        let cummax = create_pipeline(
+            device,
+            "runmat-cummax-layout",
+            "runmat-cummax-shader",
+            "runmat-cummax-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => CUMMAX_SHADER_F64,
+                NumericPrecision::F32 => CUMMAX_SHADER_F32,
+            },
+        );
+
+        let tril = create_pipeline(
+            device,
+            "runmat-tril-layout",
+            "runmat-tril-shader",
+            "runmat-tril-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => TRIL_SHADER_F64,
+                NumericPrecision::F32 => TRIL_SHADER_F32,
+            },
+        );
+
+        let triu = create_pipeline(
+            device,
+            "runmat-triu-layout",
+            "runmat-triu-shader",
+            "runmat-triu-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => TRIU_SHADER_F64,
+                NumericPrecision::F32 => TRIU_SHADER_F32,
+            },
+        );
+
+        let circshift = create_pipeline(
+            device,
+            "runmat-circshift-layout",
+            "runmat-circshift-shader",
+            "runmat-circshift-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => CIRCSHIFT_SHADER_F64,
+                NumericPrecision::F32 => CIRCSHIFT_SHADER_F32,
+            },
+        );
+
+        let repmat = create_pipeline(
+            device,
+            "runmat-repmat-layout",
+            "runmat-repmat-shader",
+            "runmat-repmat-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => REPMAT_SHADER_F64,
+                NumericPrecision::F32 => REPMAT_SHADER_F32,
+            },
+        );
+
+        let kron = create_pipeline(
+            device,
+            "runmat-kron-layout",
+            "runmat-kron-shader",
+            "runmat-kron-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => KRON_SHADER_F64,
+                NumericPrecision::F32 => KRON_SHADER_F32,
+            },
+        );
+
         let matmul = create_pipeline(
             device,
             "runmat-matmul-layout",
@@ -173,15 +503,292 @@ impl WgpuPipelines {
             },
         );
 
+        let eye = create_pipeline(
+            device,
+            "runmat-eye-layout",
+            "runmat-eye-shader",
+            "runmat-eye-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => EYE_SHADER_F64,
+                NumericPrecision::F32 => EYE_SHADER_F32,
+            },
+        );
+
+        let fill = create_pipeline(
+            device,
+            "runmat-fill-layout",
+            "runmat-fill-shader",
+            "runmat-fill-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => FILL_SHADER_F64,
+                NumericPrecision::F32 => FILL_SHADER_F32,
+            },
+        );
+
+        let linspace = create_pipeline(
+            device,
+            "runmat-linspace-layout",
+            "runmat-linspace-shader",
+            "runmat-linspace-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => LINSPACE_SHADER_F64,
+                NumericPrecision::F32 => LINSPACE_SHADER_F32,
+            },
+        );
+
+        let random_int = create_pipeline(
+            device,
+            "runmat-random-int-layout",
+            "runmat-random-int-shader",
+            "runmat-random-int-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDOM_INT_SHADER_F64,
+                NumericPrecision::F32 => RANDOM_INT_SHADER_F32,
+            },
+        );
+
+        let random_uniform = create_pipeline(
+            device,
+            "runmat-random-uniform-layout",
+            "runmat-random-uniform-shader",
+            "runmat-random-uniform-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDOM_UNIFORM_SHADER_F64,
+                NumericPrecision::F32 => RANDOM_UNIFORM_SHADER_F32,
+            },
+        );
+
+        let random_normal = create_pipeline(
+            device,
+            "runmat-random-normal-layout",
+            "runmat-random-normal-shader",
+            "runmat-random-normal-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDOM_NORMAL_SHADER_F64,
+                NumericPrecision::F32 => RANDOM_NORMAL_SHADER_F32,
+            },
+        );
+        let fspecial = create_pipeline(
+            device,
+            "runmat-fspecial-layout",
+            "runmat-fspecial-shader",
+            "runmat-fspecial-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => FSPECIAL_SHADER_F64,
+                NumericPrecision::F32 => FSPECIAL_SHADER_F32,
+            },
+        );
+
+        let imfilter = create_pipeline(
+            device,
+            "runmat-imfilter-layout",
+            "runmat-imfilter-shader",
+            "runmat-imfilter-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_write_entry(3),
+                uniform_entry(4),
+            ],
+            match precision {
+                NumericPrecision::F64 => IMFILTER_SHADER_F64,
+                NumericPrecision::F32 => IMFILTER_SHADER_F32,
+            },
+        );
+
+        let randperm = create_pipeline(
+            device,
+            "runmat-randperm-layout",
+            "runmat-randperm-shader",
+            "runmat-randperm-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDPERM_SHADER_F64,
+                NumericPrecision::F32 => RANDPERM_SHADER_F32,
+            },
+        );
+
+        let polyval = create_pipeline(
+            device,
+            "runmat-polyval-layout",
+            "runmat-polyval-shader",
+            "runmat-polyval-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => POLYVAL_SHADER_F64,
+                NumericPrecision::F32 => POLYVAL_SHADER_F32,
+            },
+        );
+
+        let polyder = create_pipeline(
+            device,
+            "runmat-polyder-layout",
+            "runmat-polyder-shader",
+            "runmat-polyder-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => POLYDER_SHADER_F64,
+                NumericPrecision::F32 => POLYDER_SHADER_F32,
+            },
+        );
+
+        let polyint = create_pipeline(
+            device,
+            "runmat-polyint-layout",
+            "runmat-polyint-shader",
+            "runmat-polyint-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => POLYINT_SHADER_F64,
+                NumericPrecision::F32 => POLYINT_SHADER_F32,
+            },
+        );
+
+        let diag_from_vector = create_pipeline(
+            device,
+            "runmat-diag-vec-layout",
+            "runmat-diag-vec-shader",
+            "runmat-diag-vec-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => DIAG_FROM_VECTOR_SHADER_F64,
+                NumericPrecision::F32 => DIAG_FROM_VECTOR_SHADER_F32,
+            },
+        );
+
+        let diag_extract = create_pipeline(
+            device,
+            "runmat-diag-extract-layout",
+            "runmat-diag-extract-shader",
+            "runmat-diag-extract-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => DIAG_EXTRACT_SHADER_F64,
+                NumericPrecision::F32 => DIAG_EXTRACT_SHADER_F32,
+            },
+        );
+
+        let find = create_pipeline(
+            device,
+            "runmat-find-layout",
+            "runmat-find-shader",
+            "runmat-find-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                storage_read_write_entry(3),
+                storage_read_write_entry(4),
+                storage_read_write_entry(5),
+                uniform_entry(6),
+            ],
+            match precision {
+                NumericPrecision::F64 => FIND_SHADER_F64,
+                NumericPrecision::F32 => FIND_SHADER_F32,
+            },
+        );
+
+        let bandwidth = create_pipeline(
+            device,
+            "runmat-bandwidth-layout",
+            "runmat-bandwidth-shader",
+            "runmat-bandwidth-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => BANDWIDTH_SHADER_F64,
+                NumericPrecision::F32 => BANDWIDTH_SHADER_F32,
+            },
+        );
+
+        let symmetry = create_pipeline(
+            device,
+            "runmat-symmetry-layout",
+            "runmat-symmetry-shader",
+            "runmat-symmetry-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => SYMMETRY_SHADER_F64,
+                NumericPrecision::F32 => SYMMETRY_SHADER_F32,
+            },
+        );
+
         Self {
             binary,
             unary,
             scalar,
             transpose,
+            permute,
+            flip,
+            conv1d,
+            filter,
+            diff,
+            cumsum,
+            cumprod,
+            cummin,
+            cummax,
+            circshift,
+            tril,
+            triu,
+            repmat,
+            kron,
             matmul,
             reduce_global,
             reduce_dim_sum_mean,
             reduce_dim_minmax,
+            eye,
+            fill,
+            linspace,
+            random_int,
+            random_uniform,
+            random_normal,
+            randperm,
+            fspecial,
+            imfilter,
+            polyval,
+            polyder,
+            polyint,
+            diag_from_vector,
+            diag_extract,
+            find,
+            bandwidth,
+            symmetry,
         }
     }
 }

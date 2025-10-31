@@ -1,8 +1,6 @@
-use std::collections::HashMap;
+use runmat_builtins::{builtin_functions, LogicalArray, Tensor, Value};
 
-use runmat_builtins::{builtin_functions, Tensor, Value};
-
-use crate::{make_cell, new_object_builtin};
+use crate::{make_cell_with_shape, new_object_builtin};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -25,26 +23,44 @@ pub fn value_contains_gpu(value: &Value) -> bool {
 pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
     match value {
         Value::GpuTensor(handle) => {
+            // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
+            #[cfg(all(test, feature = "wgpu"))]
+            {
+                if handle.device_id != 0 {
+                    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                    );
+                }
+            }
             let provider = runmat_accelerate_api::provider()
                 .ok_or_else(|| "gather: no acceleration provider registered".to_string())?;
+            let is_logical = runmat_accelerate_api::handle_is_logical(handle);
             let host = provider.download(handle).map_err(|e| e.to_string())?;
             runmat_accelerate_api::clear_residency(handle);
-            let tensor = Tensor::new(host.data, host.shape).map_err(|e| e.to_string())?;
-            Ok(Value::Tensor(tensor))
+            let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
+            if is_logical {
+                let bits: Vec<u8> = data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
+                let logical = LogicalArray::new(bits, shape).map_err(|e| e.to_string())?;
+                Ok(Value::LogicalArray(logical))
+            } else {
+                let tensor = Tensor::new(data, shape).map_err(|e| e.to_string())?;
+                Ok(Value::Tensor(tensor))
+            }
         }
         Value::Cell(ca) => {
             let mut gathered = Vec::with_capacity(ca.data.len());
             for ptr in &ca.data {
                 gathered.push(gather_if_needed(&**ptr)?);
             }
-            make_cell(gathered, ca.rows, ca.cols)
+            make_cell_with_shape(gathered, ca.shape.clone())
         }
         Value::Struct(sv) => {
-            let mut fields = HashMap::with_capacity(sv.fields.len());
-            for (key, val) in &sv.fields {
-                fields.insert(key.clone(), gather_if_needed(val)?);
+            let mut gathered = sv.clone();
+            for value in gathered.fields.values_mut() {
+                let updated = gather_if_needed(value)?;
+                *value = updated;
             }
-            Ok(Value::Struct(runmat_builtins::StructValue { fields }))
+            Ok(Value::Struct(gathered))
         }
         Value::Object(obj) => {
             let mut cloned = obj.clone();

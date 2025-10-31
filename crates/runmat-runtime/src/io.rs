@@ -4,18 +4,6 @@
 
 use regex::Regex;
 use runmat_macros::runtime_builtin;
-use std::sync::{Mutex, OnceLock};
-
-/// Display a string to the console (language fprintf with single string argument)
-#[runtime_builtin(name = "fprintf", sink = true)]
-pub fn fprintf_string_builtin(format_str: String) -> Result<f64, String> {
-    print!("{format_str}");
-    use std::io::{self, Write};
-    io::stdout()
-        .flush()
-        .map_err(|e| format!("Failed to flush stdout: {e}"))?;
-    Ok(format_str.len() as f64) // fprintf returns number of characters written
-}
 
 /// Format and display string with one numeric argument (fprintf with %d, %f, %.4f etc.)
 // merged into single fprintf below if needed
@@ -92,43 +80,9 @@ pub fn disp_number_builtin(n: f64) -> Result<f64, String> {
     Ok(0.0)
 }
 
-// Global timer state for tic/toc functionality
-static TIMER_START: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
-
-/// Start a stopwatch timer (language tic function)
-#[runtime_builtin(name = "tic")]
-pub fn tic_builtin() -> Result<f64, String> {
-    let timer = TIMER_START.get_or_init(|| Mutex::new(None));
-    let mut start_time = timer.lock().map_err(|_| "Failed to acquire timer lock")?;
-    *start_time = Some(std::time::Instant::now());
-    Ok(0.0) // tic returns 0 in the language
-}
-
-/// Read elapsed time from stopwatch (language toc function)
-#[runtime_builtin(name = "toc")]
-pub fn toc_builtin() -> Result<f64, String> {
-    let timer = TIMER_START.get_or_init(|| Mutex::new(None));
-    let start_time = timer.lock().map_err(|_| "Failed to acquire timer lock")?;
-
-    match *start_time {
-        Some(start) => {
-            let elapsed = start.elapsed().as_secs_f64();
-            Ok(elapsed)
-        }
-        None => Err("tic must be called before toc".to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_fprintf() {
-        let result = fprintf_string_builtin("Hello, world!".to_string());
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 13.0);
-    }
 
     #[test]
     fn test_disp_string() {
@@ -140,23 +94,5 @@ mod tests {
     fn test_disp_number() {
         let result = disp_number_builtin(std::f64::consts::PI);
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_tic_toc() {
-        // Test tic
-        let result = tic_builtin();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0.0);
-
-        // Small delay
-        std::thread::sleep(std::time::Duration::from_millis(10));
-
-        // Test toc
-        let result = toc_builtin();
-        assert!(result.is_ok());
-        let elapsed = result.unwrap();
-        assert!(elapsed >= 0.01); // At least 10ms
-        assert!(elapsed < 1.0); // Less than 1 second
     }
 }
