@@ -332,6 +332,13 @@ fn cumsum_gpu(
             );
         }
     }
+    if matches!(direction, CumsumDirection::Reverse) && matches!(nan_mode, CumsumNanMode::Omit) {
+        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
+        let result = cumsum_tensor(&tensor, fallback_dim, direction, nan_mode)?;
+        return Ok(tensor::tensor_into_value(result));
+    }
+
     if let Some(target) = dim {
         if target == 0 {
             return Err("cumsum: dimension must be >= 1".to_string());
@@ -925,8 +932,8 @@ mod tests {
             data: &tensor.data,
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let handle = provider
             .upload(&view)
             .unwrap();
         let gpu = cumsum_builtin(
@@ -938,8 +945,12 @@ mod tests {
         match cpu {
             Value::Tensor(ct) => {
                 assert_eq!(ct.shape, gathered.shape);
+                let tol = match provider.precision() {
+                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
+                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+                };
                 for (a, b) in ct.data.iter().zip(gathered.data.iter()) {
-                    assert!((a - b).abs() < 1e-9);
+                    assert!((a - b).abs() < tol);
                 }
             }
             other => panic!("unexpected cpu result {other:?}"),

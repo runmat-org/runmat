@@ -435,7 +435,9 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::{HostTensorView, ProviderPrecision};
+    use runmat_accelerate_api::HostTensorView;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
 
     #[test]

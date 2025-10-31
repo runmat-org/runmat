@@ -326,6 +326,13 @@ fn cumprod_gpu(
             );
         }
     }
+    if matches!(direction, CumprodDirection::Reverse) && matches!(nan_mode, CumprodNanMode::Omit) {
+        let tensor = gpu_helpers::gather_tensor(&handle)?;
+        let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
+        let result = cumprod_tensor(&tensor, fallback_dim, direction, nan_mode)?;
+        return Ok(tensor::tensor_into_value(result));
+    }
+
     if let Some(target) = dim {
         if target == 0 {
             return Err("cumprod: dimension must be >= 1".to_string());
@@ -869,11 +876,15 @@ mod tests {
         match cpu {
             Value::Tensor(ct) => {
                 assert_eq!(gathered.shape, ct.shape);
+                let tol = match provider.precision() {
+                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+                };
                 for (a, b) in gathered.data.iter().zip(ct.data.iter()) {
                     if b.is_nan() {
                         assert!(a.is_nan());
                     } else {
-                        assert!((a - b).abs() < 1e-12);
+                        assert!((a - b).abs() < tol);
                     }
                 }
             }

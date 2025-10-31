@@ -911,8 +911,12 @@ mod tests {
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
             other => panic!("unexpected cpu result {other:?}"),
         };
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
         for (a, b) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
-            assert!((a - b).abs() < 1e-9);
+            assert!((a - b).abs() < tol);
         }
         let _ = provider.free(&hb);
         let _ = provider.free(&he);

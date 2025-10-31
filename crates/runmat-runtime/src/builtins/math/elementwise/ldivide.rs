@@ -995,12 +995,11 @@ mod tests {
             data: &rhs.data,
             shape: &rhs.shape,
         };
-        let ha = runmat_accelerate_api::provider()
-            .unwrap()
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let ha = provider
             .upload(&view_l)
             .unwrap();
-        let hb = runmat_accelerate_api::provider()
-            .unwrap()
+        let hb = provider
             .upload(&view_r)
             .unwrap();
         let gpu = ldivide_gpu_pair(ha, hb).unwrap();
@@ -1008,8 +1007,12 @@ mod tests {
         match cpu {
             Value::Tensor(t) => {
                 assert_eq!(gathered.data.len(), t.data.len());
+                let tol = match provider.precision() {
+                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+                };
                 for (ga, ca) in gathered.data.iter().zip(t.data.iter()) {
-                    assert!((ga - ca).abs() < EPS);
+                    assert!((ga - ca).abs() < tol);
                 }
             }
             Value::Num(n) => assert_eq!(gathered.data, vec![n]),

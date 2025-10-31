@@ -5686,6 +5686,20 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
+        // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
+        if matches!(direction, ProviderScanDirection::Reverse) {
+            let flipped_in = self.flip_exec(handle, &[dim])?;
+            let forward = self.cumsum_exec(
+                &flipped_in,
+                dim,
+                ProviderScanDirection::Forward,
+                nan_mode,
+            )?;
+            let _ = self.free(&flipped_in);
+            let flipped_out = self.flip_exec(&forward, &[dim])?;
+            let _ = self.free(&forward);
+            return Ok(flipped_out);
+        }
         let entry = self.get_entry(handle)?;
         if entry.len == 0 {
             return Ok(handle.clone());
@@ -5760,9 +5774,6 @@ impl WgpuProvider {
         }
 
         let mut flags = 0u32;
-        if matches!(direction, ProviderScanDirection::Reverse) {
-            flags |= 1;
-        }
         if matches!(nan_mode, ProviderNanMode::Omit) {
             flags |= 2;
         }
@@ -5777,7 +5788,6 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-
         let params_buffer = self.uniform_buffer(&params, "runmat-cumsum-params");
         let bind_group = self
             .device_ref()
@@ -5799,7 +5809,6 @@ impl WgpuProvider {
                     },
                 ],
             });
-
         let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
             segments as u32,
             crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -5813,7 +5822,6 @@ impl WgpuProvider {
             "runmat-cumsum-encoder",
             "runmat-cumsum-pass",
         );
-
         Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
     }
 
@@ -5824,6 +5832,20 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
+        // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
+        if matches!(direction, ProviderScanDirection::Reverse) {
+            let flipped_in = self.flip_exec(handle, &[dim])?;
+            let forward = self.cumprod_exec(
+                &flipped_in,
+                dim,
+                ProviderScanDirection::Forward,
+                nan_mode,
+            )?;
+            let _ = self.free(&flipped_in);
+            let flipped_out = self.flip_exec(&forward, &[dim])?;
+            let _ = self.free(&forward);
+            return Ok(flipped_out);
+        }
         let entry = self.get_entry(handle)?;
         if entry.len == 0 {
             return Ok(handle.clone());
@@ -5898,9 +5920,6 @@ impl WgpuProvider {
         }
 
         let mut flags = 0u32;
-        if matches!(direction, ProviderScanDirection::Reverse) {
-            flags |= 1;
-        }
         if matches!(nan_mode, ProviderNanMode::Omit) {
             flags |= 2;
         }
@@ -5915,7 +5934,6 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-
         let params_buffer = self.uniform_buffer(&params, "runmat-cumprod-params");
         let bind_group = self
             .device_ref()
@@ -5937,7 +5955,6 @@ impl WgpuProvider {
                     },
                 ],
             });
-
         let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
             segments as u32,
             crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -5951,7 +5968,6 @@ impl WgpuProvider {
             "runmat-cumprod-encoder",
             "runmat-cumprod-pass",
         );
-
         Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
     }
 
