@@ -14,6 +14,8 @@ mod log;
 mod log10;
 mod log1p;
 mod log2;
+mod minus;
+mod plus;
 mod pow2;
 mod power;
 mod rdivide;

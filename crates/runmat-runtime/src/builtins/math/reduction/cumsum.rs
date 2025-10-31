@@ -933,9 +933,7 @@ mod tests {
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().unwrap();
-        let handle = provider
-            .upload(&view)
-            .unwrap();
+        let handle = provider.upload(&view).unwrap();
         let gpu = cumsum_builtin(
             Value::GpuTensor(handle),
             vec![Value::from("reverse"), Value::from("omitnan")],

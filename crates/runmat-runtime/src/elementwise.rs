@@ -3,6 +3,7 @@
 //! This module implements language-compatible element-wise operations (.*,  ./,  .^)
 //! These operations work element-by-element on matrices and support scalar broadcasting.
 
+use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::matrix::matrix_power;
 use runmat_builtins::{Tensor, Value};
 
@@ -230,17 +231,91 @@ pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
             _ => {}
         }
     }
+    if let Some(p) = runmat_accelerate_api::provider() {
+        // GPU + host: upload host to GPU and continue
+        if let (Value::GpuTensor(ga), Value::Tensor(tb)) = (a, b) {
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tb.data,
+                shape: &tb.shape,
+            };
+            let gb = p.upload(&view).map_err(|e| e.to_string())?;
+            return elementwise_add(&Value::GpuTensor(ga.clone()), &Value::GpuTensor(gb));
+        }
+        if let (Value::Tensor(ta), Value::GpuTensor(gb)) = (a, b) {
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &ta.data,
+                shape: &ta.shape,
+            };
+            let ga = p.upload(&view).map_err(|e| e.to_string())?;
+            return elementwise_add(&Value::GpuTensor(ga), &Value::GpuTensor(gb.clone()));
+        }
+        if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
+            if ha.shape == hb.shape {
+                if let Ok(hc) = p.elem_add(ha, hb) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            } else {
+                // N-D broadcast via repmat on GPU
+                let plan = BroadcastPlan::new(&ha.shape, &hb.shape)
+                    .map_err(|err| format!("addition: {err}"))?;
+                let nd = plan.output_shape().len();
+                let mut ext_a = vec![1usize; nd - ha.shape.len()];
+                ext_a.extend_from_slice(&ha.shape);
+                let mut ext_b = vec![1usize; nd - hb.shape.len()];
+                ext_b.extend_from_slice(&hb.shape);
+                let reps_a: Vec<usize> = plan
+                    .output_shape()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &out)| {
+                        let da = ext_a[i];
+                        if da == 1 {
+                            out
+                        } else {
+                            1
+                        }
+                    })
+                    .collect();
+                let reps_b: Vec<usize> = plan
+                    .output_shape()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &out)| {
+                        let db = ext_b[i];
+                        if db == 1 {
+                            out
+                        } else {
+                            1
+                        }
+                    })
+                    .collect();
+                let a_rep = if reps_a.iter().any(|&r| r != 1) {
+                    p.repmat(ha, &reps_a).map_err(|e| e.to_string())?
+                } else {
+                    ha.clone()
+                };
+                let b_rep = if reps_b.iter().any(|&r| r != 1) {
+                    p.repmat(hb, &reps_b).map_err(|e| e.to_string())?
+                } else {
+                    hb.clone()
+                };
+                let out = p.elem_add(&a_rep, &b_rep).map_err(|e| e.to_string())?;
+                // free temporaries if allocated
+                if &a_rep as *const _ != ha as *const _ {
+                    let _ = p.free(&a_rep);
+                }
+                if &b_rep as *const _ != hb as *const _ {
+                    let _ = p.free(&b_rep);
+                }
+                return Ok(Value::GpuTensor(out));
+            }
+        }
+    }
+    // Fall back to host
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
         let ah = to_host_value(a)?;
         let bh = to_host_value(b)?;
         return elementwise_add(&ah, &bh);
-    }
-    if let Some(p) = runmat_accelerate_api::provider() {
-        if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
-            if let Ok(hc) = p.elem_add(ha, hb) {
-                return Ok(Value::GpuTensor(hc));
-            }
-        }
     }
     match (a, b) {
         // Complex scalars
@@ -357,17 +432,90 @@ pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
             _ => {}
         }
     }
+    if let Some(p) = runmat_accelerate_api::provider() {
+        // GPU + host: upload host to GPU and continue
+        if let (Value::GpuTensor(ga), Value::Tensor(tb)) = (a, b) {
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tb.data,
+                shape: &tb.shape,
+            };
+            let gb = p.upload(&view).map_err(|e| e.to_string())?;
+            return elementwise_sub(&Value::GpuTensor(ga.clone()), &Value::GpuTensor(gb));
+        }
+        if let (Value::Tensor(ta), Value::GpuTensor(gb)) = (a, b) {
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &ta.data,
+                shape: &ta.shape,
+            };
+            let ga = p.upload(&view).map_err(|e| e.to_string())?;
+            return elementwise_sub(&Value::GpuTensor(ga), &Value::GpuTensor(gb.clone()));
+        }
+        if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
+            if ha.shape == hb.shape {
+                if let Ok(hc) = p.elem_sub(ha, hb) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            } else {
+                // N-D broadcast via repmat on GPU
+                let plan = BroadcastPlan::new(&ha.shape, &hb.shape)
+                    .map_err(|err| format!("subtraction: {err}"))?;
+                let nd = plan.output_shape().len();
+                let mut ext_a = vec![1usize; nd - ha.shape.len()];
+                ext_a.extend_from_slice(&ha.shape);
+                let mut ext_b = vec![1usize; nd - hb.shape.len()];
+                ext_b.extend_from_slice(&hb.shape);
+                let reps_a: Vec<usize> = plan
+                    .output_shape()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &out)| {
+                        let da = ext_a[i];
+                        if da == 1 {
+                            out
+                        } else {
+                            1
+                        }
+                    })
+                    .collect();
+                let reps_b: Vec<usize> = plan
+                    .output_shape()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &out)| {
+                        let db = ext_b[i];
+                        if db == 1 {
+                            out
+                        } else {
+                            1
+                        }
+                    })
+                    .collect();
+                let a_rep = if reps_a.iter().any(|&r| r != 1) {
+                    p.repmat(ha, &reps_a).map_err(|e| e.to_string())?
+                } else {
+                    ha.clone()
+                };
+                let b_rep = if reps_b.iter().any(|&r| r != 1) {
+                    p.repmat(hb, &reps_b).map_err(|e| e.to_string())?
+                } else {
+                    hb.clone()
+                };
+                let out = p.elem_sub(&a_rep, &b_rep).map_err(|e| e.to_string())?;
+                if &a_rep as *const _ != ha as *const _ {
+                    let _ = p.free(&a_rep);
+                }
+                if &b_rep as *const _ != hb as *const _ {
+                    let _ = p.free(&b_rep);
+                }
+                return Ok(Value::GpuTensor(out));
+            }
+        }
+    }
+    // Fall back to host
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
         let ah = to_host_value(a)?;
         let bh = to_host_value(b)?;
         return elementwise_sub(&ah, &bh);
-    }
-    if let Some(p) = runmat_accelerate_api::provider() {
-        if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
-            if let Ok(hc) = p.elem_sub(ha, hb) {
-                return Ok(Value::GpuTensor(hc));
-            }
-        }
     }
     match (a, b) {
         // Complex scalars

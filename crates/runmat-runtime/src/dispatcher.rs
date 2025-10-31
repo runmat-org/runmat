@@ -117,7 +117,11 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
     // Try each builtin until one succeeds. Within each group, prefer later-registered
     // implementations to allow overrides when names collide.
     let mut last_error = String::new();
-    for builtin in no_category.into_iter().rev().chain(categorized.into_iter().rev()) {
+    for builtin in no_category
+        .into_iter()
+        .rev()
+        .chain(categorized.into_iter().rev())
+    {
         let f = builtin.implementation;
         match (f)(args) {
             Ok(mut result) => {

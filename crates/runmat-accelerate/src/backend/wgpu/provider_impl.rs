@@ -5689,12 +5689,8 @@ impl WgpuProvider {
         // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
         if matches!(direction, ProviderScanDirection::Reverse) {
             let flipped_in = self.flip_exec(handle, &[dim])?;
-            let forward = self.cumsum_exec(
-                &flipped_in,
-                dim,
-                ProviderScanDirection::Forward,
-                nan_mode,
-            )?;
+            let forward =
+                self.cumsum_exec(&flipped_in, dim, ProviderScanDirection::Forward, nan_mode)?;
             let _ = self.free(&flipped_in);
             let flipped_out = self.flip_exec(&forward, &[dim])?;
             let _ = self.free(&forward);
@@ -5835,12 +5831,8 @@ impl WgpuProvider {
         // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
         if matches!(direction, ProviderScanDirection::Reverse) {
             let flipped_in = self.flip_exec(handle, &[dim])?;
-            let forward = self.cumprod_exec(
-                &flipped_in,
-                dim,
-                ProviderScanDirection::Forward,
-                nan_mode,
-            )?;
+            let forward =
+                self.cumprod_exec(&flipped_in, dim, ProviderScanDirection::Forward, nan_mode)?;
             let _ = self.free(&flipped_in);
             let flipped_out = self.flip_exec(&forward, &[dim])?;
             let _ = self.free(&forward);

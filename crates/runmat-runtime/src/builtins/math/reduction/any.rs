@@ -363,9 +363,13 @@ fn reduce_dims_gpu(
         let next = if omit_nan {
             // Build truth mask: (!isnan(current)) && (current != 0)
             let zeros = provider.zeros_like(&current).map_err(|e| e.to_string())?;
-            let ne_zero = provider.elem_ne(&current, &zeros).map_err(|e| e.to_string())?;
+            let ne_zero = provider
+                .elem_ne(&current, &zeros)
+                .map_err(|e| e.to_string())?;
             let _ = provider.free(&zeros);
-            let is_nan = provider.logical_isnan(&current).map_err(|e| e.to_string())?;
+            let is_nan = provider
+                .logical_isnan(&current)
+                .map_err(|e| e.to_string())?;
             let not_nan = provider.logical_not(&is_nan).map_err(|e| e.to_string())?;
             let _ = provider.free(&is_nan);
             let truth = provider
@@ -380,7 +384,9 @@ fn reduce_dims_gpu(
                 .map_err(|e| e.to_string())?;
             let _ = provider.free(&truth);
             let zeros_out = provider.zeros_like(&summed).map_err(|e| e.to_string())?;
-            let gt_zero = provider.elem_gt(&summed, &zeros_out).map_err(|e| e.to_string())?;
+            let gt_zero = provider
+                .elem_gt(&summed, &zeros_out)
+                .map_err(|e| e.to_string())?;
             let _ = provider.free(&summed);
             let _ = provider.free(&zeros_out);
             Ok(gt_zero)

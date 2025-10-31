@@ -996,12 +996,8 @@ mod tests {
             shape: &rhs.shape,
         };
         let provider = runmat_accelerate_api::provider().unwrap();
-        let ha = provider
-            .upload(&view_l)
-            .unwrap();
-        let hb = provider
-            .upload(&view_r)
-            .unwrap();
+        let ha = provider.upload(&view_l).unwrap();
+        let hb = provider.upload(&view_r).unwrap();
         let gpu = ldivide_gpu_pair(ha, hb).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
