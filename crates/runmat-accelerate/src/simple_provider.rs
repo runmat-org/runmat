@@ -2880,6 +2880,40 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn unary_double(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?
+            .clone();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, abuf);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn unary_single(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().map(|&x| (x as f32) as f64).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
     fn unary_pow2(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let guard = registry().lock().unwrap();
         let abuf = guard

@@ -73,28 +73,6 @@ fn make_cell_builtin(rest: Vec<Value>) -> Result<Value, String> {
     make_cell(rest, rows, cols)
 }
 
-#[runmat_macros::runtime_builtin(name = "cellstr")]
-fn cellstr_builtin(a: Value) -> Result<Value, String> {
-    match a {
-        Value::String(s) => make_cell(vec![Value::String(s)], 1, 1),
-        Value::StringArray(sa) => {
-            let rows = sa.rows();
-            let cols = sa.cols();
-            let mut cells: Vec<Value> = Vec::with_capacity(sa.data.len());
-            for r in 0..rows {
-                for c in 0..cols {
-                    let idx = r + c * rows;
-                    cells.push(Value::String(sa.data[idx].clone()));
-                }
-            }
-            make_cell(cells, rows, cols)
-        }
-        other => Err(format!(
-            "cellstr: expected string or string array, got {other:?}"
-        )),
-    }
-}
-
 // size builtin centralized in introspection.rs
 
 // -------- String constructors/conversions --------
@@ -120,26 +98,6 @@ fn strings_ctor(rest: Vec<Value>) -> Result<Value, String> {
     let data = vec![String::new(); total];
     Ok(Value::StringArray(
         runmat_builtins::StringArray::new(data, shape).map_err(|e| format!("strings: {e}"))?,
-    ))
-}
-
-#[runmat_macros::runtime_builtin(name = "string.empty")]
-fn string_empty_ctor(rest: Vec<Value>) -> Result<Value, String> {
-    let mut shape: Vec<usize> = Vec::new();
-    for v in rest {
-        let n: f64 = (&v).try_into()?;
-        if n < 0.0 {
-            return Err("string.empty: dimensions must be non-negative".to_string());
-        }
-        shape.push(n as usize);
-    }
-    if shape.is_empty() {
-        shape = vec![0, 0];
-    }
-    let total: usize = shape.iter().product();
-    let data = vec![String::new(); total];
-    Ok(Value::StringArray(
-        runmat_builtins::StringArray::new(data, shape).map_err(|e| format!("string.empty: {e}"))?,
     ))
 }
 
@@ -210,98 +168,6 @@ fn logical_ctor(a: Value) -> Result<Value, String> {
 fn to_string_scalar(v: &Value) -> Result<String, String> {
     let s: String = v.try_into()?;
     Ok(s)
-}
-
-fn map_string_array<F>(sa: &runmat_builtins::StringArray, mut f: F) -> runmat_builtins::Tensor
-where
-    F: FnMut(&str) -> f64,
-{
-    let mut out: Vec<f64> = Vec::with_capacity(sa.data.len());
-    for s in &sa.data {
-        out.push(f(s));
-    }
-    runmat_builtins::Tensor::new(out, sa.shape.clone()).unwrap()
-}
-
-#[runmat_macros::runtime_builtin(name = "strcmp")]
-fn strcmp_builtin(a: Value, b: Value) -> Result<Value, String> {
-    match (a, b) {
-        (Value::StringArray(sa), Value::StringArray(sb)) => {
-            if sa.shape != sb.shape {
-                return Err("strcmp: shape mismatch".to_string());
-            }
-            let data: Vec<f64> = sa
-                .data
-                .iter()
-                .zip(sb.data.iter())
-                .map(|(x, y)| if x == y { 1.0 } else { 0.0 })
-                .collect();
-            Ok(Value::Tensor(
-                runmat_builtins::Tensor::new(data, sa.shape).map_err(|e| format!("strcmp: {e}"))?,
-            ))
-        }
-        (Value::StringArray(sa), other) => {
-            let s = to_string_scalar(&other)?;
-            let t = map_string_array(&sa, |x| if x == s { 1.0 } else { 0.0 });
-            Ok(Value::Tensor(t))
-        }
-        (other, Value::StringArray(sb)) => {
-            let s = to_string_scalar(&other)?;
-            let t = map_string_array(&sb, |x| if x == s { 1.0 } else { 0.0 });
-            Ok(Value::Tensor(t))
-        }
-        (av, bv) => {
-            let as_ = to_string_scalar(&av)?;
-            let bs_ = to_string_scalar(&bv)?;
-            Ok(Value::Num(if as_ == bs_ { 1.0 } else { 0.0 }))
-        }
-    }
-}
-
-#[runmat_macros::runtime_builtin(name = "strncmp")]
-fn strncmp_builtin(a: Value, b: Value, n: f64) -> Result<Value, String> {
-    let n = if n < 0.0 { 0usize } else { n as usize };
-    let cmp = |x: &str, y: &str| -> f64 {
-        let xs = &x.chars().take(n).collect::<String>();
-        let ys = &y.chars().take(n).collect::<String>();
-        if xs == ys {
-            1.0
-        } else {
-            0.0
-        }
-    };
-    match (a, b) {
-        (Value::StringArray(sa), Value::StringArray(sb)) => {
-            if sa.shape != sb.shape {
-                return Err("strncmp: shape mismatch".to_string());
-            }
-            let data: Vec<f64> = sa
-                .data
-                .iter()
-                .zip(sb.data.iter())
-                .map(|(x, y)| cmp(x, y))
-                .collect();
-            Ok(Value::Tensor(
-                runmat_builtins::Tensor::new(data, sa.shape)
-                    .map_err(|e| format!("strncmp: {e}"))?,
-            ))
-        }
-        (Value::StringArray(sa), other) => {
-            let s = to_string_scalar(&other)?;
-            let t = map_string_array(&sa, |x| cmp(x, &s));
-            Ok(Value::Tensor(t))
-        }
-        (other, Value::StringArray(sb)) => {
-            let s = to_string_scalar(&other)?;
-            let t = map_string_array(&sb, |x| cmp(&s, x));
-            Ok(Value::Tensor(t))
-        }
-        (av, bv) => {
-            let as_ = to_string_scalar(&av)?;
-            let bs_ = to_string_scalar(&bv)?;
-            Ok(Value::Num(cmp(&as_, &bs_)))
-        }
-    }
 }
 
 #[runmat_macros::runtime_builtin(name = "strrep")]
@@ -386,22 +252,6 @@ fn strcat_builtin(rest: Vec<Value>) -> Result<Value, String> {
     ))
 }
 
-#[runmat_macros::runtime_builtin(name = "extractBetween")]
-fn extract_between_builtin(a: Value, start: Value, stop: Value) -> Result<Value, String> {
-    let s = to_string_scalar(&a)?;
-    let st = to_string_scalar(&start)?;
-    let en = to_string_scalar(&stop)?;
-    if st.is_empty() || en.is_empty() {
-        return Ok(Value::String(String::new()));
-    }
-    if let Some(i) = s.find(&st) {
-        if let Some(j) = s[i + st.len()..].find(&en) {
-            return Ok(Value::String(s[i + st.len()..i + st.len() + j].to_string()));
-        }
-    }
-    Ok(Value::String(String::new()))
-}
-
 #[runmat_macros::runtime_builtin(name = "erase")]
 fn erase_builtin(a: Value, pat: Value) -> Result<Value, String> {
     let s = to_string_scalar(&a)?;
@@ -426,36 +276,6 @@ fn erase_between_builtin(a: Value, start: Value, stop: Value) -> Result<Value, S
         }
     }
     Ok(Value::String(s))
-}
-
-#[runmat_macros::runtime_builtin(name = "pad")]
-fn pad_builtin(a: Value, total_len: f64, rest: Vec<Value>) -> Result<Value, String> {
-    // pad(s, n, 'left'|'right', char)
-    let s = to_string_scalar(&a)?;
-    let n = if total_len < 0.0 {
-        0usize
-    } else {
-        total_len as usize
-    };
-    let mut direction = "left".to_string();
-    let mut ch = ' ';
-    if !rest.is_empty() {
-        direction = to_string_scalar(&rest[0])?;
-    }
-    if rest.len() > 1 {
-        let t = to_string_scalar(&rest[1])?;
-        ch = t.chars().next().unwrap_or(' ');
-    }
-    if s.chars().count() >= n {
-        return Ok(Value::String(s));
-    }
-    let pad_count = n - s.chars().count();
-    let pad_str: String = std::iter::repeat_n(ch, pad_count).collect();
-    if direction == "left" {
-        Ok(Value::String(format!("{pad_str}{s}")))
-    } else {
-        Ok(Value::String(format!("{s}{pad_str}")))
-    }
 }
 
 #[runmat_macros::runtime_builtin(name = "strtrim")]
@@ -1960,18 +1780,6 @@ fn all_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
 fn warning_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
     let s = format_variadic(&fmt, &rest)?;
     eprintln!("Warning: {s}");
-    Ok(Value::Num(0.0))
-}
-
-#[runmat_macros::runtime_builtin(name = "disp", sink = true)]
-fn disp_builtin(x: Value) -> Result<Value, String> {
-    match x {
-        Value::String(s) => println!("{s}"),
-        Value::Num(n) => println!("{n}"),
-        Value::Int(i) => println!("{}", i.to_i64()),
-        Value::Tensor(t) => println!("{:?}", t.data),
-        other => println!("{other:?}"),
-    }
     Ok(Value::Num(0.0))
 }
 

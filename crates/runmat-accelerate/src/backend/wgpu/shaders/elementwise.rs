@@ -290,6 +290,7 @@ fn apply(a: f64) -> f64 {
         case 28u: { return atanh(a); }
         case 29u: { return gamma_real(a); }
         case 30u: { return factorial_real(a); }
+        case 31u: { return f64(f32(a)); }
         default: { return a; }
     }
 }
@@ -504,6 +505,7 @@ fn apply(a: f32) -> f32 {
         case 28u: { return atanh(a); }
         case 29u: { return gamma_real(a); }
         case 30u: { return factorial_real(a); }
+        case 31u: { return a; }
         default: { return a; }
     }
 }

@@ -22,25 +22,28 @@ pub(crate) enum TextElement {
 
 impl TextCollection {
     pub(crate) fn from_subject(fn_name: &str, value: Value) -> Result<Self, String> {
-        Self::from_value(fn_name, value, true)
+        Self::from_argument(fn_name, value, "first argument")
     }
 
     pub(crate) fn from_pattern(fn_name: &str, value: Value) -> Result<Self, String> {
-        Self::from_value(fn_name, value, false)
+        Self::from_argument(fn_name, value, "pattern")
     }
 
-    fn from_value(fn_name: &str, value: Value, is_subject: bool) -> Result<Self, String> {
+    pub(crate) fn from_argument(
+        fn_name: &str,
+        value: Value,
+        descriptor: &str,
+    ) -> Result<Self, String> {
+        Self::from_value_internal(fn_name, value, descriptor)
+    }
+
+    fn from_value_internal(fn_name: &str, value: Value, descriptor: &str) -> Result<Self, String> {
         let collection = match value {
             Value::StringArray(array) => Ok(Self::from_string_array(array)),
             Value::String(text) => Ok(Self::from_string_scalar(text)),
             Value::CharArray(array) => Ok(Self::from_char_array(array)),
             Value::Cell(cell) => Self::from_cell_array(fn_name, cell),
             _ => {
-                let descriptor = if is_subject {
-                    "first argument"
-                } else {
-                    "pattern"
-                };
                 Err(format!("{fn_name}: {descriptor} must be text (string array, character array, or cell array of character vectors)"))
             }
         }?;
@@ -49,13 +52,9 @@ impl TextCollection {
             || tensor::element_count(&collection.shape) == collection.elements.len()
         {
             Ok(collection)
-        } else if is_subject {
-            Err(format!(
-                "{fn_name}: first argument must be text (string array, character array, or cell array of character vectors)"
-            ))
         } else {
             Err(format!(
-                "{fn_name}: pattern must be text (string array, character array, or cell array of character vectors)"
+                "{fn_name}: {descriptor} must be text (string array, character array, or cell array of character vectors)"
             ))
         }
     }

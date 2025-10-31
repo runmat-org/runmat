@@ -4,6 +4,8 @@
 
 pub mod class;
 mod isa;
+mod ischar;
+mod isstring;
 pub mod which;
 pub mod who;
 pub mod whos;

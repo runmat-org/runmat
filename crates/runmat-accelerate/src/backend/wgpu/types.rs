@@ -48,6 +48,7 @@ pub enum UnaryOpCode {
     Atanh = 28,
     Gamma = 29,
     Factorial = 30,
+    Single = 31,
 }
 
 #[derive(Clone, Copy)]

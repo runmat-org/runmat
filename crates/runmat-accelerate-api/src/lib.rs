@@ -1134,6 +1134,12 @@ pub trait AccelProvider: Send + Sync {
     fn unary_sqrt(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_sqrt not supported by provider"))
     }
+    fn unary_double(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_double not supported by provider"))
+    }
+    fn unary_single(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_single not supported by provider"))
+    }
     fn unary_pow2(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_pow2 not supported by provider"))
     }

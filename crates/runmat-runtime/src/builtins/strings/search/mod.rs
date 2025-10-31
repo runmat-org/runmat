@@ -4,4 +4,4 @@ pub mod contains;
 pub mod endswith;
 pub mod startswith;
 pub mod strfind;
-mod text_utils;
+pub(crate) mod text_utils;

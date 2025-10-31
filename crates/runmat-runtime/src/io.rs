@@ -3,7 +3,6 @@
 //! This module provides language-compatible I/O functions like fprintf, disp, etc.
 
 use regex::Regex;
-use runmat_macros::runtime_builtin;
 
 /// Format and display string with one numeric argument (fprintf with %d, %f, %.4f etc.)
 // merged into single fprintf below if needed
@@ -64,35 +63,4 @@ pub fn fprintf_format2_builtin(
         .flush()
         .map_err(|e| format!("Failed to flush stdout: {e}"))?;
     Ok(output.len() as f64)
-}
-
-/// Display a string with automatic newline (language disp)
-#[runtime_builtin(name = "disp", sink = true)]
-pub fn disp_string_builtin(s: String) -> Result<f64, String> {
-    println!("{s}");
-    Ok(0.0)
-}
-
-/// Display a number with automatic newline
-// combine disp overloads via separate name or keep single string version; remove duplicate registration
-pub fn disp_number_builtin(n: f64) -> Result<f64, String> {
-    println!("{n}");
-    Ok(0.0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_disp_string() {
-        let result = disp_string_builtin("Test message".to_string());
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_disp_number() {
-        let result = disp_number_builtin(std::f64::consts::PI);
-        assert!(result.is_ok());
-    }
 }

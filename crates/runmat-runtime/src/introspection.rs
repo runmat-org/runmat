@@ -7,16 +7,6 @@ fn numel_builtin(a: Value) -> Result<f64, String> {
     Ok(value_numel(&a) as f64)
 }
 
-#[runtime_builtin(name = "ischar")]
-fn ischar_builtin(a: Value) -> Result<bool, String> {
-    Ok(matches!(a, Value::CharArray(_)))
-}
-
-#[runtime_builtin(name = "isstring")]
-fn isstring_builtin(a: Value) -> Result<bool, String> {
-    Ok(matches!(a, Value::String(_) | Value::StringArray(_)))
-}
-
 // ---------------------------
 // String predicates and ops
 // ---------------------------

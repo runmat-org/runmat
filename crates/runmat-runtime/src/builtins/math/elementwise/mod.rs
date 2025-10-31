@@ -2,6 +2,7 @@
 mod abs;
 mod angle;
 mod conj;
+mod double;
 mod exp;
 mod expm1;
 mod factorial;
@@ -18,4 +19,5 @@ mod power;
 mod rdivide;
 mod real;
 mod sign;
+mod single;
 mod sqrt;

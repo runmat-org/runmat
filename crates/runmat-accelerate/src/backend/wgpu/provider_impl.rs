@@ -9552,6 +9552,20 @@ impl AccelProvider for WgpuProvider {
         self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, a)
     }
 
+    fn unary_double(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if self.precision != NumericPrecision::F64 {
+            return Err(anyhow!(
+                "wgpu provider: shader-f64 unavailable; cannot materialise double precision"
+            ));
+        }
+        let entry = self.get_entry(a)?;
+        Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len))
+    }
+
+    fn unary_single(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Single, a)
+    }
+
     fn unary_pow2(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, a)
     }
