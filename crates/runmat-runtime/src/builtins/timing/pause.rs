@@ -376,9 +376,7 @@ mod tests {
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
 
     fn reset_state(enabled: bool) {
-        let mut guard = PAUSE_STATE
-            .write()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut guard = PAUSE_STATE.write().unwrap_or_else(|e| e.into_inner());
         guard.enabled = enabled;
     }
 

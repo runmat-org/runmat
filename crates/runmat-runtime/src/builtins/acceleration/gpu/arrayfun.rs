@@ -276,7 +276,11 @@ fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> Result<Value, String> 
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)));
     let gpu_device_id = inputs_snapshot.iter().find_map(|v| {
-        if let Value::GpuTensor(h) = v { Some(h.device_id) } else { None }
+        if let Value::GpuTensor(h) = v {
+            Some(h.device_id)
+        } else {
+            None
+        }
     });
 
     if uniform_output {
@@ -741,7 +745,10 @@ fn try_gpu_fast_path(
 
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if inputs.iter().any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0)) {
+        if inputs
+            .iter()
+            .any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0))
+        {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );

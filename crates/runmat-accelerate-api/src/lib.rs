@@ -716,6 +716,11 @@ pub trait AccelProvider: Send + Sync {
         self.eye(&prototype.shape)
     }
 
+    /// Construct MATLAB-style coordinate grids from axis vectors.
+    fn meshgrid(&self, _axes: &[MeshgridAxisView<'_>]) -> anyhow::Result<ProviderMeshgridResult> {
+        Err(anyhow::anyhow!("meshgrid not supported by provider"))
+    }
+
     /// Construct a diagonal matrix from a vector-like tensor. `offset` matches MATLAB semantics.
     fn diag_from_vector(
         &self,
@@ -930,6 +935,13 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_div not supported by provider"))
     }
+    fn elem_pow(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_pow not supported by provider"))
+    }
 
     fn elem_hypot(
         &self,
@@ -1031,6 +1043,12 @@ pub trait AccelProvider: Send + Sync {
     // Unary elementwise operations (optional)
     fn unary_sin(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_sin not supported by provider"))
+    }
+    fn unary_gamma(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_gamma not supported by provider"))
+    }
+    fn unary_factorial(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_factorial not supported by provider"))
     }
     fn unary_asinh(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("unary_asinh not supported by provider"))
@@ -1382,6 +1400,14 @@ pub trait AccelProvider: Send + Sync {
     fn reduce_sum_dim(&self, _a: &GpuTensorHandle, _dim: usize) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_sum_dim not supported by provider"))
     }
+    fn dot(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+        _dim: Option<usize>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("dot not supported by provider"))
+    }
     fn reduce_nnz(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_nnz not supported by provider"))
     }
@@ -1724,4 +1750,16 @@ pub struct HostTensorOwned {
 pub struct HostTensorView<'a> {
     pub data: &'a [f64],
     pub shape: &'a [usize],
+}
+
+/// Lightweight 1-D axis view used by provider meshgrid hooks.
+#[derive(Debug)]
+pub struct MeshgridAxisView<'a> {
+    pub data: &'a [f64],
+}
+
+/// Provider-side meshgrid result containing coordinate tensor handles.
+#[derive(Debug, Clone)]
+pub struct ProviderMeshgridResult {
+    pub outputs: Vec<GpuTensorHandle>,
 }

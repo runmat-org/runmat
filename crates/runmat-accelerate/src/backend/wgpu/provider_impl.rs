@@ -6,18 +6,19 @@ use once_cell::sync::OnceCell;
 use pollster::block_on;
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows,
-    CovNormalization, CovRows, CovarianceOptions, FindDirection, FspecialRequest,
-    GpuTensorHandle, HostTensorOwned, HostTensorView, ImfilterOptions, ImfilterPadding,
-    IsMemberOptions, IsMemberResult, PagefunOp, PagefunRequest, ProviderBandwidth,
+    CovNormalization, CovRows, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
+    HostTensorOwned, HostTensorView, ImfilterOptions, ImfilterPadding, IsMemberOptions,
+    IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth,
     ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode,
     ProviderConvOrientation, ProviderCummaxResult, ProviderCumminResult, ProviderEigResult,
     ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult,
     ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult,
-    ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
-    ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderStdNormalization,
-    ProviderSymmetryKind, ReduceDimResult, SetdiffOptions, SetdiffResult, SortComparison,
-    SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult, UniqueOptions, UniqueResult
+    ProviderMeshgridResult, ProviderNanMode, ProviderNormOrder, ProviderPinvOptions,
+    ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision,
+    ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
+    ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult, SetdiffOptions, SetdiffResult,
+    SortComparison, SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult,
+    UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -6459,16 +6460,14 @@ impl WgpuProvider {
                 stride <= u32::MAX as usize,
                 "imfilter: image stride exceeds GPU limits"
             );
-            image_strides_arr[i] =
-                crate::backend::wgpu::params::AlignedU32::new(stride as u32);
+            image_strides_arr[i] = crate::backend::wgpu::params::AlignedU32::new(stride as u32);
 
             let out_dim = plan.output_shape_ext[i];
             ensure!(
                 out_dim <= u32::MAX as usize,
                 "imfilter: output dimension exceeds GPU limits"
             );
-            output_shape_arr[i] =
-                crate::backend::wgpu::params::AlignedU32::new(out_dim as u32);
+            output_shape_arr[i] = crate::backend::wgpu::params::AlignedU32::new(out_dim as u32);
 
             let offset = plan.base_offset[i];
             ensure!(
@@ -6621,6 +6620,82 @@ impl WgpuProvider {
         let len: usize = shape.iter().copied().product();
         let buffer = self.create_storage_buffer(len, "zeros");
         Ok(self.register_existing_buffer(buffer, shape.to_vec(), len))
+    }
+
+    pub(crate) fn meshgrid_exec(
+        &self,
+        axes: &[MeshgridAxisView<'_>],
+    ) -> Result<ProviderMeshgridResult> {
+        ensure!(
+            axes.len() == 2 || axes.len() == 3,
+            "meshgrid: provider expects two or three axes"
+        );
+
+        let x_axis = axes
+            .get(0)
+            .ok_or_else(|| anyhow!("meshgrid: missing X axis"))?
+            .data;
+        let y_axis = axes
+            .get(1)
+            .ok_or_else(|| anyhow!("meshgrid: missing Y axis"))?
+            .data;
+        let z_axis = axes.get(2).map(|axis| axis.data);
+
+        let nx = x_axis.len();
+        let ny = y_axis.len();
+        let nz = z_axis.map(|axis| axis.len()).unwrap_or(1);
+
+        let shape = if nz == 1 {
+            vec![ny, nx]
+        } else {
+            vec![ny, nx, nz]
+        };
+
+        let total = product_checked(&shape)
+            .ok_or_else(|| anyhow!("meshgrid: tensor size exceeds GPU limits"))?;
+
+        let mut x_data = Vec::with_capacity(total);
+        let mut y_data = Vec::with_capacity(total);
+        let mut z_data = z_axis.map(|_| Vec::with_capacity(total));
+
+        for k in 0..nz {
+            let z_value = z_axis.map(|axis| axis[k]);
+            for col in 0..nx {
+                let x_value = x_axis[col];
+                for row in 0..ny {
+                    x_data.push(x_value);
+                    y_data.push(y_axis[row]);
+                    if let (Some(ref mut z_vec), Some(val)) = (z_data.as_mut(), z_value) {
+                        z_vec.push(val);
+                    }
+                }
+            }
+        }
+
+        let shape_slice = &shape;
+        let x_view = HostTensorView {
+            data: &x_data,
+            shape: shape_slice,
+        };
+        let y_view = HostTensorView {
+            data: &y_data,
+            shape: shape_slice,
+        };
+        let x_handle = <Self as AccelProvider>::upload(self, &x_view)?;
+        let y_handle = <Self as AccelProvider>::upload(self, &y_view)?;
+
+        let mut outputs = vec![x_handle, y_handle];
+
+        if let Some(z_vec) = z_data {
+            let z_view = HostTensorView {
+                data: &z_vec,
+                shape: shape_slice,
+            };
+            let z_handle = <Self as AccelProvider>::upload(self, &z_view)?;
+            outputs.push(z_handle);
+        }
+
+        Ok(ProviderMeshgridResult { outputs })
     }
 
     fn imfilter_exec_fallback(
@@ -7731,6 +7806,66 @@ impl WgpuProvider {
             offset += chunk_len;
         }
         Ok(self.register_existing_buffer(out_buffer, entry_a.shape, len))
+    }
+
+    pub(crate) fn dot_exec(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        dim: Option<usize>,
+    ) -> Result<GpuTensorHandle> {
+        let entry_lhs = self.get_entry(lhs)?;
+        let entry_rhs = self.get_entry(rhs)?;
+        ensure!(
+            entry_lhs.shape == entry_rhs.shape,
+            "dot: shape mismatch between inputs"
+        );
+        if entry_lhs.shape.is_empty() {
+            return self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, lhs, rhs);
+        }
+        if entry_lhs.shape.len() != 2 {
+            return Err(anyhow!(
+                "dot: only 2D tensors are currently supported by the WGPU provider"
+            ));
+        }
+
+        let shape = entry_lhs.shape.clone();
+        let default_dim = shape
+            .iter()
+            .position(|&extent| extent != 1)
+            .map(|idx| idx + 1)
+            .unwrap_or(1);
+        let target_dim = dim.unwrap_or(default_dim);
+        let dim_index = target_dim.saturating_sub(1);
+
+        if dim_index >= shape.len() {
+            return self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, lhs, rhs);
+        }
+        if dim_index > 1 {
+            return Err(anyhow!(
+                "dot: unsupported dimension {} for WGPU provider",
+                target_dim
+            ));
+        }
+
+        let product =
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, lhs, rhs)?;
+
+        let reduce = self.reduce_dim_sum_mean_exec(
+            &product,
+            dim_index,
+            crate::backend::wgpu::types::DimReduceOp::Sum,
+        );
+        match reduce {
+            Ok(handle) => {
+                let _ = self.free(&product);
+                Ok(handle)
+            }
+            Err(err) => {
+                let _ = self.free(&product);
+                Err(err)
+            }
+        }
     }
 
     pub(crate) fn elem_eq_exec(
@@ -8966,7 +9101,9 @@ impl WgpuProvider {
         let count_storage = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("runmat-find-count-storage"),
             size: 8,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         self.queue
@@ -9037,11 +9174,11 @@ impl WgpuProvider {
             &bind_group,
         );
 
-        let mut copy_encoder = self
-            .device_ref()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-find-copy-count"),
-            });
+        let mut copy_encoder =
+            self.device_ref()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-find-copy-count"),
+                });
         copy_encoder.copy_buffer_to_buffer(&count_storage, 0, &count_staging, 0, 8);
         self.submit(copy_encoder);
         let slice = count_staging.slice(..8);
@@ -9102,6 +9239,10 @@ impl AccelProvider for WgpuProvider {
 
     fn eye_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.eye_exec(&prototype.shape)
+    }
+
+    fn meshgrid(&self, axes: &[MeshgridAxisView<'_>]) -> Result<ProviderMeshgridResult> {
+        self.meshgrid_exec(axes)
     }
 
     fn linspace(&self, start: f64, stop: f64, count: usize) -> Result<GpuTensorHandle> {
@@ -9250,6 +9391,10 @@ impl AccelProvider for WgpuProvider {
         self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Div, a, b)
     }
 
+    fn elem_pow(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Pow, a, b)
+    }
+
     fn elem_ge(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.elem_ge_exec(a, b)
     }
@@ -9322,6 +9467,14 @@ impl AccelProvider for WgpuProvider {
 
     fn unary_sin(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sin, a)
+    }
+
+    fn unary_gamma(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Gamma, a)
+    }
+
+    fn unary_factorial(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Factorial, a)
     }
 
     fn unary_asinh(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -10055,6 +10208,15 @@ impl AccelProvider for WgpuProvider {
             shape: &result.shape,
         })?;
         Ok(handle)
+    }
+
+    fn dot(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        dim: Option<usize>,
+    ) -> Result<GpuTensorHandle> {
+        self.dot_exec(lhs, rhs, dim)
     }
 
     fn eig(&self, handle: &GpuTensorHandle, compute_left: bool) -> Result<ProviderEigResult> {

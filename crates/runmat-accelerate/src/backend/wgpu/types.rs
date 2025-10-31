@@ -12,6 +12,7 @@ pub enum BinaryOpCode {
     Div = 3,
     Hypot = 4,
     Atan2 = 5,
+    Pow = 6,
 }
 
 #[derive(Clone, Copy)]
@@ -45,6 +46,8 @@ pub enum UnaryOpCode {
     Asinh = 26,
     Acosh = 27,
     Atanh = 28,
+    Gamma = 29,
+    Factorial = 30,
 }
 
 #[derive(Clone, Copy)]

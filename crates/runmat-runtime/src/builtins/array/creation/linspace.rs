@@ -363,9 +363,9 @@ fn build_sequence(
             if count == 0 {
                 // Skip provider.linspace for zero-length; fall back to upload path below.
             } else {
-            if let Ok(handle) = provider.linspace(start_re, stop_re, count) {
-                return Ok(Value::GpuTensor(handle));
-            }
+                if let Ok(handle) = provider.linspace(start_re, stop_re, count) {
+                    return Ok(Value::GpuTensor(handle));
+                }
             }
         }
     }

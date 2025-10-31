@@ -128,37 +128,6 @@ fn angle_builtin(x: f64) -> Result<f64, String> {
     }
 }
 
-// Special functions
-
-#[runtime_builtin(name = "gamma")]
-fn gamma_builtin(x: f64) -> Result<f64, String> {
-    if x <= 0.0 {
-        return Err("Gamma function undefined for non-positive integers".to_string());
-    }
-
-    // Stirling's approximation for large x
-    if x > 10.0 {
-        let term1 = (2.0 * std::f64::consts::PI / x).sqrt();
-        let term2 = (x / std::f64::consts::E).powf(x);
-        return Ok(term1 * term2);
-    }
-
-    // For smaller values, use recursive relation Γ(x+1) = x * Γ(x)
-    if x < 1.0 {
-        return Ok(gamma_builtin(x + 1.0)? / x);
-    }
-
-    // Simple approximation for 1 <= x <= 10
-    let mut result = 1.0;
-    let mut n = x;
-    while n > 2.0 {
-        n -= 1.0;
-        result *= n;
-    }
-
-    Ok(result)
-}
-
 #[runtime_builtin(name = "factorial")]
 fn factorial_builtin(n: i32) -> Result<f64, String> {
     if n < 0 {

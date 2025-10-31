@@ -27,6 +27,7 @@ fn apply(a: f64, b: f64) -> f64 {
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
         case 5u: { return atan2(a, b); }
+        case 6u: { return pow(a, b); }
         default: { return a; }
     }
 }
@@ -74,7 +75,8 @@ fn apply(a: f32, b: f32) -> f32 {
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
         case 5u: { return atan2(a, b); }
-        default: { return pow(a, b); }
+        case 6u: { return pow(a, b); }
+        default: { return a; }
     }
 }
 
@@ -104,6 +106,12 @@ struct Params {
     total: u32,
 };
 
+const PI: f64 = 3.141592653589793;
+const SQRT_TWO_PI: f64 = 2.5066282746310002;
+const LANCZOS_G: f64 = 7.0;
+const EPSILON: f64 = 1.0e-12;
+const FACTORIAL_MAX: u32 = 170u;
+const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 fn expm1_precise(a: f64) -> f64 {
     let abs_a = abs(a);
     if abs_a < 1.0e-6 {
@@ -131,6 +139,106 @@ fn log1p_precise(a: f64) -> f64 {
 @group(0) @binding(0) var<storage, read> A: Tensor;
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
+
+fn lanczos_gamma(z: f64) -> f64 {
+    let z_minus_one = z - 1.0;
+    var sum = 0.99999999999980993;
+    sum = sum + 676.5203681218851 / (z_minus_one + 1.0);
+    sum = sum + -1259.1392167224028 / (z_minus_one + 2.0);
+    sum = sum + 771.3234287776531 / (z_minus_one + 3.0);
+    sum = sum + -176.6150291621406 / (z_minus_one + 4.0);
+    sum = sum + 12.507343278686905 / (z_minus_one + 5.0);
+    sum = sum + -0.13857109526572012 / (z_minus_one + 6.0);
+    sum = sum + 0.000009984369578019572 / (z_minus_one + 7.0);
+    sum = sum + 0.00000015056327351493116 / (z_minus_one + 8.0);
+    let t = z_minus_one + (LANCZOS_G + 0.5);
+    return SQRT_TWO_PI * pow(t, z_minus_one + 0.5) * exp(-t) * sum;
+}
+
+fn is_non_positive_integer(x: f64) -> bool {
+    if (x > 0.0) {
+        return false;
+    }
+    let nearest = round(x);
+    return abs(x - nearest) <= EPSILON * (1.0 + abs(x));
+}
+
+fn is_nan64(x: f64) -> bool {
+    return x != x;
+}
+
+fn is_inf64(x: f64) -> bool {
+    let inf = f64(1.0) / f64(0.0);
+    let neg_inf = -inf;
+    return x == inf || x == neg_inf;
+}
+
+fn gamma_real(a: f64) -> f64 {
+    if (is_nan64(a)) {
+        return a;
+    }
+    if (is_inf64(a)) {
+        if (a > 0.0) {
+            return f64(1.0) / f64(0.0);
+        }
+        return f64(0.0) / f64(0.0);
+    }
+    if (is_non_positive_integer(a)) {
+        return f64(1.0) / f64(0.0);
+    }
+    if (a < 0.5) {
+        let sin_term = sin(PI * a);
+        if (abs(sin_term) <= EPSILON) {
+            return f64(1.0) / f64(0.0);
+        }
+        let gamma_one_minus = lanczos_gamma(1.0 - a);
+        return PI / (sin_term * gamma_one_minus);
+    }
+    return lanczos_gamma(a);
+}
+
+fn factorial_real(a: f64) -> f64 {
+    if (is_nan64(a)) {
+        return a;
+    }
+    if (a == 0.0) {
+        return 1.0;
+    }
+    if (is_inf64(a)) {
+        if (a > 0.0) {
+            return f64(1.0) / f64(0.0);
+        }
+        return f64(0.0) / f64(0.0);
+    }
+    if (a < 0.0) {
+        return f64(0.0) / f64(0.0);
+    }
+    let rounded = round(a);
+    if (abs(a - rounded) > FACTORIAL_INT_TOL) {
+        return f64(0.0) / f64(0.0);
+    }
+    if (rounded < 0.0) {
+        return f64(0.0) / f64(0.0);
+    }
+    if (rounded > f64(FACTORIAL_MAX)) {
+        return f64(1.0) / f64(0.0);
+    }
+    let n = i32(rounded);
+    if (n <= 1) {
+        return 1.0;
+    }
+    let limit = u32(n);
+    var acc: f64 = 1.0;
+    var i: u32 = 2u;
+    loop {
+        if (i > limit) {
+            break;
+        }
+        acc = acc * f64(i);
+        i = i + 1u;
+    }
+    return acc;
+}
 
 fn apply(a: f64) -> f64 {
     switch params.op {
@@ -180,6 +288,8 @@ fn apply(a: f64) -> f64 {
         case 26u: { return asinh(a); }
         case 27u: { return acosh(a); }
         case 28u: { return atanh(a); }
+        case 29u: { return gamma_real(a); }
+        case 30u: { return factorial_real(a); }
         default: { return a; }
     }
 }
@@ -205,11 +315,17 @@ struct Tensor {
 
 struct Params {
     len: u32,
-    op: u32,
+  	op: u32,
     offset: u32,
     total: u32,
 };
 
+const PI: f32 = 3.1415927;
+const SQRT_TWO_PI: f32 = 2.5066283;
+const LANCZOS_G: f32 = 7.0;
+const EPSILON: f32 = 1.0e-5;
+const FACTORIAL_MAX_F32: u32 = 170u;
+const FACTORIAL_INT_TOL_F32: f32 = 1.0e-4;
 fn expm1_precise(a: f32) -> f32 {
     let abs_a = abs(a);
     if abs_a < 1.0e-4 {
@@ -237,6 +353,106 @@ fn log1p_precise(a: f32) -> f32 {
 @group(0) @binding(0) var<storage, read> A: Tensor;
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
+
+fn lanczos_gamma(z: f32) -> f32 {
+    let z_minus_one = z - 1.0;
+    var sum: f32 = 0.99999994;
+    sum = sum + 676.5204 / (z_minus_one + 1.0);
+    sum = sum + -1259.1393 / (z_minus_one + 2.0);
+    sum = sum + 771.3234 / (z_minus_one + 3.0);
+    sum = sum + -176.61502 / (z_minus_one + 4.0);
+    sum = sum + 12.507343 / (z_minus_one + 5.0);
+    sum = sum + -0.1385711 / (z_minus_one + 6.0);
+    sum = sum + 0.00000998437 / (z_minus_one + 7.0);
+    sum = sum + 0.00000015056327 / (z_minus_one + 8.0);
+    let t = z_minus_one + (LANCZOS_G + 0.5);
+    return SQRT_TWO_PI * pow(t, z_minus_one + 0.5) * exp(-t) * sum;
+}
+
+fn is_non_positive_integer(x: f32) -> bool {
+    if (x > 0.0) {
+        return false;
+    }
+    let nearest = round(x);
+    return abs(x - nearest) <= EPSILON * (1.0 + abs(x));
+}
+
+fn is_nan32(x: f32) -> bool {
+    return x != x;
+}
+
+fn is_inf32(x: f32) -> bool {
+    let inf = f32(1.0) / f32(0.0);
+    let neg_inf = -inf;
+    return x == inf || x == neg_inf;
+}
+
+fn gamma_real(a: f32) -> f32 {
+    if (is_nan32(a)) {
+        return a;
+    }
+    if (is_inf32(a)) {
+        if (a > 0.0) {
+            return f32(1.0) / f32(0.0);
+        }
+        return f32(0.0) / f32(0.0);
+    }
+    if (is_non_positive_integer(a)) {
+        return f32(1.0) / f32(0.0);
+    }
+    if (a < 0.5) {
+        let sin_term = sin(PI * a);
+        if (abs(sin_term) <= EPSILON) {
+            return f32(1.0) / f32(0.0);
+        }
+        let gamma_one_minus = lanczos_gamma(1.0 - a);
+        return PI / (sin_term * gamma_one_minus);
+    }
+    return lanczos_gamma(a);
+}
+
+fn factorial_real(a: f32) -> f32 {
+    if (is_nan32(a)) {
+        return a;
+    }
+    if (a == 0.0) {
+        return 1.0;
+    }
+    if (is_inf32(a)) {
+        if (a > 0.0) {
+            return f32(1.0) / f32(0.0);
+        }
+        return f32(0.0) / f32(0.0);
+    }
+    if (a < 0.0) {
+        return f32(0.0) / f32(0.0);
+    }
+    let rounded = round(a);
+    if (abs(a - rounded) > FACTORIAL_INT_TOL_F32) {
+        return f32(0.0) / f32(0.0);
+    }
+    if (rounded < 0.0) {
+        return f32(0.0) / f32(0.0);
+    }
+    if (rounded > f32(FACTORIAL_MAX_F32)) {
+        return f32(1.0) / f32(0.0);
+    }
+    let n = i32(rounded);
+    if (n <= 1) {
+        return 1.0;
+    }
+    let limit = u32(n);
+    var acc: f32 = 1.0;
+    var i: u32 = 2u;
+    loop {
+        if (i > limit) {
+            break;
+        }
+        acc = acc * f32(i);
+        i = i + 1u;
+    }
+    return acc;
+}
 
 fn apply(a: f32) -> f32 {
     switch params.op {
@@ -286,6 +502,8 @@ fn apply(a: f32) -> f32 {
         case 26u: { return asinh(a); }
         case 27u: { return acosh(a); }
         case 28u: { return atanh(a); }
+        case 29u: { return gamma_real(a); }
+        case 30u: { return factorial_real(a); }
         default: { return a; }
     }
 }

@@ -284,7 +284,10 @@ fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> Result<Value, String> {
 fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> Result<Option<Value>, String> {
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if subs.iter().any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0)) {
+        if subs
+            .iter()
+            .any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0))
+        {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );

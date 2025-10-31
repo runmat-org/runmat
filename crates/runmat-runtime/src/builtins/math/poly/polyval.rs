@@ -1114,8 +1114,7 @@ mod tests {
         .unwrap();
         st.fields.insert("R".to_string(), Value::Tensor(r));
         st.fields.insert("df".to_string(), Value::Num(4.0));
-        st.fields
-            .insert("normr".to_string(), Value::Num(2.0));
+        st.fields.insert("normr".to_string(), Value::Num(2.0));
         let stats = Value::Struct(st);
         let eval = evaluate(Value::Tensor(coeffs), Value::Tensor(points), &[stats], true)
             .expect("polyval");

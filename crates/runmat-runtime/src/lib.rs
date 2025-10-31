@@ -1,7 +1,7 @@
+use crate::builtins::common::format::format_variadic;
 use runmat_builtins::Value;
 use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
-use crate::builtins::common::format::format_variadic;
 
 pub mod dispatcher;
 
@@ -1774,7 +1774,6 @@ fn mean_dim(a: Value, dim: f64) -> Result<Value, String> {
 
 // legacy mean removed; new implementation lives under builtins/math/reduction/mean.rs
 
-
 fn any_all_or_cols(a: Value) -> Result<Value, String> {
     match a {
         Value::Tensor(t) => {
@@ -1962,7 +1961,6 @@ fn warning_builtin(fmt: String, rest: Vec<Value>) -> Result<Value, String> {
     let s = format_variadic(&fmt, &rest)?;
     eprintln!("Warning: {s}");
     Ok(Value::Num(0.0))
-
 }
 
 #[runmat_macros::runtime_builtin(name = "disp", sink = true)]

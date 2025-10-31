@@ -481,7 +481,9 @@ pub fn interpret_with_vars(
                             pc += 1;
                             continue;
                         }
-                        let func: UserFunction = match context.functions.get(&name)
+                        let func: UserFunction = match context
+                            .functions
+                            .get(&name)
                             .or_else(|| bytecode.functions.get(&name))
                         {
                             Some(f) => f.clone(),
@@ -593,11 +595,10 @@ pub fn interpret_with_vars(
                         for (k, v) in func_bytecode.functions.iter() {
                             context.functions.insert(k.clone(), v.clone());
                         }
-                        let func_result_vars =
-                            match interpret_function(&func_bytecode, func_vars) {
-                                Ok(v) => v,
-                                Err(e) => vm_bail!(e),
-                            };
+                        let func_result_vars = match interpret_function(&func_bytecode, func_vars) {
+                            Ok(v) => v,
+                            Err(e) => vm_bail!(e),
+                        };
                         if let Some(output_var_id) = func.outputs.first() {
                             let local_output_index =
                                 var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
@@ -908,7 +909,8 @@ pub fn interpret_with_vars(
                         }
                     }
                     _ => {
-                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
                         let v = runmat_runtime::elementwise_sub(&a_acc, &b_acc)?;
                         stack.push(v)
                     }
@@ -1807,7 +1809,8 @@ pub fn interpret_with_vars(
                                 .map(|(q, _, _)| q.clone())
                                 .collect::<Vec<_>>()
                                 .join(", ");
-                            vm_bail!(format!("ambiguous builtin '{}' via imports: {}", name, msg).to_string());
+                            vm_bail!(format!("ambiguous builtin '{}' via imports: {}", name, msg)
+                                .to_string());
                         }
                         if let Some((_, _, value)) = specific_matches.pop() {
                             stack.push(value);
@@ -1845,7 +1848,8 @@ pub fn interpret_with_vars(
                                 vm_bail!(format!(
                                     "ambiguous builtin '{}' via wildcard imports: {}",
                                     name, msg
-                                ).to_string());
+                                )
+                                .to_string());
                             }
                             if let Some((_, _, value)) = wildcard_matches.pop() {
                                 stack.push(value);
@@ -1853,7 +1857,8 @@ pub fn interpret_with_vars(
                                 // Special-case: rethrow() without explicit e uses last caught
                                 if name == "rethrow" && args.is_empty() {
                                     if let Some(le) = &last_exception {
-                                        vm_bail!(format!("{}: {}", le.identifier, le.message).to_string());
+                                        vm_bail!(format!("{}: {}", le.identifier, le.message)
+                                            .to_string());
                                     }
                                 }
                                 if let Some((catch_pc, catch_var)) = try_stack.pop() {
@@ -3066,6 +3071,46 @@ pub fn interpret_with_vars(
                     }
                     continue;
                 }
+                if name == "meshgrid" {
+                    let eval = match runmat_runtime::builtins::array::creation::meshgrid::evaluate(
+                        &args,
+                    ) {
+                        Ok(eval) => eval,
+                        Err(err) => vm_bail!(err),
+                    };
+                    if out_count == 0 {
+                        continue;
+                    }
+                    let available = eval.output_count();
+                    if out_count > available {
+                        let msg = if available == 2 {
+                            "meshgrid with two inputs supports at most two outputs"
+                        } else {
+                            "meshgrid supports at most three outputs"
+                        };
+                        vm_bail!(mex("TooManyOutputs", msg));
+                    }
+                    let first = match eval.first() {
+                        Ok(value) => value,
+                        Err(err) => vm_bail!(err),
+                    };
+                    stack.push(first);
+                    if out_count >= 2 {
+                        let second = match eval.second() {
+                            Ok(value) => value,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(second);
+                    }
+                    if out_count >= 3 {
+                        let third = match eval.third() {
+                            Ok(value) => value,
+                            Err(err) => vm_bail!(err),
+                        };
+                        stack.push(third);
+                    }
+                    continue;
+                }
                 if name == "load" {
                     let eval = match runmat_runtime::builtins::io::mat::load::evaluate(&args) {
                         Ok(eval) => eval,
@@ -3173,7 +3218,8 @@ pub fn interpret_with_vars(
                     continue;
                 }
                 if name == "setenv" {
-                    let eval = match runmat_runtime::builtins::io::repl_fs::setenv::evaluate(&args) {
+                    let eval = match runmat_runtime::builtins::io::repl_fs::setenv::evaluate(&args)
+                    {
                         Ok(eval) => eval,
                         Err(err) => vm_bail!(err),
                     };
@@ -5466,9 +5512,7 @@ pub fn interpret_with_vars(
                                             Value::Tensor(idx_t) => {
                                                 let len = idx_t.shape.iter().product::<usize>();
                                                 if len == total {
-                                                    for (i, &val) in
-                                                        idx_t.data.iter().enumerate()
-                                                    {
+                                                    for (i, &val) in idx_t.data.iter().enumerate() {
                                                         if val != 0.0 {
                                                             idxs.push(i + 1);
                                                         }
@@ -6017,12 +6061,13 @@ pub fn interpret_with_vars(
                                                         t.data[start + r] = rt.data[0];
                                                     }
                                                 } else {
-                                                    vm_bail!(
-                                                        "shape mismatch for slice assign".to_string()
-                                                    );
+                                                    vm_bail!("shape mismatch for slice assign"
+                                                        .to_string());
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
+                                            _ => {
+                                                vm_bail!("rhs must be numeric or tensor".to_string())
+                                            }
                                         }
                                         stack.push(Value::Tensor(t));
                                         bench_end("StoreSlice2D.fast_col", __b);
@@ -6065,12 +6110,13 @@ pub fn interpret_with_vars(
                                                         t.data[i0 + c * rows] = rt.data[0];
                                                     }
                                                 } else {
-                                                    vm_bail!(
-                                                        "shape mismatch for slice assign".to_string()
-                                                    );
+                                                    vm_bail!("shape mismatch for slice assign"
+                                                        .to_string());
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
+                                            _ => {
+                                                vm_bail!("rhs must be numeric or tensor".to_string())
+                                            }
                                         }
                                         stack.push(Value::Tensor(t));
                                         bench_end("StoreSlice2D.fast_row", __b);
@@ -6519,12 +6565,13 @@ pub fn interpret_with_vars(
                                                         t.data[start + r] = rt.data[0];
                                                     }
                                                 } else {
-                                                    vm_bail!(
-                                                        "shape mismatch for slice assign".to_string()
-                                                    );
+                                                    vm_bail!("shape mismatch for slice assign"
+                                                        .to_string());
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
+                                            _ => {
+                                                vm_bail!("rhs must be numeric or tensor".to_string())
+                                            }
                                         }
                                         let view = runmat_accelerate_api::HostTensorView {
                                             data: &t.data,
@@ -6573,12 +6620,13 @@ pub fn interpret_with_vars(
                                                         t.data[i0 + c * rows] = rt.data[0];
                                                     }
                                                 } else {
-                                                    vm_bail!(
-                                                        "shape mismatch for slice assign".to_string()
-                                                    );
+                                                    vm_bail!("shape mismatch for slice assign"
+                                                        .to_string());
                                                 }
                                             }
-                                            _ => vm_bail!("rhs must be numeric or tensor".to_string()),
+                                            _ => {
+                                                vm_bail!("rhs must be numeric or tensor".to_string())
+                                            }
                                         }
                                         let view = runmat_accelerate_api::HostTensorView {
                                             data: &t.data,
@@ -7208,40 +7256,43 @@ pub fn interpret_with_vars(
                                         strides: Vec<usize>,
                                     },
                                 }
-                                let rhs_view = match rhs {
-                                    Value::Num(n) => RhsView::Scalar(n),
-                                    Value::Tensor(rt) => {
-                                        let mut rshape = rt.shape.clone();
-                                        if rshape.len() < dims {
-                                            rshape.resize(dims, 1);
-                                        }
-                                        if rshape.len() > dims {
-                                            if rshape.iter().skip(dims).any(|&s| s != 1) {
-                                                vm_bail!("shape mismatch for slice assign".to_string());
+                                let rhs_view =
+                                    match rhs {
+                                        Value::Num(n) => RhsView::Scalar(n),
+                                        Value::Tensor(rt) => {
+                                            let mut rshape = rt.shape.clone();
+                                            if rshape.len() < dims {
+                                                rshape.resize(dims, 1);
                                             }
-                                            rshape.truncate(dims);
-                                        }
-                                        for d in 0..dims {
-                                            let out_len = per_dim_indices[d].len();
-                                            let rhs_len = rshape[d];
-                                            if !(rhs_len == 1 || rhs_len == out_len) {
-                                                vm_bail!("shape mismatch for slice assign".to_string());
+                                            if rshape.len() > dims {
+                                                if rshape.iter().skip(dims).any(|&s| s != 1) {
+                                                    vm_bail!("shape mismatch for slice assign"
+                                                        .to_string());
+                                                }
+                                                rshape.truncate(dims);
+                                            }
+                                            for d in 0..dims {
+                                                let out_len = per_dim_indices[d].len();
+                                                let rhs_len = rshape[d];
+                                                if !(rhs_len == 1 || rhs_len == out_len) {
+                                                    vm_bail!("shape mismatch for slice assign"
+                                                        .to_string());
+                                                }
+                                            }
+                                            let mut rstrides = vec![0usize; dims];
+                                            let mut racc = 1usize;
+                                            for d in 0..dims {
+                                                rstrides[d] = racc;
+                                                racc *= rshape[d];
+                                            }
+                                            RhsView::Tensor {
+                                                data: rt.data,
+                                                shape: rshape,
+                                                strides: rstrides,
                                             }
                                         }
-                                        let mut rstrides = vec![0usize; dims];
-                                        let mut racc = 1usize;
-                                        for d in 0..dims {
-                                            rstrides[d] = racc;
-                                            racc *= rshape[d];
-                                        }
-                                        RhsView::Tensor {
-                                            data: rt.data,
-                                            shape: rshape,
-                                            strides: rstrides,
-                                        }
-                                    }
-                                    _ => vm_bail!("rhs must be numeric or tensor".to_string()),
-                                };
+                                        _ => vm_bail!("rhs must be numeric or tensor".to_string()),
+                                    };
                                 // Map absolute indices to selection positions per dimension
                                 use std::collections::HashMap;
                                 let mut pos_maps: Vec<HashMap<usize, usize>> =

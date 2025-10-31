@@ -3,6 +3,7 @@ mod eye;
 mod fill;
 mod linspace;
 mod logspace;
+pub mod meshgrid;
 mod ones;
 mod rand;
 mod randi;

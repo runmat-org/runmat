@@ -46,7 +46,11 @@ pub fn build_sub2ind_shader(
     )
     .unwrap();
     writeln!(shader, "const EPSILON: {scalar_ty} = {epsilon};").unwrap();
-    let max_val = if scalar_ty == "f32" { "3.4028234663852886e38" } else { "1.7976931348623157e308" };
+    let max_val = if scalar_ty == "f32" {
+        "3.4028234663852886e38"
+    } else {
+        "1.7976931348623157e308"
+    };
     writeln!(
         shader,
         "fn isfinite_scalar(x: {scalar_ty}) -> bool {{ return (x == x) && (abs(x) < {scalar_ty}({max_val})); }}"

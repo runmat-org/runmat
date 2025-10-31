@@ -417,7 +417,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{Tensor, ComplexTensor, LogicalArray};
+    use runmat_builtins::{ComplexTensor, LogicalArray, Tensor};
 
     #[test]
     fn roots_quadratic_real() {
@@ -491,7 +491,8 @@ mod tests {
     #[test]
     fn roots_accepts_complex_coefficients_input() {
         // p(x) = x^2 + 1 with complex coefficients path
-        let coeffs = ComplexTensor::new(vec![(1.0, 0.0), (0.0, 0.0), (1.0, 0.0)], vec![3, 1]).unwrap();
+        let coeffs =
+            ComplexTensor::new(vec![(1.0, 0.0), (0.0, 0.0), (1.0, 0.0)], vec![3, 1]).unwrap();
         let result = roots_builtin(Value::ComplexTensor(coeffs)).expect("roots complex input");
         match result {
             Value::ComplexTensor(t) => {

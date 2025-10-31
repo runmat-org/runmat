@@ -10,8 +10,7 @@ pub struct WorkspaceResolver {
     pub globals: fn() -> Vec<String>,
 }
 
-static RESOLVER: Lazy<RwLock<Option<WorkspaceResolver>>> =
-    Lazy::new(|| RwLock::new(None));
+static RESOLVER: Lazy<RwLock<Option<WorkspaceResolver>>> = Lazy::new(|| RwLock::new(None));
 
 /// Register the workspace resolver. Ignition installs this once during
 /// initialization so that language builtins can query variables lazily.

@@ -3,9 +3,9 @@ use once_cell::sync::OnceCell;
 use runmat_accelerate::fusion_residency;
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, CorrcoefOptions, FspecialRequest, GpuTensorHandle,
-    HostTensorOwned, HostTensorView, PagefunRequest, ProviderPrecision, UniqueOptions,
-    UniqueResult, ProviderCondNorm, ProviderConvMode, ProviderEigResult, ProviderLinsolveOptions,
-    ProviderLinsolveResult, ProviderNormOrder, ProviderPinvOptions,
+    HostTensorOwned, HostTensorView, PagefunRequest, ProviderCondNorm, ProviderConvMode,
+    ProviderEigResult, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPrecision, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;

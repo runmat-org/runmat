@@ -366,7 +366,10 @@ fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> Result<Opti
     #[cfg(all(test, feature = "wgpu"))]
     {
         // Reassert WGPU provider only when operands are WGPU handles (device_id != 0).
-        if operands.iter().any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0)) {
+        if operands
+            .iter()
+            .any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0))
+        {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
@@ -1058,8 +1061,12 @@ mod tests {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
         let func = CharArray::new("@mtimes".chars().collect(), 1, 7).unwrap();
-        let result = pagefun_builtin(Value::CharArray(func), Value::Tensor(lhs), vec![Value::Tensor(rhs)])
-            .expect("pagefun char array");
+        let result = pagefun_builtin(
+            Value::CharArray(func),
+            Value::Tensor(lhs),
+            vec![Value::Tensor(rhs)],
+        )
+        .expect("pagefun char array");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -1126,13 +1133,11 @@ mod tests {
 
     #[test]
     fn pagefun_page_dimension_mismatch() {
-        let lhs = Tensor::new(
-            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-            vec![2, 2, 2],
-        )
-        .unwrap();
+        let lhs = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![2, 2, 2]).unwrap();
         let rhs = Tensor::new(
-            vec![1.0, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+            vec![
+                1.0, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ],
             vec![2, 2, 3],
         )
         .unwrap();

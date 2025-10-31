@@ -5,15 +5,14 @@ use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
     AccelProvider, CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest,
     GpuTensorHandle, HostTensorOwned, HostTensorView, ImfilterOptions, PagefunRequest,
-    ProviderFindResult, ProviderPrecision, SetdiffOptions, SetdiffResult, SortComparison,
-    SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
     ProviderBandwidth, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
-    ProviderConvMode, ProviderConvOrientation, ProviderEigResult,
+    ProviderConvMode, ProviderConvOrientation, ProviderEigResult, ProviderFindResult,
     ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderNanMode,
-    ProviderNormOrder, ProviderPinvOptions, ProviderQrOptions, ProviderQrPivot,
-    ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind,
-    ProviderPolyderQuotient,
+    ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision,
+    ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
+    ProviderSymmetryKind, SetdiffOptions, SetdiffResult, SortComparison, SortResult,
+    SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -27,7 +26,7 @@ use runmat_runtime::builtins::stats::summary::{
 };
 
 use runmat_runtime::builtins::math::linalg::ops::{
-    mldivide_host_real_for_provider, mrdivide_host_real_for_provider,
+    dot_host_real_for_provider, mldivide_host_real_for_provider, mrdivide_host_real_for_provider,
 };
 use runmat_runtime::builtins::math::linalg::solve::cond::cond_host_real_for_provider;
 use runmat_runtime::builtins::math::linalg::solve::inv::inv_host_real_for_provider;
@@ -55,6 +54,8 @@ fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
 }
 
 const POLYDER_EPS: f64 = 1.0e-12;
+const FACTORIAL_MAX_HOST: usize = 170;
+const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 
 #[derive(Clone, Copy)]
 enum PolyOrientation {
@@ -174,6 +175,44 @@ fn poly_sub_real(a: &[f64], b: &[f64]) -> Vec<f64> {
 fn rng_state() -> &'static Mutex<u64> {
     static RNG: OnceCell<Mutex<u64>> = OnceCell::new();
     RNG.get_or_init(|| Mutex::new(0x9e3779b97f4a7c15))
+}
+
+fn factorial_scalar_host(value: f64) -> f64 {
+    if value.is_nan() {
+        return f64::NAN;
+    }
+    if value == 0.0 {
+        return 1.0;
+    }
+    if value.is_infinite() {
+        return if value.is_sign_positive() {
+            f64::INFINITY
+        } else {
+            f64::NAN
+        };
+    }
+    if value < 0.0 {
+        return f64::NAN;
+    }
+    let rounded = value.round();
+    if (value - rounded).abs() > FACTORIAL_INT_TOL {
+        return f64::NAN;
+    }
+    if rounded < 0.0 {
+        return f64::NAN;
+    }
+    let n = rounded as usize;
+    if n > FACTORIAL_MAX_HOST {
+        return f64::INFINITY;
+    }
+    if n == 0 {
+        return 1.0;
+    }
+    let mut acc = 1.0f64;
+    for k in 2..=n {
+        acc *= k as f64;
+    }
+    acc
 }
 
 fn tensor_to_weight_vector(tensor: &Tensor) -> Result<Vec<f64>> {
@@ -1890,6 +1929,32 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn elem_pow(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let bbuf = guard
+            .get(&b.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id))?;
+        if a.shape != b.shape {
+            return Err(anyhow::anyhow!("shape mismatch"));
+        }
+        let mut out = vec![0.0; abuf.len()];
+        for i in 0..abuf.len() {
+            out[i] = abuf[i].powf(bbuf[i]);
+        }
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
     fn elem_ne(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let (adata, bdata) = {
             let guard = registry().lock().unwrap();
@@ -2455,6 +2520,25 @@ impl AccelProvider for InProcessProvider {
             .get(&a.buffer_id)
             .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
         let out: Vec<f64> = abuf.iter().map(|&x| x.sin()).collect();
+        drop(guard);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut guard2 = registry().lock().unwrap();
+        guard2.insert(id, out);
+        Ok(GpuTensorHandle {
+            shape: a.shape.clone(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+    fn unary_gamma(&self, _a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("unary_gamma not supported by provider"))
+    }
+    fn unary_factorial(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let guard = registry().lock().unwrap();
+        let abuf = guard
+            .get(&a.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+        let out: Vec<f64> = abuf.iter().copied().map(factorial_scalar_host).collect();
         drop(guard);
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard2 = registry().lock().unwrap();
@@ -3459,6 +3543,33 @@ impl AccelProvider for InProcessProvider {
         };
         let (tiled, shape) = repmat_numeric(&data, &handle.shape, reps)?;
         Ok(self.allocate_tensor(tiled, shape))
+    }
+
+    fn dot(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        dim: Option<usize>,
+    ) -> Result<GpuTensorHandle> {
+        let (lhs_buf, rhs_buf) = {
+            let guard = registry().lock().unwrap();
+            let lhs_buf = guard
+                .get(&lhs.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("dot: unknown tensor handle {}", lhs.buffer_id))?;
+            let rhs_buf = guard
+                .get(&rhs.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("dot: unknown tensor handle {}", rhs.buffer_id))?;
+            (lhs_buf, rhs_buf)
+        };
+        let lhs_tensor =
+            Tensor::new(lhs_buf, lhs.shape.clone()).map_err(|e| anyhow!("dot: {e}"))?;
+        let rhs_tensor =
+            Tensor::new(rhs_buf, rhs.shape.clone()).map_err(|e| anyhow!("dot: {e}"))?;
+        let result =
+            dot_host_real_for_provider(&lhs_tensor, &rhs_tensor, dim).map_err(|e| anyhow!(e))?;
+        Ok(self.allocate_tensor(result.data.clone(), result.shape.clone()))
     }
 
     fn reduce_sum(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {

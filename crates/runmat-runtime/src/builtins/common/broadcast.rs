@@ -59,12 +59,20 @@ pub fn broadcast_index(
     let mut offset = 0usize;
     for dim in 0..out_shape.len() {
         let out_extent = out_shape[dim];
-        let coord = if out_extent == 0 { 0 } else { linear % out_extent };
+        let coord = if out_extent == 0 {
+            0
+        } else {
+            linear % out_extent
+        };
         if out_extent != 0 {
             linear /= out_extent;
         }
         let in_extent = in_shape.get(dim).copied().unwrap_or(1);
-        let mapped = if in_extent == 1 || out_extent == 0 { 0 } else { coord };
+        let mapped = if in_extent == 1 || out_extent == 0 {
+            0
+        } else {
+            coord
+        };
         if dim < strides.len() {
             offset += mapped * strides[dim];
         }
@@ -139,14 +147,24 @@ impl BroadcastPlan {
     }
 
     /// Total number of elements produced by the broadcast.
-    pub fn len(&self) -> usize { self.len }
+    pub fn len(&self) -> usize {
+        self.len
+    }
 
     /// Output shape after broadcasting both operands.
-    pub fn output_shape(&self) -> &[usize] { &self.output_shape }
+    pub fn output_shape(&self) -> &[usize] {
+        &self.output_shape
+    }
 
     /// Iterator yielding `(output_index, index_a, index_b)` triples for each element.
     pub fn iter(&self) -> BroadcastIter<'_> {
-        BroadcastIter { plan: self, offset: 0, index_a: 0, index_b: 0, coords: vec![0usize; self.output_shape.len()] }
+        BroadcastIter {
+            plan: self,
+            offset: 0,
+            index_a: 0,
+            index_b: 0,
+            coords: vec![0usize; self.output_shape.len()],
+        }
     }
 }
 
@@ -163,12 +181,18 @@ impl<'a> Iterator for BroadcastIter<'a> {
     type Item = (usize, usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset >= self.plan.len { return None; }
+        if self.offset >= self.plan.len {
+            return None;
+        }
         let current = (self.offset, self.index_a, self.index_b);
         self.offset += 1;
-        if self.offset == self.plan.len { return Some(current); }
+        if self.offset == self.plan.len {
+            return Some(current);
+        }
         for dim in 0..self.plan.output_shape.len() {
-            if self.plan.output_shape[dim] == 0 { continue; }
+            if self.plan.output_shape[dim] == 0 {
+                continue;
+            }
             self.coords[dim] += 1;
             if self.coords[dim] < self.plan.output_shape[dim] {
                 self.index_a += self.plan.advance_a[dim];
@@ -179,8 +203,12 @@ impl<'a> Iterator for BroadcastIter<'a> {
             let rewind = self.plan.output_shape[dim].saturating_sub(1);
             let rewind_a = self.plan.advance_a[dim] * rewind;
             let rewind_b = self.plan.advance_b[dim] * rewind;
-            if rewind_a != 0 { self.index_a = self.index_a.saturating_sub(rewind_a); }
-            if rewind_b != 0 { self.index_b = self.index_b.saturating_sub(rewind_b); }
+            if rewind_a != 0 {
+                self.index_a = self.index_a.saturating_sub(rewind_a);
+            }
+            if rewind_b != 0 {
+                self.index_b = self.index_b.saturating_sub(rewind_b);
+            }
         }
         Some(current)
     }
@@ -229,7 +257,14 @@ mod tests {
         let indices: Vec<(usize, usize, usize)> = plan.iter().collect();
         assert_eq!(
             indices,
-            vec![(0, 0, 0), (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5)]
+            vec![
+                (0, 0, 0),
+                (1, 1, 1),
+                (2, 2, 2),
+                (3, 3, 3),
+                (4, 4, 4),
+                (5, 5, 5)
+            ]
         );
     }
 

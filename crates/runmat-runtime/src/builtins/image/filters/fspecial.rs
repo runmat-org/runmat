@@ -1150,8 +1150,9 @@ mod tests {
         let result = fspecial_builtin(Value::from("gaussian"), args).unwrap();
         let tensor = match result {
             Value::Tensor(t) => t,
-            Value::GpuTensor(h) =>
-                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather"),
+            Value::GpuTensor(h) => {
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
+            }
             other => panic!("expected tensor, got {other:?}"),
         };
         assert_eq!(tensor.shape, vec![7, 7]);

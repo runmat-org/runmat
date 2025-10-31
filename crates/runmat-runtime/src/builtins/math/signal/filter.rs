@@ -1246,7 +1246,10 @@ mod tests {
         };
         for (idx, (a, b)) in lhs.iter().zip(rhs.iter()).enumerate() {
             let diff = (a - b).abs();
-            assert!(diff < tol, "value mismatch at index {idx}: {a} vs {b} (diff {diff})");
+            assert!(
+                diff < tol,
+                "value mismatch at index {idx}: {a} vs {b} (diff {diff})"
+            );
         }
     }
 
