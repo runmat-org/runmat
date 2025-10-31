@@ -14,6 +14,7 @@ core.*
 **/core
 **/core.*
 **/*.core
+!crates/runmat-runtime/src/builtins/strings/core.rs
  
 # Generated website content
 website/content/builtins.json

@@ -283,7 +283,9 @@ impl AppContext {
                 Ok(new_outcome) => {
                     outcome = new_outcome;
                 }
-                Err(err) => println!("[runmatfunc] test execution error after completion pass: {err}"),
+                Err(err) => {
+                    println!("[runmatfunc] test execution error after completion pass: {err}")
+                }
             }
         }
 
