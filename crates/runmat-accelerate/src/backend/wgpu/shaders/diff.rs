@@ -18,7 +18,7 @@ struct DiffParams {
 @group(0) @binding(1) var<storage, read_write> Output: Tensor;
 @group(0) @binding(2) var<uniform> params: DiffParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (params.segment_out == 0u) {
         return;
@@ -66,7 +66,7 @@ struct DiffParams {
 @group(0) @binding(1) var<storage, read_write> Output: Tensor;
 @group(0) @binding(2) var<uniform> params: DiffParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (params.segment_out == 0u) {
         return;

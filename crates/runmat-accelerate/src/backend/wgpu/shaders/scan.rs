@@ -26,7 +26,7 @@ fn nan_f64() -> f64 {
     return bitcast<f64>(0x7ff8000000000000u);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let segment = gid.x;
     if segment >= params.segments {
@@ -137,7 +137,7 @@ fn nan_f32() -> f32 {
     return bitcast<f32>(0x7fc00000u);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let segment = gid.x;
     if segment >= params.segments {
@@ -248,7 +248,7 @@ fn nan_f64() -> f64 {
     return bitcast<f64>(0x7ff8000000000000u);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let segment = gid.x;
     if segment >= params.segments {
@@ -359,7 +359,7 @@ fn nan_f32() -> f32 {
     return bitcast<f32>(0x7fc00000u);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let segment = gid.x;
     if segment >= params.segments {
@@ -475,7 +475,7 @@ fn nan_f64() -> f64 {
     return bitcast<f64>(0x7ff8000000000000u);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let segment = gid.x;
     if segment >= params.segments {
@@ -641,7 +641,7 @@ fn nan_f64() -> f64 {
     return bitcast<f64>(0x7ff8000000000000u);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let segment = gid.x;
     if segment >= params.segments {
@@ -807,7 +807,7 @@ fn nan_f32() -> f32 {
     return bitcast<f32>(0x7fc00000u);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let segment = gid.x;
     if segment >= params.segments {
@@ -973,7 +973,7 @@ fn nan_f32() -> f32 {
     return bitcast<f32>(0x7fc00000u);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let segment = gid.x;
     if segment >= params.segments {

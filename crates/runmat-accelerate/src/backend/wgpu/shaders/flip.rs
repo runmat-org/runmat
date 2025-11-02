@@ -28,7 +28,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> Output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local_index = gid.x;
     if local_index >= params.len {
@@ -113,7 +113,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> Output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local_index = gid.x;
     if local_index >= params.len {

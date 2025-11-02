@@ -16,7 +16,7 @@ struct Params {
 
 fn isNan(x: f64) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local = gid.x;
     if local >= params.len {
@@ -51,7 +51,7 @@ struct Params {
 
 fn isNan(x: f32) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local = gid.x;
     if local >= params.len {

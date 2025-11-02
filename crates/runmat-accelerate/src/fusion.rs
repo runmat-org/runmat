@@ -642,7 +642,7 @@ impl FusionGroupPlan {
             "@group(0) @binding({}) var<uniform> params: Params;\n\n",
             self.inputs.len() + 1
         ));
-        shader.push_str("@compute @workgroup_size(512)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n");
+        shader.push_str("@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n");
         shader.push_str("    let idx = gid.x;\n    if (idx >= params.len) { return; }\n");
         shader.push_str("    let g = idx + params.offset;\n");
         shader.push_str("    // Compute N-D coordinates from global index (with chunk offset)\n    var coord: array<u32, MAX_RANK>;\n    var tmp: u32 = g;\n    var d: u32 = 0u;\n    loop { if d >= params.rank { break; } let dim = params.out_shape[d].value; if dim == 0u { coord[d] = 0u; } else { coord[d] = tmp % dim; tmp = tmp / dim; } d = d + 1u; }\n");
@@ -738,7 +738,7 @@ impl FusionGroupPlan {
             "@group(0) @binding(2) var<uniform> params: MParams;\n\n"
         ));
         // Use a small fixed workgroup tile size to avoid driver stalls on some backends
-        shader.push_str(&format!("var<workgroup> tile: array<{scalar_ty}, 512u>;\n\n"));
+        shader.push_str(&format!("var<workgroup> tile: array<{scalar_ty}, @WG@u>;\n\n"));
         shader.push_str(&format!(
             "const OMITNAN: bool = {};\n\n",
             if omitnan { "true" } else { "false" }
@@ -758,7 +758,7 @@ impl FusionGroupPlan {
             "fn isNanF(x: {scalar}) -> bool {{ return x != x; }}\n\n",
             scalar = scalar_ty
         ));
-        shader.push_str("@compute @workgroup_size(512)\n");
+        shader.push_str("@compute @workgroup_size(@WG@)\n");
         if axis == 0 {
             // Column-wise: reduce over rows; one output per column (ncols)
             shader.push_str(
@@ -775,7 +775,7 @@ impl FusionGroupPlan {
             // helpers are declared at module scope
             shader.push_str("  var saw_nan: bool = false;\n  var r = lid.x;\n");
             shader.push_str(&format!(
-                "  while (r < params.nrows) {{\n    let v = input0.data[ (col * params.ld) + r ];\n    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n    r += 512u;\n  }}\n",
+                "  while (r < params.nrows) {{\n    let v = input0.data[ (col * params.ld) + r ];\n    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n    r += @WG@u;\n  }}\n",
                 scalar = scalar_ty,
                 val = val_expr
             ));
@@ -786,7 +786,7 @@ impl FusionGroupPlan {
             }
             shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
             shader.push_str(
-                "  var off = 256u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",
+                "  var off = (@WG@u) / 2u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",
             );
             // Final write: apply post-scale (sum=1, mean=1/rows)
             shader.push_str(&format!("  if (lid.x == 0u) {{ output.data[col] = tile[0u] * {}; }}\n}}\n", post_scale));
@@ -806,7 +806,7 @@ impl FusionGroupPlan {
             // helpers are declared at module scope
             shader.push_str("  var saw_nan: bool = false;\n  var c = lid.x;\n");
             shader.push_str(&format!(
-                "  while (c < params.ncols) {{\n    let v = input0.data[ row + (c * params.ld) ];\n    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n    c += 512u;\n  }}\n",
+                "  while (c < params.ncols) {{\n    let v = input0.data[ row + (c * params.ld) ];\n    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n    c += @WG@u;\n  }}\n",
                 scalar = scalar_ty,
                 val = val_expr
             ));
@@ -817,7 +817,7 @@ impl FusionGroupPlan {
             }
             shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
             shader.push_str(
-                "  var off = 256u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",
+                "  var off = (@WG@u) / 2u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",
             );
             shader.push_str(&format!("  if (lid.x == 0u) {{ output.data[row] = tile[0u] * {}; }}\n}}\n", post_scale));
         }

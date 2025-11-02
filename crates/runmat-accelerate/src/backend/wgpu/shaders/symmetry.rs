@@ -47,7 +47,7 @@ fn real_within(value: f64, reference: f64, tol: f64) -> bool {
     return abs(value - reference) <= tol;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len || params.rows == 0u {
@@ -144,7 +144,7 @@ fn real_within(value: f32, reference: f32, tol: f32) -> bool {
     return abs(value - reference) <= tol;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len || params.rows == 0u {

@@ -31,7 +31,7 @@ struct Params { len: u32, _pad0: u32, _pad1: u32, _pad2: u32 }
 @group(0) @binding(0) var<storage,read> input0: Tensor;
 @group(0) @binding(1) var<storage,read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= params.len) { return; }
@@ -61,7 +61,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // in-process here, so this simply validates that persistence occurred.
     let p = provider::ensure_wgpu_provider().unwrap().unwrap();
     let layout_tag = format!("runmat-fusion-layout-{}", 1);
-    let key = p.compute_pipeline_hash_bytes(shader.as_bytes(), &layout_tag, Some(256));
+    let key = p.compute_pipeline_hash_bytes(
+        shader.as_bytes(),
+        &layout_tag,
+        Some(runmat_accelerate::backend::wgpu::config::effective_workgroup_size()),
+    );
     let cache_dir = std::env::var("RUNMAT_PIPELINE_CACHE_DIR")
         .map(std::path::PathBuf::from)
         .ok()

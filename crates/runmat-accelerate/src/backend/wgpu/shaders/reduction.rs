@@ -41,7 +41,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-var<workgroup> tile: array<f64, 256>;
+var<workgroup> tile: array<f64, @WG@>;
 
 fn combine(a: f64, b: f64, op: u32) -> f64 {
     switch op {
@@ -74,7 +74,7 @@ fn map_value(v: f64, op: u32) -> f64 {
     return v;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
@@ -120,7 +120,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-var<workgroup> tile: array<f32, 256>;
+var<workgroup> tile: array<f32, @WG@>;
 
 fn combine(a: f32, b: f32, op: u32) -> f32 {
     switch op {
@@ -153,7 +153,7 @@ fn map_value(v: f32, op: u32) -> f32 {
     return v;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
@@ -201,7 +201,7 @@ struct Params {
 
 fn isNan(x: f64) -> bool { return x != x; }
 
-@compute @workgroup_size(512)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     let op_any_include = params.op == 3u;
@@ -401,7 +401,7 @@ struct Params {
 
 fn isNan(x: f32) -> bool { return x != x; }
 
-@compute @workgroup_size(512)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     let op_any_include = params.op == 3u;
@@ -605,7 +605,7 @@ fn better(current: f64, candidate: f64, op: u32) -> bool {
     return candidate > current;
 }
 
-@compute @workgroup_size(512)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if params.dim == 1u {
@@ -658,7 +658,7 @@ fn better(current: f32, candidate: f32, op: u32) -> bool {
     return candidate > current;
 }
 
-@compute @workgroup_size(512)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if params.dim == 1u {
@@ -712,7 +712,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-var<workgroup> tile: array<f64, 512u>;
+var<workgroup> tile: array<f64, @WG@u>;
 
 fn map_col_to_base(col: u32) -> u32 {
   var rem = col;
@@ -740,7 +740,7 @@ fn map_row_offset(r: u32) -> u32 {
   return off;
 }
 
-@compute @workgroup_size(512)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
   let col = wid.x;
   if (col >= params.cols) { return; }
@@ -791,7 +791,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-var<workgroup> tile: array<f32, 512u>;
+var<workgroup> tile: array<f32, @WG@u>;
 
 fn map_col_to_base(col: u32) -> u32 {
   var rem = col;
@@ -819,7 +819,7 @@ fn map_row_offset(r: u32) -> u32 {
   return off;
 }
 
-@compute @workgroup_size(512)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
   let col = wid.x;
   if (col >= params.cols) { return; }
@@ -871,8 +871,8 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> Ex2Out: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-var<workgroup> tile_sum: array<f64, 512u>;
-var<workgroup> tile_sumsq: array<f64, 512u>;
+var<workgroup> tile_sum: array<f64, @WG@u>;
+var<workgroup> tile_sumsq: array<f64, @WG@u>;
 
 fn map_col_to_base(col: u32) -> u32 {
   var rem = col;
@@ -900,7 +900,7 @@ fn map_row_offset(r: u32) -> u32 {
   return off;
 }
 
-@compute @workgroup_size(512)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
   let col = wid.x;
   if (col >= params.cols) { return; }
@@ -961,8 +961,8 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> Ex2Out: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-var<workgroup> tile_sum: array<f32, 512u>;
-var<workgroup> tile_sumsq: array<f32, 512u>;
+var<workgroup> tile_sum: array<f32, @WG@u>;
+var<workgroup> tile_sumsq: array<f32, @WG@u>;
 
 fn map_col_to_base(col: u32) -> u32 {
   var rem = col;
@@ -990,7 +990,7 @@ fn map_row_offset(r: u32) -> u32 {
   return off;
 }
 
-@compute @workgroup_size(512)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
   let col = wid.x;
   if (col >= params.cols) { return; }

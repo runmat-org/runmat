@@ -80,7 +80,7 @@ fn reflect_index(coord_in: i32, len: i32) -> u32 {
 @group(0) @binding(3) var<storage, read_write> Output: Tensor;
 @group(0) @binding(4) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local_idx = gid.x;
     if local_idx >= params.len {
@@ -260,7 +260,7 @@ fn reflect_index(coord_in: i32, len: i32) -> u32 {
 @group(0) @binding(3) var<storage, read_write> Output: Tensor;
 @group(0) @binding(4) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local_idx = gid.x;
     if local_idx >= params.len {

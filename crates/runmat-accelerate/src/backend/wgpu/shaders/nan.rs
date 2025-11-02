@@ -6,7 +6,7 @@ struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 fn isnan64(x: f64) -> bool { return x != x; }
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let idx = gid.x; if (idx >= params.len) { return; }
   let v = input0.data[idx];
@@ -20,7 +20,7 @@ struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 fn isnan32(x: f32) -> bool { return x != x; }
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let idx = gid.x; if (idx >= params.len) { return; }
   let v = input0.data[idx];
@@ -34,7 +34,7 @@ struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 fn isnan64(x: f64) -> bool { return x != x; }
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let idx = gid.x; if (idx >= params.len) { return; }
   let v = input0.data[idx];
@@ -48,7 +48,7 @@ struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 fn isnan32(x: f32) -> bool { return x != x; }
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let idx = gid.x; if (idx >= params.len) { return; }
   let v = input0.data[idx];

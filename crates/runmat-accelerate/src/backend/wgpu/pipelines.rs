@@ -860,6 +860,18 @@ impl WgpuPipelines {
     }
 }
 
+fn substitute_wg_token(src: &str, wg: u32) -> Cow<'_, str> {
+    if src.contains("@WG@") {
+        let mut s = src.to_string();
+        let token = "@WG@";
+        let val = wg.to_string();
+        s = s.replace(token, &val);
+        Cow::Owned(s)
+    } else {
+        Cow::Borrowed(src)
+    }
+}
+
 fn create_pipeline(
     device: &wgpu::Device,
     layout_label: &str,
@@ -877,9 +889,11 @@ fn create_pipeline(
         bind_group_layouts: &[&layout],
         push_constant_ranges: &[],
     });
+    let wg = crate::backend::wgpu::config::effective_workgroup_size();
+    let patched = substitute_wg_token(shader_source, wg);
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(shader_label),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_source)),
+        source: wgpu::ShaderSource::Wgsl(patched),
     });
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some(pipeline_label),
@@ -903,8 +917,10 @@ pub fn create_pipeline_layout(
 }
 
 pub fn create_shader_module(device: &wgpu::Device, label: &str, wgsl: &str) -> wgpu::ShaderModule {
+    let wg = crate::backend::wgpu::config::effective_workgroup_size();
+    let patched = substitute_wg_token(wgsl, wg);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(wgsl)),
+        source: wgpu::ShaderSource::Wgsl(patched),
     })
 }

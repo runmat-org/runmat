@@ -19,7 +19,7 @@ struct BandwidthParams {
 @group(0) @binding(1) var<storage, read_write> output: BandwidthOutput;
 @group(0) @binding(2) var<uniform> params: BandwidthParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len || params.rows == 0u {
@@ -62,7 +62,7 @@ struct BandwidthParams {
 @group(0) @binding(1) var<storage, read_write> output: BandwidthOutput;
 @group(0) @binding(2) var<uniform> params: BandwidthParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len || params.rows == 0u {

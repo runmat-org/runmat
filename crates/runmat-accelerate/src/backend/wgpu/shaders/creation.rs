@@ -17,7 +17,7 @@ struct EyeParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: EyeParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if params.diag_total == 0u {
         return;
@@ -52,7 +52,7 @@ struct EyeParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: EyeParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if params.diag_total == 0u {
         return;
@@ -84,7 +84,7 @@ struct FillParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: FillParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len {
@@ -109,7 +109,7 @@ struct FillParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: FillParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len {
@@ -137,7 +137,7 @@ struct LinspaceParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: LinspaceParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if params.chunk == 0u || params.total == 0u {
         return;
@@ -177,7 +177,7 @@ struct LinspaceParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: LinspaceParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if params.chunk == 0u || params.total == 0u {
         return;
@@ -262,7 +262,7 @@ fn unsharp_base(row: u32, col: u32, alpha: f64) -> f64 {
     return -alpha;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len {
@@ -379,7 +379,7 @@ fn unsharp_base(row: u32, col: u32, alpha: f32) -> f32 {
     return -alpha;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len {
@@ -467,7 +467,7 @@ fn uniform_f64(state: ptr<function, u32>) -> f64 {
     return combined * INV_POW53;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.chunk {
@@ -525,7 +525,7 @@ fn uniform_f32(state: ptr<function, u32>) -> f32 {
     return f32(bits) * INV_POW23;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.chunk {
@@ -581,7 +581,7 @@ fn uniform_f64(state: ptr<function, u32>) -> f64 {
     return combined * INV_POW53;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.chunk {
@@ -629,7 +629,7 @@ fn uniform_f32(state: ptr<function, u32>) -> f32 {
     return min(sample, ALMOST_ONE);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.chunk {
@@ -676,7 +676,7 @@ fn uniform_f64(state: ptr<function, u32>) -> f64 {
     return combined * INV_POW53;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.chunk {
@@ -730,7 +730,7 @@ fn uniform_f32(state: ptr<function, u32>) -> f32 {
     return clamp(sample, MIN_UNIFORM, ALMOST_ONE);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.chunk {

@@ -148,7 +148,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -178,7 +178,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -208,7 +208,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -238,7 +238,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -268,7 +268,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -298,7 +298,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -328,7 +328,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -358,7 +358,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -388,7 +388,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -418,7 +418,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -448,7 +448,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -478,7 +478,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -508,7 +508,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -538,7 +538,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -568,7 +568,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -598,7 +598,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -628,7 +628,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -658,7 +658,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -687,7 +687,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -715,7 +715,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -745,7 +745,7 @@ struct Params {
 
 fn isNan(x: f32) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -775,7 +775,7 @@ struct Params {
 
 fn isNan(x: f64) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -802,7 +802,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -832,7 +832,7 @@ struct Params {
 
 fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -862,7 +862,7 @@ struct Params {
 
 fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -892,7 +892,7 @@ struct Params {
 
 fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -2038,7 +2038,7 @@ impl WgpuProvider {
         let shader_hash = self.compute_pipeline_hash_bytes(
             shader.as_bytes(),
             &layout_tag,
-            Some(crate::backend::wgpu::config::WORKGROUP_SIZE),
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
         );
         let module = crate::backend::wgpu::pipelines::create_shader_module(
             self.device_ref(),
@@ -2052,7 +2052,7 @@ impl WgpuProvider {
             "runmat-fusion-pipeline",
             Some(shader.as_bytes()),
             Some(&layout_tag),
-            Some(crate::backend::wgpu::config::WORKGROUP_SIZE),
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
         );
         // Warmup once
         crate::backend::wgpu::dispatch::elementwise::warmup_noop(
@@ -2181,7 +2181,7 @@ impl WgpuProvider {
 
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
+                crate::backend::wgpu::config::effective_workgroup_size(),
             );
             crate::backend::wgpu::dispatch::elementwise::run(
                 self.device_ref(),
