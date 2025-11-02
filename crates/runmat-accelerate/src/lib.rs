@@ -401,9 +401,8 @@ impl Accelerator {
     pub fn elementwise_add(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
         match (a, b) {
             (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
-                ExecutionTarget::Cpu => {
-                    runmat_runtime::elementwise_add(a, b).map_err(|e| anyhow::anyhow!(e))
-                }
+                ExecutionTarget::Cpu => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
+                    .map_err(|e| anyhow::anyhow!(e)),
                 ExecutionTarget::Gpu(_) => {
                     let bk = self
                         .planner
@@ -431,7 +430,8 @@ impl Accelerator {
                 let hb = self.gather_handle(gb)?;
                 self.elementwise_add(other, &hb)
             }
-            _ => runmat_runtime::elementwise_add(a, b).map_err(|e| anyhow::anyhow!(e)),
+            _ => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
+                .map_err(|e| anyhow::anyhow!(e)),
         }
     }
 

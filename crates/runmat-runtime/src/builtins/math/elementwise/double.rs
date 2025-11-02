@@ -306,7 +306,6 @@ fn double_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 
     let tensor = gpu_helpers::gather_tensor(&handle)?;
     if let Some(provider) = provider {
-        let _ = provider.free(&handle);
         if provider.precision() == ProviderPrecision::F64 {
             let view = HostTensorView {
                 data: &tensor.data,

@@ -241,6 +241,7 @@ struct ParsedRand {
 #[derive(Clone)]
 enum RandTemplate {
     Double,
+    Single,
     Like(Value),
 }
 
@@ -272,9 +273,9 @@ impl ParsedRand {
                         continue;
                     }
                     "single" => {
-                        return Err(
-                            "rand: single precision output is not implemented yet".to_string()
-                        );
+                        template = Some(RandTemplate::Single);
+                        idx += 1;
+                        continue;
                     }
                     other => {
                         return Err(format!("rand: unrecognised option '{other}'"));
@@ -325,11 +326,18 @@ impl ParsedRand {
 fn build_output(parsed: ParsedRand) -> Result<Value, String> {
     match parsed.template {
         RandTemplate::Double => rand_double(&parsed.shape),
+        RandTemplate::Single => rand_single(&parsed.shape),
         RandTemplate::Like(proto) => rand_like(&proto, &parsed.shape),
     }
 }
 
 fn rand_double(shape: &[usize]) -> Result<Value, String> {
+    // Prefer provider when available to keep residency
+    if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Ok(gpu) = provider.random_uniform(shape) {
+            return Ok(Value::GpuTensor(gpu));
+        }
+    }
     let len = tensor::element_count(shape);
     let data = random::generate_uniform(len, "rand")?;
     let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| format!("rand: {e}"))?;
@@ -348,6 +356,18 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
         Value::CharArray(_) | Value::Cell(_) => rand_double(shape),
         other => Err(format!("rand: unsupported prototype {other:?}")),
     }
+}
+
+fn rand_single(shape: &[usize]) -> Result<Value, String> {
+    // Generate in provider if possible, then cast to single on device
+    if let Some(_provider) = runmat_accelerate_api::provider() {
+        if let Ok(Value::GpuTensor(gpu)) = rand_double(shape) {
+            return crate::call_builtin("single", &[Value::GpuTensor(gpu)]);
+        }
+    }
+    // Host fallback: generate then cast via builtin (may remain host-side)
+    let v = rand_double(shape)?;
+    crate::call_builtin("single", &[v])
 }
 
 fn rand_complex(shape: &[usize]) -> Result<Value, String> {

@@ -25,3 +25,4 @@ pub mod symmetry;
 pub mod transpose;
 pub mod tril;
 pub mod triu;
+pub mod nan;

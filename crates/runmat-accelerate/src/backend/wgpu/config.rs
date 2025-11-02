@@ -1,6 +1,6 @@
-pub const WORKGROUP_SIZE: u32 = 256;
-pub const REDUCE_WORKGROUP_SIZE: u32 = 256;
+pub const WORKGROUP_SIZE: u32 = 512;
+pub const REDUCE_WORKGROUP_SIZE: u32 = 512;
 pub const DEFAULT_TWO_PASS_THRESHOLD: usize = 1024;
-pub const DEFAULT_REDUCTION_WG: u32 = 256;
+pub const DEFAULT_REDUCTION_WG: u32 = 512;
 pub const MATMUL_TILE: u32 = 16;
 pub const MAX_DISPATCH_WORKGROUPS: u32 = 65_535;

@@ -5,6 +5,10 @@ use std::borrow::Cow;
 // Shader aliases
 const BINARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::BINARY_SHADER_F64;
 const BINARY_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::BINARY_SHADER_F32;
+const BINARY_BROADCAST_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F64;
+const BINARY_BROADCAST_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F32;
 const UNARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::UNARY_SHADER_F64;
 const UNARY_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::UNARY_SHADER_F32;
 const SCALAR_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F64;
@@ -89,6 +93,14 @@ const CUMMIN_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMMIN_SHAD
 const CUMMIN_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMMIN_SHADER_F32;
 const CUMMAX_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMMAX_SHADER_F64;
 const CUMMAX_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMMAX_SHADER_F32;
+const REDUCE_ND_MEAN_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::reduction::REDUCE_ND_MEAN_SHADER_F64;
+const REDUCE_ND_MEAN_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::reduction::REDUCE_ND_MEAN_SHADER_F32;
+const REDUCE_ND_MOMENTS_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::reduction::REDUCE_ND_MOMENTS_SHADER_F64;
+const REDUCE_ND_MOMENTS_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::reduction::REDUCE_ND_MOMENTS_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -97,6 +109,7 @@ pub struct PipelineBundle {
 
 pub struct WgpuPipelines {
     pub binary: PipelineBundle,
+    pub binary_broadcast: PipelineBundle,
     pub unary: PipelineBundle,
     pub scalar: PipelineBundle,
     pub transpose: PipelineBundle,
@@ -135,6 +148,8 @@ pub struct WgpuPipelines {
     pub find: PipelineBundle,
     pub bandwidth: PipelineBundle,
     pub symmetry: PipelineBundle,
+    pub reduce_nd_mean: PipelineBundle,
+    pub reduce_nd_moments: PipelineBundle,
 }
 
 impl WgpuPipelines {
@@ -153,6 +168,23 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => BINARY_SHADER_F64,
                 NumericPrecision::F32 => BINARY_SHADER_F32,
+            },
+        );
+
+        let binary_broadcast = create_pipeline(
+            device,
+            "runmat-binary-broadcast-layout",
+            "runmat-binary-broadcast-shader",
+            "runmat-binary-broadcast-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => BINARY_BROADCAST_SHADER_F64,
+                NumericPrecision::F32 => BINARY_BROADCAST_SHADER_F32,
             },
         );
 
@@ -749,8 +781,41 @@ impl WgpuPipelines {
             },
         );
 
+        let reduce_nd_mean = create_pipeline(
+            device,
+            "runmat-reduce-nd-mean-layout",
+            "runmat-reduce-nd-mean-shader",
+            "runmat-reduce-nd-mean-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => REDUCE_ND_MEAN_SHADER_F64,
+                NumericPrecision::F32 => REDUCE_ND_MEAN_SHADER_F32,
+            },
+        );
+        let reduce_nd_moments = create_pipeline(
+            device,
+            "runmat-reduce-nd-moments-layout",
+            "runmat-reduce-nd-moments-shader",
+            "runmat-reduce-nd-moments-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => REDUCE_ND_MOMENTS_SHADER_F64,
+                NumericPrecision::F32 => REDUCE_ND_MOMENTS_SHADER_F32,
+            },
+        );
+
         Self {
             binary,
+            binary_broadcast,
             unary,
             scalar,
             transpose,
@@ -789,6 +854,8 @@ impl WgpuPipelines {
             find,
             bandwidth,
             symmetry,
+            reduce_nd_mean,
+            reduce_nd_moments,
         }
     }
 }

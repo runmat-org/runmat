@@ -499,6 +499,37 @@ fn rdivide_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Result<Value,
                 return Ok(Value::GpuTensor(handle));
             }
         }
+        // Try N-D implicit expansion on device using repmat + elem_div
+        if let Some((out_shape, reps_l, reps_r)) = broadcast_reps(&lhs.shape, &rhs.shape) {
+            let made_left = reps_l.iter().any(|&r| r != 1);
+            let made_right = reps_r.iter().any(|&r| r != 1);
+            let left_expanded = if made_left {
+                provider.repmat(&lhs, &reps_l).map_err(|e| e.to_string())?
+            } else {
+                lhs.clone()
+            };
+            let right_expanded = if made_right {
+                provider.repmat(&rhs, &reps_r).map_err(|e| e.to_string())?
+            } else {
+                rhs.clone()
+            };
+            let result = provider
+                .elem_div(&left_expanded, &right_expanded)
+                .map_err(|e| e.to_string());
+            if made_left {
+                let _ = provider.free(&left_expanded);
+            }
+            if made_right {
+                let _ = provider.free(&right_expanded);
+            }
+            if let Ok(handle) = result {
+                if handle.shape == out_shape {
+                    return Ok(Value::GpuTensor(handle));
+                } else {
+                    let _ = provider.free(&handle);
+                }
+            }
+        }
         if is_scalar_shape(&rhs.shape) {
             if let Some(scalar) = gpu_scalar_value(&rhs)? {
                 if let Ok(handle) = provider.scalar_div(&lhs, scalar) {
@@ -517,6 +548,36 @@ fn rdivide_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> Result<Value,
     let left = gpu_helpers::gather_tensor(&lhs)?;
     let right = gpu_helpers::gather_tensor(&rhs)?;
     rdivide_host(Value::Tensor(left), Value::Tensor(right))
+}
+
+fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
+    let rank = a.len().max(b.len()).max(1);
+    let mut out = vec![1usize; rank];
+    let mut aa = vec![1usize; rank];
+    let mut bb = vec![1usize; rank];
+    for i in 0..rank {
+        aa[i] = *a.get(i).unwrap_or(&1);
+        bb[i] = *b.get(i).unwrap_or(&1);
+    }
+    for i in 0..rank {
+        let (ad, bd) = (aa[i], bb[i]);
+        if ad == bd {
+            out[i] = ad;
+        } else if ad == 1 {
+            out[i] = bd;
+        } else if bd == 1 {
+            out[i] = ad;
+        } else {
+            return None;
+        }
+    }
+    let reps_a: Vec<usize> = (0..rank)
+        .map(|i| if aa[i] == out[i] { 1 } else { out[i] })
+        .collect();
+    let reps_b: Vec<usize> = (0..rank)
+        .map(|i| if bb[i] == out[i] { 1 } else { out[i] })
+        .collect();
+    Some((out, reps_a, reps_b))
 }
 
 fn rdivide_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> Result<Value, String> {

@@ -96,12 +96,12 @@ impl BroadcastPlan {
         let ndims = shape_a.len().max(shape_b.len());
 
         let mut ext_a = Vec::with_capacity(ndims);
-        ext_a.extend(std::iter::repeat(1).take(ndims.saturating_sub(shape_a.len())));
         ext_a.extend_from_slice(shape_a);
+        ext_a.extend(std::iter::repeat(1).take(ndims.saturating_sub(shape_a.len())));
 
         let mut ext_b = Vec::with_capacity(ndims);
-        ext_b.extend(std::iter::repeat(1).take(ndims.saturating_sub(shape_b.len())));
         ext_b.extend_from_slice(shape_b);
+        ext_b.extend(std::iter::repeat(1).take(ndims.saturating_sub(shape_b.len())));
 
         let mut output_shape = Vec::with_capacity(ndims);
         for i in 0..ndims {

@@ -465,31 +465,24 @@ pub fn create_matrix_from_values(rows: &[Vec<Value>]) -> Result<Value, String> {
         return Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0])?));
     }
 
-    // Validate rectangularity
-    let mut all_cols_equal = true;
-    let cols = rows[0].len();
-    for r in rows {
-        if r.len() != cols {
-            all_cols_equal = false;
-            break;
-        }
-    }
-    if !all_cols_equal {
-        return Err("Matrix construction: inconsistent number of columns in rows".to_string());
-    }
-
-    // First, concatenate each row horizontally
+    // Build each row using horzcat builtin to preserve canonical semantics
     let mut row_matrices: Vec<Value> = Vec::with_capacity(rows.len());
     for row in rows {
-        let row_result = hcat_values(row)?;
-        row_matrices.push(row_result);
+        let row_value = if row.is_empty() {
+            Value::Tensor(Tensor::new(vec![], vec![0, 0])?)
+        } else {
+            crate::call_builtin("horzcat", row)?
+        };
+        row_matrices.push(row_value);
     }
 
-    // Then concatenate all rows vertically
-    match row_matrices.len() {
-        0 => Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0])?)),
-        1 => Ok(row_matrices.into_iter().next().unwrap()),
-        _ => vcat_values(&row_matrices),
+    // Stack rows using vertcat builtin
+    if row_matrices.is_empty() {
+        Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0])?))
+    } else if row_matrices.len() == 1 {
+        Ok(row_matrices.into_iter().next().unwrap())
+    } else {
+        crate::call_builtin("vertcat", &row_matrices)
     }
 }
 

@@ -207,11 +207,20 @@ pub struct FusionGroupPlan {
     pub inputs: Vec<ValueId>,
     pub stack_pattern: Vec<usize>,
     pub constants: HashMap<usize, Value>,
+    pub const_values: HashMap<ValueId, Value>,
     pub output: Option<ValueId>,
     pub kernel: FusionKernelSpec,
     // For reductions: track the ValueId of the data tensor being reduced, if identifiable
     pub reduction_data: Option<ValueId>,
+    // For reductions: the semantic mode (sum or mean)
+    pub reduction_mode: Option<ReductionMode>,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReductionMode {
+    Sum,
+    Mean,
+}
+
 
 #[derive(Debug, Clone)]
 pub enum FusionOp {
@@ -367,7 +376,9 @@ impl FusionGroupPlan {
         let mut inputs: Vec<ValueId> = Vec::new();
         let mut stack_pattern: Vec<usize> = Vec::new();
         let mut constants: HashMap<usize, Value> = HashMap::new();
+        let const_values: HashMap<ValueId, Value> = HashMap::new();
         let mut operations = Vec::new();
+        let mut reduction_mode: Option<ReductionMode> = None;
         let mut reduction_data: Option<ValueId> = None;
         let mut output: Option<ValueId> = None;
 
@@ -453,6 +464,7 @@ impl FusionGroupPlan {
                 let lname = name.to_ascii_lowercase();
                 if (lname == "sum" || lname == "mean") && !node.inputs.is_empty() {
                     reduction_data = Some(node.inputs[0]);
+                    reduction_mode = Some(if lname == "mean" { ReductionMode::Mean } else { ReductionMode::Sum });
                 }
             }
         }
@@ -464,16 +476,56 @@ impl FusionGroupPlan {
             operations,
             stack_pattern,
             constants,
+            const_values,
             inputs,
             output,
             kernel: FusionKernelSpec::new(kind, true),
             reduction_data,
+            reduction_mode,
         };
 
-        // For reduction groups, externalize only the data operand as input; keep constants separate
+        // For reduction groups, externalize only real tensor dependencies; keep constants separate
         if plan.group.kind.is_reduction() {
-            if let Some(data) = plan.reduction_data {
-                plan.inputs.retain(|vid| *vid == data);
+            if let Some(data_vid) = plan.reduction_data {
+                // Record constant ValueIds for codegen
+                for node_id in &plan.group.nodes {
+                    if let Some(node) = graph.node(*node_id) {
+                        for &inp in &node.inputs {
+                            if let Some(info) = graph.value(inp) {
+                                if let Some(cv) = info.constant.clone() {
+                                    plan.const_values.insert(inp, cv);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Build dependency map from op outputs to inputs
+                let mut prod: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
+                for op in &plan.operations {
+                    match op {
+                        FusionOp::Primitive { inputs, output, op: _ } => {
+                            if let Some(out) = output { prod.insert(*out, inputs.clone()); }
+                        }
+                        FusionOp::Builtin { name: _, inputs, output } => {
+                            if let Some(out) = output { prod.insert(*out, inputs.clone()); }
+                        }
+                    }
+                }
+                let original_inputs = plan.inputs.clone();
+                let mut deps: Vec<ValueId> = Vec::new();
+                let mut visited: HashSet<ValueId> = HashSet::new();
+                let mut stack: Vec<ValueId> = vec![data_vid];
+                while let Some(cur) = stack.pop() {
+                    if !visited.insert(cur) { continue; }
+                    if original_inputs.contains(&cur) {
+                        if !deps.contains(&cur) { deps.push(cur); }
+                        continue;
+                    }
+                    if let Some(parents) = prod.get(&cur) {
+                        for p in parents { stack.push(*p); }
+                    }
+                }
+                plan.inputs = deps;
                 plan.stack_pattern.clear();
             }
         }
@@ -485,7 +537,7 @@ impl FusionGroupPlan {
         } else {
             false
         };
-        plan.kernel.supported = supported;
+        plan.kernel.supported = plan.kernel.supported && supported;
         plan
     }
 
@@ -523,7 +575,8 @@ impl FusionGroupPlan {
         let output_id = self.output?;
         let mut exprs: HashMap<ValueId, String> = HashMap::new();
         for (idx, input_id) in self.inputs.iter().enumerate() {
-            exprs.insert(*input_id, format!("input{idx}.data[idx]"));
+            // Placeholder; will be replaced by broadcasted index variable i{idx}
+            exprs.insert(*input_id, format!("input{idx}.data[i{idx}]"));
         }
 
         let mut body = String::new();
@@ -554,8 +607,17 @@ impl FusionGroupPlan {
         let final_expr = exprs.get(&output_id)?.clone();
 
         let mut shader = String::new();
-        shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}> }};\n"));
-        shader.push_str("struct Params {\n    len: u32;\n    _pad0: u32;\n    _pad1: u32;\n    _pad2: u32;\n}\n\n");
+        shader.push_str("const MAX_RANK: u32 = 128u;\n");
+        shader.push_str("struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };\n");
+        shader.push_str("alias PackedArray = array<PackedValue, MAX_RANK>;\n\n");
+        shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>, }};\n"));
+        // Broadcast-aware Params: len, offset, rank, pad, out_shape and per-input shape/stride
+        shader.push_str("struct Params {\n    len: u32,\n    offset: u32,\n    rank: u32,\n    _pad: u32,\n    out_shape: PackedArray,\n");
+        for idx in 0..self.inputs.len() {
+            shader.push_str(&format!("    in{}_shape: PackedArray,\n", idx));
+            shader.push_str(&format!("    in{}_stride: PackedArray,\n", idx));
+        }
+        shader.push_str("}\n\n");
         // Provide portable stubs; avoid relying on backend builtins that may be missing
         if scalar_ty == "f32" {
             shader.push_str("fn isNan(x: f32) -> bool { return x != x; }\n");
@@ -580,12 +642,19 @@ impl FusionGroupPlan {
             "@group(0) @binding({}) var<uniform> params: Params;\n\n",
             self.inputs.len() + 1
         ));
-        shader.push_str("@compute @workgroup_size(256)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n");
-        shader.push_str(
-            "    let idx = gid.x;\n    if (idx >= params.len) {\n        return;\n    }\n",
-        );
+        shader.push_str("@compute @workgroup_size(512)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n");
+        shader.push_str("    let idx = gid.x;\n    if (idx >= params.len) { return; }\n");
+        shader.push_str("    let g = idx + params.offset;\n");
+        shader.push_str("    // Compute N-D coordinates from global index (with chunk offset)\n    var coord: array<u32, MAX_RANK>;\n    var tmp: u32 = g;\n    var d: u32 = 0u;\n    loop { if d >= params.rank { break; } let dim = params.out_shape[d].value; if dim == 0u { coord[d] = 0u; } else { coord[d] = tmp % dim; tmp = tmp / dim; } d = d + 1u; }\n");
+        // Compute broadcasted indices per input
+        for (idx, _) in self.inputs.iter().enumerate() {
+            shader.push_str(&format!(
+                "    var i{}: u32 = 0u; d = 0u; loop {{ if d >= params.rank {{ break; }} let sd = params.in{}_shape[d].value; let st = params.in{}_stride[d].value; let c = select(coord[d], 0u, sd == 1u); i{} = i{} + c * st; d = d + 1u; }}\n",
+                idx, idx, idx, idx, idx
+            ));
+        }
         shader.push_str(&body);
-        shader.push_str(&format!("    output.data[idx] = {final_expr};\n}}\n"));
+        shader.push_str(&format!("    output.data[g] = {final_expr};\n}}\n"));
         Some(shader)
     }
 
@@ -623,6 +692,39 @@ impl FusionGroupPlan {
             _ => false,
         });
 
+        // Build reduction operand expression by folding the producer chain
+        let data_vid = self.reduction_data?;
+        let ext_input = self.inputs[0];
+        let mut exprs: HashMap<ValueId, String> = HashMap::new();
+        exprs.insert(ext_input, "v".to_string());
+        for (vid, val) in &self.const_values {
+            let lit = match val {
+                Value::Num(n) => if scalar_ty == "f64" { format!("f64({})", n) } else { format!("{}", *n as f32) },
+                Value::Int(i) => { let f = i.to_f64(); if scalar_ty == "f64" { format!("f64({})", f) } else { format!("{}", f as f32) } },
+                _ => if scalar_ty == "f64" { "f64(0.0)".to_string() } else { "0.0".to_string() },
+            };
+            exprs.insert(*vid, lit);
+        }
+        for op in &self.operations {
+            match op {
+                FusionOp::Primitive { op, inputs, output } => {
+                    if let Some(out) = output {
+                        if let Some(code) = primitive_expr(*op, inputs, &exprs) {
+                            exprs.insert(*out, code);
+                        }
+                    }
+                }
+                FusionOp::Builtin { name, inputs, output } => {
+                    if let Some(out) = output {
+                        if let Some(code) = builtin_expr(name, inputs, &exprs, scalar_ty) {
+                            exprs.insert(*out, code);
+                        }
+                    }
+                }
+            }
+        }
+        let val_expr = match exprs.get(&data_vid) { Some(s) => s.clone(), None => return None };
+
         let mut shader = String::new();
         shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>, }};\n"));
         shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
@@ -636,13 +738,27 @@ impl FusionGroupPlan {
             "@group(0) @binding(2) var<uniform> params: MParams;\n\n"
         ));
         // Use a small fixed workgroup tile size to avoid driver stalls on some backends
-        shader.push_str("var<workgroup> tile: array<f32, 64u>;\n\n");
+        shader.push_str(&format!("var<workgroup> tile: array<{scalar_ty}, 512u>;\n\n"));
         shader.push_str(&format!(
-            "const OMITNAN: bool = {}bool({});\n\n",
-            if scalar_ty == "f64" { "" } else { "" },
+            "const OMITNAN: bool = {};\n\n",
             if omitnan { "true" } else { "false" }
         ));
-        shader.push_str("@compute @workgroup_size(64)\n");
+        let is_mean = matches!(self.reduction_mode, Some(ReductionMode::Mean));
+        let post_scale = if is_mean {
+            if axis == 0 {
+                if scalar_ty == "f64" { "(1.0 / f64(f32(params.nrows)))".to_string() } else { "(1.0 / f32(params.nrows))".to_string() }
+            } else {
+                if scalar_ty == "f64" { "(1.0 / f64(f32(params.ncols)))".to_string() } else { "(1.0 / f32(params.ncols))".to_string() }
+            }
+        } else {
+            if scalar_ty == "f64" { "f64(1.0)".to_string() } else { "1.0".to_string() }
+        };
+        // Helper(s) at module scope
+        shader.push_str(&format!(
+            "fn isNanF(x: {scalar}) -> bool {{ return x != x; }}\n\n",
+            scalar = scalar_ty
+        ));
+        shader.push_str("@compute @workgroup_size(512)\n");
         if axis == 0 {
             // Column-wise: reduce over rows; one output per column (ncols)
             shader.push_str(
@@ -656,9 +772,24 @@ impl FusionGroupPlan {
             if scalar_ty == "f64" {
                 shader.push_str("  // close cast for f64 literal\n");
             }
-            shader.push_str("  fn isNanF(x: f32) -> bool { return x != x; }\n");
+            // helpers are declared at module scope
             shader.push_str("  var saw_nan: bool = false;\n  var r = lid.x;\n");
-            shader.push_str("  while (r < params.nrows) {\n    let v = input0.data[ (col * params.ld) + r ];\n    if (OMITNAN) { if (!isNanF(v)) { acc = acc + v; } } else { if (isNanF(v)) { saw_nan = true; } else { acc = acc + v; } }\n    r += 64u;\n  }\n");
+            shader.push_str(&format!(
+                "  while (r < params.nrows) {{\n    let v = input0.data[ (col * params.ld) + r ];\n    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n    r += 512u;\n  }}\n",
+                scalar = scalar_ty,
+                val = val_expr
+            ));
+            if scalar_ty == "f64" {
+                shader.push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n");
+            } else {
+                shader.push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f32>(0x7fc00000u); }\n");
+            }
+            shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
+            shader.push_str(
+                "  var off = 256u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",
+            );
+            // Final write: apply post-scale (sum=1, mean=1/rows)
+            shader.push_str(&format!("  if (lid.x == 0u) {{ output.data[col] = tile[0u] * {}; }}\n}}\n", post_scale));
         } else {
             // Row-wise: reduce over cols; one output per row (nrows)
             shader.push_str(
@@ -672,18 +803,23 @@ impl FusionGroupPlan {
             if scalar_ty == "f64" {
                 shader.push_str("  // close cast for f64 literal\n");
             }
-            shader.push_str("  fn isNanF(x: f32) -> bool { return x != x; }\n");
+            // helpers are declared at module scope
             shader.push_str("  var saw_nan: bool = false;\n  var c = lid.x;\n");
-            shader.push_str("  while (c < params.ncols) {\n    let v = input0.data[ row + (c * params.ld) ];\n    if (OMITNAN) { if (!isNanF(v)) { acc = acc + v; } } else { if (isNanF(v)) { saw_nan = true; } else { acc = acc + v; } }\n    c += 64u;\n  }\n");
-        }
-        shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
-        shader.push_str(
-            "  var off = 32u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    if (!is_omitnan(params.flags) && (isNanF(a) || isNanF(b))) { tile[lid.x] = f32(NaN); } else { tile[lid.x] = a + b; }\n  } workgroupBarrier(); off = off / 2u; }\n",
-        );
-        if axis == 0 {
-            shader.push_str("  if (lid.x == 0u) { output.data[col] = tile[0u]; }\n}\n");
-        } else {
-            shader.push_str("  if (lid.x == 0u) { output.data[row] = tile[0u]; }\n}\n");
+            shader.push_str(&format!(
+                "  while (c < params.ncols) {{\n    let v = input0.data[ row + (c * params.ld) ];\n    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n    c += 512u;\n  }}\n",
+                scalar = scalar_ty,
+                val = val_expr
+            ));
+            if scalar_ty == "f64" {
+                shader.push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n");
+            } else {
+                shader.push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f32>(0x7fc00000u); }\n");
+            }
+            shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
+            shader.push_str(
+                "  var off = 256u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",
+            );
+            shader.push_str(&format!("  if (lid.x == 0u) {{ output.data[row] = tile[0u] * {}; }}\n}}\n", post_scale));
         }
         Some(shader)
     }
@@ -788,6 +924,8 @@ fn builtin_expr(
         "ceil" => "ceil",
         "round" => "round",
         "trunc" => "trunc",
+        "max" => return builtin_binary("max", inputs, exprs),
+        "min" => return builtin_binary("min", inputs, exprs),
         _ => {
             return match name.to_ascii_lowercase().as_str() {
                 "log10" => {

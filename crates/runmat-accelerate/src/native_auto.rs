@@ -294,6 +294,13 @@ impl NativeAutoOffload {
         if !self.enabled {
             return Ok(args.to_vec());
         }
+        // Do not attempt to promote 'double' on providers that cannot store f64.
+        // Offloading a cast to double requires device-side f64; otherwise keep host.
+        if name.eq_ignore_ascii_case("double") {
+            if self.provider.precision() != runmat_accelerate_api::ProviderPrecision::F64 {
+                return Ok(args.to_vec());
+            }
+        }
         if let Some(policy) = builtin_policy(name) {
             if policy.is_sink {
                 return gather_args(args);
@@ -539,7 +546,7 @@ fn compare_elemwise(
     let tensor = Tensor::new(data.clone(), vec![elements, 1]).map_err(|e| anyhow!(e))?;
     let a = Value::Tensor(tensor.clone());
     let b = Value::Tensor(tensor.clone());
-    let cpu_time = time(|| runmat_runtime::elementwise_add(&a, &b))?;
+    let cpu_time = time(|| runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]))?;
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {

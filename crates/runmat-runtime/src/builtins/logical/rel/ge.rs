@@ -242,10 +242,28 @@ register_builtin_doc_text!("ge", DOC_MD);
     accel = "elementwise"
 )]
 fn ge_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
-    if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
-        if let Some(result) = try_ge_gpu(a, b) {
-            return result;
+    // Prefer device paths when any operand is a GPU tensor
+    match (&lhs, &rhs) {
+        (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) => {
+            if let Some(result) = try_ge_gpu(a, b) {
+                return result;
+            }
         }
+        (Value::GpuTensor(ref a), other) => {
+            if let Some(handle) = try_fill_like(a, other) {
+                if let Some(result) = try_ge_gpu(a, &handle) {
+                    return result;
+                }
+            }
+        }
+        (other, Value::GpuTensor(ref b)) => {
+            if let Some(handle) = try_fill_like(b, other) {
+                if let Some(result) = try_ge_gpu(&handle, b) {
+                    return result;
+                }
+            }
+        }
+        _ => {}
     }
     ge_host(lhs, rhs)
 }
@@ -259,6 +277,19 @@ fn try_ge_gpu(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Result<Value, 
             None
         }
     }
+}
+
+fn try_fill_like(proto: &GpuTensorHandle, other: &Value) -> Option<GpuTensorHandle> {
+    let provider = runmat_accelerate_api::provider()?;
+    let scalar = match other {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        _ => None,
+    }?;
+    provider.fill_like(proto, scalar).ok()
 }
 
 fn ge_host(lhs: Value, rhs: Value) -> Result<Value, String> {

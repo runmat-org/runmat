@@ -3,7 +3,6 @@
 //! Advanced linear algebra operations including decompositions and linear system solvers.
 
 use runmat_builtins::{Tensor as Matrix, Value};
-use runmat_macros::runtime_builtin;
 
 /// LU decomposition result
 pub struct LuDecomposition {
@@ -351,7 +350,8 @@ fn is_square(matrix: &Matrix) -> bool {
 }
 
 // Helper function to convert Vec<Value> to Vec<f64>
-fn value_vector_to_f64(values: &[Value]) -> Result<Vec<f64>, String> {
+#[allow(dead_code)]
+pub(crate) fn value_vector_to_f64(values: &[Value]) -> Result<Vec<f64>, String> {
     let mut out: Vec<f64> = Vec::new();
     for v in values {
         match v {
@@ -379,29 +379,32 @@ fn f64_vector_to_value(values: Vec<f64>) -> Vec<Value> {
 }
 
 // Builtin functions for LAPACK operations
-#[runtime_builtin(name = "solve")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn solve_builtin(a: Matrix, b: Vec<Value>) -> Result<Value, String> {
     let b_f64 = value_vector_to_f64(&b)?;
-    let solution = lapack_solve_linear_system(&a, &b_f64)?;
-    // Return as a cell column vector to match test expectations
-    let n = solution.len();
-    let data: Vec<Value> = solution.into_iter().map(Value::Num).collect();
-    super::make_cell(data, n, 1)
+    let x = lapack_solve_linear_system(&a, &b_f64)?;
+    Ok(Value::Tensor(
+        runmat_builtins::Tensor::new(x, vec![b_f64.len(), 1])
+            .map_err(|e| format!("solve: {e}"))?,
+    ))
 }
 
-#[runtime_builtin(name = "det")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn det_builtin(matrix: Matrix) -> Result<f64, String> {
     lapack_determinant(&matrix)
 }
 
-#[runtime_builtin(name = "inv")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn inv_builtin(matrix: Matrix) -> Result<Matrix, String> {
     lapack_matrix_inverse(&matrix)
 }
 
-#[runtime_builtin(name = "eig")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn eig_builtin(matrix: Matrix) -> Result<Matrix, String> {
     let decomp = lapack_eigenvalues(&matrix, false)?;
-    let n = decomp.eigenvalues.len();
-    Matrix::new_2d(decomp.eigenvalues, n, 1)
+    Ok(decomp.eigenvectors.unwrap())
 }

@@ -1270,21 +1270,264 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 fn elementwise_max(value: Value, args: ElementwiseArgs) -> Result<MaxEvaluation, String> {
     let ElementwiseArgs { other, comparison } = args;
     match (value, other) {
-        (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            // No provider hook today; gather both operands.
-            let tensor_a = gpu_helpers::gather_tensor(&handle_a)?;
-            let tensor_b = gpu_helpers::gather_tensor(&handle_b)?;
-            elementwise_real_or_complex(
-                Value::Tensor(tensor_a),
-                Value::Tensor(tensor_b),
-                comparison,
-            )
-        }
-        (Value::GpuTensor(handle), other) | (other, Value::GpuTensor(handle)) => {
-            let tensor = gpu_helpers::gather_tensor(&handle)?;
-            elementwise_real_or_complex(Value::Tensor(tensor), other, comparison)
-        }
+        (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) =>
+            elementwise_max_gpu_pair(&handle_a, &handle_b, comparison)
+                .or_else(|| {
+                    // Fallback to host path if provider path unavailable or unsupported
+                    let ta = gpu_helpers::gather_tensor(&handle_a).ok()?;
+                    let tb = gpu_helpers::gather_tensor(&handle_b).ok()?;
+                    elementwise_real_or_complex(Value::Tensor(ta), Value::Tensor(tb), comparison)
+                        .ok()
+                })
+                .ok_or_else(|| "max: elementwise GPU path failed".to_string()),
+        (Value::GpuTensor(handle), other) =>
+            elementwise_max_gpu_scalar_left(&handle, &other, comparison)
+                .or_else(|| {
+                    let t = gpu_helpers::gather_tensor(&handle).ok()?;
+                    elementwise_real_or_complex(Value::Tensor(t), other, comparison).ok()
+                })
+                .ok_or_else(|| "max: elementwise GPU scalar path failed".to_string()),
+        (other, Value::GpuTensor(handle)) =>
+            elementwise_max_gpu_scalar_right(&other, &handle, comparison)
+                .or_else(|| {
+                    let t = gpu_helpers::gather_tensor(&handle).ok()?;
+                    elementwise_real_or_complex(other, Value::Tensor(t), comparison).ok()
+                })
+                .ok_or_else(|| "max: elementwise GPU scalar path failed".to_string()),
         (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, comparison),
+    }
+}
+
+fn elementwise_max_gpu_pair(
+    a: &GpuTensorHandle,
+    b: &GpuTensorHandle,
+    comparison: ComparisonMethod,
+) -> Option<MaxEvaluation> {
+    if comparison != ComparisonMethod::Auto {
+        return None;
+    }
+    let provider = runmat_accelerate_api::provider()?;
+    // Equal-shape fast path
+    if a.shape == b.shape {
+        let values = provider.elem_max(a, b).ok()?;
+        // Try device mask first; if unavailable, compute indices on host while keeping values on device
+        if let Ok(mask) = provider.elem_ge(a, b) {
+            let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+            let _ = provider.free(&mask);
+            let mut indices = Vec::with_capacity(mask_host.data.len());
+            for &m in &mask_host.data {
+                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
+            }
+            let index_tensor = Tensor::new(indices, mask_host.shape.clone()).ok()?;
+            return Some(MaxEvaluation {
+                values: Value::GpuTensor(values),
+                indices: tensor::tensor_into_value(index_tensor),
+            });
+        } else {
+            // Host path for indices only
+            let ta = gpu_helpers::gather_tensor(a).ok()?;
+            let tb = gpu_helpers::gather_tensor(b).ok()?;
+            let mut indices = Vec::with_capacity(ta.data.len());
+            for i in 0..ta.data.len() {
+                indices.push(if ta.data[i] >= tb.data[i] { 1.0 } else { 2.0 });
+            }
+            let index_tensor = Tensor::new(indices, ta.shape.clone()).ok()?;
+            return Some(MaxEvaluation {
+                values: Value::GpuTensor(values),
+                indices: tensor::tensor_into_value(index_tensor),
+            });
+        }
+    }
+    // Broadcast-compatible path via repmat, then device compare
+    let (out_shape, reps_a, reps_b) = broadcast_reps(&a.shape, &b.shape)?;
+    let a_exp = if reps_a.iter().any(|&r| r != 1) {
+        provider.repmat(a, &reps_a).ok()?
+    } else {
+        a.clone()
+    };
+    let b_exp = if reps_b.iter().any(|&r| r != 1) {
+        provider.repmat(b, &reps_b).ok()?
+    } else {
+        b.clone()
+    };
+    let values = provider.elem_max(&a_exp, &b_exp).ok();
+    let mask = provider.elem_ge(&a_exp, &b_exp).ok();
+    if !std::ptr::eq(&a_exp, a) {
+        let _ = provider.free(&a_exp);
+    }
+    if !std::ptr::eq(&b_exp, b) {
+        let _ = provider.free(&b_exp);
+    }
+    let values = values?;
+    if values.shape != out_shape {
+        let _ = provider.free(&values);
+        return None;
+    }
+    let index_tensor = if let Some(mask) = mask {
+        let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+        let _ = provider.free(&mask);
+        let mut indices = Vec::with_capacity(mask_host.data.len());
+        for &m in &mask_host.data {
+            indices.push(if m != 0.0 { 1.0 } else { 2.0 });
+        }
+        Tensor::new(indices, out_shape).ok()?
+    } else {
+        // Host indices fallback
+        let ta = gpu_helpers::gather_tensor(&a_exp).ok()?;
+        let tb = gpu_helpers::gather_tensor(&b_exp).ok()?;
+        let mut indices = Vec::with_capacity(ta.data.len());
+        for i in 0..ta.data.len() {
+            indices.push(if ta.data[i] >= tb.data[i] { 1.0 } else { 2.0 });
+        }
+        Tensor::new(indices, out_shape).ok()?
+    };
+    Some(MaxEvaluation {
+        values: Value::GpuTensor(values),
+        indices: tensor::tensor_into_value(index_tensor),
+    })
+}
+
+fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
+    let rank = a.len().max(b.len()).max(1);
+    let mut out = vec![1usize; rank];
+    let mut aa = vec![1usize; rank];
+    let mut bb = vec![1usize; rank];
+    for i in 0..rank {
+        aa[i] = *a.get(i).unwrap_or(&1);
+        bb[i] = *b.get(i).unwrap_or(&1);
+    }
+    for i in 0..rank {
+        let (ad, bd) = (aa[i], bb[i]);
+        if ad == bd {
+            out[i] = ad;
+        } else if ad == 1 {
+            out[i] = bd;
+        } else if bd == 1 {
+            out[i] = ad;
+        } else {
+            return None;
+        }
+    }
+    let reps_a: Vec<usize> = (0..rank)
+        .map(|i| if aa[i] == out[i] { 1 } else { out[i] })
+        .collect();
+    let reps_b: Vec<usize> = (0..rank)
+        .map(|i| if bb[i] == out[i] { 1 } else { out[i] })
+        .collect();
+    Some((out, reps_a, reps_b))
+}
+
+fn elementwise_max_gpu_scalar_left(
+    a: &GpuTensorHandle,
+    other: &Value,
+    comparison: ComparisonMethod,
+) -> Option<MaxEvaluation> {
+    if comparison != ComparisonMethod::Auto {
+        return None;
+    }
+    let provider = runmat_accelerate_api::provider()?;
+    let scalar = extract_scalar(other)?;
+    // Prefer tensorize + elem_max for broader provider compatibility
+    let values = if let Ok(fill) = provider.fill_like(a, scalar) {
+        let vals = provider.elem_max(a, &fill).ok();
+        let _ = provider.free(&fill);
+        vals?
+    } else {
+        provider.scalar_max(a, scalar).ok()?
+    };
+    // Try device mask; if unavailable, compute on host
+    let index_tensor = if let Ok(fill) = provider.fill_like(a, scalar) {
+        if let Ok(mask) = provider.elem_ge(a, &fill) {
+            let _ = provider.free(&fill);
+            let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+            let _ = provider.free(&mask);
+            let mut indices = Vec::with_capacity(mask_host.data.len());
+            for &m in &mask_host.data {
+                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
+            }
+            Tensor::new(indices, mask_host.shape.clone()).ok()?
+        } else {
+            let _ = provider.free(&fill);
+            let ta = gpu_helpers::gather_tensor(a).ok()?;
+            let mut indices = Vec::with_capacity(ta.data.len());
+            for &v in &ta.data {
+                indices.push(if v >= scalar { 1.0 } else { 2.0 });
+            }
+            Tensor::new(indices, ta.shape.clone()).ok()?
+        }
+    } else {
+        let ta = gpu_helpers::gather_tensor(a).ok()?;
+        let mut indices = Vec::with_capacity(ta.data.len());
+        for &v in &ta.data {
+            indices.push(if v >= scalar { 1.0 } else { 2.0 });
+        }
+        Tensor::new(indices, ta.shape.clone()).ok()?
+    };
+    Some(MaxEvaluation {
+        values: Value::GpuTensor(values),
+        indices: tensor::tensor_into_value(index_tensor),
+    })
+}
+
+fn elementwise_max_gpu_scalar_right(
+    other: &Value,
+    b: &GpuTensorHandle,
+    comparison: ComparisonMethod,
+) -> Option<MaxEvaluation> {
+    if comparison != ComparisonMethod::Auto {
+        return None;
+    }
+    let provider = runmat_accelerate_api::provider()?;
+    let scalar = extract_scalar(other)?;
+    let values = if let Ok(fill) = provider.fill_like(b, scalar) {
+        let vals = provider.elem_max(&fill, b).ok();
+        let _ = provider.free(&fill);
+        vals?
+    } else {
+        provider.scalar_max(b, scalar).ok()?
+    };
+    // Try device mask; if unavailable, compute on host (origin 1 if scalar >= b)
+    let index_tensor = if let Ok(fill) = provider.fill_like(b, scalar) {
+        if let Ok(mask) = provider.elem_ge(&fill, b) {
+            let _ = provider.free(&fill);
+            let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+            let _ = provider.free(&mask);
+            let mut indices = Vec::with_capacity(mask_host.data.len());
+            for &m in &mask_host.data {
+                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
+            }
+            Tensor::new(indices, mask_host.shape.clone()).ok()?
+        } else {
+            let _ = provider.free(&fill);
+            let tb = gpu_helpers::gather_tensor(b).ok()?;
+            let mut indices = Vec::with_capacity(tb.data.len());
+            for &v in &tb.data {
+                indices.push(if scalar >= v { 1.0 } else { 2.0 });
+            }
+            Tensor::new(indices, tb.shape.clone()).ok()?
+        }
+    } else {
+        let tb = gpu_helpers::gather_tensor(b).ok()?;
+        let mut indices = Vec::with_capacity(tb.data.len());
+        for &v in &tb.data {
+            indices.push(if scalar >= v { 1.0 } else { 2.0 });
+        }
+        Tensor::new(indices, tb.shape.clone()).ok()?
+    };
+    Some(MaxEvaluation {
+        values: Value::GpuTensor(values),
+        indices: tensor::tensor_into_value(index_tensor),
+    })
+}
+
+fn extract_scalar(v: &Value) -> Option<f64> {
+    match v {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        _ => None,
     }
 }
 

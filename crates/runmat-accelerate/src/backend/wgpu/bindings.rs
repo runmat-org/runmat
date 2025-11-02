@@ -56,6 +56,22 @@ pub fn build_bgl_for_layout_tag(device: &wgpu::Device, tag: &str) -> Option<wgpu
             );
         }
     }
+    if let Some(rest) = tag.strip_prefix("runmat-reduction-layout-") {
+        if let Ok(n_inputs) = rest.parse::<usize>() {
+            let mut entries = Vec::with_capacity(n_inputs + 2);
+            for i in 0..n_inputs {
+                entries.push(storage_read_entry(i as u32));
+            }
+            entries.push(storage_read_write_entry(n_inputs as u32));
+            entries.push(uniform_entry((n_inputs + 1) as u32));
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("runmat-reduction-dyn-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+    }
     match tag {
         "runmat-reduction-bgl" | "runmat-reduction-p1-bgl" | "runmat-reduction-p2-bgl" => {
             let entries = [

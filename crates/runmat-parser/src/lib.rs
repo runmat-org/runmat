@@ -735,10 +735,12 @@ impl Parser {
                         return Err("expected ')' after arguments".into());
                     }
                 }
-                // Heuristic: If arguments indicate indexing (colon/end/range), treat as indexing; else if
-                // the callee is an identifier, treat as function call; otherwise as indexing.
+                // Heuristic: Prefer function-call for identifiers when clear function hints exist
+                // even if a range appears among arguments (e.g., reshape(0:9, [2 5])).
                 let has_index_hint = args.iter().any(|a| self.expr_suggests_indexing(a));
-                if has_index_hint {
+                let has_func_hint = matches!(expr, Expr::Ident(_))
+                    && args.iter().any(|a| matches!(a, Expr::Tensor(_) | Expr::Cell(_) | Expr::String(_)));
+                if has_index_hint && !has_func_hint {
                     expr = Expr::Index(Box::new(expr), args);
                 } else {
                     match expr {

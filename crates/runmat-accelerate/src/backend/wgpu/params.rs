@@ -244,6 +244,22 @@ pub struct RepmatParams {
     pub base_strides: [AlignedU32; REPMAT_MAX_RANK],
 }
 
+pub const BCAST_MAX_RANK: usize = PERMUTE_MAX_RANK;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct BinaryBroadcastParams {
+    pub len: u32,
+    pub offset: u32,
+    pub rank: u32,
+    pub op: u32,
+    pub out_shape: [AlignedU32; BCAST_MAX_RANK],
+    pub a_shape: [AlignedU32; BCAST_MAX_RANK],
+    pub b_shape: [AlignedU32; BCAST_MAX_RANK],
+    pub a_strides: [AlignedU32; BCAST_MAX_RANK],
+    pub b_strides: [AlignedU32; BCAST_MAX_RANK],
+}
+
 pub const KRON_MAX_RANK: usize = PERMUTE_MAX_RANK;
 
 #[repr(C)]
@@ -320,8 +336,8 @@ pub struct MatmulParams {
 pub struct ReduceGlobalParams {
     pub len: u32,
     pub op: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
+    pub offset: u32,
+    pub total: u32,
 }
 
 #[repr(C)]
@@ -402,6 +418,7 @@ pub struct FillParamsF32 {
     pub len: u32,
     pub _pad: [u32; 2],
 }
+
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -558,4 +575,20 @@ pub struct TriuParams {
     pub diag_offset: i32,
     pub _pad0: u32,
     pub _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ReduceNdParams {
+    pub rank: u32,
+    pub kept_count: u32,
+    pub reduce_count: u32,
+    pub _pad: u32,
+    pub rows: u32,
+    pub cols: u32,
+    pub _pad2: [u32; 2],
+    pub kept_sizes: [AlignedU32; BCAST_MAX_RANK],
+    pub reduce_sizes: [AlignedU32; BCAST_MAX_RANK],
+    pub kept_strides: [AlignedU32; BCAST_MAX_RANK],
+    pub reduce_strides: [AlignedU32; BCAST_MAX_RANK],
 }

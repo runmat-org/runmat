@@ -619,6 +619,12 @@ pub struct ProviderIirFilterResult {
     pub final_state: Option<GpuTensorHandle>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderMoments2 {
+    pub mean: GpuTensorHandle,
+    pub ex2: GpuTensorHandle,
+}
+
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: Send + Sync {
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
@@ -921,6 +927,20 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_mul not supported by provider"))
     }
+    fn elem_max(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_max not supported by provider"))
+    }
+    fn elem_min(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_min not supported by provider"))
+    }
     fn elem_sub(
         &self,
         _a: &GpuTensorHandle,
@@ -1166,6 +1186,12 @@ pub trait AccelProvider: Send + Sync {
     }
     fn scalar_mul(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scalar_mul not supported by provider"))
+    }
+    fn scalar_max(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_max not supported by provider"))
+    }
+    fn scalar_min(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_min not supported by provider"))
     }
     fn scalar_div(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scalar_div not supported by provider"))
@@ -1433,6 +1459,23 @@ pub trait AccelProvider: Send + Sync {
     fn reduce_mean(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_mean not supported by provider"))
     }
+    /// Reduce mean across multiple zero-based dimensions in one device pass.
+    fn reduce_mean_nd(
+        &self,
+        _a: &GpuTensorHandle,
+        _dims_zero_based: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_mean_nd not supported by provider"))
+    }
+    /// Reduce moments across multiple zero-based dimensions in one device pass.
+    /// Returns mean (E[x]) and mean of squares (E[x^2]).
+    fn reduce_moments_nd(
+        &self,
+        _a: &GpuTensorHandle,
+        _dims_zero_based: &[usize],
+    ) -> anyhow::Result<ProviderMoments2> {
+        Err(anyhow::anyhow!("reduce_moments_nd not supported by provider"))
+    }
     fn reduce_mean_dim(
         &self,
         _a: &GpuTensorHandle,
@@ -1559,6 +1602,16 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!(
             "fused_elementwise not supported by provider"
         ))
+    }
+
+    /// Build a numeric tensor where NaNs in `a` are replaced with 0.0 (device side).
+    fn map_nan_to_zero(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("map_nan_to_zero not supported by provider"))
+    }
+
+    /// Build a numeric mask tensor with 1.0 where value is not NaN and 0.0 where value is NaN.
+    fn not_nan_mask(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("not_nan_mask not supported by provider"))
     }
 
     /// Generic fused reduction entrypoint.
@@ -1729,6 +1782,26 @@ pub fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTenso
 pub fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
         if let Ok(h) = p.elem_hypot(a, b) {
+            return Some(h);
+        }
+    }
+    None
+}
+
+/// Convenience: perform elementwise max via provider if possible; otherwise return None
+pub fn try_elem_max(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+    if let Some(p) = provider() {
+        if let Ok(h) = p.elem_max(a, b) {
+            return Some(h);
+        }
+    }
+    None
+}
+
+/// Convenience: perform elementwise min via provider if possible; otherwise return None
+pub fn try_elem_min(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+    if let Some(p) = provider() {
+        if let Ok(h) = p.elem_min(a, b) {
             return Some(h);
         }
     }

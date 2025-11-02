@@ -23,3 +23,4 @@ mod real;
 mod sign;
 mod single;
 mod sqrt;
+mod times;

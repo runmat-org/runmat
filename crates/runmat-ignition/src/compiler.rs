@@ -1983,8 +1983,14 @@ impl Compiler {
                     }
                     // Existing propagation path and builtin call
                     if !has_any_expand {
+                        // First scan for user-defined inner function calls to expand; avoid compiling
+                        // simple args here to prevent duplicating them on the stack. If any inner
+                        // user functions are found, compile them and then compile the remaining
+                        // simple args once, emit the builtin call, and return. Otherwise, fall
+                        // through to the normal (single-pass) compilation below.
                         let mut total_argc = 0usize;
                         let mut did_expand_inner = false;
+                        let mut pending_simple: Vec<&runmat_hir::HirExpr> = Vec::new();
                         for arg in args {
                             if let HirExprKind::FuncCall(inner, inner_args) = &arg.kind {
                                 if self.functions.contains_key(inner) {
@@ -2004,15 +2010,17 @@ impl Compiler {
                                     total_argc += outc;
                                     did_expand_inner = true;
                                 } else {
-                                    self.compile_expr(arg)?;
-                                    total_argc += 1;
+                                    pending_simple.push(arg);
                                 }
                             } else {
-                                self.compile_expr(arg)?;
-                                total_argc += 1;
+                                pending_simple.push(arg);
                             }
                         }
                         if did_expand_inner {
+                            for arg in pending_simple {
+                                self.compile_expr(arg)?;
+                                total_argc += 1;
+                            }
                             self.emit(Instr::CallBuiltin(resolved, total_argc));
                             return Ok(());
                         }

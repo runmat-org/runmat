@@ -252,19 +252,17 @@ fn log1p_builtin(value: Value) -> Result<Value, String> {
 
 fn log1p_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
+        // Fast path: try device op first; if unsupported, fall back to complex-domain check
+        if let Ok(out) = provider.unary_log1p(&handle) {
+            return Ok(Value::GpuTensor(out));
+        }
         match detect_gpu_requires_complex(provider, &handle) {
-            Ok(false) => {
-                if let Ok(out) = provider.unary_log1p(&handle) {
-                    return Ok(Value::GpuTensor(out));
-                }
-            }
             Ok(true) => {
                 let tensor = gpu_helpers::gather_tensor(&handle)?;
                 return log1p_tensor(tensor);
             }
-            Err(_) => {
-                // Fall through to host fallback below.
-            }
+            Ok(false) => {}
+            Err(_) => {}
         }
     }
     let tensor = gpu_helpers::gather_tensor(&handle)?;

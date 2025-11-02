@@ -208,7 +208,7 @@ pub extern "C" fn runmat_value_pow(a_ptr: *const Value, b_ptr: *const Value) -> 
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        let result = match runmat_runtime::power(a, b) {
+        let result = match runmat_runtime::call_builtin("power", &[a.clone(), b.clone()]) {
             Ok(value) => value,
             Err(e) => {
                 error!("Power operation failed: {e}");
@@ -233,7 +233,7 @@ pub extern "C" fn runmat_value_neg(a_ptr: *const Value) -> *mut Value {
     unsafe {
         let a = &*a_ptr;
 
-        let result = match runmat_runtime::elementwise_neg(a) {
+        let result = match runmat_runtime::call_builtin("times", &[a.clone(), Value::Num(-1.0)]) {
             Ok(value) => value,
             Err(e) => {
                 error!("Negation failed: {e}");
@@ -262,7 +262,7 @@ pub extern "C" fn runmat_value_elementwise_mul(
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        match runmat_runtime::elementwise_mul(a, b) {
+        match runmat_runtime::call_builtin("times", &[a.clone(), b.clone()]) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),
@@ -289,7 +289,7 @@ pub extern "C" fn runmat_value_elementwise_div(
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        match runmat_runtime::elementwise_div(a, b) {
+        match runmat_runtime::call_builtin("rdivide", &[a.clone(), b.clone()]) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),
@@ -316,7 +316,7 @@ pub extern "C" fn runmat_value_elementwise_pow(
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        match runmat_runtime::elementwise_pow(a, b) {
+        match runmat_runtime::call_builtin("power", &[a.clone(), b.clone()]) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),
@@ -343,8 +343,8 @@ pub extern "C" fn runmat_value_elementwise_leftdiv(
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        // Left division is b \ a which is equivalent to a / b
-        match runmat_runtime::elementwise_div(b, a) {
+        // Left division is b \ a which is equivalent to a ./ b
+        match runmat_runtime::call_builtin("rdivide", &[a.clone(), b.clone()]) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),

@@ -3,8 +3,8 @@
 //! Implements comparison operators returning logical matrices/values.
 
 use runmat_builtins::Tensor;
+#[cfg(test)]
 use runmat_builtins::Value;
-use runmat_macros::runtime_builtin;
 
 /// Element-wise greater than comparison
 pub fn matrix_gt(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
@@ -151,27 +151,32 @@ pub fn matrix_ne(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 }
 
 // Built-in comparison functions
-#[runtime_builtin(name = "gt")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn gt_builtin(a: f64, b: f64) -> Result<f64, String> {
     Ok(if a > b { 1.0 } else { 0.0 })
 }
 
-#[runtime_builtin(name = "ge")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn ge_builtin(a: f64, b: f64) -> Result<f64, String> {
     Ok(if a >= b { 1.0 } else { 0.0 })
 }
 
-#[runtime_builtin(name = "lt")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn lt_builtin(a: f64, b: f64) -> Result<f64, String> {
     Ok(if a < b { 1.0 } else { 0.0 })
 }
 
-#[runtime_builtin(name = "le")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn le_builtin(a: f64, b: f64) -> Result<f64, String> {
     Ok(if a <= b { 1.0 } else { 0.0 })
 }
 
-#[runtime_builtin(name = "eq")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn eq_builtin(a: Value, b: Value) -> Result<Value, String> {
     match (a, b) {
         // Handle identity semantics
@@ -297,7 +302,8 @@ fn eq_builtin(a: Value, b: Value) -> Result<Value, String> {
     }
 }
 
-#[runtime_builtin(name = "ne")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn ne_builtin(a: Value, b: Value) -> Result<Value, String> {
     match (a, b) {
         // Handle identity semantics

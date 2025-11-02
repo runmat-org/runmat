@@ -13,6 +13,8 @@ pub enum BinaryOpCode {
     Hypot = 4,
     Atan2 = 5,
     Pow = 6,
+    Max = 7,
+    Min = 8,
 }
 
 #[derive(Clone, Copy)]
@@ -59,6 +61,8 @@ pub enum ScalarOpCode {
     Div = 3,
     RSub = 4,
     RDiv = 5,
+    Max = 6,
+    Min = 7,
 }
 
 #[derive(Clone, Copy)]
