@@ -207,7 +207,7 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
-                  Run the whole language, not a subset: proper indexing (<code>end</code>/colon/masks), multiple returns,
+                  Run the whole language, not a subset:  proper indexing (<code>end</code>/colon/masks), multiple returns,
                   classdef OOP, events/handles—plus built-ins across arrays, linalg, FFT/signal, stats, strings, and I/O. See <Link className="underline" href="/docs/language-coverage">coverage</Link>.
                 </CardDescription>
               </CardContent>
