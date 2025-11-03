@@ -69,10 +69,12 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
             bind_group_layouts: &[&bgl],
             push_constant_ranges: &[],
         });
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("warmup-shader-module"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(wgsl_str)),
-        });
+        // Apply the @WG@ substitution used by regular pipeline creation
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            device,
+            "warmup-shader-module",
+            wgsl_str,
+        );
         let key = compute_hash(&wgsl_bytes, layout_tag, meta.workgroup_size);
         let pipeline = get_or_create(
             key,

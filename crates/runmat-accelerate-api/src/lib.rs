@@ -647,6 +647,11 @@ pub trait AccelProvider: Send + Sync {
         ProviderPrecision::F64
     }
 
+    /// Read a single scalar at linear index from a device tensor, returning it as f64.
+    fn read_scalar(&self, _h: &GpuTensorHandle, _linear_index: usize) -> anyhow::Result<f64> {
+        Err(anyhow::anyhow!("read_scalar not supported by provider"))
+    }
+
     /// Allocate a zero-initialised tensor with the provided shape on the device.
     fn zeros(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("zeros not supported by provider"))

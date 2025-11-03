@@ -1493,6 +1493,21 @@ impl AccelProvider for InProcessProvider {
         symrcm_host_real_data(&matrix.shape, &data).map_err(|e| anyhow!(e))
     }
 
+    fn read_scalar(&self, h: &GpuTensorHandle, linear_index: usize) -> Result<f64> {
+        let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+        let buf = guard
+            .get(&h.buffer_id)
+            .ok_or_else(|| anyhow!("read_scalar: unknown buffer {}", h.buffer_id))?;
+        if linear_index >= buf.len() {
+            return Err(anyhow!(
+                "read_scalar: index {} out of bounds (len {})",
+                linear_index + 1,
+                buf.len()
+            ));
+        }
+        Ok(buf[linear_index])
+    }
+
     fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);

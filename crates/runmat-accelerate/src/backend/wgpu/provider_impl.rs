@@ -11082,6 +11082,62 @@ impl AccelProvider for WgpuProvider {
         symrcm_host_real_data(&host.shape, &host.data).map_err(|e| anyhow!(e))
     }
 
+    fn read_scalar(&self, h: &GpuTensorHandle, linear_index: usize) -> Result<f64> {
+        let entry = self.get_entry(h)?;
+        let elem_size = match entry.precision {
+            NumericPrecision::F64 => std::mem::size_of::<f64>() as u64,
+            NumericPrecision::F32 => std::mem::size_of::<f32>() as u64,
+        };
+        let total_bytes = (linear_index as u64)
+            .checked_mul(elem_size)
+            .ok_or_else(|| anyhow!("read_scalar: index overflow"))?;
+        if (linear_index + 1) > entry.len {
+            return Err(anyhow!("read_scalar: index {} out of bounds (len {})", linear_index + 1, entry.len));
+        }
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-read-scalar-staging"),
+            size: elem_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-read-scalar-enc"),
+            });
+        encoder.copy_buffer_to_buffer(
+            entry.buffer.as_ref(),
+            total_bytes,
+            &staging,
+            0,
+            elem_size,
+        );
+        self.submit(encoder);
+        let slice = staging.slice(..);
+        let (tx, rx) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+        rx.recv()
+            .map_err(|_| anyhow!("read_scalar: map_async dropped"))?
+            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
+        let mapped = slice.get_mapped_range();
+        let value = match entry.precision {
+            NumericPrecision::F64 => {
+                let words: &[f64] = cast_slice(&mapped);
+                words.get(0).copied().unwrap_or(0.0)
+            }
+            NumericPrecision::F32 => {
+                let words: &[f32] = cast_slice(&mapped);
+                words.get(0).copied().unwrap_or(0.0) as f64
+            }
+        };
+        drop(mapped);
+        staging.unmap();
+        Ok(value)
+    }
+
     fn fused_elementwise(
         &self,
         shader: &str,

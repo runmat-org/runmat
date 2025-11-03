@@ -10,11 +10,21 @@ pub fn broadcast_shapes(
     left: &[usize],
     right: &[usize],
 ) -> Result<Vec<usize>, String> {
+    // MATLAB implicit expansion aligns trailing dimensions. To achieve this with
+    // column-major `[usize]` shape vectors, pad the shorter shape on the FRONT
+    // with ones so that the last dimensions line up.
     let rank = left.len().max(right.len());
+    let mut left_ext = Vec::with_capacity(rank);
+    left_ext.extend(std::iter::repeat(1).take(rank.saturating_sub(left.len())));
+    left_ext.extend_from_slice(left);
+    let mut right_ext = Vec::with_capacity(rank);
+    right_ext.extend(std::iter::repeat(1).take(rank.saturating_sub(right.len())));
+    right_ext.extend_from_slice(right);
+
     let mut shape = Vec::with_capacity(rank);
     for dim in 0..rank {
-        let a = left.get(dim).copied().unwrap_or(1);
-        let b = right.get(dim).copied().unwrap_or(1);
+        let a = left_ext[dim];
+        let b = right_ext[dim];
         if a == b {
             shape.push(a);
         } else if a == 1 {
@@ -95,13 +105,14 @@ impl BroadcastPlan {
     pub fn new(shape_a: &[usize], shape_b: &[usize]) -> Result<Self, String> {
         let ndims = shape_a.len().max(shape_b.len());
 
+        // Pad on the FRONT to align trailing dimensions per MATLAB rules.
         let mut ext_a = Vec::with_capacity(ndims);
-        ext_a.extend_from_slice(shape_a);
         ext_a.extend(std::iter::repeat(1).take(ndims.saturating_sub(shape_a.len())));
+        ext_a.extend_from_slice(shape_a);
 
         let mut ext_b = Vec::with_capacity(ndims);
-        ext_b.extend_from_slice(shape_b);
         ext_b.extend(std::iter::repeat(1).take(ndims.saturating_sub(shape_b.len())));
+        ext_b.extend_from_slice(shape_b);
 
         let mut output_shape = Vec::with_capacity(ndims);
         for i in 0..ndims {

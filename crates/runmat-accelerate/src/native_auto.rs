@@ -53,7 +53,7 @@ impl Default for ThresholdConfig {
         Self {
             unary_min_elems: 4_096,
             binary_min_elems: 4_096,
-            reduction_min_elems: 4_096,
+            reduction_min_elems: 256,
             matmul_min_flops: 1_000_000, // roughly 100x100x100
             cpu_elem_per_elem: DEFAULT_CPU_ELEM_PER_ELEM,
             cpu_reduction_per_elem: DEFAULT_CPU_REDUCTION_PER_ELEM,

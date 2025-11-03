@@ -289,7 +289,6 @@ fn double_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
         if provider.precision() == ProviderPrecision::F64 {
             match provider.unary_double(&handle) {
                 Ok(result) => {
-                    let _ = provider.free(&handle);
                     return Ok(Value::GpuTensor(result));
                 }
                 Err(err) => {
