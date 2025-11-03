@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import Image from "next/image";
 
 import { OSInstallCommand } from "@/components/OSInstallCommand";
 import Link from "next/link";
@@ -105,31 +104,14 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Hero Image */}
-      <section className="w-full py-8 md:py-12">
+      {/* New SVG Section - Placeholder for clean SVG */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
-          <div className="mx-auto max-w-[58rem] flex flex-col items-center space-y-6 text-center">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
-              GPU-Performance, Minimal Friction
-            </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-lg sm:leading-7">
-              Designed to be competitive with Python + PyTorch (CUDA) on many GPU-friendly workloads.
-            </p>
-            <div className="w-[60%] flex flex-col items-center mt-4">
-              <Image
-                src="https://web.runmatstatic.com/hero-perf-4k.svg"
-                alt="RunMat Performance"
-                width={1200}
-                height={400}
-                className="w-full h-auto"
-                unoptimized
-              />
-              <p className="mt-4 text-sm text-muted-foreground text-center max-w-full">
-                Benchmarked on an Apple M2 Max, 32GB
-                <br />
-                Reproduce with <Link href="#benchmarks" className="underline">benchmarks in the repo</Link>
-              </p>
-            </div>
+          <div className="mx-auto max-w-7xl flex justify-center">
+            <div 
+              className="w-full max-w-3xl" 
+              dangerouslySetInnerHTML={{ __html: `<!-- New clean SVG will go here -->` }}
+            />
           </div>
         </div>
       </section>
@@ -201,11 +183,11 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
           <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-6xl">
-          Write in MATLAB. Run on CPU or GPU.
+          Write in MATLAB Code. Run on CPU or GPU.
+
           </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-          Same MATLAB-syntax you already know. Bring your existing MATLAB code and run as is. RunMat will translate your math to GPU code and run it automatically. No kernel code, no rewrites.
-
+              Boots in 5ms, GPU optimizes by default, single compact cross-platform binary.
           </p>
           </div>
 
@@ -259,59 +241,13 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* GPU Fusion Architecture Section */}
-      <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
-        <div className="container mx-auto px-4 md:px-6">
-          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
-              GPU Fusion Architecture, Why it's Fast
-            </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-lg sm:leading-7">
-              RunMat fuses back-to-back math into fewer GPU steps and keeps arrays on the device between steps ("residency"). That means less memory traffic and fewer launches. so your scripts finish sooner.
-            </p>
-            <div className="w-full max-w-5xl flex justify-center mt-4">
-              <Image
-                src="https://web.runmatstatic.com/gpu-diagram-a.svg"
-                alt="GPU Fusion Architecture Diagram"
-                width={1200}
-                height={600}
-                className="w-full h-auto"
-                unoptimized
-              />
-            </div>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mt-8">
-              <Link 
-                href="/docs/how-it-works" 
-                className="underline"
-              >
-                How accelerate works
-              </Link>
-              <span className="hidden sm:inline text-muted-foreground">•</span>
-              <Link 
-                href="/docs/how-it-works" 
-                className="underline"
-              >
-                How fusion works
-              </Link>
-              <span className="hidden sm:inline text-muted-foreground">•</span>
-              <Link 
-                href="/docs/how-it-works" 
-                className="underline"
-              >
-                How GPU data residency works
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* Language Semantics Section */}
       <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">Full Language Semantics</h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-            RunMat implements MATLAB grammar/core semantics and ships 200+ built-ins across arrays, math, linalg, FFT/signal/image, stats, strings, I/O, JSON/HTTP/TCP. <br></br> Most execute on GPU with fusion/residency. See
+              RunMat implements the full grammar and core semantics of the MATLAB language. See
               <Link className="underline ml-1" href="/docs/language-coverage">language coverage</Link>.
             </p>
           </div>
@@ -343,42 +279,29 @@ export default function HomePage() {
       {/* Benchmarks Section */}
       <section id="benchmarks" className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
-          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">Real workloads, Reproducible Results</h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-lg sm:leading-7">
-              From per-pixel 4K image pipelines to PCA, NLMS, and Monte Carlo, see how RunMat stacks up against Python + PyTorch, NumPy, and Julia. Run them locally and compare on your machine.
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">Blazing Fast Performance</h2>
+            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
+              Benchmarked on an Apple M2 Max, 32GB.<br />Reproduce with <code>benchmarks</code> in the repo.
             </p>
-            <div className="w-full max-w-5xl flex justify-center mt-4">
-              <Image
-                src="https://web.runmatstatic.com/perf-container.svg"
-                alt="Benchmark Comparison"
-                width={1200}
-                height={600}
-                className="w-full h-auto"
-                unoptimized
-              />
-            </div>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mt-8 flex-wrap">
-              <Link href="/benchmarks/4k-image-pipeline" className="underline">
-                4K image pipeline
-              </Link>
-              <span className="hidden sm:inline text-muted-foreground">·</span>
-              <Link href="/benchmarks/pca" className="underline">
-                PCA
-              </Link>
-              <span className="hidden sm:inline text-muted-foreground">·</span>
-              <Link href="/benchmarks/nlms" className="underline">
-                NLMS
-              </Link>
-              <span className="hidden sm:inline text-muted-foreground">·</span>
-              <Link href="/benchmarks/monte-carlo" className="underline">
-                Monte Carlo
-              </Link>
-              <span className="hidden sm:inline text-muted-foreground">·</span>
-              <Link href="/benchmarks" className="underline">
-                Full benchmark index
-              </Link>
-            </div>
+          </div>
+          <div className="overflow-x-auto mx-auto max-w-[48rem]">
+            <table className="w-full text-base md:text-lg table-mobile-wrap">
+              <thead>
+                <tr className="text-left border-b border-border">
+                  <th className="py-3 px-4">Benchmark</th>
+                  <th className="py-3 px-4 text-right">Octave (s)</th>
+                  <th className="py-3 px-4 text-right">RunMat (s)</th>
+                  <th className="py-3 px-4 text-right">Speedup</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Startup Time</td><td className="py-3 px-4 text-right">0.9147</td><td className="py-3 px-4 text-right">0.0050</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">183x</span></td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Matrix Operations</td><td className="py-3 px-4 text-right">0.8220</td><td className="py-3 px-4 text-right">0.0050</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">164x</span></td></tr>
+                <tr className="border-b border-border/60"><td className="py-3 px-4">Mathematical Functions</td><td className="py-3 px-4 text-right">0.8677</td><td className="py-3 px-4 text-right">0.0057</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">163x</span></td></tr>
+                <tr><td className="py-3 px-4">Control Flow</td><td className="py-3 px-4 text-right">0.8757</td><td className="py-3 px-4 text-right">0.0057</td><td className="py-3 px-4 text-right"><span className="text-green-600 font-semibold">155x</span></td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </section>

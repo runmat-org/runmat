@@ -2,7 +2,15 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // Allow API routes to run on Vercel (no static export)
-  images: { unoptimized: true },
+  images: { 
+    unoptimized: true,
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'web.runmatstatic.com',
+      },
+    ],
+  },
   experimental: {
     optimizePackageImports: ["lucide-react"],
   },
