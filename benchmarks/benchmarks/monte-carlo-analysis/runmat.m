@@ -1,5 +1,6 @@
 rng(0);
-M = 10_000_000; T = 256;
+if ~exist('M','var'), M = 1000000; end
+if ~exist('T','var'), T = 256; end
 S0 = single(100); mu = single(0.05); sigma = single(0.20);
 dt = single(1.0/252.0); K = single(100.0);
 

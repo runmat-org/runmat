@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
+import os
 import torch
 
 def main() -> None:
     torch.manual_seed(0)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    override = os.environ.get("TORCH_DEVICE")
+    if override:
+        device = torch.device(override)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     M, T = 2_000_000, 4096
+    M = int(os.environ.get("IIR_M", M))
+    T = int(os.environ.get("IIR_T", T))
     alpha = torch.tensor(0.98, dtype=torch.float32, device=device)
     beta = torch.tensor(0.02, dtype=torch.float32, device=device)
 

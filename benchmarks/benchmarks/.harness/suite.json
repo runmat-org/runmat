@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "global": {
+    "iterations": 1,
+    "device_policy": {
+      "torch": "auto",
+      "runmat": "wgpu"
+    },
+    "timeout_s": 600,
+    "fairness": {"mode": "parity"}
+  },
+  "cases": [
+    {
+      "id": "pca",
+      "label": "Principal Component Analysis",
+      "entries": {
+        "runmat": "pca/runmat.m",
+        "python-numpy": "pca/python_numpy.py",
+        "python-torch": "pca/python_torch.py"
+      },
+      "include_impl": ["runmat", "python-numpy", "python-torch"],
+      "params": {
+        "defaults": {"n": 40000, "d": 512, "k": 8, "iters": 10},
+        "scale": {"key": "n", "values": [10000, 20000, 40000, 80000]}
+      },
+      "env_map": {"n": "PCA_N", "d": "PCA_D", "k": "PCA_K", "iters": "PCA_ITERS"},
+      "parity": {
+        "metric_regex": "TOPK_SUM=([0-9eE+\\-.]+)",
+        "rtol": 0.001,
+        "atol": 1e-05
+      },
+      "harness": {"warmup": 1, "timeout_s": 600}
+    },
+    {
+      "id": "4k-image-processing",
+      "label": "4K Image Processing",
+      "entries": {
+        "runmat": "4k-image-processing/runmat.m",
+        "python-numpy": "4k-image-processing/python_numpy.py",
+        "python-torch": "4k-image-processing/python_torch.py"
+      },
+      "include_impl": ["runmat", "python-numpy", "python-torch", "octave"],
+      "params": {
+        "defaults": {"B": 16, "H": 2160, "W": 3840},
+        "scale": {"key": "B", "values": [4, 8, 16, 32]}
+      },
+      "env_map": {"B": "IMG_B", "H": "IMG_H", "W": "IMG_W"},
+      "parity": {
+        "metric_regex": "MSE=([0-9eE+\\-.]+)",
+        "rtol": 1e-05,
+        "atol": 1e-07
+      },
+      "harness": {"warmup": 1, "timeout_s": 180}
+    },
+    {
+      "id": "monte-carlo-analysis",
+      "label": "Monte Carlo Analysis",
+      "entries": {
+        "runmat": "monte-carlo-analysis/runmat.m",
+        "python-numpy": "monte-carlo-analysis/python_numpy.py",
+        "python-torch": "monte-carlo-analysis/python_torch.py"
+      },
+      "include_impl": ["runmat", "python-numpy", "python-torch"],
+      "params": {
+        "defaults": {"M": 1000000, "T": 1024},
+        "scale": {"key": "M", "values": [250000, 500000, 1000000]}
+      },
+      "env_map": {"M": "MC_M", "T": "MC_T"},
+      "parity": {
+        "metric_regex": "PRICE=([0-9eE+\\-.]+)",
+        "rtol": 0.01,
+        "atol": 1e-03
+      },
+      "harness": {"warmup": 1, "timeout_s": 300}
+    },
+    {
+      "id": "batched-nlms",
+      "label": "Batched NLMS",
+      "entries": {
+        "runmat": "batched-nlms/runmat.m",
+        "python-numpy": "batched-nlms/python_numpy.py",
+        "python-torch": "batched-nlms/python_torch.py"
+      },
+      "include_impl": ["runmat", "python-numpy", "python-torch"],
+      "params": {
+        "defaults": {"p": 128, "C": 2048, "T": 200},
+        "scale": {"key": "C", "values": [512, 1024, 2048, 4096]}
+      },
+      "env_map": {"p": "NLMS_P", "C": "NLMS_C", "T": "NLMS_T"},
+      "parity": {
+        "metric_regex": "MSE=([0-9eE+\\-.]+)",
+        "rtol": 0.001,
+        "atol": 1e-05
+      },
+      "harness": {"warmup": 1}
+    },
+    {
+      "id": "batched-iir-smoothing",
+      "label": "Batched IIR Smoothing",
+      "entries": {
+        "runmat": "batched-iir-smoothing/runmat.m",
+        "python-numpy": "batched-iir-smoothing/python_numpy.py",
+        "python-torch": "batched-iir-smoothing/python_torch.py"
+      },
+      "include_impl": ["runmat", "python-numpy", "python-torch"],
+      "params": {
+        "defaults": {"M": 1000000, "T": 2048},
+        "scale": {"key": "M", "values": [250000, 500000, 1000000]}
+      },
+      "env_map": {"M": "IIR_M", "T": "IIR_T"},
+      "parity": {
+        "metric_regex": "MEAN=([0-9eE+\\-.]+)",
+        "rtol": 0.001,
+        "atol": 1e-05
+      },
+      "harness": {"warmup": 1, "timeout_s": 300}
+    }
+  ]
+}

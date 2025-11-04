@@ -1511,6 +1511,33 @@ fn rng_state() -> &'static Mutex<u64> {
     RNG.get_or_init(|| Mutex::new(RNG_DEFAULT_SEED))
 }
 impl WgpuProvider {
+    const BUFFER_POOL_MAX_PER_SIZE: usize = 8;
+
+    fn create_storage_buffer_checked(
+        &self,
+        len: usize,
+        label: &str,
+    ) -> Result<Arc<wgpu::Buffer>> {
+        // Centralised guard + warning for oversized allocations
+        let size_bytes = (len as u64) * self.element_size as u64;
+        if size_bytes >= (256u64 << 20) {
+            log::warn!(
+                "{}: large GPU allocation ({} bytes) len={} elems",
+                label,
+                size_bytes,
+                len
+            );
+        }
+        if size_bytes > (self.adapter_limits.max_buffer_size as u64) {
+            return Err(anyhow!(
+                "{}: requested {} bytes exceeds device max {}",
+                label,
+                size_bytes,
+                self.adapter_limits.max_buffer_size
+            ));
+        }
+        Ok(self.create_storage_buffer(len, label))
+    }
     pub fn device_id(&self) -> u32 {
         self.device_id
     }
@@ -5180,10 +5207,94 @@ impl WgpuProvider {
         }
         let out_shape = vec![m, n];
         let len = m * n;
-        let out_buffer = self.create_storage_buffer(len, "runmat-matmul-out");
         if len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
+            let out_buffer = self.create_storage_buffer(0, "runmat-matmul-out");
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
         }
+        // Heuristic: for very large k, accumulate in chunks to reduce long inner loops
+        const K_CHUNK: usize = 8192;
+        const K_CHUNK_SWITCH: usize = 65536; // only chunk for very large k to avoid regressions
+        if k_a >= K_CHUNK_SWITCH {
+            self.prepare_matmul_pipeline();
+            self.device_ref().poll(wgpu::Maintain::Poll);
+            let lda_u32 = entry_a.shape[0] as u32;
+            let ldb_u32 = entry_b.shape[0] as u32;
+            let m_u32 = m as u32;
+            let n_u32 = n as u32;
+            // Accumulator handle across chunks
+            let mut acc: Option<GpuTensorHandle> = None;
+            let mut k_off: usize = 0;
+            while k_off < k_a {
+                let k_sub = std::cmp::min(K_CHUNK, k_a - k_off);
+                // Create partial output buffer and bind group
+                let partial_buffer = self
+                    .create_storage_buffer_checked(len, "runmat-matmul-partial")?;
+                let offset_a_elems = k_off
+                    .checked_mul(entry_a.shape[0])
+                    .ok_or_else(|| anyhow!("matmul: offset overflow"))?;
+                let offset_a_u32 = u32::try_from(offset_a_elems)
+                    .map_err(|_| anyhow!("matmul: A offset exceeds GPU limits"))?;
+                let offset_b_u32 = u32::try_from(k_off)
+                    .map_err(|_| anyhow!("matmul: B offset exceeds GPU limits"))?;
+                let params = crate::backend::wgpu::params::MatmulParams {
+                    m: m_u32,
+                    n: n_u32,
+                    k: k_sub as u32,
+                    lda: lda_u32,
+                    ldb: ldb_u32,
+                    ldc: m_u32,
+                    offset_a: offset_a_u32,
+                    offset_b: offset_b_u32,
+                    offset_out: 0,
+                    _pad: 0,
+                };
+                let params_buffer = self.uniform_buffer(&params, "runmat-matmul-params");
+                let bg = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-matmul-bind"),
+                    layout: &self.pipelines.matmul.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry_a.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: entry_b.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: partial_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+                let tile = crate::backend::wgpu::config::effective_matmul_tile();
+                let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
+                let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m_u32, tile);
+                crate::backend::wgpu::dispatch::matmul::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.matmul.pipeline,
+                    &bg,
+                    groups_x,
+                    groups_y,
+                );
+                // Wrap partial buffer into handle
+                let partial = self.register_existing_buffer(partial_buffer, out_shape.clone(), len);
+                acc = match acc {
+                    None => Some(partial),
+                    Some(prev) => Some(self.elem_add(&prev, &partial)?),
+                };
+                k_off += k_sub;
+            }
+            return Ok(acc.expect("matmul chunking produced no output"));
+        }
+
+        // Default single-dispatch path
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-matmul-out")?;
         self.prepare_matmul_pipeline();
         self.device_ref().poll(wgpu::Maintain::Poll);
         let params = crate::backend::wgpu::params::MatmulParams {
@@ -5223,14 +5334,9 @@ impl WgpuProvider {
                     },
                 ],
             });
-        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
-            n as u32,
-            crate::backend::wgpu::config::MATMUL_TILE,
-        );
-        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
-            m as u32,
-            crate::backend::wgpu::config::MATMUL_TILE,
-        );
+        let tile = crate::backend::wgpu::config::effective_matmul_tile();
+        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n as u32, tile);
+        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile);
         crate::backend::wgpu::dispatch::matmul::run(
             self.device_ref(),
             self.queue_ref(),
@@ -5328,14 +5434,9 @@ impl WgpuProvider {
         let ldb = k_u32;
         let ldc = m_u32;
 
-        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
-            n_u32,
-            crate::backend::wgpu::config::MATMUL_TILE,
-        );
-        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
-            m_u32,
-            crate::backend::wgpu::config::MATMUL_TILE,
-        );
+        let tile = crate::backend::wgpu::config::effective_matmul_tile();
+        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
+        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m_u32, tile);
 
         self.prepare_matmul_pipeline();
         self.device_ref().poll(wgpu::Maintain::Poll);
@@ -6739,7 +6840,7 @@ impl WgpuProvider {
 
     pub(crate) fn zeros_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
-        let buffer = self.create_storage_buffer(len, "zeros");
+        let buffer = self.create_storage_buffer_checked(len, "zeros")?;
         // Explicitly zero-initialize the storage buffer; pooled buffers may contain old data
         let size_bytes = (len.max(1) as u64) * (self.element_size as u64);
         if size_bytes > 0 {
@@ -6855,7 +6956,9 @@ impl WgpuProvider {
     pub(crate) fn random_uniform_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("rand: tensor size exceeds GPU limits"))?;
-        let out_buffer = self.create_storage_buffer(total_len, "runmat-rng-uniform-out");
+        let out_buffer = self
+            .create_storage_buffer_checked(total_len, "runmat-rng-uniform-out")?
+            ;
         if total_len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
         }
@@ -6908,7 +7011,9 @@ impl WgpuProvider {
     pub(crate) fn random_normal_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("randn: tensor size exceeds GPU limits"))?;
-        let out_buffer = self.create_storage_buffer(total_len, "runmat-rng-normal-out");
+        let out_buffer = self
+            .create_storage_buffer_checked(total_len, "runmat-rng-normal-out")?
+            ;
         if total_len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
         }
@@ -7099,7 +7204,9 @@ impl WgpuProvider {
         ensure!(lower <= upper, "randi: lower bound must be <= upper bound");
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("randi: tensor size exceeds GPU limits"))?;
-        let out_buffer = self.create_storage_buffer(total_len, "runmat-rng-int-out");
+        let out_buffer = self
+            .create_storage_buffer_checked(total_len, "runmat-rng-int-out")?
+            ;
         if total_len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
         }
@@ -7185,7 +7292,9 @@ impl WgpuProvider {
 
         let effective_k = k.min(n);
         let shape_vec = vec![1, effective_k];
-        let out_buffer = self.create_storage_buffer(effective_k, "runmat-randperm-out");
+        let out_buffer = self
+            .create_storage_buffer_checked(effective_k, "runmat-randperm-out")?
+            ;
         if effective_k == 0 {
             return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
         }
@@ -10363,6 +10472,172 @@ impl AccelProvider for WgpuProvider {
     fn matmul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.matmul_exec(a, b)
     }
+
+    fn matmul_epilogue(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        ep: &runmat_accelerate_api::MatmulEpilogue,
+    ) -> Result<GpuTensorHandle> {
+        use runmat_accelerate_api::ProviderPrecision;
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 {
+            return Err(anyhow!("matmul_epilogue: only 2D tensors supported"));
+        }
+        let (m, k_a) = (entry_a.shape[0], entry_a.shape[1]);
+        let (k_b, n) = (entry_b.shape[0], entry_b.shape[1]);
+        if k_a != k_b {
+            return Err(anyhow!("matmul_epilogue: inner dimensions must match"));
+        }
+        let out_shape = vec![m, n];
+        let len = m * n;
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-matmul-epilogue-out")?;
+        if len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
+        }
+
+        // Ensure pipelines exist
+        self.prepare_matmul_pipeline();
+        self.device_ref().poll(wgpu::Maintain::Poll);
+
+        let params = crate::backend::wgpu::params::MatmulParams {
+            m: m as u32,
+            n: n as u32,
+            k: k_a as u32,
+            lda: entry_a.shape[0] as u32,
+            ldb: entry_b.shape[0] as u32,
+            ldc: m as u32,
+            offset_a: 0,
+            offset_b: 0,
+            offset_out: 0,
+            _pad: 0,
+        };
+        let params_buffer = self.uniform_buffer(&params, "runmat-matmul-epilogue-params");
+
+        // Resolve optional scales and epilogue params by precision
+        let has_row = ep.row_scale.is_some();
+        let has_col = ep.col_scale.is_some();
+        let dummy_vec = self.create_storage_buffer(1, "runmat-matmul-epilogue-dummy");
+        let row_buf = match &ep.row_scale {
+            Some(h) => self.get_entry(h)?.buffer.clone(),
+            None => dummy_vec.clone(),
+        };
+        let col_buf = match &ep.col_scale {
+            Some(h) => self.get_entry(h)?.buffer.clone(),
+            None => dummy_vec.clone(),
+        };
+
+        let tile = crate::backend::wgpu::config::effective_matmul_tile();
+        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n as u32, tile);
+        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile);
+
+        // Build a layout tag incorporating the epilogue mask for cache keying
+        let mask: u32 = (if has_row { 1 } else { 0 }) | ((if has_col { 1 } else { 0 }) << 1);
+        let layout_tag = format!("runmat-matmul-epilogue-layout-m{}", mask);
+
+        // Create module from the static WGSL (token substitution handled inside)
+        let (shader_src, ep_buf, pipeline_layout) = match self.precision() {
+            ProviderPrecision::F64 => {
+                let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF64 {
+                    alpha: ep.alpha,
+                    beta: ep.beta,
+                    has_row_scale: if has_row { 1 } else { 0 },
+                    has_col_scale: if has_col { 1 } else { 0 },
+                    row_is_div: if matches!(ep.row_op, runmat_accelerate_api::ScaleOp::Divide) {
+                        1
+                    } else {
+                        0
+                    },
+                    col_is_div: if matches!(ep.col_op, runmat_accelerate_api::ScaleOp::Divide) {
+                        1
+                    } else {
+                        0
+                    },
+                };
+                let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
+                let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                    self.device_ref(),
+                    "runmat-matmul-epilogue-pl",
+                    &self.pipelines.matmul_epilogue.layout,
+                );
+                (
+                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64,
+                    ep_buf,
+                    pl,
+                )
+            }
+            ProviderPrecision::F32 => {
+                let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF32 {
+                    alpha: ep.alpha as f32,
+                    beta: ep.beta as f32,
+                    has_row_scale: if has_row { 1 } else { 0 },
+                    has_col_scale: if has_col { 1 } else { 0 },
+                    row_is_div: if matches!(ep.row_op, runmat_accelerate_api::ScaleOp::Divide) {
+                        1
+                    } else {
+                        0
+                    },
+                    col_is_div: if matches!(ep.col_op, runmat_accelerate_api::ScaleOp::Divide) {
+                        1
+                    } else {
+                        0
+                    },
+                };
+                let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
+                let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                    self.device_ref(),
+                    "runmat-matmul-epilogue-pl",
+                    &self.pipelines.matmul_epilogue.layout,
+                );
+                (
+                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F32,
+                    ep_buf,
+                    pl,
+                )
+            }
+        };
+
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-matmul-epilogue-module",
+            shader_src,
+        );
+        let key = self.compute_pipeline_hash_bytes(shader_src.as_bytes(), &layout_tag, Some(tile));
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-matmul-epilogue",
+            Some(shader_src.as_bytes()),
+            Some(&layout_tag),
+            Some(tile),
+        );
+
+        let bg = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("runmat-matmul-epilogue-bind"),
+            layout: &self.pipelines.matmul_epilogue.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: entry_a.buffer.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: entry_b.buffer.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: out_buffer.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: params_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: row_buf.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: col_buf.as_ref().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: ep_buf.as_entire_binding() },
+            ],
+        });
+        crate::backend::wgpu::dispatch::matmul::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &pipeline,
+            &bg,
+            groups_x,
+            groups_y,
+        );
+
+        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
+    }
     fn pagefun(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
         self.pagefun_exec(request)
     }
@@ -11432,9 +11707,16 @@ impl AccelProvider for WgpuProvider {
                     .buffer_pool
                     .lock()
                     .expect("buffer pool mutex poisoned");
-                pool.entry(entry.len)
-                    .or_default()
-                    .push(entry.buffer.clone());
+                let list = pool.entry(entry.len).or_default();
+                if list.len() < Self::BUFFER_POOL_MAX_PER_SIZE {
+                    list.push(entry.buffer.clone());
+                } else {
+                    // Drop buffer instead of pooling to cap memory footprint
+                    log::trace!(
+                        "buffer_pool: dropping buffer (len={} elems) due to pool cap",
+                        entry.len
+                    );
+                }
             }
         }
         runmat_accelerate_api::clear_handle_logical(h);

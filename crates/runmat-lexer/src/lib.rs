@@ -74,9 +74,11 @@ pub enum Token {
     // Identifiers and literals
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| { lex.extras.last_was_value = true; })]
     Ident,
-    #[regex(r"\d+\.\d+([eE][+-]?\d+)?", |lex| { lex.extras.last_was_value = true; })]
+    // Float with optional underscores as digit separators (strip later)
+    #[regex(r"\d(?:_?\d)*\.\d(?:_?\d)*(?:[eE][+-]?\d(?:_?\d)*)?", |lex| { lex.extras.last_was_value = true; })]
     Float,
-    #[regex(r"\d+([eE][+-]?\d+)?", |lex| { lex.extras.last_was_value = true; })]
+    // Integer with optional underscores as digit separators (strip later)
+    #[regex(r"\d(?:_?\d)*(?:[eE][+-]?\d(?:_?\d)*)?", |lex| { lex.extras.last_was_value = true; })]
     Integer,
     // Apostrophe is handled contextually in tokenize_detailed: either Transpose or a single-quoted string
     #[token("'")]
@@ -201,7 +203,11 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
     while let Some(res) = lex.next() {
         match res {
             Ok(tok) => {
-                let s = lex.slice().to_string();
+                let mut s = lex.slice().to_string();
+                // Normalize numeric literals: remove underscores in integers/floats
+                if matches!(tok, Token::Float | Token::Integer) {
+                    s.retain(|c| c != '_');
+                }
                 let span = lex.span();
 
                 // Handle contextual apostrophe before normal push logic

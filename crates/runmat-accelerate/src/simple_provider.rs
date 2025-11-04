@@ -4502,6 +4502,78 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn matmul_epilogue(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        ep: &runmat_accelerate_api::MatmulEpilogue,
+    ) -> Result<GpuTensorHandle> {
+        // Compute plain matmul first
+        let base = self.matmul(a, b)?;
+        let (rows, cols) = (base.shape[0], base.shape[1]);
+        let mut data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&base.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("matmul_epilogue: unknown buffer {}", base.buffer_id))?
+        };
+
+        // Load optional scales from registry
+        let row_scale: Option<Vec<f64>> = if let Some(ref h) = ep.row_scale {
+            let guard = registry().lock().unwrap();
+            Some(
+                guard
+                    .get(&h.buffer_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("matmul_epilogue: unknown row scale buffer {}", h.buffer_id))?,
+            )
+        } else {
+            None
+        };
+        let col_scale: Option<Vec<f64>> = if let Some(ref h) = ep.col_scale {
+            let guard = registry().lock().unwrap();
+            Some(
+                guard
+                    .get(&h.buffer_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("matmul_epilogue: unknown col scale buffer {}", h.buffer_id))?,
+            )
+        } else {
+            None
+        };
+
+        // Apply epilogue: alpha/beta, then per-row/col scales (matches GPU epilogue ordering)
+        for j in 0..cols {
+            for i in 0..rows {
+                let idx = i + j * rows;
+                let mut v = data[idx] * ep.alpha + ep.beta;
+                if let Some(ref rs) = row_scale {
+                    let s = *rs.get(i).unwrap_or(&1.0);
+                    v = match ep.row_op {
+                        runmat_accelerate_api::ScaleOp::Multiply => v * s,
+                        runmat_accelerate_api::ScaleOp::Divide => v / s,
+                    };
+                }
+                if let Some(ref cs) = col_scale {
+                    let s = *cs.get(j).unwrap_or(&1.0);
+                    v = match ep.col_op {
+                        runmat_accelerate_api::ScaleOp::Multiply => v * s,
+                        runmat_accelerate_api::ScaleOp::Divide => v / s,
+                    };
+                }
+                data[idx] = v;
+            }
+        }
+
+        // Replace buffer contents with epilogued data
+        {
+            let mut guard = registry().lock().unwrap();
+            guard.insert(base.buffer_id, data);
+        }
+        Ok(base)
+    }
+
     fn pagefun(&self, _request: &PagefunRequest) -> Result<GpuTensorHandle> {
         Err(anyhow::anyhow!(
             "pagefun: in-process provider does not implement GPU page operations"

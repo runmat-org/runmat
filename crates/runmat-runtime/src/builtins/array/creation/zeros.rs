@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use runmat_builtins::NumericDType;
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
@@ -246,6 +247,10 @@ struct ParsedZeros {
 #[derive(Clone)]
 enum OutputTemplate {
     Double,
+    /// Single-precision request. Host tensors are stored as f64 today; we
+    /// treat 'single' as a request for a numeric zeros tensor and honour
+    /// single precision when allocating on GPU via 'like' or provider hooks.
+    Single,
     Logical,
     Like(Value),
 }
@@ -300,9 +305,12 @@ impl ParsedZeros {
                         continue;
                     }
                     "single" => {
-                        return Err(
-                            "zeros: single precision output is not implemented yet".to_string()
-                        );
+                        if like_proto.is_some() {
+                            return Err("zeros: cannot combine 'like' with 'single'".to_string());
+                        }
+                        class_override = Some(OutputTemplate::Single);
+                        idx += 1;
+                        continue;
                     }
                     other => {
                         return Err(format!("zeros: unrecognised option '{other}'"));
@@ -361,6 +369,7 @@ impl ParsedZeros {
 fn build_output(parsed: ParsedZeros) -> Result<Value, String> {
     match parsed.template {
         OutputTemplate::Double => zeros_double(&parsed.shape),
+        OutputTemplate::Single => zeros_single(&parsed.shape),
         OutputTemplate::Logical => zeros_logical(&parsed.shape),
         OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape),
     }
@@ -368,6 +377,11 @@ fn build_output(parsed: ParsedZeros) -> Result<Value, String> {
 
 fn zeros_double(shape: &[usize]) -> Result<Value, String> {
     let tensor = tensor::zeros(shape)?;
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+fn zeros_single(shape: &[usize]) -> Result<Value, String> {
+    let tensor = tensor::zeros_with_dtype(shape, NumericDType::F32)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -383,7 +397,11 @@ fn zeros_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
             Ok(Value::ComplexTensor(tensor))
         }
         Value::GpuTensor(handle) => zeros_like_gpu(handle, shape),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => zeros_double(shape),
+        Value::Tensor(t) => match t.dtype {
+            NumericDType::F32 => zeros_single(shape),
+            NumericDType::F64 => zeros_double(shape),
+        },
+        Value::Num(_) | Value::Int(_) => zeros_double(shape),
         Value::CharArray(_) | Value::Cell(_) => zeros_double(shape),
         _ => zeros_double(shape),
     }
@@ -399,8 +417,12 @@ fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, St
         if let Ok(gpu) = attempt {
             return Ok(Value::GpuTensor(gpu));
         }
-
-        let host = tensor::zeros(shape)?;
+        // Fallback: build a host tensor with dtype matching provider precision and upload
+        let dtype = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
+            runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+        };
+        let host = tensor::zeros_with_dtype(shape, dtype)?;
         let view = HostTensorView {
             data: &host.data,
             shape: &host.shape,

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
+import os
 import numpy as np
 
 def main() -> None:
     np.random.seed(0)
     M, T = 10_000_000, 256
+    M = int(os.environ.get("MC_M", M))
+    T = int(os.environ.get("MC_T", T))
     S0, mu, sigma = 100.0, 0.05, 0.20
     dt, K = 1.0 / 252.0, 100.0
 

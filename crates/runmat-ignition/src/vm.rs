@@ -3,7 +3,7 @@ use crate::gc_roots::InterpretContext;
 use crate::instr::Instr;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
-    execute_elementwise, execute_reduction, FusionExecutionRequest,
+    execute_elementwise, execute_matmul_epilogue, execute_reduction, FusionExecutionRequest,
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
@@ -3446,20 +3446,26 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     match out_count {
-                        0 => continue,
+                        0 => {
+                            pc += 1;
+                            continue;
+                        }
                         1 => {
                             stack.push(eval.r());
+                            pc += 1;
                             continue;
                         }
                         2 => {
                             stack.push(eval.q());
                             stack.push(eval.r());
+                            pc += 1;
                             continue;
                         }
                         3 => {
                             stack.push(eval.q());
                             stack.push(eval.r());
                             stack.push(eval.permutation());
+                            pc += 1;
                             continue;
                         }
                         _ => vm_bail!(mex(
@@ -9734,6 +9740,16 @@ fn try_execute_fusion_group(
         }
         let workgroup_size = 256u32;
         match execute_reduction(request, reduce_len, num_slices, workgroup_size) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else if plan.group.kind == runmat_accelerate::fusion::FusionKind::MatmulEpilogue {
+        match execute_matmul_epilogue(request) {
             Ok(result) => Ok(result),
             Err(err) => {
                 for value in consumed.into_iter().rev() {

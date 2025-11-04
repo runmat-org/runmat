@@ -10,21 +10,11 @@ function main()
     G = (A' * A) / Float32(n - 1)
 
     Q = rand(Float32, d, k)
-    for j in 1:k
-        nj = norm(@view Q[:, j])
-        if nj > 0
-            @views Q[:, j] ./= nj
-        end
-    end
+    Q = Matrix(qr(Q, Thin=true).Q)
 
     for _ in 1:iters
         Q = G * Q
-        for j in 1:k
-            nj = norm(@view Q[:, j])
-            if nj > 0
-                @views Q[:, j] ./= nj
-            end
-        end
+        Q = Matrix(qr(Q, Thin=true).Q)
     end
 
     Lambda = diag(Q' * G * Q)

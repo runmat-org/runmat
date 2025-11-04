@@ -333,6 +333,28 @@ pub struct MatmulParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MatmulEpilogueParamsF64 {
+    pub alpha: f64,
+    pub beta: f64,
+    pub has_row_scale: u32,
+    pub has_col_scale: u32,
+    pub row_is_div: u32,
+    pub col_is_div: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MatmulEpilogueParamsF32 {
+    pub alpha: f32,
+    pub beta: f32,
+    pub has_row_scale: u32,
+    pub has_col_scale: u32,
+    pub row_is_div: u32,
+    pub col_is_div: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ReduceGlobalParams {
     pub len: u32,
     pub op: u32,

@@ -1,7 +1,7 @@
 //! MATLAB-compatible `randn` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random;
@@ -245,6 +245,7 @@ fn randn_builtin(rest: Vec<Value>) -> Result<Value, String> {
 struct ParsedRandn {
     shape: Vec<usize>,
     template: RandnTemplate,
+    dtype: NumericDType,
 }
 
 #[derive(Clone)]
@@ -259,6 +260,7 @@ impl ParsedRandn {
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
         let mut template: Option<RandnTemplate> = None;
+        let mut dtype: NumericDType = NumericDType::F64;
 
         let mut idx = 0;
         while idx < args.len() {
@@ -277,13 +279,15 @@ impl ParsedRandn {
                     }
                     "double" => {
                         template = Some(RandnTemplate::Double);
+                        dtype = NumericDType::F64;
                         idx += 1;
                         continue;
                     }
                     "single" => {
-                        return Err(
-                            "randn: single precision output is not implemented yet".to_string()
-                        );
+                        template = Some(RandnTemplate::Double);
+                        dtype = NumericDType::F32;
+                        idx += 1;
+                        continue;
                     }
                     other => {
                         return Err(format!("randn: unrecognised option '{other}'"));
@@ -327,13 +331,16 @@ impl ParsedRandn {
 
         let template = template.unwrap_or(RandnTemplate::Double);
 
-        Ok(Self { shape, template })
+        Ok(Self { shape, template, dtype })
     }
 }
 
 fn build_output(parsed: ParsedRandn) -> Result<Value, String> {
     match parsed.template {
-        RandnTemplate::Double => randn_double(&parsed.shape),
+        RandnTemplate::Double => match parsed.dtype {
+            NumericDType::F64 => randn_double(&parsed.shape),
+            NumericDType::F32 => randn_single(&parsed.shape),
+        },
         RandnTemplate::Like(proto) => randn_like(&proto, &parsed.shape),
     }
 }
@@ -342,6 +349,14 @@ fn randn_double(shape: &[usize]) -> Result<Value, String> {
     let len = tensor::element_count(shape);
     let data = random::generate_normal(len, "randn")?;
     let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| format!("randn: {e}"))?;
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+fn randn_single(shape: &[usize]) -> Result<Value, String> {
+    let len = tensor::element_count(shape);
+    let data = random::generate_normal(len, "randn")?;
+    let tensor = Tensor::new_with_dtype(data, shape.to_vec(), NumericDType::F32)
+        .map_err(|e| format!("randn: {e}"))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 

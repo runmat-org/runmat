@@ -1228,6 +1228,22 @@ pub trait AccelProvider: Send + Sync {
     fn pagefun(&self, _request: &PagefunRequest) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("pagefun not supported by provider"))
     }
+
+    /// Optional: matrix multiplication with an epilogue applied before store.
+    ///
+    /// The default implementation falls back to `matmul` when the epilogue is effectively a no-op
+    /// (alpha=1, beta=0, no row/col scales), and otherwise returns `Err`.
+    fn matmul_epilogue(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        epilogue: &MatmulEpilogue,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        if epilogue.is_noop() {
+            return self.matmul(a, b);
+        }
+        Err(anyhow::anyhow!("matmul_epilogue not supported by provider"))
+    }
     fn linsolve(
         &self,
         _lhs: &GpuTensorHandle,
@@ -1846,4 +1862,50 @@ pub struct MeshgridAxisView<'a> {
 #[derive(Debug, Clone)]
 pub struct ProviderMeshgridResult {
     pub outputs: Vec<GpuTensorHandle>,
+}
+
+/// Descriptor for GEMM epilogues applied to `C = A * B` before storing to `C`.
+///
+/// Supported operations:
+/// - Scale by `alpha` and add scalar `beta`.
+/// - Multiply output by per-row and/or per-column scale vectors (broadcasted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScaleOp {
+    Multiply,
+    Divide,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MatmulEpilogue {
+    /// Scalar multiply applied to each output element.
+    pub alpha: f64,
+    /// Scalar add applied to each output element after scaling.
+    pub beta: f64,
+    /// Optional per-row scale (length m). When present, output[row, col] *= row_scale[row].
+    pub row_scale: Option<GpuTensorHandle>,
+    /// Optional per-column scale (length n). When present, output[row, col] *= col_scale[col].
+    pub col_scale: Option<GpuTensorHandle>,
+    /// Row scale operation (multiply or divide). Ignored when `row_scale` is None.
+    pub row_op: ScaleOp,
+    /// Column scale operation (multiply or divide). Ignored when `col_scale` is None.
+    pub col_op: ScaleOp,
+}
+
+impl MatmulEpilogue {
+    pub fn noop() -> Self {
+        Self {
+            alpha: 1.0,
+            beta: 0.0,
+            row_scale: None,
+            col_scale: None,
+            row_op: ScaleOp::Multiply,
+            col_op: ScaleOp::Multiply,
+        }
+    }
+    pub fn is_noop(&self) -> bool {
+        self.alpha == 1.0
+            && self.beta == 0.0
+            && self.row_scale.is_none()
+            && self.col_scale.is_none()
+    }
 }

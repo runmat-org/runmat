@@ -82,7 +82,7 @@ impl Default for AccelerateConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            provider: AccelerateProviderPreference::Auto,
+            provider: AccelerateProviderPreference::Wgpu,
             allow_inprocess_fallback: true,
             wgpu_power_preference: AccelPowerPreference::Auto,
             wgpu_force_fallback_adapter: false,

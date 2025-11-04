@@ -4,10 +4,13 @@ gain = single(1.0123); bias = single(-0.02); gamma = single(1.8); eps0 = single(
 
 imgs = rand(B, H, W, 'single');
 
-mu = mean(imgs, [2 3]);
-sigma = sqrt(mean((imgs - mu).^2, [2 3]) + eps0);
+% Use nested means to ensure exact MATLAB semantics for dims [2 3]
+mu = mean(mean(imgs, 2), 3);
+sigma = sqrt(mean(mean((imgs - mu).^2, 2), 3) + eps0);
 
 out = ((imgs - mu) ./ sigma) * gain + bias;
+% Clamp to avoid NaNs from fractional power on negatives
+out = max(out, single(0));
 out = out .^ gamma;
 mse = mean((out - imgs).^2, 'all');
 

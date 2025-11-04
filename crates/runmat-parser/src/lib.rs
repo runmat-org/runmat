@@ -259,10 +259,14 @@ struct Parser {
 }
 
 impl Parser {
+    fn is_simple_assignment_ahead(&self) -> bool {
+        // Heuristic: at statement start, if we see Ident ... '=' before a terminator, treat as assignment
+        self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
+    }
     fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
         while self.pos < self.tokens.len() {
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) || self.consume(&Token::Newline) {
                 continue;
             }
             body.push(self.parse_stmt_with_semicolon()?);
@@ -317,6 +321,22 @@ impl Parser {
                     is_semicolon_terminated && has_more_toplevel_tokens,
                 ))
             }
+            Stmt::MultiAssign(names, expr, _) => {
+                let has_more_toplevel_tokens = self.pos < self.tokens.len();
+                Ok(Stmt::MultiAssign(
+                    names,
+                    expr,
+                    is_semicolon_terminated && has_more_toplevel_tokens,
+                ))
+            }
+            Stmt::AssignLValue(lv, expr, _) => {
+                let has_more_toplevel_tokens = self.pos < self.tokens.len();
+                Ok(Stmt::AssignLValue(
+                    lv,
+                    expr,
+                    is_semicolon_terminated && has_more_toplevel_tokens,
+                ))
+            }
             other => Ok(other),
         }
     }
@@ -347,14 +367,11 @@ impl Parser {
             Some(Token::Function) => self.parse_function().map_err(|e| e.into()),
             // Multi-assign like [a,b] = f()
             Some(Token::LBracket) => {
-                let save = self.pos;
+                // Prefer parsing as a multi-assign at statement start. If it fails, surface the error
+                // instead of falling back silently to a matrix literal, which leads to confusing '=' errors.
                 match self.try_parse_multi_assign() {
                     Ok(stmt) => Ok(stmt),
-                    Err(_) => {
-                        self.pos = save;
-                        let expr = self.parse_expr()?;
-                        Ok(Stmt::ExprStmt(expr, false))
-                    }
+                    Err(msg) => Err(self.error(&msg)),
                 }
             }
             _ => {
@@ -370,6 +387,14 @@ impl Parser {
                     }
                     let expr = self.parse_expr()?;
                     Ok(Stmt::Assign(name, expr, false)) // Will be updated by parse_stmt_with_semicolon
+                } else if self.is_simple_assignment_ahead() {
+                    // Fallback: treat as simple assignment if '=' appears before terminator
+                    let name = self.expect_ident().map_err(|e| self.error(&e))?;
+                    if !self.consume(&Token::Assign) {
+                        return Err(self.error_with_expected("expected assignment operator", "'='"));
+                    }
+                    let expr = self.parse_expr()?;
+                    Ok(Stmt::Assign(name, expr, false))
                 } else if self.peek_token() == Some(&Token::Ident) {
                     // First, try complex lvalue assignment starting from an identifier: A(1)=x, A{1}=x, s.f=x, s.(n)=x
                     if let Some(lv) = self.try_parse_lvalue_assign()? {
@@ -1197,16 +1222,26 @@ impl Parser {
             if term(tok) {
                 break;
             }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) || self.consume(&Token::Newline) {
                 continue;
             }
-            let stmt = self.parse_stmt().map_err(|e| e.message)?;
+            // Fast-path: handle multi-assign LHS at statement start inside blocks reliably
+            let stmt = if self.peek_token() == Some(&Token::LBracket) {
+                match self.try_parse_multi_assign() {
+                    Ok(stmt) => stmt,
+                    Err(msg) => return Err(msg),
+                }
+            } else {
+                self.parse_stmt().map_err(|e| e.message)?
+            };
             let is_semicolon_terminated = self.consume(&Token::Semicolon);
 
             // Only expression statements are display-suppressed by semicolon.
             let final_stmt = match stmt {
                 Stmt::ExprStmt(expr, _) => Stmt::ExprStmt(expr, is_semicolon_terminated),
                 Stmt::Assign(name, expr, _) => Stmt::Assign(name, expr, false),
+                Stmt::MultiAssign(names, expr, _) => Stmt::MultiAssign(names, expr, false),
+                Stmt::AssignLValue(lv, expr, _) => Stmt::AssignLValue(lv, expr, false),
                 other => other,
             };
             body.push(final_stmt);

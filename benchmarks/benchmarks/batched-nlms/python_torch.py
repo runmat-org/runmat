@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
+import os
 import torch
 
 def main() -> None:
     torch.manual_seed(0)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    override = os.environ.get("TORCH_DEVICE")
+    if override:
+        device = torch.device(override)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     p, C, T = 128, 2048, 200
+    p = int(os.environ.get("NLMS_P", p))
+    C = int(os.environ.get("NLMS_C", C))
+    T = int(os.environ.get("NLMS_T", T))
     mu = torch.tensor(0.5, dtype=torch.float32, device=device)
     eps0 = torch.tensor(1e-3, dtype=torch.float32, device=device)
 

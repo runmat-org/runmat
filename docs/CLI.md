@@ -275,14 +275,20 @@ runmat config paths
 
 ### Acceleration provider (RunMat Accelerate)
 
-These control GPU reduction behavior and provider debugging:
+These control GPU workgroup sizing, reductions, and provider debugging:
 
-- `RUNMAT_TWO_PASS_THRESHOLD` (usize)
-  - Threshold for reduction length per slice above which the provider will use
-    a two-pass kernel. Default: `1024`.
+- `RUNMAT_WG` (u32)
+  - Global compute workgroup size used in WGSL at module creation.
+    Applies to elementwise kernels and fused kernels (including fused reductions).
+    Default: `512`.
+- `RUNMAT_MATMUL_TILE` (u32)
+  - Square tile size for matmul kernels. Default: `16`.
 - `RUNMAT_REDUCTION_WG` (u32)
-  - Default reduction workgroup size when a call site requests provider
-    defaults (e.g., passes `0`). Default: `256`.
+  - Default workgroup size for provider-managed reduction kernels when a call site
+    opts into provider defaults (e.g., passes `0`). Default: `512`.
+- `RUNMAT_TWO_PASS_THRESHOLD` (usize)
+  - Threshold for reduction length per slice above which the provider uses a two-pass kernel.
+    Default: `1024`.
 - `RUNMAT_DEBUG_PIPELINE_ONLY` (bool)
   - When set, the provider stops after pipeline compilation and skips buffer
     creation/dispatch. Useful for triaging driver pipeline creation behavior.

@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+import os
 import numpy as np
 
 def main() -> None:
     np.random.seed(0)
     p, C, T = 128, 2048, 200
+    p = int(os.environ.get("NLMS_P", p))
+    C = int(os.environ.get("NLMS_C", C))
+    T = int(os.environ.get("NLMS_T", T))
     mu = np.float32(0.5)
     eps0 = np.float32(1e-3)
 

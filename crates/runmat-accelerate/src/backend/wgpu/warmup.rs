@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::bindings::build_bgl_for_layout_tag;
 use super::cache::persist::PipelineMeta;
+use super::cache::persist::PIPELINE_CACHE_VERSION;
 
 pub fn warmup_from_disk<FHash, FCreate, FNoop>(
     device: &wgpu::Device,
@@ -47,6 +48,10 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
             Ok(m) => m,
             Err(_) => continue,
         };
+        // Skip stale or incompatible cache entries silently
+        if meta.version.unwrap_or(0) != PIPELINE_CACHE_VERSION {
+            continue;
+        }
         let layout_tag = match meta.layout_tag.as_deref() {
             Some(t) => t,
             None => continue,

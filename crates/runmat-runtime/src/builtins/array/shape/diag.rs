@@ -649,6 +649,7 @@ fn diag_tensor_value(tensor: Tensor, options: &DiagOptions) -> Result<Value, Str
         shape,
         rows,
         cols,
+        ..
     } = tensor;
     ensure_matrix_shape("diag", &shape)?;
     if is_vector_like(rows, cols, shape.len()) {

@@ -586,7 +586,7 @@ fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, St
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(provider) = runmat_accelerate_api::provider() {
         // Include-NaN: use provider reduce_mean_* hooks
         if args.nan_mode == ReductionNaN::Include {
             if let Some(device_result) = mean_gpu_try(provider, &handle, &args.axes) {

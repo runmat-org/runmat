@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
+import os
 import torch
 
 def main() -> None:
     torch.manual_seed(0)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    override = os.environ.get("TORCH_DEVICE")
+    if override:
+        device = torch.device(override)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     M, T = 10_000_000, 256
+    M = int(os.environ.get("MC_M", M))
+    T = int(os.environ.get("MC_T", T))
     S0, mu, sigma = 100.0, 0.05, 0.20
     dt, K = 1.0 / 252.0, 100.0
 

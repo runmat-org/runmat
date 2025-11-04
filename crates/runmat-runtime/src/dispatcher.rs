@@ -1,4 +1,4 @@
-use runmat_builtins::{builtin_functions, LogicalArray, Tensor, Value};
+use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::{make_cell_with_shape, new_object_builtin};
 
@@ -43,7 +43,11 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
                 let logical = LogicalArray::new(bits, shape).map_err(|e| e.to_string())?;
                 Ok(Value::LogicalArray(logical))
             } else {
-                let tensor = Tensor::new(data, shape).map_err(|e| e.to_string())?;
+                let dtype = match provider.precision() {
+                    runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
+                    runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+                };
+                let tensor = Tensor::new_with_dtype(data, shape, dtype).map_err(|e| e.to_string())?;
                 Ok(Value::Tensor(tensor))
             }
         }

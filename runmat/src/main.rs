@@ -1132,7 +1132,11 @@ async fn execute_script_with_args(
             }
         );
         if let Some(value) = result.value {
-            println!("{value:?}");
+            // For script execution, suppress implicit value printing unless verbose is enabled.
+            // Scripts should print their own outputs (e.g., RESULT_ok ...).
+            if config.runtime.verbose {
+                println!("{value:?}");
+            }
         }
     }
 

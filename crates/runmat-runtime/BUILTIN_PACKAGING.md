@@ -1,6 +1,6 @@
 # Builtin Packaging & Authoring Blueprint
 
-This document captures the end-state we want for builtin authoring, GPU integration, documentation, and automation. It is the go-to reference when wiring new builtins or extending the RunMat Function Manager tooling.
+This document captures the builtin authoring, GPU integration, documentation, and automation blueprint for the RunMat project.
 
 ## Goals
 - One Rust source file per builtin containing code, long-form documentation, GPU/fusion specs, and unit tests.

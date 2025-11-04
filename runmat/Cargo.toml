@@ -51,7 +51,7 @@ runmat-accelerate-api = { version = "=0.0.17", path = "../crates/runmat-accelera
 [features]
 # GUI plotting features and BLAS/LAPACK (enabled by default)
 default = ["gui", "blas-lapack"]
-wgpu = []
+wgpu = ["runmat-accelerate/wgpu"]
 gui = ["runmat-plot/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
 blas-only = ["runmat-runtime/blas-only"]

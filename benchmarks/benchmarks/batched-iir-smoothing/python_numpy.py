@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
+import os
 import numpy as np
 
 def main() -> None:
     np.random.seed(0)
     M, T = 2_000_000, 4096
+    M = int(os.environ.get("IIR_M", M))
+    T = int(os.environ.get("IIR_T", T))
     alpha, beta = np.float32(0.98), np.float32(0.02)
 
     X = np.random.rand(M, T).astype(np.float32)

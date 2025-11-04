@@ -506,14 +506,20 @@ fn env_usize(key: &str) -> Option<usize> {
 
 fn auto_calibrate(provider: &'static dyn AccelProvider, cfg: &mut ThresholdConfig) -> Result<()> {
     if let Some(elem_threshold) = calibrate_elemwise(provider, cfg).transpose()? {
-        cfg.binary_min_elems = elem_threshold;
-        cfg.unary_min_elems = cfg.unary_min_elems.min(elem_threshold);
+        if elem_threshold != usize::MAX {
+            cfg.binary_min_elems = elem_threshold;
+            cfg.unary_min_elems = cfg.unary_min_elems.min(elem_threshold);
+        }
     }
     if let Some(red_threshold) = calibrate_reduction(provider, cfg).transpose()? {
-        cfg.reduction_min_elems = red_threshold;
+        if red_threshold != usize::MAX {
+            cfg.reduction_min_elems = red_threshold;
+        }
     }
     if let Some(matmul_threshold) = calibrate_matmul(provider, cfg).transpose()? {
-        cfg.matmul_min_flops = matmul_threshold;
+        if matmul_threshold != usize::MAX {
+            cfg.matmul_min_flops = matmul_threshold;
+        }
     }
     Ok(())
 }

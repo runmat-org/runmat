@@ -7,14 +7,15 @@ use runmat_builtins::Value;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::{
-    AccelGraph, AccelNode, AccelNodeLabel, InstrSpan, NodeId, PrimitiveOp, ShapeInfo, ValueId,
-    ValueOrigin,
+    AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId, PrimitiveOp,
+    ShapeInfo, ValueId, ValueOrigin,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FusionKind {
     ElementwiseChain,
     Reduction,
+    MatmulEpilogue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +108,62 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             span,
         });
         group_id += 1;
+    }
+
+    // Matmul + simple epilogue (alpha/beta/row/col scale) chains
+    for node in &graph.nodes {
+        if node.category != AccelOpCategory::MatMul || assigned.contains(&node.id) {
+            continue;
+        }
+        if node.outputs.is_empty() {
+            continue;
+        }
+        // Require exactly one consumer chain and only elementwise ops we can fold
+        let mut chain: Vec<NodeId> = vec![node.id];
+        let mut frontier = node.id;
+        let mut ok = false;
+        loop {
+            // Find single consumer of the current frontier's output
+            let mut next_id_opt: Option<NodeId> = None;
+            for &out in &graph.node(frontier).unwrap().outputs {
+                if let Some(cons) = consumer_map.get(&out) {
+                    if cons.len() == 1 {
+                        next_id_opt = cons.iter().copied().next();
+                    } else {
+                        next_id_opt = None;
+                    }
+                }
+            }
+            let Some(next_id) = next_id_opt else { break };
+            let next = graph.node(next_id).unwrap();
+            if !next.is_elementwise() { break; }
+            // Allow only primitive elementwise ops we can fold: add/sub/mul/div/elem variants
+            let allowed = matches!(
+                next.label,
+                AccelNodeLabel::Primitive(PrimitiveOp::Add)
+                    | AccelNodeLabel::Primitive(PrimitiveOp::Sub)
+                    | AccelNodeLabel::Primitive(PrimitiveOp::Mul)
+                    | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
+                    | AccelNodeLabel::Primitive(PrimitiveOp::Div)
+                    | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
+            );
+            if !allowed { break; }
+            chain.push(next_id);
+            frontier = next_id;
+            ok = true;
+        }
+        if ok {
+            for id in &chain { assigned.insert(*id); }
+            let span = group_span(graph, &chain);
+            groups.push(FusionGroup {
+                id: group_id,
+                kind: FusionKind::MatmulEpilogue,
+                nodes: chain,
+                shape: node_output_shape(graph, node),
+                span,
+            });
+            group_id += 1;
+        }
     }
 
     groups
@@ -484,21 +541,23 @@ impl FusionGroupPlan {
             reduction_mode,
         };
 
+        // Record constant ValueIds for all groups for easier downstream analysis
+        for node_id in &plan.group.nodes {
+            if let Some(node) = graph.node(*node_id) {
+                for &inp in &node.inputs {
+                    if let Some(info) = graph.value(inp) {
+                        if let Some(cv) = info.constant.clone() {
+                            plan.const_values.insert(inp, cv);
+                        }
+                    }
+                }
+            }
+        }
+
         // For reduction groups, externalize only real tensor dependencies; keep constants separate
         if plan.group.kind.is_reduction() {
             if let Some(data_vid) = plan.reduction_data {
                 // Record constant ValueIds for codegen
-                for node_id in &plan.group.nodes {
-                    if let Some(node) = graph.node(*node_id) {
-                        for &inp in &node.inputs {
-                            if let Some(info) = graph.value(inp) {
-                                if let Some(cv) = info.constant.clone() {
-                                    plan.const_values.insert(inp, cv);
-                                }
-                            }
-                        }
-                    }
-                }
                 // Build dependency map from op outputs to inputs
                 let mut prod: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
                 for op in &plan.operations {
@@ -535,7 +594,8 @@ impl FusionGroupPlan {
         } else if plan.kernel.kind.is_reduction() {
             plan.generate_reduction_wgsl("f32").is_some()
         } else {
-            false
+            // Non-WGSL kinds are executed via provider paths
+            true
         };
         plan.kernel.supported = plan.kernel.supported && supported;
         plan
