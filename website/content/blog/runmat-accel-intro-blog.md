@@ -1,3 +1,24 @@
+---
+title: "Introducing RunMat Accelerate: The Fastest Runtime for Math"
+description: "RunMat Accelerate is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
+date: "2025-11-05"
+author: "Nabeel Allana"
+readTime: "7 min read"
+slug: "runmat-accel-intro-blog"
+tags: ["MATLAB", "Rust", "JIT", "Octave", "scientific computing", "open source"]
+keywords: "MATLAB runtime, GNU Octave comparison, Rust scientific computing, JIT compiler, numerical computing, open source"
+excerpt: "RunMat Accelerate is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
+image: "/images/blog/runmat-hero.png"
+imageAlt: "RunMat logo with performance charts"
+ogType: "article"
+ogTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Math"
+ogDescription: "RunMat is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
+twitterCard: "summary_large_image"
+twitterTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Math"
+twitterDescription: "RunMat is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
+canonical: "https://runmat.org/blog/runmat-accel-intro-blog"
+---
+
 ## The Fastest Runtime for Math
 
 ### Why a faster way to do math
