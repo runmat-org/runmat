@@ -97,35 +97,36 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
         ],
     )
     .expect("gpuArray single upload");
-    let provider_precision = runmat_accelerate_api::provider()
-        .map(|p| p.precision())
-        .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64);
-    let expected_handle_precision = runmat_accelerate_api::ProviderPrecision::F32;
-    let expected_dtype = match provider_precision {
-        runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-        runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
-    };
-    println!(
-        "provider precision: {:?}, expected dtype: {:?}",
-        provider_precision, expected_dtype
-    );
     if let Value::GpuTensor(ref handle) = gpu {
+        let expected_handle_precision = runmat_accelerate_api::ProviderPrecision::F32;
         let precision = runmat_accelerate_api::handle_precision(handle)
-            .unwrap_or(provider_precision);
-        println!("handle precision before gather: {:?}", precision);
+            .unwrap_or(expected_handle_precision);
         assert_eq!(precision, expected_handle_precision);
+        let expected_dtype = match precision {
+            runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
+            runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+        };
+        let gathered = runmat_runtime::dispatcher::gather_if_needed(&gpu)
+            .expect("gather single");
+        match gathered {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, host.shape);
+                assert_eq!(t.dtype, expected_dtype);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+
+        let builtin_gathered = runmat_runtime::call_builtin("gather", &[gpu.clone()])
+            .expect("gather builtin");
+        match builtin_gathered {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, host.shape);
+                assert_eq!(t.dtype, expected_dtype);
+            }
+            other => panic!("expected tensor result from builtin gather, got {other:?}"),
+        }
     } else {
         panic!("expected gpu tensor");
-    }
-    let gathered = runmat_runtime::call_builtin("gather", &[gpu.clone()])
-        .expect("gather single");
-    match gathered {
-        Value::Tensor(t) => {
-            assert_eq!(t.shape, host.shape);
-            println!("gather dtype actual: {:?}", t.dtype);
-            assert_eq!(t.dtype, expected_dtype);
-        }
-        other => panic!("expected tensor result, got {other:?}"),
     }
 }
 

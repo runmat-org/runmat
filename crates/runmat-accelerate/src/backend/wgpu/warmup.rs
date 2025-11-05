@@ -4,10 +4,12 @@ use std::sync::Arc;
 use super::bindings::build_bgl_for_layout_tag;
 use super::cache::persist::PipelineMeta;
 use super::cache::persist::PIPELINE_CACHE_VERSION;
+use super::types::NumericPrecision;
 
 pub fn warmup_from_disk<FHash, FCreate, FNoop>(
     device: &wgpu::Device,
     cache_dir: Option<&Path>,
+    target_precision: NumericPrecision,
     compute_hash: FHash,
     get_or_create: FCreate,
     after_create_noop: FNoop,
@@ -51,6 +53,16 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
         // Skip stale or incompatible cache entries silently
         if meta.version.unwrap_or(0) != PIPELINE_CACHE_VERSION {
             continue;
+        }
+        match meta.precision.as_deref() {
+            Some(stored) if stored == target_precision.as_str() => {}
+            Some(_) => {
+                continue;
+            }
+            None => {
+                // Missing precision metadata (likely stale entry); skip
+                continue;
+            }
         }
         let layout_tag = match meta.layout_tag.as_deref() {
             Some(t) => t,

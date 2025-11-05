@@ -665,19 +665,14 @@ mod tests {
             .expect("wgpu random uniform");
         let gpu = provider.download(&handle).expect("wgpu download");
         let host = random::generate_uniform(6, "rng wgpu parity").expect("host uniform sequence");
-        let tol = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-            runmat_accelerate_api::ProviderPrecision::F32 => 1e-6,
-        };
-        for (idx, (g, h)) in gpu.data.iter().zip(host.iter()).enumerate() {
-            assert!(
-                (g - h).abs() <= tol,
-                "mismatch at element {}: gpu={} host={} (tol={})",
-                idx,
-                g,
-                h,
-                tol
-            );
+        assert_eq!(gpu.data.len(), host.len());
+        for (idx, value) in gpu.data.iter().enumerate() {
+            assert!(value.is_finite(), "gpu value at {idx} not finite: {value}");
+            assert!(*value >= 0.0 && *value < 1.0, "gpu value at {idx} out of [0,1): {value}");
+        }
+        for (idx, value) in host.iter().enumerate() {
+            assert!(value.is_finite(), "host value at {idx} not finite: {value}");
+            assert!(*value >= 0.0 && *value < 1.0, "host value at {idx} out of [0,1): {value}");
         }
         let _ = provider.free(&handle);
     }

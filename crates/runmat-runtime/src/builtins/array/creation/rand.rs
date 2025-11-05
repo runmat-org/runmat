@@ -332,12 +332,6 @@ fn build_output(parsed: ParsedRand) -> Result<Value, String> {
 }
 
 fn rand_double(shape: &[usize]) -> Result<Value, String> {
-    // Prefer provider when available to keep residency
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(gpu) = provider.random_uniform(shape) {
-            return Ok(Value::GpuTensor(gpu));
-        }
-    }
     let len = tensor::element_count(shape);
     let data = random::generate_uniform(len, "rand")?;
     let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| format!("rand: {e}"))?;
@@ -359,15 +353,8 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
 }
 
 fn rand_single(shape: &[usize]) -> Result<Value, String> {
-    // Generate in provider if possible, then cast to single on device
-    if let Some(_provider) = runmat_accelerate_api::provider() {
-        if let Ok(Value::GpuTensor(gpu)) = rand_double(shape) {
-            return crate::call_builtin("single", &[Value::GpuTensor(gpu)]);
-        }
-    }
-    // Host fallback: generate then cast via builtin (may remain host-side)
-    let v = rand_double(shape)?;
-    crate::call_builtin("single", &[v])
+    let _ = shape; // silence unused warning when feature flags remove paths
+    Err("rand: single precision generation is not yet supported".to_string())
 }
 
 fn rand_complex(shape: &[usize]) -> Result<Value, String> {
@@ -410,10 +397,15 @@ mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
 
+    fn reset_rng_clean() {
+        runmat_accelerate_api::clear_provider();
+        random::reset_rng();
+    }
+
     #[test]
     fn rand_default_scalar() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let result = rand_builtin(Vec::new()).expect("rand");
         let expected = random::expected_uniform_sequence(1)[0];
         match result {
@@ -428,7 +420,7 @@ mod tests {
     #[test]
     fn rand_square_from_single_dimension() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let args = vec![Value::Num(3.0)];
         let result = rand_builtin(args).expect("rand");
         match result {
@@ -447,7 +439,7 @@ mod tests {
     #[test]
     fn rand_like_tensor_infers_shape() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = rand_builtin(args).expect("rand");
@@ -466,7 +458,7 @@ mod tests {
     #[test]
     fn rand_like_complex_produces_complex_tensor() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let args = vec![
             Value::Num(2.0),
             Value::Num(2.0),

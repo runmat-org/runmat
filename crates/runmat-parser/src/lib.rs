@@ -266,7 +266,10 @@ impl Parser {
     fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
         while self.pos < self.tokens.len() {
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) || self.consume(&Token::Newline) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             body.push(self.parse_stmt_with_semicolon()?);
@@ -367,11 +370,14 @@ impl Parser {
             Some(Token::Function) => self.parse_function().map_err(|e| e.into()),
             // Multi-assign like [a,b] = f()
             Some(Token::LBracket) => {
-                // Prefer parsing as a multi-assign at statement start. If it fails, surface the error
-                // instead of falling back silently to a matrix literal, which leads to confusing '=' errors.
-                match self.try_parse_multi_assign() {
-                    Ok(stmt) => Ok(stmt),
-                    Err(msg) => Err(self.error(&msg)),
+                if matches!(self.peek_token_at(1), Some(Token::Ident | Token::Tilde)) {
+                    match self.try_parse_multi_assign() {
+                        Ok(stmt) => Ok(stmt),
+                        Err(msg) => Err(self.error(&msg)),
+                    }
+                } else {
+                    let expr = self.parse_expr()?;
+                    Ok(Stmt::ExprStmt(expr, false))
                 }
             }
             _ => {
@@ -763,8 +769,12 @@ impl Parser {
                 // Heuristic: Prefer function-call for identifiers when clear function hints exist
                 // even if a range appears among arguments (e.g., reshape(0:9, [2 5])).
                 let has_index_hint = args.iter().any(|a| self.expr_suggests_indexing(a));
+                let has_end_keyword = args.iter().any(|a| self.expr_contains_end(a));
                 let has_func_hint = matches!(expr, Expr::Ident(_))
-                    && args.iter().any(|a| matches!(a, Expr::Tensor(_) | Expr::Cell(_) | Expr::String(_)));
+                    && !has_end_keyword
+                    && args
+                        .iter()
+                        .any(|a| matches!(a, Expr::Tensor(_) | Expr::Cell(_) | Expr::String(_)));
                 if has_index_hint && !has_func_hint {
                     expr = Expr::Index(Box::new(expr), args);
                 } else {
@@ -865,6 +875,43 @@ impl Parser {
                     | BinOp::BitAnd
                     | BinOp::BitOr
             ),
+            _ => false,
+        }
+    }
+
+    fn expr_contains_end(&self, e: &Expr) -> bool {
+        match e {
+            Expr::EndKeyword => true,
+            Expr::Binary(lhs, _, rhs) => self.expr_contains_end(lhs) || self.expr_contains_end(rhs),
+            Expr::Range(start, step, end) => {
+                self.expr_contains_end(start)
+                    || step.as_deref().map_or(false, |s| self.expr_contains_end(s))
+                    || self.expr_contains_end(end)
+            }
+            Expr::Tensor(rows) => rows
+                .iter()
+                .flatten()
+                .any(|expr| self.expr_contains_end(expr)),
+            Expr::Cell(rows) => rows
+                .iter()
+                .flatten()
+                .any(|expr| self.expr_contains_end(expr)),
+            Expr::Index(base, args) => {
+                self.expr_contains_end(base) || args.iter().any(|arg| self.expr_contains_end(arg))
+            }
+            Expr::MethodCall(base, _, args) => {
+                self.expr_contains_end(base) || args.iter().any(|arg| self.expr_contains_end(arg))
+            }
+            Expr::FuncCall(_, args) => args.iter().any(|arg| self.expr_contains_end(arg)),
+            Expr::Unary(_, expr) => self.expr_contains_end(expr),
+            Expr::Member(base, _) => self.expr_contains_end(base),
+            Expr::MemberDynamic(base, field) => {
+                self.expr_contains_end(base) || self.expr_contains_end(field)
+            }
+            Expr::IndexCell(base, args) => {
+                self.expr_contains_end(base) || args.iter().any(|arg| self.expr_contains_end(arg))
+            }
+            Expr::AnonFunc { body, .. } => self.expr_contains_end(body),
             _ => false,
         }
     }
@@ -1222,7 +1269,10 @@ impl Parser {
             if term(tok) {
                 break;
             }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) || self.consume(&Token::Newline) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             // Fast-path: handle multi-assign LHS at statement start inside blocks reliably

@@ -38,6 +38,14 @@ fn ensure_gpu_tensor(
     }
 }
 
+fn value_to_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(n) => Some(*n),
+        Value::Int(i) => Some(i.to_f64()),
+        _ => None,
+    }
+}
+
 pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_elementwise() {
@@ -462,7 +470,10 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
         let handle = match v {
             Value::GpuTensor(h) => h.clone(),
             Value::Tensor(t) => {
-                let view = HostTensorView { data: &t.data, shape: &t.shape };
+                let view = HostTensorView {
+                    data: &t.data,
+                    shape: &t.shape,
+                };
                 let h = prov.upload(&view)?;
                 owned.push(h.clone());
                 h
@@ -474,7 +485,9 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
 
     // Helper: find handle by ValueId
     let find_handle = |vid: graph::ValueId| -> Option<GpuTensorHandle> {
-        prepared.iter().find_map(|(v, h, _)| if *v == vid { Some(h.clone()) } else { None })
+        prepared
+            .iter()
+            .find_map(|(v, h, _)| if *v == vid { Some(h.clone()) } else { None })
     };
 
     // Find matmul op and its output
@@ -482,7 +495,12 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
     let mut a_vid: Option<graph::ValueId> = None;
     let mut b_vid: Option<graph::ValueId> = None;
     for op in &request.plan.operations {
-        if let crate::fusion::FusionOp::Builtin { name, inputs, output } = op {
+        if let crate::fusion::FusionOp::Builtin {
+            name,
+            inputs,
+            output,
+        } = op
+        {
             if name.eq_ignore_ascii_case("mtimes") {
                 a_vid = inputs.get(0).copied();
                 b_vid = inputs.get(1).copied();
@@ -491,139 +509,128 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
             }
         }
     }
-    let (a_vid, b_vid, mut cur) = (a_vid.ok_or_else(|| anyhow!("mtimes not found"))?, b_vid.ok_or_else(|| anyhow!("mtimes not found"))?, cur_out.ok_or_else(|| anyhow!("mtimes output missing"))?);
+    let (a_vid, b_vid, mut cur) = (
+        a_vid.ok_or_else(|| anyhow!("mtimes not found"))?,
+        b_vid.ok_or_else(|| anyhow!("mtimes not found"))?,
+        cur_out.ok_or_else(|| anyhow!("mtimes output missing"))?,
+    );
 
-    // Derive epilogue (alpha, beta, row/col scale with mul/div flags) by walking subsequent ops that consume cur
+    // Derive epilogue (scale/bias, clamp, pow, diag) by walking subsequent ops that consume cur
     let mut alpha: f64 = 1.0;
     let mut beta: f64 = 0.0;
     let mut row_scale: Option<GpuTensorHandle> = None;
     let mut col_scale: Option<GpuTensorHandle> = None;
-    let mut row_div = false;
-    let mut col_div = false;
     let mut clamp_min: Option<f64> = None;
     let mut clamp_max: Option<f64> = None;
     let mut pow_exponent: Option<f64> = None;
+    let mut row_div = false;
+    let mut col_div = false;
+    let mut diag_vid: Option<graph::ValueId> = None;
 
     for op in &request.plan.operations {
         match op {
             crate::fusion::FusionOp::Primitive { op, inputs, output } => {
-        if let Some(out) = output {
-                    if !inputs.contains(&cur) {
-                        continue;
-                    }
-            let other = if inputs[0] == cur { inputs[1] } else { inputs[0] };
-            let const_opt = request.plan.const_values.get(&other).cloned();
-                    match op {
-                crate::graph::PrimitiveOp::Mul | crate::graph::PrimitiveOp::ElemMul => {
-                    if let Some(Value::Num(s)) = const_opt {
-                        alpha *= s;
-                    } else if let Some(Value::Int(i)) = const_opt {
-                        alpha *= i.to_f64();
-                    } else if row_scale.is_none() || col_scale.is_none() {
-                        if let Some(h) = find_handle(other) {
-                            let r = h.shape.get(0).copied().unwrap_or(1);
-                            let c = h.shape.get(1).copied().unwrap_or(1);
-                            if c == 1 && row_scale.is_none() {
-                                row_scale = Some(h);
-                                row_div = false;
-                            } else if r == 1 && col_scale.is_none() {
-                                col_scale = Some(h);
-                                col_div = false;
+                let Some(out) = output else { continue };
+                if !inputs.contains(&cur) {
+                    continue;
+                }
+                let other = if inputs[0] == cur {
+                    inputs[1]
+                } else {
+                    inputs[0]
+                };
+                let const_opt = request.plan.const_values.get(&other);
+                let const_f64 = const_opt.and_then(value_to_f64);
+                match op {
+                    crate::graph::PrimitiveOp::Mul | crate::graph::PrimitiveOp::ElemMul => {
+                        if let Some(val) = const_f64 {
+                            alpha *= val;
+                        } else if row_scale.is_none() || col_scale.is_none() {
+                            if let Some(h) = find_handle(other) {
+                                let r = h.shape.get(0).copied().unwrap_or(1);
+                                let c = h.shape.get(1).copied().unwrap_or(1);
+                                if c == 1 && row_scale.is_none() {
+                                    row_scale = Some(h);
+                                    row_div = false;
+                                } else if r == 1 && col_scale.is_none() {
+                                    col_scale = Some(h);
+                                    col_div = false;
+                                }
                             }
                         }
                     }
-                }
-                crate::graph::PrimitiveOp::Div | crate::graph::PrimitiveOp::ElemDiv => {
-                    if let Some(Value::Num(s)) = const_opt {
-                                if s != 0.0 {
-                                    alpha *= 1.0 / s;
+                    crate::graph::PrimitiveOp::Div | crate::graph::PrimitiveOp::ElemDiv => {
+                        if let Some(val) = const_f64 {
+                            if val != 0.0 {
+                                alpha *= 1.0 / val;
+                            }
+                        } else if row_scale.is_none() || col_scale.is_none() {
+                            if let Some(h) = find_handle(other) {
+                                let r = h.shape.get(0).copied().unwrap_or(1);
+                                let c = h.shape.get(1).copied().unwrap_or(1);
+                                if c == 1 && row_scale.is_none() {
+                                    row_scale = Some(h);
+                                    row_div = true;
+                                } else if r == 1 && col_scale.is_none() {
+                                    col_scale = Some(h);
+                                    col_div = true;
                                 }
-                    } else if let Some(Value::Int(i)) = const_opt {
-                                let s = i.to_f64();
-                                if s != 0.0 {
-                                    alpha *= 1.0 / s;
-                                }
-                    } else if row_scale.is_none() || col_scale.is_none() {
-                        if let Some(h) = find_handle(other) {
-                            let r = h.shape.get(0).copied().unwrap_or(1);
-                            let c = h.shape.get(1).copied().unwrap_or(1);
-                            if c == 1 && row_scale.is_none() {
-                                row_scale = Some(h);
-                                row_div = true;
-                            } else if r == 1 && col_scale.is_none() {
-                                col_scale = Some(h);
-                                col_div = true;
                             }
                         }
                     }
-                }
-                crate::graph::PrimitiveOp::Add => {
-                            if let Some(Value::Num(s)) = const_opt {
-                                beta += s;
-                            } else if let Some(Value::Int(i)) = const_opt {
-                                beta += i.to_f64();
-                            }
-                }
-                crate::graph::PrimitiveOp::Sub => {
-                            if let Some(Value::Num(s)) = const_opt {
-                                beta -= s;
-                            } else if let Some(Value::Int(i)) = const_opt {
-                                beta -= i.to_f64();
-                            }
+                    crate::graph::PrimitiveOp::Add => {
+                        if let Some(val) = const_f64 {
+                            beta += val;
                         }
-                        crate::graph::PrimitiveOp::Pow | crate::graph::PrimitiveOp::ElemPow => {
-                            if inputs
-                                .iter()
-                                .position(|v| *v == cur)
-                                .map(|idx| idx == 0)
-                                .unwrap_or(false)
-                            {
-                                if let Some(exp) = const_opt {
-                                    let exponent = match exp {
-                                        Value::Num(v) => v,
-                                        Value::Int(i) => i.to_f64(),
-                                        _ => {
-                                            cur = *out;
-                                            continue;
-                                        }
-                                    };
-                                    pow_exponent = Some(match pow_exponent {
-                                        Some(existing) => existing * exponent,
-                                        None => exponent,
-                                    });
-                                }
-                            }
+                    }
+                    crate::graph::PrimitiveOp::Sub => {
+                        if let Some(val) = const_f64 {
+                            beta -= val;
+                        }
+                    }
+                    crate::graph::PrimitiveOp::Pow | crate::graph::PrimitiveOp::ElemPow => {
+                        if pow_exponent.is_none() && inputs[0] == cur {
+                            pow_exponent = const_f64;
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
+                cur = *out;
             }
-            cur = *out;
+            crate::fusion::FusionOp::Builtin {
+                name,
+                inputs,
+                output,
+            } => {
+                let Some(out) = output else { continue };
+                if !inputs.contains(&cur) {
+                    continue;
                 }
-            }
-            crate::fusion::FusionOp::Builtin { name, inputs, output } => {
-                if let Some(out) = output {
-                    if !inputs.contains(&cur) {
-                        continue;
-                    }
-                    let lc = name.to_ascii_lowercase();
-                    let other_vals: Vec<_> = inputs.iter().copied().filter(|v| *v != cur).collect();
-                    if other_vals.len() == 1 {
-                        if let Some(const_val) = request.plan.const_values.get(&other_vals[0]) {
-                            let numeric = match const_val {
-                                Value::Num(v) => Some(*v),
-                                Value::Int(i) => Some(i.to_f64()),
-                                _ => None,
-                            };
-                            if let Some(val) = numeric {
-                                if lc == "max" {
-                                    clamp_min = Some(clamp_min.map(|existing| existing.max(val)).unwrap_or(val));
-                                } else if lc == "min" {
-                                    clamp_max = Some(clamp_max.map(|existing| existing.min(val)).unwrap_or(val));
-                                }
+                let lower = name.to_ascii_lowercase();
+                if lower == "max" || lower == "min" {
+                    if let Some(&other) = inputs.iter().find(|&&v| v != cur) {
+                        if let Some(val) =
+                            request.plan.const_values.get(&other).and_then(value_to_f64)
+                        {
+                            if lower == "max" {
+                                clamp_min = Some(clamp_min.map_or(val, |prev| prev.max(val)));
+                            } else {
+                                clamp_max = Some(clamp_max.map_or(val, |prev| prev.min(val)));
                             }
                         }
                     }
-                    cur = *out;
+                } else if lower == "pow" && pow_exponent.is_none() {
+                    if let Some(&other) = inputs.iter().find(|&&v| v != cur) {
+                        if let Some(val) =
+                            request.plan.const_values.get(&other).and_then(value_to_f64)
+                        {
+                            pow_exponent = Some(val);
+                        }
+                    }
+                } else if lower == "diag" {
+                    diag_vid = Some(*out);
                 }
+                cur = *out;
             }
         }
     }
@@ -632,18 +639,69 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
     let mut ep = runmat_accelerate_api::MatmulEpilogue::noop();
     ep.alpha = alpha;
     ep.beta = beta;
-    ep.row_op = if row_div { runmat_accelerate_api::ScaleOp::Divide } else { runmat_accelerate_api::ScaleOp::Multiply };
-    ep.col_op = if col_div { runmat_accelerate_api::ScaleOp::Divide } else { runmat_accelerate_api::ScaleOp::Multiply };
-    if let Some(h) = row_scale.clone() { ep.row_scale = Some(h); }
-    if let Some(h) = col_scale.clone() { ep.col_scale = Some(h); }
     ep.clamp_min = clamp_min;
     ep.clamp_max = clamp_max;
     ep.pow_exponent = pow_exponent;
+    ep.row_op = if row_div {
+        runmat_accelerate_api::ScaleOp::Divide
+    } else {
+        runmat_accelerate_api::ScaleOp::Multiply
+    };
+    ep.col_op = if col_div {
+        runmat_accelerate_api::ScaleOp::Divide
+    } else {
+        runmat_accelerate_api::ScaleOp::Multiply
+    };
+    if let Some(h) = row_scale.clone() {
+        ep.row_scale = Some(h);
+    }
+    if let Some(h) = col_scale.clone() {
+        ep.col_scale = Some(h);
+    }
 
     let a = find_handle(a_vid).ok_or_else(|| anyhow!("missing A"))?;
     let b = find_handle(b_vid).ok_or_else(|| anyhow!("missing B"))?;
+
+    let mut diag_handle: Option<(graph::ValueId, GpuTensorHandle)> = None;
+    if let Some(vid) = diag_vid {
+        let diag_len = std::cmp::min(
+            a.shape.get(0).copied().unwrap_or(0),
+            b.shape.get(1).copied().unwrap_or(0),
+        );
+        let mut diag_shape = vec![diag_len, 1];
+        if diag_len == 0 {
+            diag_shape[1] = 1;
+        }
+        let handle = prov.zeros(&diag_shape)?;
+        ep.diag_output = Some(handle.clone());
+        diag_handle = Some((vid, handle));
+    }
+
     let out = prov.matmul_epilogue(&a, &b, &ep)?;
-    for h in owned { let _ = prov.free(&h); }
-    fusion_residency::mark(&out);
-    Ok(Value::GpuTensor(out))
+    for h in owned {
+        let _ = prov.free(&h);
+    }
+
+    if let Some((_, diag)) = &diag_handle {
+        fusion_residency::mark(diag);
+    }
+
+    let final_vid = request.plan.output.or(Some(cur));
+    let mut result = out.clone();
+    let mut free_out = false;
+    if let Some((vid, diag)) = &diag_handle {
+        if Some(*vid) == final_vid {
+            result = diag.clone();
+            free_out = true;
+        }
+    }
+
+    if free_out {
+        let _ = prov.free(&out);
+    } else {
+        fusion_residency::mark(&out);
+    }
+
+    fusion_residency::mark(&result);
+    Ok(Value::GpuTensor(result))
 }

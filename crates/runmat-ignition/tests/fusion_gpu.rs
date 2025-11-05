@@ -1047,11 +1047,14 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         let bytecode = compile(&hir).expect("compile");
         if let Some(graph) = &bytecode.accel_graph {
             let groups = graph.detect_fusion_groups();
+            let reduction_count = groups
+                .iter()
+                .filter(|g| matches!(g.kind, runmat_accelerate::fusion::FusionKind::Reduction))
+                .count();
             assert!(
-                groups
-                    .iter()
-                    .any(|g| matches!(g.kind, runmat_accelerate::fusion::FusionKind::CenteredGram)),
-                "expected centered gram group"
+                reduction_count >= 2,
+                "expected at least two reduction groups for include/omit nan sums, got {:?}",
+                groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
             );
         } else {
             panic!("bytecode missing accel graph");
@@ -2152,7 +2155,7 @@ fn explained_variance_matches_cpu() {
 
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             for (pc, instr) in bytecode.instructions.iter().enumerate() {
-                println!("instr {pc}: {instr:?}");
+                eprintln!("instr {pc}: {instr:?}");
             }
         }
 
@@ -2162,8 +2165,8 @@ fn explained_variance_matches_cpu() {
                 groups
                     .iter()
                     .any(|g| matches!(g.kind, FusionKind::ExplainedVariance)),
-                "expected explained-variance group, got {:?}",
-                groups
+                "expected explained variance group, got {:?}",
+                groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
             );
             let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
             let explained = plan

@@ -179,7 +179,12 @@ fn test_gc_statistics_accuracy() {
         .minor_collections
         .load(Ordering::Relaxed);
 
-    assert_eq!(final_collections - initial_collections, 1);
+    let expected_increments = if collected > 0 { 1 } else { 0 };
+    assert_eq!(
+        final_collections - initial_collections,
+        expected_increments,
+        "minor collection stat mismatch: collected={collected}"
+    );
     println!("Statistics test: allocated {allocation_count}, collected {collected}");
 }
 

@@ -75,10 +75,17 @@ pub enum Token {
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| { lex.extras.last_was_value = true; })]
     Ident,
     // Float with optional underscores as digit separators (strip later)
-    #[regex(r"\d(?:_?\d)*\.\d(?:_?\d)*(?:[eE][+-]?\d(?:_?\d)*)?", |lex| { lex.extras.last_was_value = true; })]
+    #[regex(r"\d(?:_?\d)*\.(?:\d(?:_?\d)*)?(?:[eE][+-]?\d(?:_?\d)*)?", |lex| {
+        lex.extras.last_was_value = true;
+    })]
+    #[regex(r"\d(?:_?\d)*[eE][+-]?\d(?:_?\d)*", |lex| {
+        lex.extras.last_was_value = true;
+    })]
     Float,
     // Integer with optional underscores as digit separators (strip later)
-    #[regex(r"\d(?:_?\d)*(?:[eE][+-]?\d(?:_?\d)*)?", |lex| { lex.extras.last_was_value = true; })]
+    #[regex(r"\d(?:_?\d)*", |lex| {
+        lex.extras.last_was_value = true;
+    })]
     Integer,
     // Apostrophe is handled contextually in tokenize_detailed: either Transpose or a single-quoted string
     #[token("'")]
@@ -534,13 +541,6 @@ fn last_is_value_token(tok: &Token) -> bool {
             | Token::RBrace
             | Token::Str
     )
-}
-
-// If regex matched but it's actually an unterminated quote (no closing '),
-// tell Logos to Skip so the single-quote token can be picked up as Transpose.
-#[allow(dead_code)]
-fn single_quoted_string_or_skip(_lexer: &mut Lexer<Token>) -> Filter<()> {
-    Filter::Skip
 }
 
 fn double_quoted_string_emit(lexer: &mut Lexer<Token>) -> Filter<()> {

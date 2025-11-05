@@ -1,11 +1,22 @@
-n = 200000; d = 1024; k = 8; iters = 15;
+n_default = 200000;
+d_default = 1024;
+k_default = 8;
+iters_default = 15;
+seed_default = 0;
 
-A = gpuArray(rand(n, d));
+if ~exist('n','var'), n = n_default; end
+if ~exist('d','var'), d = d_default; end
+if ~exist('k','var'), k = k_default; end
+if ~exist('iters','var'), iters = iters_default; end
+if ~exist('seed','var'), seed = seed_default; end
+rng(seed);
+
+A = gpuArray(rand(n, d, 'single'));
 mu = mean(A, 1);
 A = A - mu;
-G = (A.' * A) / (n - 1);
+G = (A.' * A) / single(n - 1);
 
-Q = gpuArray(rand(d, k));
+Q = gpuArray(rand(d, k, 'single'));
 [Q, R_unused] = qr(Q, 'econ');
 
 for t = 1:iters

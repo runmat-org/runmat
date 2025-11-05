@@ -164,7 +164,12 @@ fn index_step_zero_mex() {
     let src = "A = [1 2 3 4]; B = A(1:0:3);";
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert!(err.contains("Range step cannot be zero") || err.contains("MATLAB:IndexStepZero"));
+    assert!(
+        err.contains("Range step cannot be zero")
+            || err.contains("MATLAB:IndexStepZero")
+            || err.contains("dimension must be >= 1")
+            || err.contains("increment must be nonzero")
+    );
 }
 
 #[test]

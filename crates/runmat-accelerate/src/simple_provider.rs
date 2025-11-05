@@ -270,12 +270,11 @@ impl InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        let handle = GpuTensorHandle {
+        GpuTensorHandle {
             shape,
             device_id: 0,
             buffer_id: id,
-        };
-        handle
+        }
     }
 
     fn load_polynomial(&self, handle: &GpuTensorHandle) -> Result<(Vec<f64>, PolyOrientation)> {
@@ -1243,7 +1242,6 @@ impl AccelProvider for InProcessProvider {
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_logical(h);
-        runmat_accelerate_api::clear_handle_precision(h);
         Ok(())
     }
 

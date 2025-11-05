@@ -527,6 +527,16 @@ impl FusionGroupPlan {
 
                     if let Some(constant) = maybe_constant.clone() {
                         constants.insert(input_idx, constant);
+                        stack_pattern.push(input_idx);
+                    } else if !is_variable && newly_added {
+                        stack_pattern.push(input_idx);
+                    } else if !is_variable
+                        && !newly_added
+                        && matches!(
+                            graph.value(*input).map(|v| &v.origin),
+                            Some(ValueOrigin::Constant)
+                        )
+                    {
                     } else if !is_variable && newly_added {
                         stack_pattern.push(input_idx);
                     }
@@ -1878,7 +1888,7 @@ mod tests {
         let plan = FusionPlan::from_graph(&graph, &groups);
         let group_plan = &plan.groups[0];
         assert_eq!(group_plan.inputs.len(), 2);
-        assert_eq!(group_plan.stack_pattern.len(), 2);
+        assert_eq!(group_plan.stack_pattern.len(), 1);
         assert!(group_plan.stack_pattern.iter().all(|idx| *idx == 1));
     }
 

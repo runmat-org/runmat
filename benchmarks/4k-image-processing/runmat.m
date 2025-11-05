@@ -1,6 +1,20 @@
-rng(0);
-B = 16; H = 2160; W = 3840;
-gain = single(1.0123); bias = single(-0.02); gamma = single(1.8); eps0 = single(1e-6);
+seed_default = 0;
+B_default = 16; H_default = 2160; W_default = 3840;
+gain_default = single(1.0123);
+bias_default = single(-0.02);
+gamma_default = single(1.8);
+eps0_default = single(1e-6);
+
+if ~exist('seed','var'), seed = seed_default; end
+rng(seed);
+
+if ~exist('B','var'), B = B_default; end
+if ~exist('H','var'), H = H_default; end
+if ~exist('W','var'), W = W_default; end
+if ~exist('gain','var'), gain = gain_default; else gain = single(gain); end
+if ~exist('bias','var'), bias = bias_default; else bias = single(bias); end
+if ~exist('gamma','var'), gamma = gamma_default; else gamma = single(gamma); end
+if ~exist('eps0','var'), eps0 = eps0_default; else eps0 = single(eps0); end
 
 imgs = rand(B, H, W, 'single');
 

@@ -353,11 +353,8 @@ fn randn_double(shape: &[usize]) -> Result<Value, String> {
 }
 
 fn randn_single(shape: &[usize]) -> Result<Value, String> {
-    let len = tensor::element_count(shape);
-    let data = random::generate_normal(len, "randn")?;
-    let tensor = Tensor::new_with_dtype(data, shape.to_vec(), NumericDType::F32)
-        .map_err(|e| format!("randn: {e}"))?;
-    Ok(tensor::tensor_into_value(tensor))
+    let _ = shape;
+    Err("randn: single precision generation is not yet supported".to_string())
 }
 
 fn randn_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
@@ -417,10 +414,15 @@ mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
 
+    fn reset_rng_clean() {
+        runmat_accelerate_api::clear_provider();
+        random::reset_rng();
+    }
+
     #[test]
     fn randn_default_scalar() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let result = randn_builtin(Vec::new()).expect("randn");
         let expected = random::expected_normal_sequence(1)[0];
         match result {
@@ -432,7 +434,7 @@ mod tests {
     #[test]
     fn randn_square_from_single_dimension() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let args = vec![Value::Num(2.0)];
         let result = randn_builtin(args).expect("randn");
         match result {
@@ -450,7 +452,7 @@ mod tests {
     #[test]
     fn randn_size_vector_argument() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let size_vec = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
         let result = randn_builtin(vec![Value::Tensor(size_vec)]).expect("randn");
         match result {
@@ -469,7 +471,7 @@ mod tests {
     #[test]
     fn randn_zero_dimension_returns_empty() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let result = randn_builtin(vec![Value::Num(0.0)]).expect("randn");
         match result {
             Value::Tensor(t) => {
@@ -481,15 +483,26 @@ mod tests {
     }
 
     #[test]
-    fn randn_single_precision_errors() {
-        let result = randn_builtin(vec![Value::from("single")]);
-        assert!(matches!(result, Err(message) if message.contains("single precision")));
+    fn randn_single_precision_produces_f32() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset_rng_clean();
+        let result = randn_builtin(vec![Value::from("single")]).expect("randn single");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.dtype, NumericDType::F32);
+                assert_eq!(t.shape, vec![1, 1]);
+            }
+            Value::Num(_) => {
+                // Fallback scalar path remains F64-backed but should definitely not allocate on GPU.
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
     }
 
     #[test]
     fn randn_like_tensor_infers_shape() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = randn_builtin(args).expect("randn");
@@ -508,7 +521,7 @@ mod tests {
     #[test]
     fn randn_like_complex_produces_complex_tensor() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let args = vec![
             Value::Num(2.0),
             Value::Num(1.0),

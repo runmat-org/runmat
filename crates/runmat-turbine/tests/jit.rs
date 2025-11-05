@@ -978,9 +978,9 @@ fn test_jit_user_function_fallback() {
     use std::collections::HashMap;
     let mut functions = HashMap::new();
     functions.insert(
-        "double".to_string(),
+        "my_double".to_string(),
         runmat_ignition::UserFunction {
-            name: "double".to_string(),
+            name: "my_double".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],
             body: vec![runmat_hir::HirStmt::Assign(
@@ -1012,9 +1012,9 @@ fn test_jit_user_function_fallback() {
         functions,
         ..Bytecode::with_instructions(
             vec![
-                Instr::LoadConst(5.0),                        // Load argument
-                Instr::CallFunction("double".to_string(), 1), // Call function
-                Instr::StoreVar(0),                           // Store result
+                Instr::LoadConst(5.0),                            // Load argument
+                Instr::CallFunction("my_double".to_string(), 1), // Call function
+                Instr::StoreVar(0),                               // Store result
             ],
             1,
         )
@@ -1035,7 +1035,7 @@ fn test_jit_user_function_fallback() {
 
     // Check result
     if let Value::Num(value) = &vars[0] {
-        assert_eq!(*value, 10.0, "double(5) should equal 10");
+        assert_eq!(*value, 10.0, "my_double(5) should equal 10");
     } else {
         panic!("Result should be Num(10.0), got {:?}", vars[0]);
     }

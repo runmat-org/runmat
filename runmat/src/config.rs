@@ -82,7 +82,7 @@ impl Default for AccelerateConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            provider: AccelerateProviderPreference::Wgpu,
+            provider: AccelerateProviderPreference::Auto,
             allow_inprocess_fallback: true,
             wgpu_power_preference: AccelPowerPreference::Auto,
             wgpu_force_fallback_adapter: false,
@@ -1140,7 +1140,7 @@ mod tests {
         let accel = AccelerateConfig::default();
         let opts = accel.to_init_options();
         assert!(opts.enabled);
-        assert_eq!(opts.provider, AccelerateProviderPreference::Auto);
+        assert_eq!(opts.provider, AccelerateProviderPreference::Wgpu);
     }
 
     #[test]

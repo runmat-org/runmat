@@ -10,7 +10,7 @@ pub fn create_range(start: f64, step: Option<f64>, end: f64) -> Result<Value, St
     // Delegate to new builtins to ensure unified semantics
     match step {
         Some(s) => crate::call_builtin(
-            "range",
+            "colon",
             &[Value::Num(start), Value::Num(s), Value::Num(end)],
         ),
         None => crate::call_builtin("colon", &[Value::Num(start), Value::Num(end)]),

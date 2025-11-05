@@ -17,4 +17,14 @@
 - 2025-11-04 11:48: Planning dtype audit across `zeros/ones/randn/gpuArray/gather`; inspecting runtime helpers and noting scalar `tensor_into_value` may drop dtype metadata.
 - 2025-11-04 12:02: Added dtype regression tests (`crates/runmat-runtime/tests/dtype.rs`); fixed `randn('like', proto)` to respect F32 prototypes; `cargo test -p runmat-runtime dtype` passing.
 - 2025-11-04 12:40: Extended dtype plumbing to mark `gpuArray` handles with requested precision and noted current gather behavior (metadata tracks F32 even when simple provider gathers as F64).
+- 2025-11-04 12:58: Added gather dtype conversions keyed off provider precision and locked regression coverage with `cargo test -p runmat-runtime dtype`.
+- 2025-11-04 13:20: Hardened parser heuristics so bracket-leading matrix literals no longer misparse as multi-assigns; added `dynamic_member_assignment_parses` and `multi_assign_semicolon_and_newline_behavior` regression tests.
+- 2025-11-04 13:32: Added newline separation regression (`test_newline_separates_statements`) and reran `cargo test -p runmat-parser`.
+- 2025-11-04 13:55: Patched PCA/4k/NLMS/Monte Carlo/IIR benchmarks with harness-aware defaults, RNG seed wiring, and single-precision guards.
+- 2025-11-04 14:05: Added `crates/runmat-runtime/tests/rng.rs` to sanity-check `randn` mean/variance for F32/F64; `cargo test -p runmat-runtime rng` passing.
+- 2025-11-05 09:10: After Team A/B sync, revalidated parser fallback (`try_parse_multi_assign`), restored newline/lvalue regression tests, and reran `cargo test -p runmat-parser`.
+- 2025-11-05 09:35: Reapplied harness guards across PCA/4k/NLMS/MonteCarlo/IIR scripts post-merge, confirming seeded overrides and single-precision flow.
+- 2025-11-05 09:50: Reintroduced dtype gather fixes with conversion on F32 precision, refreshed `crates/runmat-runtime/tests/dtype.rs`, and reran `cargo test -p runmat-runtime dtype`.
+- 2025-11-05 10:00: Restored RNG sanity suite (`crates/runmat-runtime/tests/rng.rs`) and verified via `cargo test -p runmat-runtime rng`.
+- 2025-11-05 10:45: After GPU merge fallout, reverted `rand()` default path to host tensors so RNG builtins match MATLAB semantics; re-ran `cargo test -p runmat-runtime rand` (green) to confirm `rand/randn/randi/randperm` suites no longer panic.
 

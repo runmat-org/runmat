@@ -17,11 +17,12 @@
 - 2025-11-04 04:32 UTC — Implemented small-k GEMM specialization (k≤8) with dedicated WGSL, pipeline warmup, provider routing, and tests to confirm the optimized path matches CPU across threshold cases.
 - 2025-11-05 00:24 UTC — Extended the matmul epilogue descriptor with diagonal pack support (`diag_output`) alongside clamp/pow options, widened the uniform structs, added new WGSL bits (flags + diag write path), refreshed pipeline layouts/bind groups, and updated the simple provider parity implementation.
 - 2025-11-05 00:41 UTC — Added WGPU `matmul_epilogue` coverage for diagonal extraction, resolved validation conflicts by separating dummy storage buffers, and relaxed tolerances for the mixed-precision path; suite now green under `cargo test --features wgpu matmul_epilogue`.
+- 2025-11-05 01:05 UTC — Reconciled Team B/C fusion merges: extended `execute_matmul_epilogue` to harvest clamp/min/max, pow, and diag intent from fusion plans, wire the new descriptor fields (including diag buffer allocation) through to the WGPU provider, and ensured GPU tests still pass with `cargo test -p runmat-accelerate --features wgpu`.
 
 ### Immediate Next Steps
 
 - Coordinate with runtime to surface allocation failures cleanly now that GPU buffer requests propagate `anyhow::Error`; evaluate whether additional telemetry is needed for large allocation warnings.
-- Wire planner/fusion hooks so matmul epilogues can emit clamp/pow/diag metadata automatically; monitor Team B updates to keep extraction logic current.
+- Monitor fusion planner changes for any new epilogue patterns (e.g., bias vectors, packed outputs) so the extractor stays in sync.
 - Spin up the normalize→gain→bias→clamp→pow fused kernel so 4k workloads can benefit as soon as the fusion planner emits the pattern.
 
 ## Detailed Notes

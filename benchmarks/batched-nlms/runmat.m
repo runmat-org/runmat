@@ -1,6 +1,18 @@
-rng(0);
-p = 128; C = 2048; T = 200;
-mu = single(0.5); eps0 = single(1e-3);
+seed_default = 0;
+p_default = 128;
+C_default = 2048;
+T_default = 200;
+mu_default = single(0.5);
+eps0_default = single(1e-3);
+
+if ~exist('seed','var'), seed = seed_default; end
+rng(seed);
+
+if ~exist('p','var'), p = p_default; end
+if ~exist('C','var'), C = C_default; end
+if ~exist('T','var'), T = T_default; end
+if ~exist('mu','var'), mu = mu_default; else mu = single(mu); end
+if ~exist('eps0','var'), eps0 = eps0_default; else eps0 = single(eps0); end
 
 W = zeros(p, C, 'single');
 

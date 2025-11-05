@@ -1863,6 +1863,13 @@ pub fn provider() -> Option<&'static dyn AccelProvider> {
         .and_then(|guard| guard.as_ref().copied())
 }
 
+/// Clear the globally registered provider. Intended for tests to ensure deterministic behaviour.
+pub fn clear_provider() {
+    if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
+        *guard = None;
+    }
+}
+
 /// Convenience: perform elementwise add via provider if possible; otherwise return None
 pub fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {

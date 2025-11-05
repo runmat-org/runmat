@@ -310,7 +310,13 @@ fn whitespace_and_comma_mixed_elements() {
 #[test]
 fn tensor_in_index_and_end_arithmetic() {
     let ast = parse("A=[1 2 3; 4 5 6; 7 8 9]; B=A(1:end-1, [1 3]);").unwrap();
-    dbg!(&ast.body[1]);
+    if let Stmt::Assign(_, Expr::Tensor(rows), _) = &ast.body[0] {
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].len(), 3);
+        assert_eq!(rows[1].len(), 3);
+    } else {
+        panic!("expected tensor literal on assignment to A");
+    }
     if let Stmt::Assign(_, Expr::Index(_, idxs), _) = &ast.body[1] {
         assert_eq!(idxs.len(), 2);
     } else {
