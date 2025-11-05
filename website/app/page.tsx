@@ -203,7 +203,7 @@ export default function HomePage() {
             <Card>
               <CardHeader className="items-center text-center">
                 <div className="mb-3 text-3xl">✅</div>
-                <CardTitle>Full MATLAB Language Semantics</CardTitle>
+                <CardTitle>Full MATLAB  Language Semantics</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
