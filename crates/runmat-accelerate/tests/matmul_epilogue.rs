@@ -40,14 +40,34 @@ fn matmul_epilogue_row_col_alpha_beta() {
         2.0, 4.0, 6.0, 8.0, // col 1
     ];
 
-    let ha = p.upload(&HostTensorView { data: &a, shape: &[ar, ac] }).expect("upload A");
-    let hb = p.upload(&HostTensorView { data: &b, shape: &[br, bc] }).expect("upload B");
+    let ha = p
+        .upload(&HostTensorView {
+            data: &a,
+            shape: &[ar, ac],
+        })
+        .expect("upload A");
+    let hb = p
+        .upload(&HostTensorView {
+            data: &b,
+            shape: &[br, bc],
+        })
+        .expect("upload B");
 
     // Row/col scales
     let row_scale: Vec<f64> = vec![2.0, 0.5, 1.0];
     let col_scale: Vec<f64> = vec![1.0, 2.0, 0.25, 1.5];
-    let hrow = p.upload(&HostTensorView { data: &row_scale, shape: &[ar, 1] }).expect("row scale");
-    let hcol = p.upload(&HostTensorView { data: &col_scale, shape: &[1, bc] }).expect("col scale");
+    let hrow = p
+        .upload(&HostTensorView {
+            data: &row_scale,
+            shape: &[ar, 1],
+        })
+        .expect("row scale");
+    let hcol = p
+        .upload(&HostTensorView {
+            data: &col_scale,
+            shape: &[1, bc],
+        })
+        .expect("col scale");
 
     let mut ep = MatmulEpilogue::noop();
     ep.alpha = 1.25;
@@ -77,7 +97,14 @@ fn matmul_epilogue_row_col_alpha_beta() {
         let got = host.data[idx];
         let want = expected[idx];
         let diff = (got - want).abs();
-        assert!(diff < 1e-9, "mismatch at {}: got={} want={} diff={}", idx, got, want, diff);
+        assert!(
+            diff < 1e-9,
+            "mismatch at {}: got={} want={} diff={}",
+            idx,
+            got,
+            want,
+            diff
+        );
     }
 }
 
@@ -94,12 +121,27 @@ fn matmul_epilogue_col_divide() {
     let bc = 2usize;
     let a: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0];
     let b: Vec<f64> = vec![1.0, 0.0, 0.0, 1.0];
-    let ha = p.upload(&HostTensorView { data: &a, shape: &[ar, ac] }).expect("upload A");
-    let hb = p.upload(&HostTensorView { data: &b, shape: &[br, bc] }).expect("upload B");
+    let ha = p
+        .upload(&HostTensorView {
+            data: &a,
+            shape: &[ar, ac],
+        })
+        .expect("upload A");
+    let hb = p
+        .upload(&HostTensorView {
+            data: &b,
+            shape: &[br, bc],
+        })
+        .expect("upload B");
 
     // col denom
     let denom: Vec<f64> = vec![2.0, 4.0];
-    let hcol = p.upload(&HostTensorView { data: &denom, shape: &[1, bc] }).expect("col denom");
+    let hcol = p
+        .upload(&HostTensorView {
+            data: &denom,
+            shape: &[1, bc],
+        })
+        .expect("col denom");
 
     let mut ep = MatmulEpilogue::noop();
     ep.col_scale = Some(hcol.clone());
@@ -108,8 +150,10 @@ fn matmul_epilogue_col_divide() {
     let hc = p.matmul_epilogue(&ha, &hb, &ep).expect("matmul_epilogue");
     let host = p.download(&hc).expect("download");
     // Expected: identity matmul gives A, then divide each column by denom
-    let expected: Vec<f64> = vec![a[0]/2.0, a[1]/2.0, a[2]/4.0, a[3]/4.0];
-    for i in 0..expected.len() { assert!((host.data[i]-expected[i]).abs() < 1e-9); }
+    let expected: Vec<f64> = vec![a[0] / 2.0, a[1] / 2.0, a[2] / 4.0, a[3] / 4.0];
+    for i in 0..expected.len() {
+        assert!((host.data[i] - expected[i]).abs() < 1e-9);
+    }
 }
 
 #[cfg(feature = "wgpu")]
@@ -121,8 +165,18 @@ fn matmul_epilogue_clamp_pow() {
     // Simple 2x2 matmul with known output
     let a: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0]; // 2x2
     let b: Vec<f64> = vec![2.0, 0.0, 0.0, 2.0]; // 2x2 diagonal scale
-    let ha = p.upload(&HostTensorView { data: &a, shape: &[2, 2] }).expect("upload A");
-    let hb = p.upload(&HostTensorView { data: &b, shape: &[2, 2] }).expect("upload B");
+    let ha = p
+        .upload(&HostTensorView {
+            data: &a,
+            shape: &[2, 2],
+        })
+        .expect("upload A");
+    let hb = p
+        .upload(&HostTensorView {
+            data: &b,
+            shape: &[2, 2],
+        })
+        .expect("upload B");
 
     let mut ep = MatmulEpilogue::noop();
     ep.alpha = 1.0;
@@ -146,8 +200,13 @@ fn matmul_epilogue_clamp_pow() {
         let got = host.data[idx];
         let want = expected[idx];
         let diff = (got - want).abs();
-        assert!(diff < 1e-8, "clamp+pow mismatch at {}: got={} want={} diff={}", idx, got, want, diff);
+        assert!(
+            diff < 1e-8,
+            "clamp+pow mismatch at {}: got={} want={} diff={}",
+            idx,
+            got,
+            want,
+            diff
+        );
     }
 }
-
-

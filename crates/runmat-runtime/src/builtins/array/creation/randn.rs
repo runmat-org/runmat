@@ -331,7 +331,11 @@ impl ParsedRandn {
 
         let template = template.unwrap_or(RandnTemplate::Double);
 
-        Ok(Self { shape, template, dtype })
+        Ok(Self {
+            shape,
+            template,
+            dtype,
+        })
     }
 }
 
@@ -365,10 +369,9 @@ fn randn_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
             NumericDType::F32 => randn_single(shape),
             NumericDType::F64 => randn_double(shape),
         },
-        Value::Num(_)
-        | Value::Int(_)
-        | Value::Bool(_)
-        | Value::LogicalArray(_) => randn_double(shape),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => {
+            randn_double(shape)
+        }
         Value::CharArray(_) | Value::Cell(_) => randn_double(shape),
         other => Err(format!("randn: unsupported prototype {other:?}")),
     }

@@ -53,7 +53,14 @@ fn syrk_matches_cpu() {
         let got = host.data[idx];
         let want = expected[idx];
         let diff = (got - want).abs();
-        assert!(diff < 1e-9, "mismatch at {}: got={} want={} diff={}", idx, got, want, diff);
+        assert!(
+            diff < 1e-9,
+            "mismatch at {}: got={} want={} diff={}",
+            idx,
+            got,
+            want,
+            diff
+        );
     }
 }
 
@@ -87,7 +94,13 @@ fn syrk_large_rows_chunks() {
         let got = host.data[idx];
         let want = expected[idx];
         let diff = (got - want).abs();
-        assert!(diff < 1e-6, "chunk mismatch at {}: got={} want={} diff={}", idx, got, want, diff);
+        assert!(
+            diff < 1e-6,
+            "chunk mismatch at {}: got={} want={} diff={}",
+            idx,
+            got,
+            want,
+            diff
+        );
     }
 }
-

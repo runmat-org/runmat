@@ -484,12 +484,16 @@ fn ldivide_gpu_pair(divisor: GpuTensorHandle, numerator: GpuTensorHandle) -> Res
             let made_num = reps_num.iter().any(|&r| r != 1);
             let made_div = reps_div.iter().any(|&r| r != 1);
             let num_expanded = if made_num {
-                provider.repmat(&numerator, &reps_num).map_err(|e| e.to_string())?
+                provider
+                    .repmat(&numerator, &reps_num)
+                    .map_err(|e| e.to_string())?
             } else {
                 numerator.clone()
             };
             let div_expanded = if made_div {
-                provider.repmat(&divisor, &reps_div).map_err(|e| e.to_string())?
+                provider
+                    .repmat(&divisor, &reps_div)
+                    .map_err(|e| e.to_string())?
             } else {
                 divisor.clone()
             };

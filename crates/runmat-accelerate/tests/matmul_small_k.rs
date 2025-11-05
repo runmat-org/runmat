@@ -41,8 +41,18 @@ fn matmul_small_k_threshold() {
         }
     }
 
-    let ha = p.upload(&HostTensorView { data: &a, shape: &[m, k] }).expect("upload A");
-    let hb = p.upload(&HostTensorView { data: &b, shape: &[k, n] }).expect("upload B");
+    let ha = p
+        .upload(&HostTensorView {
+            data: &a,
+            shape: &[m, k],
+        })
+        .expect("upload A");
+    let hb = p
+        .upload(&HostTensorView {
+            data: &b,
+            shape: &[k, n],
+        })
+        .expect("upload B");
     let hc = p.matmul(&ha, &hb).expect("matmul");
     let host = p.download(&hc).expect("download");
     assert_eq!(host.shape, vec![m, n]);
@@ -50,7 +60,14 @@ fn matmul_small_k_threshold() {
     let expected = cpu_matmul(&a, m, k, &b, k, n);
     for idx in 0..expected.len() {
         let diff = (host.data[idx] - expected[idx]).abs();
-        assert!(diff < 1e-9, "small-k mismatch at {}: got={} want={} diff={}", idx, host.data[idx], expected[idx], diff);
+        assert!(
+            diff < 1e-9,
+            "small-k mismatch at {}: got={} want={} diff={}",
+            idx,
+            host.data[idx],
+            expected[idx],
+            diff
+        );
     }
 }
 
@@ -76,8 +93,18 @@ fn matmul_small_k_exact_threshold() {
         }
     }
 
-    let ha = p.upload(&HostTensorView { data: &a, shape: &[m, k] }).expect("upload A");
-    let hb = p.upload(&HostTensorView { data: &b, shape: &[k, n] }).expect("upload B");
+    let ha = p
+        .upload(&HostTensorView {
+            data: &a,
+            shape: &[m, k],
+        })
+        .expect("upload A");
+    let hb = p
+        .upload(&HostTensorView {
+            data: &b,
+            shape: &[k, n],
+        })
+        .expect("upload B");
     let hc = p.matmul(&ha, &hb).expect("matmul");
     let host = p.download(&hc).expect("download");
     assert_eq!(host.shape, vec![m, n]);
@@ -85,7 +112,13 @@ fn matmul_small_k_exact_threshold() {
     let expected = cpu_matmul(&a, m, k, &b, k, n);
     for idx in 0..expected.len() {
         let diff = (host.data[idx] - expected[idx]).abs();
-        assert!(diff < 1e-8, "threshold mismatch at {}: got={} want={} diff={}", idx, host.data[idx], expected[idx], diff);
+        assert!(
+            diff < 1e-8,
+            "threshold mismatch at {}: got={} want={} diff={}",
+            idx,
+            host.data[idx],
+            expected[idx],
+            diff
+        );
     }
 }
-

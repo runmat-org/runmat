@@ -4,7 +4,11 @@ use runmat_builtins::{CharArray, NumericDType, Tensor, Value};
 fn zeros_single_uses_f32_dtype() {
     let result = runmat_runtime::call_builtin(
         "zeros",
-        &[Value::Num(2.0), Value::Num(3.0), Value::String("single".into())],
+        &[
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::String("single".into()),
+        ],
     )
     .expect("zeros single");
     match result {
@@ -20,7 +24,11 @@ fn zeros_single_uses_f32_dtype() {
 fn ones_single_uses_f32_dtype() {
     let result = runmat_runtime::call_builtin(
         "ones",
-        &[Value::Num(3.0), Value::Num(4.0), Value::String("single".into())],
+        &[
+            Value::Num(3.0),
+            Value::Num(4.0),
+            Value::String("single".into()),
+        ],
     )
     .expect("ones single");
     match result {
@@ -54,7 +62,11 @@ fn zeros_like_proto_preserves_numeric_dtype() {
 fn randn_single_sets_f32_dtype() {
     let result = runmat_runtime::call_builtin(
         "randn",
-        &[Value::Num(4.0), Value::Num(5.0), Value::String("single".into())],
+        &[
+            Value::Num(4.0),
+            Value::Num(5.0),
+            Value::String("single".into()),
+        ],
     )
     .expect("randn single");
     match result {
@@ -99,15 +111,14 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
     .expect("gpuArray single upload");
     if let Value::GpuTensor(ref handle) = gpu {
         let expected_handle_precision = runmat_accelerate_api::ProviderPrecision::F32;
-        let precision = runmat_accelerate_api::handle_precision(handle)
-            .unwrap_or(expected_handle_precision);
+        let precision =
+            runmat_accelerate_api::handle_precision(handle).unwrap_or(expected_handle_precision);
         assert_eq!(precision, expected_handle_precision);
         let expected_dtype = match precision {
             runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
             runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
         };
-        let gathered = runmat_runtime::dispatcher::gather_if_needed(&gpu)
-            .expect("gather single");
+        let gathered = runmat_runtime::dispatcher::gather_if_needed(&gpu).expect("gather single");
         match gathered {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, host.shape);
@@ -116,8 +127,8 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
             other => panic!("expected tensor result, got {other:?}"),
         }
 
-        let builtin_gathered = runmat_runtime::call_builtin("gather", &[gpu.clone()])
-            .expect("gather builtin");
+        let builtin_gathered =
+            runmat_runtime::call_builtin("gather", &[gpu.clone()]).expect("gather builtin");
         match builtin_gathered {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, host.shape);
@@ -129,4 +140,3 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
         panic!("expected gpu tensor");
     }
 }
-

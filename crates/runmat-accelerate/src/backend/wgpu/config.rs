@@ -10,7 +10,9 @@ pub const MAX_DISPATCH_WORKGROUPS: u32 = 65_535;
 pub fn effective_workgroup_size() -> u32 {
     if let Ok(val) = std::env::var("RUNMAT_WG") {
         if let Ok(parsed) = val.trim().parse::<u32>() {
-            if parsed > 0 { return parsed; }
+            if parsed > 0 {
+                return parsed;
+            }
         }
     }
     WORKGROUP_SIZE
@@ -20,7 +22,9 @@ pub fn effective_workgroup_size() -> u32 {
 pub fn effective_matmul_tile() -> u32 {
     if let Ok(val) = std::env::var("RUNMAT_MATMUL_TILE") {
         if let Ok(parsed) = val.trim().parse::<u32>() {
-            if parsed > 0 { return parsed; }
+            if parsed > 0 {
+                return parsed;
+            }
         }
     }
     MATMUL_TILE

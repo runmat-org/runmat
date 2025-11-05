@@ -2,11 +2,11 @@
 //!
 //! High-performance linear algebra using BLAS (Basic Linear Algebra Subprograms).
 
+#[cfg(test)]
+use crate::lapack::value_vector_to_f64;
 use runmat_builtins::Tensor as Matrix;
 #[cfg(test)]
 use runmat_builtins::Value;
-#[cfg(test)]
-use crate::lapack::value_vector_to_f64;
 
 /// Helper function to transpose a matrix from row-major to column-major
 fn transpose_to_column_major(matrix: &Matrix) -> Vec<f64> {

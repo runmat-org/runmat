@@ -34,22 +34,18 @@ extern crate openblas_src;
 pub use dispatcher::{call_builtin, gather_if_needed, is_gpu_value, value_contains_gpu};
 
 // Transitional public shim for tests using matrix_transpose
-pub use crate::matrix::matrix_transpose as matrix_transpose;
+pub use crate::matrix::matrix_transpose;
 
 // Pruned legacy re-exports; prefer builtins::* and explicit shims only
 // Transitional root-level shims for widely used helpers
 pub use arrays::create_range;
 pub use concatenation::create_matrix_from_values;
+pub use elementwise::{elementwise_div, elementwise_mul, elementwise_neg, elementwise_pow, power};
 pub use indexing::perform_indexing;
-pub use elementwise::{
-    elementwise_div, elementwise_mul, elementwise_neg, elementwise_pow,
-    power,
-};
 // Explicitly re-export for external users (ignition VM) that build matrices from values
 // (kept above)
 // Note: constants and mathematics modules only contain #[runtime_builtin] functions
 // and don't export public items, so they don't need to be re-exported
- 
 
 #[cfg(feature = "blas-lapack")]
 pub use blas::*;
@@ -175,8 +171,6 @@ fn to_string_scalar(v: &Value) -> Result<String, String> {
     Ok(s)
 }
 
- 
-
 fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
     match v {
         Value::String(s) => runmat_builtins::StringArray::new(vec![s.clone()], vec![1, 1])
@@ -197,12 +191,6 @@ fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
         other => Err(format!("cannot convert to string array: {other:?}")),
     }
 }
-
- 
-
- 
-
- 
 
 #[runmat_macros::runtime_builtin(name = "strtrim")]
 fn strtrim_builtin(a: Value) -> Result<Value, String> {
@@ -1190,8 +1178,6 @@ fn gather_builtin(x: Value) -> Result<Value, String> {
         v => Ok(v),
     }
 }
-
- 
 
 // -------- Reductions: sum/prod/mean/any/all --------
 

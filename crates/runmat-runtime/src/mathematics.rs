@@ -5,7 +5,6 @@
 //! All functions are optimized for performance and handle both scalars and matrices.
 
 use runmat_builtins::Tensor;
- 
 
 // Logarithmic and exponential functions
 
@@ -104,7 +103,5 @@ fn var_builtin(matrix: Tensor) -> Result<f64, String> {
 
     Ok(variance)
 }
-
- 
 
 // Unit tests for mathematics live under crates/runmat-runtime/tests/mathematics.rs

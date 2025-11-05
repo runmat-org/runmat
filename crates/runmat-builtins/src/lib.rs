@@ -294,7 +294,11 @@ impl Tensor {
         Self::new(data, vec![rows, cols])
     }
 
-    pub fn new_with_dtype(data: Vec<f64>, shape: Vec<usize>, dtype: NumericDType) -> Result<Self, String> {
+    pub fn new_with_dtype(
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        dtype: NumericDType,
+    ) -> Result<Self, String> {
         let mut t = Self::new(data, shape)?;
         t.dtype = dtype;
         Ok(t)

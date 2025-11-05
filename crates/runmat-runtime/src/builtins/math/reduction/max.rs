@@ -1270,7 +1270,7 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 fn elementwise_max(value: Value, args: ElementwiseArgs) -> Result<MaxEvaluation, String> {
     let ElementwiseArgs { other, comparison } = args;
     match (value, other) {
-        (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) =>
+        (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             elementwise_max_gpu_pair(&handle_a, &handle_b, comparison)
                 .or_else(|| {
                     // Fallback to host path if provider path unavailable or unsupported
@@ -1279,21 +1279,24 @@ fn elementwise_max(value: Value, args: ElementwiseArgs) -> Result<MaxEvaluation,
                     elementwise_real_or_complex(Value::Tensor(ta), Value::Tensor(tb), comparison)
                         .ok()
                 })
-                .ok_or_else(|| "max: elementwise GPU path failed".to_string()),
-        (Value::GpuTensor(handle), other) =>
+                .ok_or_else(|| "max: elementwise GPU path failed".to_string())
+        }
+        (Value::GpuTensor(handle), other) => {
             elementwise_max_gpu_scalar_left(&handle, &other, comparison)
                 .or_else(|| {
                     let t = gpu_helpers::gather_tensor(&handle).ok()?;
                     elementwise_real_or_complex(Value::Tensor(t), other, comparison).ok()
                 })
-                .ok_or_else(|| "max: elementwise GPU scalar path failed".to_string()),
-        (other, Value::GpuTensor(handle)) =>
+                .ok_or_else(|| "max: elementwise GPU scalar path failed".to_string())
+        }
+        (other, Value::GpuTensor(handle)) => {
             elementwise_max_gpu_scalar_right(&other, &handle, comparison)
                 .or_else(|| {
                     let t = gpu_helpers::gather_tensor(&handle).ok()?;
                     elementwise_real_or_complex(other, Value::Tensor(t), comparison).ok()
                 })
-                .ok_or_else(|| "max: elementwise GPU scalar path failed".to_string()),
+                .ok_or_else(|| "max: elementwise GPU scalar path failed".to_string())
+        }
         (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, comparison),
     }
 }

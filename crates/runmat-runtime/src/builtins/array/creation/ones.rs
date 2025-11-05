@@ -10,10 +10,10 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use runmat_builtins::NumericDType;
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_builtins::NumericDType;
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
@@ -432,7 +432,13 @@ fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Str
             }
         }
 
-        if let Ok(host) = tensor::ones_with_dtype(shape, match provider.precision() { runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32, runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64, }) {
+        if let Ok(host) = tensor::ones_with_dtype(
+            shape,
+            match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
+                runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+            },
+        ) {
             let view = HostTensorView {
                 data: &host.data,
                 shape: &host.shape,

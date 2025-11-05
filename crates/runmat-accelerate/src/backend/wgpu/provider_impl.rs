@@ -55,7 +55,8 @@ use crate::backend::wgpu::cache::{key as cache_key, persist as cache_persist};
 use crate::backend::wgpu::config::{DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD};
 use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
-    DiffParams, FilterParams, SymmetryParamsF32, SymmetryParamsF64,
+    DiffParams, FilterParams, ImageNormalizeUniforms, SymmetryParamsF32, SymmetryParamsF64,
+    IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::types::NumericPrecision;
@@ -1682,6 +1683,97 @@ impl WgpuProvider {
             wg,
         );
         Ok(())
+    }
+
+    fn image_normalize_cpu_fallback(
+        &self,
+        input: &GpuTensorHandle,
+        desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
+    ) -> Result<GpuTensorHandle> {
+        let mut host = self.download(input)?;
+        ensure!(
+            host.shape.len() == 3,
+            "image_normalize: expected 3-D tensor, got {:?}",
+            host.shape
+        );
+        ensure!(
+            host.shape[0] == desc.batch
+                && host.shape[1] == desc.height
+                && host.shape[2] == desc.width,
+            "image_normalize: descriptor dims {:?} do not match tensor shape {:?}",
+            (desc.batch, desc.height, desc.width),
+            host.shape
+        );
+
+        let batch = desc.batch;
+        let height = desc.height;
+        let width = desc.width;
+        let plane = height * width;
+
+        if plane == 0 {
+            let view = HostTensorView {
+                data: &host.data,
+                shape: &host.shape,
+            };
+            return self.upload(&view);
+        }
+
+        let stride_h = batch;
+        let stride_w = batch * height;
+
+        let gain = desc.gain.unwrap_or(1.0);
+        let bias = desc.bias.unwrap_or(0.0);
+        let gamma = desc.gamma;
+
+        for b in 0..batch {
+            let mut sum = 0.0;
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    sum += host.data[idx];
+                }
+            }
+            let mean = sum / plane as f64;
+
+            let mut sq_sum = 0.0;
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    let diff = host.data[idx] - mean;
+                    sq_sum += diff * diff;
+                }
+            }
+            let variance = sq_sum / plane as f64;
+            let sigma = (variance + desc.epsilon).sqrt();
+            let inv_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    let mut value = (host.data[idx] - mean) * inv_sigma;
+                    if desc.gain.is_some() {
+                        value *= gain;
+                    }
+                    if desc.bias.is_some() {
+                        value += bias;
+                    }
+                    value = value.max(0.0);
+                    if let Some(gamma) = gamma {
+                        value = value.powf(gamma);
+                    }
+                    host.data[idx] = value;
+                }
+            }
+        }
+
+        let view = HostTensorView {
+            data: &host.data,
+            shape: &host.shape,
+        };
+        self.upload(&view)
     }
 
     /// Get or create a compute pipeline from cache using a caller-provided hash key.
@@ -10706,6 +10798,7 @@ impl AccelProvider for WgpuProvider {
                     diag_offset,
                     diag_stride,
                     diag_rows,
+                    _pad: 0,
                 };
                 let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
                 let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
@@ -10792,6 +10885,134 @@ impl AccelProvider for WgpuProvider {
     }
     fn pagefun(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
         self.pagefun_exec(request)
+    }
+    fn image_normalize(
+        &self,
+        input: &GpuTensorHandle,
+        desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(input)?;
+        ensure!(
+            entry.shape.len() == 3,
+            "image_normalize: expected 3-D tensor, got {:?}",
+            entry.shape
+        );
+        ensure!(
+            entry.shape[0] == desc.batch
+                && entry.shape[1] == desc.height
+                && entry.shape[2] == desc.width,
+            "image_normalize: descriptor dims {:?} do not match tensor shape {:?}",
+            (desc.batch, desc.height, desc.width),
+            entry.shape
+        );
+
+        if entry.len == 0 {
+            return self.image_normalize_cpu_fallback(input, desc);
+        }
+
+        match self.precision {
+            NumericPrecision::F64 => self.image_normalize_cpu_fallback(input, desc),
+            NumericPrecision::F32 => {
+                ensure!(
+                    desc.epsilon.is_finite(),
+                    "image_normalize: epsilon must be finite"
+                );
+                ensure!(
+                    desc.epsilon >= 0.0,
+                    "image_normalize: epsilon must be non-negative"
+                );
+
+                let batches = entry.shape[0];
+                let height = entry.shape[1];
+                let width = entry.shape[2];
+                let plane = height
+                    .checked_mul(width)
+                    .ok_or_else(|| anyhow!("image_normalize: height*width overflow"))?;
+                ensure!(
+                    entry.len == plane * batches,
+                    "image_normalize: inconsistent tensor length {} vs dims {:?}",
+                    entry.len,
+                    entry.shape
+                );
+
+                let stride_h = batches;
+                let stride_w = batches
+                    .checked_mul(height)
+                    .ok_or_else(|| anyhow!("image_normalize: stride overflow"))?;
+
+                let batches_u32 = u32::try_from(batches)
+                    .map_err(|_| anyhow!("image_normalize: batch size too large"))?;
+                let height_u32 = u32::try_from(height)
+                    .map_err(|_| anyhow!("image_normalize: height too large"))?;
+                let width_u32 = u32::try_from(width)
+                    .map_err(|_| anyhow!("image_normalize: width too large"))?;
+                let plane_u32 = u32::try_from(plane)
+                    .map_err(|_| anyhow!("image_normalize: plane size too large"))?;
+                let stride_h_u32 = u32::try_from(stride_h)
+                    .map_err(|_| anyhow!("image_normalize: stride_h too large"))?;
+                let stride_w_u32 = u32::try_from(stride_w)
+                    .map_err(|_| anyhow!("image_normalize: stride_w too large"))?;
+
+                let mut flags = 0u32;
+                if desc.gain.is_some() {
+                    flags |= IMAGE_NORMALIZE_FLAG_GAIN;
+                }
+                if desc.bias.is_some() {
+                    flags |= IMAGE_NORMALIZE_FLAG_BIAS;
+                }
+                if desc.gamma.is_some() {
+                    flags |= IMAGE_NORMALIZE_FLAG_GAMMA;
+                }
+
+                let uniforms = ImageNormalizeUniforms {
+                    batches: batches_u32,
+                    height: height_u32,
+                    width: width_u32,
+                    plane: plane_u32,
+                    stride_h: stride_h_u32,
+                    stride_w: stride_w_u32,
+                    flags,
+                    _pad0: 0,
+                    epsilon: desc.epsilon as f32,
+                    gain: desc.gain.unwrap_or(1.0) as f32,
+                    bias: desc.bias.unwrap_or(0.0) as f32,
+                    gamma: desc.gamma.unwrap_or(1.0) as f32,
+                };
+
+                let out_buffer =
+                    self.create_storage_buffer_checked(entry.len, "runmat-image-normalize-out")?;
+                let uniform_buf = self.uniform_buffer(&uniforms, "runmat-image-normalize-uniform");
+
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-image-normalize-bind"),
+                    layout: &self.pipelines.image_normalize.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: uniform_buf.as_entire_binding(),
+                        },
+                    ],
+                });
+
+                crate::backend::wgpu::dispatch::image_normalize::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.image_normalize,
+                    &bind_group,
+                    batches_u32,
+                );
+
+                Ok(self.register_existing_buffer(out_buffer, entry.shape.clone(), entry.len))
+            }
+        }
     }
     fn matmul_power_step(
         &self,

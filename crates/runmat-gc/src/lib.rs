@@ -34,8 +34,9 @@ pub trait GcFinalizer: Send + Sync {
     fn finalize(&self);
 }
 
-static FINALIZERS: once_cell::sync::Lazy<parking_lot::Mutex<HashMap<usize, std::sync::Arc<dyn GcFinalizer>>>> =
-    once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(HashMap::new()));
+static FINALIZERS: once_cell::sync::Lazy<
+    parking_lot::Mutex<HashMap<usize, std::sync::Arc<dyn GcFinalizer>>>,
+> = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(HashMap::new()));
 
 /// Register a finalizer for the provided GC pointer.
 pub fn gc_register_finalizer(ptr: GcPtr<Value>, f: std::sync::Arc<dyn GcFinalizer>) -> Result<()> {
@@ -156,7 +157,11 @@ impl HighPerformanceGC {
 
         // Capture GPU handle if present to attach a finalizer after allocation
         let gpu_handle: Option<runmat_accelerate_api::GpuTensorHandle> =
-            if let Value::GpuTensor(h) = &value { Some(h.clone()) } else { None };
+            if let Value::GpuTensor(h) = &value {
+                Some(h.clone())
+            } else {
+                None
+            };
 
         let mut allocator = self.allocator.lock();
         let ptr = allocator.allocate(value, &self.stats)?;

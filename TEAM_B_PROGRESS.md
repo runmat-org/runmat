@@ -25,3 +25,13 @@
 - Reworked the WGPU RNG hooks to match the runtime’s 64-bit LCG exactly: generated uniform/normal/integer/permutation samples on the host, updated provider RNG state after each call, and mirrored the interpreter’s Box-Muller/min-uniform quirks. `rng_wgpu_uniform_matches_cpu` now passes on M2 Max and the wider `rand`/`randn`/`randi` paths reuse the shared generator without breaking residency.                                                                                               
 - The full `cargo test --features wgpu -- --test-threads=1` run is green aside from the long-standing `blas_lapack` fixture gap (missing `blas_matmul` / `solve` builtins); noted for follow-up.                                                                                                      
 
+## 2025-11-06
+
+- Read `TEAM_B_PROGRESS.md`, `NEXT_PLAN.md`, and the shift handoff to re-establish scope, open issues, and outstanding deliverables for Team B.
+- Summarized the current state around fusion planner coverage, telemetry plumbing, and auto-offload gaps to shape the next-task queue.
+- Drafted a proposed next-steps outline prioritizing auto-offload calibration persistence, telemetry aggregation, and fusion planner extensions for upcoming kernels.
+- Added persistent auto-offload calibration cache keyed by provider/device with JSON payloads under the user cache dir, including optional refresh via `RUNMAT_ACCEL_CALIBRATE_REFRESH` and env overrides for small-batch thresholds; initialization now loads (or writes) cached thresholds, tracks provenance, and records init metadata for reporting.
+- Introduced runtime decision logging with structured records (reason, estimates, fusion context, batch dimension) and surfaced reports via `runmat accel-info` (JSON + text); CLI `--reset` clears both provider telemetry and decision history.
+- Implemented small-batch guard heuristics (rank-aware trailing-dimension check) plus richer evaluation pipelines for unary/elementwise/matmul/reduction decisions that capture profile-model vs. threshold reasoning and feed the decision log.
+- Added benchmark-suite aggregation: `run_suite.py` now computes per-case summaries, including AUC/mean speedups vs. NumPy and consolidated RunMat telemetry (kernel counts/times, transfer bytes, auto-offload thresholds/decision histograms) keyed by sweep parameter, exporting them under `case.summary` for plotting/CI consumers.
+

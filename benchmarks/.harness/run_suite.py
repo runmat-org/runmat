@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -50,6 +51,221 @@ def _load_yaml_or_json(path: Path) -> Dict[str, Any]:
 
 
 essential_impls = ("runmat", "python-numpy", "python-torch")
+
+
+def _ns_to_ms(value: Optional[int]) -> float:
+    if value is None:
+        return 0.0
+    return float(value) / 1_000_000.0
+
+
+def _summarize_speedups(results: List[Dict[str, Any]], x_param: Optional[str]) -> Optional[Dict[str, Any]]:
+    baseline_key = x_param or "n"
+    baseline = {}
+    for entry in results:
+        if entry.get("impl") != "python-numpy":
+            continue
+        param_val = entry.get(baseline_key)
+        median_ms = entry.get("median_ms")
+        if param_val is None or median_ms in (None, 0):
+            continue
+        try:
+            baseline[int(param_val)] = float(median_ms)
+        except Exception:
+            continue
+    if not baseline:
+        return None
+
+    series = []
+    impl_names = sorted({entry.get("impl") for entry in results if entry.get("impl") and entry.get("impl") != "python-numpy"})
+    for impl in impl_names:
+        pts: List[Dict[str, Any]] = []
+        for entry in results:
+            if entry.get("impl") != impl:
+                continue
+            param_val = entry.get(baseline_key)
+            median_ms = entry.get("median_ms")
+            if param_val is None or median_ms in (None, 0):
+                continue
+            try:
+                key = int(param_val)
+            except Exception:
+                continue
+            base_ms = baseline.get(key)
+            if not base_ms:
+                continue
+            speedup = base_ms / float(median_ms)
+            pts.append({"param": key, "speedup": speedup})
+        if not pts:
+            continue
+        pts.sort(key=lambda v: v["param"])
+        speeds = [p["speedup"] for p in pts]
+        mean_speed = sum(speeds) / len(speeds)
+        auc_val = 0.0
+        if len(pts) >= 2:
+            xs = [float(p["param"]) for p in pts]
+            ys = speeds
+            for i in range(len(xs) - 1):
+                width = xs[i + 1] - xs[i]
+                if width <= 0.0:
+                    continue
+                auc_val += width * (ys[i] + ys[i + 1]) / 2.0
+        series_entry: Dict[str, Any] = {"impl": impl, "points": pts, "mean_speedup": mean_speed}
+        if auc_val > 0.0:
+            series_entry["auc_trapz"] = auc_val
+        series.append(series_entry)
+
+    if not series:
+        return None
+    return {"baseline": "python-numpy", "x_param": baseline_key, "series": series}
+
+
+def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not results:
+        return None
+    per_point: List[Dict[str, Any]] = []
+    device_info: Optional[Dict[str, Any]] = None
+    total_upload = 0
+    total_download = 0
+    total_fused_elem_count = 0
+    total_fused_elem_ms = 0.0
+    total_fused_red_count = 0
+    total_fused_red_ms = 0.0
+    total_matmul_count = 0
+    total_matmul_ms = 0.0
+
+    auto_thresholds: Optional[Dict[str, Any]] = None
+    auto_base_source: Optional[str] = None
+    auto_env_override = False
+    auto_calibrate_ms: Optional[int] = None
+    auto_reason_counts: Dict[str, int] = defaultdict(int)
+    auto_decision_counts: Dict[str, int] = defaultdict(int)
+
+    for entry in results:
+        telemetry_payload = entry.get("provider_telemetry") or {}
+        if not telemetry_payload:
+            continue
+        if device_info is None and telemetry_payload.get("device"):
+            device_info = telemetry_payload.get("device")
+
+        telemetry = telemetry_payload.get("telemetry") or {}
+        fused_elem = telemetry.get("fused_elementwise") or {}
+        fused_red = telemetry.get("fused_reduction") or {}
+        matmul = telemetry.get("matmul") or {}
+        upload_bytes = int(telemetry.get("upload_bytes") or 0)
+        download_bytes = int(telemetry.get("download_bytes") or 0)
+
+        fe_count = int(fused_elem.get("count") or 0)
+        fe_ms = _ns_to_ms(fused_elem.get("total_wall_time_ns"))
+        fr_count = int(fused_red.get("count") or 0)
+        fr_ms = _ns_to_ms(fused_red.get("total_wall_time_ns"))
+        mm_count = int(matmul.get("count") or 0)
+        mm_ms = _ns_to_ms(matmul.get("total_wall_time_ns"))
+
+        total_upload += upload_bytes
+        total_download += download_bytes
+        total_fused_elem_count += fe_count
+        total_fused_elem_ms += fe_ms
+        total_fused_red_count += fr_count
+        total_fused_red_ms += fr_ms
+        total_matmul_count += mm_count
+        total_matmul_ms += mm_ms
+
+        point_entry: Dict[str, Any] = {
+            "median_ms": entry.get("median_ms"),
+            "upload_bytes": upload_bytes,
+            "download_bytes": download_bytes,
+            "fused_elementwise": {"count": fe_count, "wall_ms": fe_ms},
+            "fused_reduction": {"count": fr_count, "wall_ms": fr_ms},
+            "matmul": {"count": mm_count, "wall_ms": mm_ms},
+        }
+        param_key = x_param or "n"
+        param_val = entry.get(param_key)
+        if param_val is not None:
+            point_entry["param"] = {param_key: param_val}
+
+        auto = telemetry_payload.get("auto_offload") or {}
+        if auto:
+            if auto_thresholds is None and auto.get("thresholds"):
+                auto_thresholds = auto.get("thresholds")
+            if auto_base_source is None and auto.get("base_source"):
+                auto_base_source = auto.get("base_source")
+            if auto.get("env_overrides_applied"):
+                auto_env_override = True
+            if auto_calibrate_ms is None and auto.get("calibrate_duration_ms") is not None:
+                auto_calibrate_ms = auto.get("calibrate_duration_ms")
+            decisions = auto.get("decisions") or []
+            if decisions:
+                reason_counts: Dict[str, int] = defaultdict(int)
+                disposition_counts: Dict[str, int] = defaultdict(int)
+                for d in decisions:
+                    reason = d.get("reason")
+                    if reason:
+                        auto_reason_counts[str(reason)] += 1
+                        reason_counts[str(reason)] += 1
+                    disposition = d.get("decision")
+                    if disposition:
+                        auto_decision_counts[str(disposition)] += 1
+                        disposition_counts[str(disposition)] += 1
+                point_entry["auto_offload"] = {
+                    "decisions_total": len(decisions),
+                    "by_reason": dict(reason_counts),
+                    "by_decision": dict(disposition_counts),
+                }
+
+        per_point.append(point_entry)
+
+    if not per_point:
+        return None
+
+    summary: Dict[str, Any] = {
+        "runs": len(per_point),
+        "per_point": per_point,
+        "totals": {
+            "upload_bytes": total_upload,
+            "download_bytes": total_download,
+            "fused_elementwise": {
+                "count": total_fused_elem_count,
+                "wall_ms": total_fused_elem_ms,
+            },
+            "fused_reduction": {
+                "count": total_fused_red_count,
+                "wall_ms": total_fused_red_ms,
+            },
+            "matmul": {
+                "count": total_matmul_count,
+                "wall_ms": total_matmul_ms,
+            },
+        },
+    }
+
+    if device_info:
+        summary["device"] = device_info
+
+    if auto_thresholds or auto_reason_counts:
+        summary["auto_offload"] = {
+            "base_source": auto_base_source,
+            "thresholds": auto_thresholds,
+            "env_overrides_applied": auto_env_override,
+            "calibrate_duration_ms": auto_calibrate_ms,
+            "decision_counts_by_reason": dict(auto_reason_counts),
+            "decision_counts_by_disposition": dict(auto_decision_counts),
+        }
+
+    return summary
+
+
+def _case_summary(case_result: Dict[str, Any], x_param: Optional[str]) -> Dict[str, Any]:
+    summary: Dict[str, Any] = {}
+    results = case_result.get("results", [])
+    speedups = _summarize_speedups(results, x_param)
+    if speedups:
+        summary["speedups"] = speedups
+    runmat_results = [r for r in results if r.get("impl") == "runmat"]
+    telemetry_summary = _summarize_runmat_telemetry(runmat_results, x_param)
+    if telemetry_summary:
+        summary["telemetry"] = telemetry_summary
+    return summary
 
 
 def _extract_metric(stdout_tail: str, regex: str) -> Optional[float]:
@@ -244,16 +460,18 @@ def main() -> None:
                 parity_ok = parity_ok and ok
                 parity_details.append({"impl": impl, "n": nval, "ok": ok, "ref": ref, "got": got})
 
-        results["cases"].append(
-            {
-                "id": case_id,
-                "label": label,
-                "parity_ok": parity_ok,
-                "parity": parity_details,
-                "sweep": case_result.get("sweep"),
-                "results": case_result.get("results"),
-            }
-        )
+        case_entry: Dict[str, Any] = {
+            "id": case_id,
+            "label": label,
+            "parity_ok": parity_ok,
+            "parity": parity_details,
+            "sweep": case_result.get("sweep"),
+            "results": case_result.get("results"),
+        }
+        summary_payload = _case_summary(case_result, scale_key)
+        if summary_payload:
+            case_entry["summary"] = summary_payload
+        results["cases"].append(case_entry)
 
     out = Path(args.output)
     ensure_output_path(out)

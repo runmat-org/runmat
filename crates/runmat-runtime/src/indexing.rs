@@ -69,7 +69,9 @@ pub fn matrix_get_col(matrix: &Tensor, col: usize) -> Result<Tensor, String> {
 pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> {
     match base {
         Value::GpuTensor(h) => {
-            let provider = runmat_accelerate_api::provider().ok_or_else(|| "Cannot index value of type GpuTensor without a provider".to_string())?;
+            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                "Cannot index value of type GpuTensor without a provider".to_string()
+            })?;
             if indices.is_empty() {
                 return Err("At least one index is required".to_string());
             }
@@ -81,7 +83,9 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                     return Err(format!("Index {} out of bounds (1 to {})", idx, total));
                 }
                 let lin0 = idx - 1; // 0-based
-                let val = provider.read_scalar(h, lin0).map_err(|e| format!("gpu index: {e}"))?;
+                let val = provider
+                    .read_scalar(h, lin0)
+                    .map_err(|e| format!("gpu index: {e}"))?;
                 return Ok(Value::Num(val));
             } else if indices.len() == 2 {
                 let row = indices[0] as usize;
@@ -89,10 +93,14 @@ pub fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, String> 
                 let rows = h.shape.first().copied().unwrap_or(1);
                 let cols = h.shape.get(1).copied().unwrap_or(1);
                 if row < 1 || row > rows || col < 1 || col > cols {
-                    return Err(format!("Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"));
+                    return Err(format!(
+                        "Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"
+                    ));
                 }
                 let lin0 = (row - 1) + (col - 1) * rows;
-                let val = provider.read_scalar(h, lin0).map_err(|e| format!("gpu index: {e}"))?;
+                let val = provider
+                    .read_scalar(h, lin0)
+                    .map_err(|e| format!("gpu index: {e}"))?;
                 return Ok(Value::Num(val));
             }
             Err(format!("Cannot index value of type {:?}", base))

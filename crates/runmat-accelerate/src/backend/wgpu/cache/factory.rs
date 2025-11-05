@@ -40,5 +40,3 @@ pub fn create_pipeline_layout_empty(device: &wgpu::Device, label: &str) -> wgpu:
         push_constant_ranges: &[],
     })
 }
-
-

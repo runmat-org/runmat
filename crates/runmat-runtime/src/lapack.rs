@@ -385,8 +385,7 @@ fn solve_builtin(a: Matrix, b: Vec<Value>) -> Result<Value, String> {
     let b_f64 = value_vector_to_f64(&b)?;
     let x = lapack_solve_linear_system(&a, &b_f64)?;
     Ok(Value::Tensor(
-        runmat_builtins::Tensor::new(x, vec![b_f64.len(), 1])
-            .map_err(|e| format!("solve: {e}"))?,
+        runmat_builtins::Tensor::new(x, vec![b_f64.len(), 1]).map_err(|e| format!("solve: {e}"))?,
     ))
 }
 

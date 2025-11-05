@@ -6,9 +6,18 @@ fn integer_scalar_variants_arithmetic() {
     let i16v = Value::Int(IntValue::I16(-2));
     let u32v = Value::Int(IntValue::U32(7));
     let u64v = Value::Int(IntValue::U64(3));
-    assert_eq!(runmat_runtime::call_builtin("plus", &[i8v.clone(), i16v.clone()]).unwrap(), Value::Num(3.0));
-    assert_eq!(runmat_runtime::call_builtin("minus", &[u32v.clone(), u64v.clone()]).unwrap(), Value::Num(4.0));
-    assert_eq!(runmat_runtime::call_builtin("times", &[i8v.clone(), u32v.clone()]).unwrap(), Value::Num(35.0));
+    assert_eq!(
+        runmat_runtime::call_builtin("plus", &[i8v.clone(), i16v.clone()]).unwrap(),
+        Value::Num(3.0)
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin("minus", &[u32v.clone(), u64v.clone()]).unwrap(),
+        Value::Num(4.0)
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin("times", &[i8v.clone(), u32v.clone()]).unwrap(),
+        Value::Num(35.0)
+    );
     assert_eq!(
         runmat_runtime::call_builtin("rdivide", &[u32v.clone(), i16v.clone()]).unwrap(),
         Value::Num(7.0 / (-2.0))
@@ -19,8 +28,14 @@ fn integer_scalar_variants_arithmetic() {
 fn integer_promotion_with_double() {
     let i = Value::Int(IntValue::I32(4));
     let d = Value::Num(2.5);
-    assert_eq!(runmat_runtime::call_builtin("plus", &[i.clone(), d.clone()]).unwrap(), Value::Num(6.5));
-    assert_eq!(runmat_runtime::call_builtin("times", &[d.clone(), i.clone()]).unwrap(), Value::Num(10.0));
+    assert_eq!(
+        runmat_runtime::call_builtin("plus", &[i.clone(), d.clone()]).unwrap(),
+        Value::Num(6.5)
+    );
+    assert_eq!(
+        runmat_runtime::call_builtin("times", &[d.clone(), i.clone()]).unwrap(),
+        Value::Num(10.0)
+    );
 }
 
 #[test]

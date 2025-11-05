@@ -34,15 +34,17 @@ fn randn_single_stats_are_unit() {
 
     let (mean, variance) = mean_variance(&tensor.data);
     assert!(mean.abs() < 0.02, "mean drift too high for single: {mean}");
-    assert!((variance - 1.0).abs() < 0.05, "variance drift too high for single: {variance}");
+    assert!(
+        (variance - 1.0).abs() < 0.05,
+        "variance drift too high for single: {variance}"
+    );
 }
 
 #[test]
 fn randn_double_stats_are_unit() {
     let count = 50_000.0;
-    let tensor_value =
-        runmat_runtime::call_builtin("randn", &[Value::Num(count), Value::Num(1.0)])
-            .expect("randn double");
+    let tensor_value = runmat_runtime::call_builtin("randn", &[Value::Num(count), Value::Num(1.0)])
+        .expect("randn double");
 
     let Value::Tensor(tensor) = tensor_value else {
         panic!("expected tensor result from randn double");
@@ -51,6 +53,8 @@ fn randn_double_stats_are_unit() {
 
     let (mean, variance) = mean_variance(&tensor.data);
     assert!(mean.abs() < 0.01, "mean drift too high for double: {mean}");
-    assert!((variance - 1.0).abs() < 0.02, "variance drift too high for double: {variance}");
+    assert!(
+        (variance - 1.0).abs() < 0.02,
+        "variance drift too high for double: {variance}"
+    );
 }
-

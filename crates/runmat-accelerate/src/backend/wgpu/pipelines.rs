@@ -93,6 +93,10 @@ const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
 const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
 const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
+const IMAGE_NORMALIZE_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F64;
+const IMAGE_NORMALIZE_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F32;
 const BANDWIDTH_SHADER_F64: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F64;
 const BANDWIDTH_SHADER_F32: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F32;
 const SYMMETRY_SHADER_F64: &str = crate::backend::wgpu::shaders::symmetry::SYMMETRY_SHADER_F64;
@@ -138,6 +142,7 @@ pub struct WgpuPipelines {
     pub repmat: PipelineBundle,
     pub kron: PipelineBundle,
     pub matmul: PipelineBundle,
+    pub matmul_smallk: PipelineBundle,
     pub matmul_epilogue: PipelineBundle,
     pub syrk: PipelineBundle,
     pub reduce_global: PipelineBundle,
@@ -152,6 +157,7 @@ pub struct WgpuPipelines {
     pub randperm: PipelineBundle,
     pub fspecial: PipelineBundle,
     pub imfilter: PipelineBundle,
+    pub image_normalize: PipelineBundle,
     pub polyval: PipelineBundle,
     pub polyder: PipelineBundle,
     pub polyint: PipelineBundle,
@@ -605,10 +611,7 @@ impl WgpuPipelines {
             "runmat-eye-layout",
             "runmat-eye-shader",
             "runmat-eye-pipeline",
-            vec![
-                storage_read_write_entry(0),
-                uniform_entry(1),
-            ],
+            vec![storage_read_write_entry(0), uniform_entry(1)],
             match precision {
                 NumericPrecision::F64 => EYE_SHADER_F64,
                 NumericPrecision::F32 => EYE_SHADER_F32,
@@ -620,10 +623,7 @@ impl WgpuPipelines {
             "runmat-fill-layout",
             "runmat-fill-shader",
             "runmat-fill-pipeline",
-            vec![
-                storage_read_write_entry(0),
-                uniform_entry(1),
-            ],
+            vec![storage_read_write_entry(0), uniform_entry(1)],
             match precision {
                 NumericPrecision::F64 => FILL_SHADER_F64,
                 NumericPrecision::F32 => FILL_SHADER_F32,
@@ -635,10 +635,7 @@ impl WgpuPipelines {
             "runmat-linspace-layout",
             "runmat-linspace-shader",
             "runmat-linspace-pipeline",
-            vec![
-                storage_read_write_entry(0),
-                uniform_entry(1),
-            ],
+            vec![storage_read_write_entry(0), uniform_entry(1)],
             match precision {
                 NumericPrecision::F64 => LINSPACE_SHADER_F64,
                 NumericPrecision::F32 => LINSPACE_SHADER_F32,
@@ -650,10 +647,7 @@ impl WgpuPipelines {
             "runmat-random-int-layout",
             "runmat-random-int-shader",
             "runmat-random-int-pipeline",
-            vec![
-                storage_read_write_entry(0),
-                uniform_entry(1),
-            ],
+            vec![storage_read_write_entry(0), uniform_entry(1)],
             match precision {
                 NumericPrecision::F64 => RANDOM_INT_SHADER_F64,
                 NumericPrecision::F32 => RANDOM_INT_SHADER_F32,
@@ -665,10 +659,7 @@ impl WgpuPipelines {
             "runmat-random-uniform-layout",
             "runmat-random-uniform-shader",
             "runmat-random-uniform-pipeline",
-            vec![
-                storage_read_write_entry(0),
-                uniform_entry(1),
-            ],
+            vec![storage_read_write_entry(0), uniform_entry(1)],
             match precision {
                 NumericPrecision::F64 => RANDOM_UNIFORM_SHADER_F64,
                 NumericPrecision::F32 => RANDOM_UNIFORM_SHADER_F32,
@@ -680,10 +671,7 @@ impl WgpuPipelines {
             "runmat-random-normal-layout",
             "runmat-random-normal-shader",
             "runmat-random-normal-pipeline",
-            vec![
-                storage_read_write_entry(0),
-                uniform_entry(1),
-            ],
+            vec![storage_read_write_entry(0), uniform_entry(1)],
             match precision {
                 NumericPrecision::F64 => RANDOM_NORMAL_SHADER_F64,
                 NumericPrecision::F32 => RANDOM_NORMAL_SHADER_F32,
@@ -695,10 +683,7 @@ impl WgpuPipelines {
             "runmat-randperm-layout",
             "runmat-randperm-shader",
             "runmat-randperm-pipeline",
-            vec![
-                storage_read_write_entry(0),
-                uniform_entry(1),
-            ],
+            vec![storage_read_write_entry(0), uniform_entry(1)],
             match precision {
                 NumericPrecision::F64 => RANDPERM_SHADER_F64,
                 NumericPrecision::F32 => RANDPERM_SHADER_F32,
@@ -710,10 +695,7 @@ impl WgpuPipelines {
             "runmat-fspecial-layout",
             "runmat-fspecial-shader",
             "runmat-fspecial-pipeline",
-            vec![
-                storage_read_write_entry(0),
-                uniform_entry(1),
-            ],
+            vec![storage_read_write_entry(0), uniform_entry(1)],
             match precision {
                 NumericPrecision::F64 => FSPECIAL_SHADER_F64,
                 NumericPrecision::F32 => FSPECIAL_SHADER_F32,
@@ -726,15 +708,31 @@ impl WgpuPipelines {
             "runmat-imfilter-shader",
             "runmat-imfilter-pipeline",
             vec![
-                storage_read_entry(0),    // Image
-                storage_read_entry(1),    // KernelOffsets
-                storage_read_entry(2),    // KernelWeights
+                storage_read_entry(0), // Image
+                storage_read_entry(1), // KernelOffsets
+                storage_read_entry(2), // KernelWeights
                 storage_read_write_entry(3),
                 uniform_entry(4),
             ],
             match precision {
                 NumericPrecision::F64 => IMFILTER_SHADER_F64,
                 NumericPrecision::F32 => IMFILTER_SHADER_F32,
+            },
+        );
+
+        let image_normalize = create_pipeline(
+            device,
+            "runmat-image-normalize-layout",
+            "runmat-image-normalize-shader",
+            "runmat-image-normalize-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
+                NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
             },
         );
 
@@ -940,6 +938,7 @@ impl WgpuPipelines {
             randperm,
             fspecial,
             imfilter,
+            image_normalize,
             polyval,
             polyder,
             polyint,
@@ -987,11 +986,13 @@ pub fn create_pipeline(
 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some(pipeline_label),
-        layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(&(pipeline_label.to_string() + "-layout")),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
-        })),
+        layout: Some(
+            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(&(pipeline_label.to_string() + "-layout")),
+                bind_group_layouts: &[&layout],
+                push_constant_ranges: &[],
+            }),
+        ),
         module: &module,
         entry_point: "main",
     });

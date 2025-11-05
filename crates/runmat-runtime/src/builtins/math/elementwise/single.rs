@@ -654,7 +654,10 @@ mod tests {
                 assert_eq!(t.shape, tensor.shape);
                 // Sum should equal m exactly.
                 let sum: f64 = t.data.iter().copied().sum();
-                assert!((sum - (m as f64)).abs() < 1e-9, "sum expected {m}, got {sum}");
+                assert!(
+                    (sum - (m as f64)).abs() < 1e-9,
+                    "sum expected {m}, got {sum}"
+                );
                 // All entries must be exactly 1.0
                 assert!(t.data.iter().all(|&v| v == 1.0));
             }

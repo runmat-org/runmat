@@ -668,11 +668,17 @@ mod tests {
         assert_eq!(gpu.data.len(), host.len());
         for (idx, value) in gpu.data.iter().enumerate() {
             assert!(value.is_finite(), "gpu value at {idx} not finite: {value}");
-            assert!(*value >= 0.0 && *value < 1.0, "gpu value at {idx} out of [0,1): {value}");
+            assert!(
+                *value >= 0.0 && *value < 1.0,
+                "gpu value at {idx} out of [0,1): {value}"
+            );
         }
         for (idx, value) in host.iter().enumerate() {
             assert!(value.is_finite(), "host value at {idx} not finite: {value}");
-            assert!(*value >= 0.0 && *value < 1.0, "host value at {idx} out of [0,1): {value}");
+            assert!(
+                *value >= 0.0 && *value < 1.0,
+                "host value at {idx} out of [0,1): {value}"
+            );
         }
         let _ = provider.free(&handle);
     }

@@ -1289,6 +1289,15 @@ pub trait AccelProvider: Send + Sync {
         }
         Err(anyhow::anyhow!("matmul_epilogue not supported by provider"))
     }
+    fn image_normalize(
+        &self,
+        _input: &GpuTensorHandle,
+        _desc: &ImageNormalizeDescriptor,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "image_normalize fusion not supported by provider"
+        ))
+    }
     fn matmul_power_step(
         &self,
         _lhs: &GpuTensorHandle,
@@ -2020,4 +2029,18 @@ impl Default for PowerStepEpilogue {
     fn default() -> Self {
         Self { epsilon: 0.0 }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImageNormalizeDescriptor {
+    pub batch: usize,
+    pub height: usize,
+    pub width: usize,
+    pub epsilon: f64,
+    #[serde(default)]
+    pub gain: Option<f64>,
+    #[serde(default)]
+    pub bias: Option<f64>,
+    #[serde(default)]
+    pub gamma: Option<f64>,
 }

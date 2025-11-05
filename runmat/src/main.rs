@@ -1866,11 +1866,16 @@ async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
         let telemetry = p.telemetry_snapshot();
 
         if json {
-            let payload = serde_json::json!({
-                "device": info,
-                "telemetry": telemetry,
-            });
-            println!("{}", serde_json::to_string_pretty(&payload)?);
+            let mut payload = serde_json::Map::new();
+            payload.insert("device".to_string(), serde_json::to_value(&info)?);
+            payload.insert("telemetry".to_string(), serde_json::to_value(&telemetry)?);
+            if let Some(report) = runmat_accelerate::auto_offload_report() {
+                payload.insert("auto_offload".to_string(), serde_json::to_value(&report)?);
+            }
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::Value::Object(payload))?
+            );
         } else {
             println!("Acceleration Provider Info");
             println!("==========================");
@@ -1912,10 +1917,48 @@ async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
                 telemetry.matmul.count,
                 to_ms(telemetry.matmul.total_wall_time_ns)
             );
+
+            if let Some(report) = runmat_accelerate::auto_offload_report() {
+                println!("Auto-offload:");
+                println!("  source: {}", report.base_source.as_str());
+                println!("  env_overrides_applied: {}", report.env_overrides_applied);
+                if let Some(path) = report.cache_path.as_deref() {
+                    println!("  cache: {}", path);
+                }
+                if let Some(ms) = report.calibrate_duration_ms {
+                    println!("  last_calibration_ms: {}", ms);
+                }
+                let thresholds = &report.thresholds;
+                println!(
+                    "  thresholds: unary={} binary={} reduction={} matmul_flops={} small_batch_dim={} small_batch_min_elems={}",
+                    thresholds.unary_min_elems,
+                    thresholds.binary_min_elems,
+                    thresholds.reduction_min_elems,
+                    thresholds.matmul_min_flops,
+                    thresholds.small_batch_max_dim,
+                    thresholds.small_batch_min_elems
+                );
+                if !report.decisions.is_empty() {
+                    println!("  recent decisions:");
+                    for entry in report.decisions.iter().rev().take(5) {
+                        println!(
+                            "    ts={} op={} decision={:?} reason={:?} elems={:?} flops={:?} batch={:?}",
+                            entry.timestamp_ms,
+                            entry.operation,
+                            entry.decision,
+                            entry.reason,
+                            entry.elements,
+                            entry.flops,
+                            entry.batch
+                        );
+                    }
+                }
+            }
         }
 
         if reset {
             p.reset_telemetry();
+            runmat_accelerate::reset_auto_offload_log();
         }
     } else if json {
         let payload = serde_json::json!({

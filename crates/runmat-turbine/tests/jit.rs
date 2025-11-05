@@ -1012,9 +1012,9 @@ fn test_jit_user_function_fallback() {
         functions,
         ..Bytecode::with_instructions(
             vec![
-                Instr::LoadConst(5.0),                            // Load argument
+                Instr::LoadConst(5.0),                           // Load argument
                 Instr::CallFunction("my_double".to_string(), 1), // Call function
-                Instr::StoreVar(0),                               // Store result
+                Instr::StoreVar(0),                              // Store result
             ],
             1,
         )

@@ -113,4 +113,3 @@ fn main(
     Out.data[out_idx] = acc;
 }
 "#;
-

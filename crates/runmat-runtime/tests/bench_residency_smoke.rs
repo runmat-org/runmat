@@ -98,7 +98,9 @@ fn residency_thermal_camera_chain() {
     .unwrap();
     let g_off = runmat_runtime::call_builtin(
         "gpuArray",
-        &[Value::Tensor(Tensor::new(offset_hw, vec![1, h, w]).unwrap())],
+        &[Value::Tensor(
+            Tensor::new(offset_hw, vec![1, h, w]).unwrap(),
+        )],
     )
     .unwrap();
 
@@ -112,8 +114,7 @@ fn residency_thermal_camera_chain() {
     let shifted = runmat_runtime::call_builtin("plus", &[scaled, Value::Num(0.1)]).unwrap();
     assert!(matches!(shifted, Value::GpuTensor(_)));
     // clamp via mask: A .* (A >= 0)
-    let mask = runmat_runtime::call_builtin("ge", &[shifted.clone(), Value::Num(0.0)])
-        .unwrap();
+    let mask = runmat_runtime::call_builtin("ge", &[shifted.clone(), Value::Num(0.0)]).unwrap();
     assert!(matches!(mask, Value::GpuTensor(_)));
     let clamped = runmat_runtime::call_builtin("times", &[shifted, mask]).unwrap();
     assert!(matches!(clamped, Value::GpuTensor(_)));

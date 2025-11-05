@@ -55,7 +55,8 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
                     runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
                     runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
                 };
-                let tensor = Tensor::new_with_dtype(data, shape, dtype).map_err(|e| e.to_string())?;
+                let tensor =
+                    Tensor::new_with_dtype(data, shape, dtype).map_err(|e| e.to_string())?;
                 Ok(Value::Tensor(tensor))
             }
         }

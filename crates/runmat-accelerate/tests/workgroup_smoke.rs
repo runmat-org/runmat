@@ -57,5 +57,3 @@ fn elementwise_smoke_env_wg_256_512() {
     run_copy_shader(513);
     run_copy_shader(200_123);
 }
-
-

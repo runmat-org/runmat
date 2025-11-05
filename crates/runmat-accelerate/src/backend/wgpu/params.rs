@@ -356,6 +356,10 @@ pub struct MatmulEpilogueParamsF32 {
     pub clamp_max: f32,
     pub pow_exponent: f32,
     pub flags: u32,
+    pub diag_offset: u32,
+    pub diag_stride: u32,
+    pub diag_rows: u32,
+    pub _pad: u32,
 }
 
 pub const MATMUL_EPILOGUE_FLAG_ROW_SCALE: u32 = 1 << 0;
@@ -365,6 +369,28 @@ pub const MATMUL_EPILOGUE_FLAG_COL_DIV: u32 = 1 << 3;
 pub const MATMUL_EPILOGUE_FLAG_CLAMP_MIN: u32 = 1 << 4;
 pub const MATMUL_EPILOGUE_FLAG_CLAMP_MAX: u32 = 1 << 5;
 pub const MATMUL_EPILOGUE_FLAG_POW: u32 = 1 << 6;
+pub const MATMUL_EPILOGUE_FLAG_DIAG_WRITE: u32 = 1 << 7;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ImageNormalizeUniforms {
+    pub batches: u32,
+    pub height: u32,
+    pub width: u32,
+    pub plane: u32,
+    pub stride_h: u32,
+    pub stride_w: u32,
+    pub flags: u32,
+    pub _pad0: u32,
+    pub epsilon: f32,
+    pub gain: f32,
+    pub bias: f32,
+    pub gamma: f32,
+}
+
+pub const IMAGE_NORMALIZE_FLAG_GAIN: u32 = 1 << 0;
+pub const IMAGE_NORMALIZE_FLAG_BIAS: u32 = 1 << 1;
+pub const IMAGE_NORMALIZE_FLAG_GAMMA: u32 = 1 << 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -469,7 +495,6 @@ pub struct FillParamsF32 {
     pub len: u32,
     pub _pad: [u32; 2],
 }
-
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

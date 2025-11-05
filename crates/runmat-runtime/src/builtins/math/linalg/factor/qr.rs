@@ -361,7 +361,11 @@ fn is_zero_scalar(value: &Value) -> bool {
             if handle.shape.iter().product::<usize>() == 1 {
                 if let Some(p) = runmat_accelerate_api::provider() {
                     if let Ok(host) = p.download(handle) {
-                        return host.data.first().map(|v| v.abs() <= EPS_SCALAR).unwrap_or(false);
+                        return host
+                            .data
+                            .first()
+                            .map(|v| v.abs() <= EPS_SCALAR)
+                            .unwrap_or(false);
                     }
                 }
             }

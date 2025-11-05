@@ -18,6 +18,9 @@
 - 2025-11-05 00:24 UTC — Extended the matmul epilogue descriptor with diagonal pack support (`diag_output`) alongside clamp/pow options, widened the uniform structs, added new WGSL bits (flags + diag write path), refreshed pipeline layouts/bind groups, and updated the simple provider parity implementation.
 - 2025-11-05 00:41 UTC — Added WGPU `matmul_epilogue` coverage for diagonal extraction, resolved validation conflicts by separating dummy storage buffers, and relaxed tolerances for the mixed-precision path; suite now green under `cargo test --features wgpu matmul_epilogue`.
 - 2025-11-05 01:05 UTC — Reconciled Team B/C fusion merges: extended `execute_matmul_epilogue` to harvest clamp/min/max, pow, and diag intent from fusion plans, wire the new descriptor fields (including diag buffer allocation) through to the WGPU provider, and ensured GPU tests still pass with `cargo test -p runmat-accelerate --features wgpu`.
+- 2025-11-05 12:40 UTC — Reviewed 4k pipeline graph expectations, outlined planner metadata needed for the normalize→affine→clamp→pow fusion, drafted the two-pass Welford-based WGSL kernel plan, and queued follow-on work for vec4 IO and telemetry integration.
+- 2025-11-05 13:05 UTC — Restored missing matmul epilogue plumbing: extended `MatmulEpilogueParamsF32` with diag metadata, added the `MATMUL_EPILOGUE_FLAG_DIAG_WRITE` constant, re-exposed the `matmul_smallk` pipeline bundle, and re-ran `cargo check -p runmat-accelerate --features wgpu` to confirm the backend builds again.
+- 2025-11-05 14:45 UTC — Implemented the fused ImageNormalize path: added the API descriptor, WGPU uniforms/pipeline, WGSL kernel (Welford mean/variance + affine/clamp/pow epilogue), provider methods (GPU execution + CPU fallback), and a WGPU parity test mirroring the 4k benchmark flow.
 
 ### Immediate Next Steps
 

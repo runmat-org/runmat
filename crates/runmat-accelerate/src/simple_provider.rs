@@ -4656,6 +4656,97 @@ impl AccelProvider for InProcessProvider {
         Ok(base)
     }
 
+    fn image_normalize(
+        &self,
+        input: &GpuTensorHandle,
+        desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
+    ) -> Result<GpuTensorHandle> {
+        ensure!(
+            input.shape.len() == 3,
+            "image_normalize: expected 3-D tensor, got {:?}",
+            input.shape
+        );
+        ensure!(
+            input.shape[0] == desc.batch
+                && input.shape[1] == desc.height
+                && input.shape[2] == desc.width,
+            "image_normalize: descriptor dims {:?} do not match tensor shape {:?}",
+            (desc.batch, desc.height, desc.width),
+            input.shape
+        );
+
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&input.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("image_normalize: unknown buffer {}", input.buffer_id))?
+        };
+
+        let batch = desc.batch;
+        let height = desc.height;
+        let width = desc.width;
+        let plane = height * width;
+        if plane == 0 {
+            return Ok(self.allocate_tensor(vec![], input.shape.clone()));
+        }
+
+        let stride_h = batch;
+        let stride_w = batch * height;
+
+        let gain = desc.gain.unwrap_or(1.0);
+        let bias = desc.bias.unwrap_or(0.0);
+        let gamma = desc.gamma;
+
+        let mut output = data.clone();
+
+        for b in 0..batch {
+            let mut sum = 0.0;
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    sum += data[idx];
+                }
+            }
+            let mean = sum / plane as f64;
+
+            let mut sq_sum = 0.0;
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    let diff = data[idx] - mean;
+                    sq_sum += diff * diff;
+                }
+            }
+            let variance = sq_sum / plane as f64;
+            let sigma = (variance + desc.epsilon).sqrt();
+            let inv_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    let mut value = (data[idx] - mean) * inv_sigma;
+                    if desc.gain.is_some() {
+                        value *= gain;
+                    }
+                    if desc.bias.is_some() {
+                        value += bias;
+                    }
+                    value = value.max(0.0);
+                    if let Some(gamma) = gamma {
+                        value = value.powf(gamma);
+                    }
+                    output[idx] = value;
+                }
+            }
+        }
+
+        Ok(self.allocate_tensor(output, input.shape.clone()))
+    }
+
     fn pagefun(&self, _request: &PagefunRequest) -> Result<GpuTensorHandle> {
         Err(anyhow::anyhow!(
             "pagefun: in-process provider does not implement GPU page operations"

@@ -586,7 +586,7 @@ fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> Result<Value, St
             );
         }
     }
-        if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider() {
         // Include-NaN: use provider reduce_mean_* hooks
         if args.nan_mode == ReductionNaN::Include {
             if let Some(device_result) = mean_gpu_try(provider, &handle, &args.axes) {
@@ -621,15 +621,21 @@ fn mean_gpu_try(
         MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim),
         MeanAxes::Vec(dims) => {
             // Prefer provider N-D reduce if available
-            let mut dims0: Vec<usize> = dims.iter().filter_map(|&d| if d>0 { Some(d-1) } else { None }).collect();
-            dims0.sort_unstable(); dims0.dedup();
+            let mut dims0: Vec<usize> = dims
+                .iter()
+                .filter_map(|&d| if d > 0 { Some(d - 1) } else { None })
+                .collect();
+            dims0.sort_unstable();
+            dims0.dedup();
             if !dims0.is_empty() {
                 if let Ok(out) = provider.reduce_mean_nd(handle, &dims0) {
                     return Some(out);
                 }
             }
             // Try fast permute+2D fallback
-            if let Some(nd) = reduce_mean_vecdim_nd_gpu(provider, handle, dims) { return Some(nd); }
+            if let Some(nd) = reduce_mean_vecdim_nd_gpu(provider, handle, dims) {
+                return Some(nd);
+            }
             // Sequential per-dimension reductions
             let mut result = handle.clone();
             let mut dims_sorted = dims.clone();
@@ -689,7 +695,13 @@ fn reduce_mean_vecdim_nd_gpu(
     // Convert to 0-based and filter in-bounds
     let mut reduce_dims: Vec<usize> = dims_1based
         .iter()
-        .filter_map(|&d| if d > 0 && d <= rank { Some(d - 1) } else { None })
+        .filter_map(|&d| {
+            if d > 0 && d <= rank {
+                Some(d - 1)
+            } else {
+                None
+            }
+        })
         .collect();
     if reduce_dims.is_empty() {
         return Some(handle.clone());
@@ -715,21 +727,29 @@ fn reduce_mean_vecdim_nd_gpu(
     }
     let num_slices = total_elems / reduce_len;
     // Reshape permuted view to [rows, cols]
-    let reshaped2d = provider.reshape(&permuted, &[reduce_len, num_slices]).ok()?;
+    let reshaped2d = provider
+        .reshape(&permuted, &[reduce_len, num_slices])
+        .ok()?;
     // Reduce along rows (dim 0) -> [1, num_slices]
     let reduced_rows = provider.reduce_mean_dim(&reshaped2d, 0).ok()?;
     let _ = provider.free(&reshaped2d);
     let _ = provider.free(&permuted);
     // Reshape to kept sizes (permuted order)
     let kept_sizes: Vec<usize> = kept_dims.iter().map(|&d| handle.shape[d]).collect();
-    let kept_shape = if kept_sizes.is_empty() { vec![1, 1] } else { kept_sizes.clone() };
+    let kept_shape = if kept_sizes.is_empty() {
+        vec![1, 1]
+    } else {
+        kept_sizes.clone()
+    };
     let reshaped_kept = provider.reshape(&reduced_rows, &kept_shape).ok()?;
     let _ = provider.free(&reduced_rows);
     // Expand permuted shape by inserting ones for reduced axes
     let mut expanded_perm_shape: Vec<usize> = Vec::with_capacity(rank);
     expanded_perm_shape.extend(std::iter::repeat(1usize).take(reduce_dims.len()));
     expanded_perm_shape.extend_from_slice(&kept_sizes);
-    let expanded = provider.reshape(&reshaped_kept, &expanded_perm_shape).ok()?;
+    let expanded = provider
+        .reshape(&reshaped_kept, &expanded_perm_shape)
+        .ok()?;
     let _ = provider.free(&reshaped_kept);
     // Inverse permute back to original axis order
     let mut inv_order = vec![0usize; rank];
@@ -755,17 +775,30 @@ fn mean_gpu_omitnan(
             vec![default_dimension_from_shape(&handle.shape) - 1]
         }
         MeanAxes::Dim(d) => {
-            if *d == 0 || *d > handle.shape.len() { return Some(handle.clone()); }
+            if *d == 0 || *d > handle.shape.len() {
+                return Some(handle.clone());
+            }
             vec![*d - 1]
         }
         MeanAxes::Vec(v) => {
-            let mut dims: Vec<usize> = v.iter().filter_map(|&d| if d > 0 && d <= handle.shape.len() { Some(d - 1) } else { None }).collect();
+            let mut dims: Vec<usize> = v
+                .iter()
+                .filter_map(|&d| {
+                    if d > 0 && d <= handle.shape.len() {
+                        Some(d - 1)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             dims.sort_unstable();
             dims.dedup();
             dims
         }
         MeanAxes::All => {
-            if handle.shape.is_empty() { return Some(handle.clone()); }
+            if handle.shape.is_empty() {
+                return Some(handle.clone());
+            }
             (0..handle.shape.len()).collect()
         }
     };

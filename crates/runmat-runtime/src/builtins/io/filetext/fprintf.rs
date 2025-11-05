@@ -273,7 +273,9 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
     let mut format_string_val: Option<String> = None;
     for i in 0..all.len() {
         // Never interpret a stream label ('stdout'/'stderr') as the format string
-        if match_stream_label(&all[i]).is_some() { continue; }
+        if match_stream_label(&all[i]).is_some() {
+            continue;
+        }
         match coerce_to_format_string(&all[i])? {
             Some(Value::String(s)) => {
                 fmt_idx = Some(i);
@@ -319,8 +321,14 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
     // Remaining arguments are data, excluding the chosen target and the format
     let mut data_args: Vec<Value> = Vec::with_capacity(all.len().saturating_sub(1));
     for (i, v) in all.into_iter().enumerate() {
-        if i == fmt_idx { continue; }
-        if let Some(tidx) = target_idx { if i == tidx { continue; } }
+        if i == fmt_idx {
+            continue;
+        }
+        if let Some(tidx) = target_idx {
+            if i == tidx {
+                continue;
+            }
+        }
         data_args.push(v);
     }
 
@@ -329,7 +337,9 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
     let rendered = format_with_repetition(&format_string, &flattened_args)?;
     let bytes = encode_output(&rendered, target.encoding_label())?;
     target.write(&bytes)?;
-    Ok(FprintfEval { bytes_written: bytes.len() })
+    Ok(FprintfEval {
+        bytes_written: bytes.len(),
+    })
 }
 
 // kind_of was used for debugging logs; removed to avoid dead code in production builds.
@@ -343,14 +353,19 @@ fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>
                 let mut out = String::with_capacity(t.data.len());
                 for &code in &t.data {
                     if !code.is_finite() {
-                        return Some(Err("fprintf: formatSpec must be a character row vector or string scalar".to_string()));
+                        return Some(Err(
+                            "fprintf: formatSpec must be a character row vector or string scalar"
+                                .to_string(),
+                        ));
                     }
                     let v = code as u32;
                     // Allow full Unicode range; MATLAB chars are UTF-16 but format strings are ASCII-compatible typically
                     if let Some(ch) = char::from_u32(v) {
                         out.push(ch);
                     } else {
-                        return Some(Err("fprintf: formatSpec contains invalid character code".to_string()));
+                        return Some(Err(
+                            "fprintf: formatSpec contains invalid character code".to_string()
+                        ));
                     }
                 }
                 return Some(Ok(out));
@@ -536,11 +551,11 @@ fn target_from_fid(fid: i32) -> Result<OutputTarget, String> {
         1 => Ok(OutputTarget::Stdout),
         2 => Ok(OutputTarget::Stderr),
         _ => {
-            let info = registry::info_for(fid)
-                .ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
+            let info =
+                registry::info_for(fid).ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
             ensure_writable(&info)?;
-            let handle = registry::take_handle(fid)
-                .ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
+            let handle =
+                registry::take_handle(fid).ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
             Ok(OutputTarget::File {
                 handle,
                 encoding: info.encoding.clone(),

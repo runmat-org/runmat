@@ -40,8 +40,7 @@ pub(crate) fn scalar_mul_real(a: &Tensor, scalar: f64) -> Tensor {
 /// Multiply a real tensor by a complex scalar, producing a complex tensor.
 pub(crate) fn scalar_mul_complex(a: &Tensor, cr: f64, ci: f64) -> ComplexTensor {
     let data: Vec<(f64, f64)> = a.data.iter().map(|&x| (x * cr, x * ci)).collect();
-    ComplexTensor::new(data, a.shape.clone())
-        .expect("scalar_mul_complex: invalid tensor")
+    ComplexTensor::new(data, a.shape.clone()).expect("scalar_mul_complex: invalid tensor")
 }
 
 /// Multiply a complex tensor by a complex scalar.
