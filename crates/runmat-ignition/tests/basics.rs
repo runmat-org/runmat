@@ -17,6 +17,16 @@ fn arithmetic_and_assignment() {
 }
 
 #[test]
+fn call_builtin_multi_advances_pc_for_zero_outputs() {
+    let input = "disp('hi'); x = 42;";
+    let ast = parse(input).expect("parse disp script");
+    let hir = lower(&ast).expect("lower disp script");
+    let vars = execute(&hir).expect("execute disp script");
+    let x: f64 = (&vars[0]).try_into().expect("convert x to f64");
+    assert_eq!(x, 42.0);
+}
+
+#[test]
 fn array_construct_like_and_size_vector_inference() {
     // zeros('like', A)
     let src_like = "A = rand(3,4); B = zeros('like', A);";

@@ -13,7 +13,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{CharArray, IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -255,6 +255,10 @@ register_builtin_doc_text!("gpuArray", DOC_MD);
 )]
 fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let options = parse_options(&rest)?;
+    let incoming_precision = match &value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_precision(handle),
+        _ => None,
+    };
     let dtype = resolve_dtype(&value, &options)?;
     let dims = options.dims.clone();
 
@@ -268,6 +272,18 @@ fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if let Some(dims) = dims.as_ref() {
         apply_dims(&mut handle, dims)?;
     }
+
+    let provider_precision = runmat_accelerate_api::provider()
+        .map(|p| p.precision())
+        .unwrap_or(ProviderPrecision::F64);
+    let requested_precision = match dtype {
+        DataClass::Single => Some(ProviderPrecision::F32),
+        _ => None,
+    };
+    let final_precision = requested_precision
+        .or(incoming_precision)
+        .unwrap_or(provider_precision);
+    runmat_accelerate_api::set_handle_precision(&handle, final_precision);
 
     runmat_accelerate_api::set_handle_logical(&handle, prepared.logical);
 

@@ -30,6 +30,12 @@ impl WgpuMetrics {
         )
     }
 
+    pub fn reset(&self) {
+        self.fused_cache_hits.store(0, Ordering::Relaxed);
+        self.fused_cache_misses.store(0, Ordering::Relaxed);
+        self.last_warmup_millis.store(0, Ordering::Relaxed);
+    }
+
     pub fn set_last_warmup_millis(&self, ms: u64) {
         self.last_warmup_millis.store(ms, Ordering::Relaxed);
     }

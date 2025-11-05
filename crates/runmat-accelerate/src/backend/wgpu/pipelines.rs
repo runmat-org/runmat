@@ -35,6 +35,12 @@ const MATMUL_EPILOGUE_SHADER_F64: &str =
     crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64;
 const MATMUL_EPILOGUE_SHADER_F32: &str =
     crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F32;
+const MATMUL_SMALLK_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::matmul_smallk::MATMUL_SMALLK_SHADER_F64;
+const MATMUL_SMALLK_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::matmul_smallk::MATMUL_SMALLK_SHADER_F32;
+const SYRK_SHADER_F64: &str = crate::backend::wgpu::shaders::syrk::SYRK_SHADER_F64;
+const SYRK_SHADER_F32: &str = crate::backend::wgpu::shaders::syrk::SYRK_SHADER_F32;
 const CONV1D_SHADER_F64: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F64;
 const CONV1D_SHADER_F32: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F32;
 const REDUCE_GLOBAL_SHADER_F64: &str =
@@ -133,6 +139,7 @@ pub struct WgpuPipelines {
     pub kron: PipelineBundle,
     pub matmul: PipelineBundle,
     pub matmul_epilogue: PipelineBundle,
+    pub syrk: PipelineBundle,
     pub reduce_global: PipelineBundle,
     pub reduce_dim_sum_mean: PipelineBundle,
     pub reduce_dim_minmax: PipelineBundle,
@@ -491,6 +498,23 @@ impl WgpuPipelines {
             },
         );
 
+        let matmul_smallk = create_pipeline(
+            device,
+            "runmat-matmul-smallk-layout",
+            "runmat-matmul-smallk-shader",
+            "runmat-matmul-smallk-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => MATMUL_SMALLK_SHADER_F64,
+                NumericPrecision::F32 => MATMUL_SMALLK_SHADER_F32,
+            },
+        );
+
         let matmul_epilogue = create_pipeline(
             device,
             "runmat-matmul-epilogue-layout",
@@ -508,6 +532,22 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => MATMUL_EPILOGUE_SHADER_F64,
                 NumericPrecision::F32 => MATMUL_EPILOGUE_SHADER_F32,
+            },
+        );
+
+        let syrk = create_pipeline(
+            device,
+            "runmat-syrk-layout",
+            "runmat-syrk-shader",
+            "runmat-syrk-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => SYRK_SHADER_F64,
+                NumericPrecision::F32 => SYRK_SHADER_F32,
             },
         );
 
@@ -885,7 +925,9 @@ impl WgpuPipelines {
             repmat,
             kron,
             matmul,
+            matmul_smallk,
             matmul_epilogue,
+            syrk,
             reduce_global,
             reduce_dim_sum_mean,
             reduce_dim_minmax,

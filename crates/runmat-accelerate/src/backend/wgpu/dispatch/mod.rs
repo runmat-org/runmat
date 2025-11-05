@@ -21,3 +21,4 @@ pub mod sub2ind;
 pub mod transpose;
 pub mod tril;
 pub mod triu;
+pub mod syrk;

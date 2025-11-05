@@ -43,7 +43,10 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
                 let logical = LogicalArray::new(bits, shape).map_err(|e| e.to_string())?;
                 Ok(Value::LogicalArray(logical))
             } else {
-                let dtype = match provider.precision() {
+                let precision = runmat_accelerate_api::handle_precision(handle)
+                    .unwrap_or_else(|| provider.precision());
+                println!("dispatcher gather precision: {:?}", precision);
+                let dtype = match precision {
                     runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
                     runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
                 };

@@ -1,0 +1,32 @@
+## Team A Progress Log
+
+- 2025-11-04 00:00 UTC — Reviewed `NEXT_PLAN.md` to internalize system milestones, KPIs, and Team A scope (SYRK, GEMM epilogues, fusion, buffer pooling, vec4 IO).
+- 2025-11-04 00:05 UTC — Skimmed `crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs` to understand current provider structure (buffer pools, pipeline caches, epilogue scaffolding).
+- 2025-11-04 00:07 UTC — Reviewed `crates/runmat-accelerate/src/backend/wgpu/shaders/matmul.rs` to assess existing tiled matmul and epilogue coverage; identified extension points for fused epilogues and vec4 paths.
+- 2025-11-04 00:18 UTC — Mapped pipeline key computation (`cache::key::compute_pipeline_hash_bytes`) and fusion matmul entry (`fusion_exec.rs`), noting current metadata gaps for epilogue masks and limited scale-only epilogue support.
+- 2025-11-04 00:27 UTC — Audited buffer pooling paths; pool keyed by exact element count with `BUFFER_POOL_MAX_PER_SIZE=8`, many hot paths bypass `create_storage_buffer_checked`, and no zero-on-alloc or size-class bins existed yet.
+- 2025-11-04 01:40 UTC — Refactored WGPU buffer pooling to use size-class bins (`BUFFER_POOL_GRANULARITY=256`), tracked capacities out-of-band, and added `create_zeroed_storage_buffer`; `zeros_exec` now zero-fills via GPU `clear_buffer` instead of host writes.
+- 2025-11-04 02:18 UTC — Generalised `zero_buffer` to operate on byte ranges, switched `fill_exec` to reuse zeroed allocations when value==0, and replaced the `find` count scratch write with GPU `clear_buffer` so RNG/reduction scratch paths honour pooled zero semantics.
+- 2025-11-04 02:45 UTC — Audited all `create_storage_buffer` call sites; migrated hot paths (reduction outputs, binary/unary ops, FFT/find scratch, etc.) to `create_storage_buffer_checked`, ensuring device limits are enforced consistently while leveraging size-class pooling.
+- 2025-11-04 03:05 UTC — Scoped GEMM epilogue roadmap: extend `MatmulEpilogue` with elementwise options (clamp min/max, pow exponent), widen params structs/uniforms, expand WGSL epilogue shader to gate ops via mask, and fold the new mask into pipeline keys (layout tag + cached key) to honour plan requirement.
+- 2025-11-04 03:18 UTC — Audited current matmul epilogue path: provider binds A/B/out/params/row/col/ep uniforms only, params structs limited to alpha/beta+scale flags, WGSL shader performs plain accumulation + row/col scales, and fusion detection only captures mul/div/add/sub; new features will require extending `MatmulEpilogue`, params, shader, and planner extraction (+ pipeline layout if we add per-axis buffers).
+- 2025-11-04 03:32 UTC — Implemented clamp/pow epilogue support end-to-end (API → params → shader → provider), updated fusion epilogue walker to harvest constant `max`/`min`/`pow` chains, and expanded the pipeline-key mask to disambiguate new variants.
+- 2025-11-04 03:47 UTC — Added WGPU `matmul_epilogue` tests covering clamp/pow behaviour against a CPU reference, ensuring the expanded epilogue flags stay parity-checked.
+- 2025-11-04 03:51 UTC — Updated `simple_provider` epilogue path to respect clamp/pow options so in-process fallback and tests stay aligned with the GPU implementation.
+- 2025-11-04 04:15 UTC — Landed SYRK support: new tiled WGSL kernel computes `A' * A` with symmetric mirroring + chunked row accumulation, provider integration (bind group/pipeline reuse), simple provider fallback, and WGPU tests (including large-row chunk case) against CPU reference.
+- 2025-11-04 04:32 UTC — Implemented small-k GEMM specialization (k≤8) with dedicated WGSL, pipeline warmup, provider routing, and tests to confirm the optimized path matches CPU across threshold cases.
+- 2025-11-05 00:24 UTC — Extended the matmul epilogue descriptor with diagonal pack support (`diag_output`) alongside clamp/pow options, widened the uniform structs, added new WGSL bits (flags + diag write path), refreshed pipeline layouts/bind groups, and updated the simple provider parity implementation.
+- 2025-11-05 00:41 UTC — Added WGPU `matmul_epilogue` coverage for diagonal extraction, resolved validation conflicts by separating dummy storage buffers, and relaxed tolerances for the mixed-precision path; suite now green under `cargo test --features wgpu matmul_epilogue`.
+
+### Immediate Next Steps
+
+- Coordinate with runtime to surface allocation failures cleanly now that GPU buffer requests propagate `anyhow::Error`; evaluate whether additional telemetry is needed for large allocation warnings.
+- Wire planner/fusion hooks so matmul epilogues can emit clamp/pow/diag metadata automatically; monitor Team B updates to keep extraction logic current.
+- Spin up the normalize→gain→bias→clamp→pow fused kernel so 4k workloads can benefit as soon as the fusion planner emits the pattern.
+
+## Detailed Notes
+
+- Pipeline cache keys currently hash WGSL bytes + layout tag + optional workgroup size (`cache::key::compute_pipeline_hash_bytes`); no room yet for epilogue masks, precision tags, or constants, so any new fused variants must either bake metadata into WGSL or extend the key function.
+- `fused_pipeline_cache` sits in `WgpuProvider`; planner-driven matmul epilogues enter via `fusion_exec::execute_matmul_epilogue`, which reconstructs alpha/beta/scale ops but only supports scalar + vector scaling, no clamp/pow yet.
+- Buffer pool now keyed by size class with granularity 256 elements; buffers record capacity via pointer map so pooled reuse respects rounded allocations, and zero-fill is handled by issuing `clear_buffer` when required. `fill_exec` short-circuits to zeroed allocations for zero literals, and shared scratch like `find` count storage now clears on-GPU instead of host pushes.
+

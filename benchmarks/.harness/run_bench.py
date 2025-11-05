@@ -129,6 +129,24 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
     return impls
 
 
+def _collect_runmat_telemetry(cmd: List[str], reset: bool = False) -> Optional[Dict]:
+    if not cmd:
+        return None
+    accel_cmd = [cmd[0], "accel-info", "--json"]
+    if reset:
+        accel_cmd.append("--reset")
+    rc, _, out, err = run_cmd(accel_cmd, env=default_env())
+    if rc != 0:
+        return None
+    try:
+        return json.loads(out)
+    except Exception:
+        try:
+            return json.loads(err)
+        except Exception:
+            return None
+
+
 def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[Dict[str, str]] = None) -> Dict:
     env = default_env()
     if env_overrides:
@@ -154,6 +172,9 @@ def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[
     mses: List[float] = []
     last_stdout = ""
     last_stderr = ""
+    telemetry_payload: Optional[Dict] = None
+    if impl.get("name") == "runmat":
+        _collect_runmat_telemetry(impl["cmd"], reset=True)
     for _ in range(iterations):
         cmd = list(impl["cmd"])
         rc, elapsed_ms, out, err = run_cmd(cmd, env=env, timeout=timeout)
@@ -182,6 +203,10 @@ def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[
     }
     if dev:
         result["device"] = dev
+    if impl.get("name") == "runmat":
+        telemetry_payload = _collect_runmat_telemetry(impl["cmd"], reset=False)
+        if telemetry_payload is not None:
+            result["provider_telemetry"] = telemetry_payload
     return result
 
 

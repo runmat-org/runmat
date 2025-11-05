@@ -5476,6 +5476,8 @@ dependencies = [
  "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-hir",
+ "runmat-ignition",
+ "runmat-parser",
  "runmat-runtime",
  "rustfft",
  "serde",

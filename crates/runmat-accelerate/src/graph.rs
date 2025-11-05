@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 
 use runmat_builtins::{Type, Value as BuiltinValue};
@@ -10,6 +11,7 @@ pub type ValueId = u32;
 pub struct AccelGraph {
     pub nodes: Vec<AccelNode>,
     pub values: Vec<ValueInfo>,
+    pub var_bindings: HashMap<ValueId, VarBinding>,
 }
 
 impl AccelGraph {
@@ -23,6 +25,10 @@ impl AccelGraph {
 
     pub fn value(&self, id: ValueId) -> Option<&ValueInfo> {
         self.values.get(id as usize)
+    }
+
+    pub fn var_binding(&self, id: ValueId) -> Option<&VarBinding> {
+        self.var_bindings.get(&id)
     }
 
     pub fn detect_fusion_groups(&self) -> Vec<crate::fusion::FusionGroup> {
@@ -139,6 +145,12 @@ pub struct ValueInfo {
     pub shape: ShapeInfo,
     #[serde(skip)]
     pub constant: Option<BuiltinValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VarBinding {
+    pub kind: VarKind,
+    pub index: usize,
 }
 
 impl ValueInfo {

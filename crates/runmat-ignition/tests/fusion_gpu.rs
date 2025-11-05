@@ -2,10 +2,11 @@ use anyhow::{anyhow, bail, Context};
 use once_cell::sync::OnceCell;
 use runmat_accelerate::fusion_residency;
 use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, CorrcoefOptions, FspecialRequest, GpuTensorHandle,
-    HostTensorOwned, HostTensorView, PagefunRequest, ProviderCondNorm, ProviderConvMode,
-    ProviderEigResult, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderNormOrder,
-    ProviderPinvOptions, ProviderPrecision, UniqueOptions, UniqueResult,
+    AccelProvider, ApiDeviceInfo, CorrcoefOptions, CovNormalization, CovRows, CovarianceOptions,
+    FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, PagefunRequest,
+    PowerStepEpilogue, ProviderCondNorm, ProviderConvMode, ProviderEigResult,
+    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderNormOrder, ProviderPinvOptions,
+    ProviderPrecision, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
@@ -102,6 +103,113 @@ impl AccelProvider for TestProvider {
             test_fspecial_spec_from_request(&request.filter).map_err(|e: String| anyhow!(e))?;
         let tensor = spec.generate_tensor().map_err(|e| anyhow!(e))?;
         Ok(self.push(tensor.data.clone(), tensor.shape.clone()))
+    }
+
+    fn covariance(
+        &self,
+        matrix: &GpuTensorHandle,
+        second: Option<&GpuTensorHandle>,
+        weights: Option<&GpuTensorHandle>,
+        options: &CovarianceOptions,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        if second.is_some() {
+            bail!("test provider: covariance secondary input unsupported");
+        }
+        if weights.is_some() || options.has_weight_vector {
+            bail!("test provider: covariance weights unsupported");
+        }
+        if options.rows != CovRows::All {
+            bail!(
+                "test provider: covariance row option {:?} unsupported",
+                options.rows
+            );
+        }
+        let (data, shape) = self.pull(matrix)?;
+        let rows = shape.get(0).copied().unwrap_or(1);
+        let cols = if shape.len() > 1 { shape[1] } else { 1 };
+        if rows == 0 || cols == 0 {
+            return Ok(self.push(Vec::new(), vec![cols, cols]));
+        }
+        let mut means = vec![0.0f64; cols];
+        for c in 0..cols {
+            for r in 0..rows {
+                let idx = r + rows * c;
+                if let Some(value) = data.get(idx) {
+                    means[c] += *value;
+                }
+            }
+            means[c] /= rows as f64;
+        }
+        let denom = match options.normalization {
+            CovNormalization::Unbiased => (rows as f64) - 1.0,
+            CovNormalization::Biased => rows as f64,
+        };
+        let denom = if denom <= 0.0 { 1.0 } else { denom };
+        let mut cov = vec![0.0f64; cols * cols];
+        for c1 in 0..cols {
+            for c2 in 0..cols {
+                let mut acc = 0.0f64;
+                for r in 0..rows {
+                    let idx1 = r + rows * c1;
+                    let idx2 = r + rows * c2;
+                    let val1 = data.get(idx1).copied().unwrap_or(0.0);
+                    let val2 = data.get(idx2).copied().unwrap_or(0.0);
+                    acc += (val1 - means[c1]) * (val2 - means[c2]);
+                }
+                let idx = c1 + cols * c2;
+                cov[idx] = acc / denom;
+            }
+        }
+        Ok(self.push(cov, vec![cols, cols]))
+    }
+
+    fn matmul_power_step(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        epilogue: &PowerStepEpilogue,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let (lhs_data, lhs_shape) = self.pull(lhs)?;
+        let (rhs_data, rhs_shape) = self.pull(rhs)?;
+        if lhs_shape.len() != 2 || rhs_shape.len() != 2 {
+            bail!("test provider: matmul_power_step expects 2D inputs");
+        }
+        let m = lhs_shape[0];
+        let k = lhs_shape[1];
+        if rhs_shape[0] != k {
+            bail!("test provider: matmul_power_step inner dimensions mismatch");
+        }
+        let n = rhs_shape[1];
+        let mut product = vec![0.0f64; m * n];
+        for col in 0..n {
+            for row in 0..m {
+                let mut acc = 0.0f64;
+                for kk in 0..k {
+                    let lhs_idx = row + m * kk;
+                    let rhs_idx = kk + k * col;
+                    acc += lhs_data[lhs_idx] * rhs_data[rhs_idx];
+                }
+                product[row + m * col] = acc;
+            }
+        }
+        let mut norms = vec![0.0f64; n];
+        for col in 0..n {
+            let mut acc = 0.0f64;
+            for row in 0..m {
+                let val = product[row + m * col];
+                acc += val * val;
+            }
+            acc += epilogue.epsilon;
+            norms[col] = acc.sqrt();
+        }
+        for col in 0..n {
+            let norm = norms[col];
+            for row in 0..m {
+                let idx = row + m * col;
+                product[idx] /= norm;
+            }
+        }
+        Ok(self.push(product, vec![m, n]))
     }
 
     fn eig(&self, _a: &GpuTensorHandle, _compute_left: bool) -> anyhow::Result<ProviderEigResult> {
@@ -324,6 +432,105 @@ impl AccelProvider for TestProvider {
             shape = vec![total];
         }
         Ok(self.push(out, shape))
+    }
+
+    fn transpose(&self, handle: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        let (data, shape) = self.pull(handle)?;
+        if shape.len() < 2 {
+            return Ok(self.push(data, shape));
+        }
+        let rows = shape[0];
+        let cols = shape[1];
+        let mut out = vec![0.0f64; data.len()];
+        for r in 0..rows {
+            for c in 0..cols {
+                let src = r + rows * c;
+                let dst = c + cols * r;
+                out[dst] = data[src];
+            }
+        }
+        let mut new_shape = shape.clone();
+        new_shape[0] = cols;
+        new_shape[1] = rows;
+        Ok(self.push(out, new_shape))
+    }
+
+    fn matmul(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let (lhs_data, lhs_shape) = self.pull(lhs)?;
+        let (rhs_data, rhs_shape) = self.pull(rhs)?;
+        if lhs_shape.len() != 2 || rhs_shape.len() != 2 {
+            bail!("test provider: matmul expects 2D inputs");
+        }
+        let m = lhs_shape[0];
+        let k = lhs_shape[1];
+        if rhs_shape[0] != k {
+            bail!("test provider: matmul inner dimensions mismatch");
+        }
+        let n = rhs_shape[1];
+        let mut out = vec![0.0f64; m * n];
+        for row in 0..m {
+            for col in 0..n {
+                let mut acc = 0.0;
+                for inner in 0..k {
+                    let lhs_idx = row + m * inner;
+                    let rhs_idx = inner + k * col;
+                    acc += lhs_data[lhs_idx] * rhs_data[rhs_idx];
+                }
+                let dst = row + m * col;
+                out[dst] = acc;
+            }
+        }
+        Ok(self.push(out, vec![m, n]))
+    }
+
+    fn diag_extract(
+        &self,
+        matrix: &GpuTensorHandle,
+        offset: isize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        if offset != 0 {
+            bail!("test provider: diag_extract offset {offset} unsupported");
+        }
+        let (data, shape) = self.pull(matrix)?;
+        if shape.len() != 2 {
+            bail!("test provider: diag_extract expects 2D input");
+        }
+        let rows = shape[0];
+        let cols = shape[1];
+        let len = rows.min(cols);
+        let mut out = Vec::with_capacity(len);
+        for i in 0..len {
+            let idx = i + rows * i;
+            out.push(data[idx]);
+        }
+        Ok(self.push(out, vec![len]))
+    }
+
+    fn reshape(
+        &self,
+        handle: &GpuTensorHandle,
+        new_shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let len: usize = new_shape.iter().product();
+        let mut buffers = self.buffers.lock().unwrap();
+        let entry = buffers
+            .get_mut(&handle.buffer_id)
+            .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id))?;
+        if entry.0.len() != len {
+            bail!(
+                "reshape: product of new dimensions ({}) must equal existing length ({})",
+                len,
+                entry.0.len()
+            );
+        }
+        entry.1 = new_shape.to_vec();
+        let mut updated = handle.clone();
+        updated.shape = new_shape.to_vec();
+        Ok(updated)
     }
 }
 
@@ -838,6 +1045,17 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         let ast = parse(&source).expect("parse");
         let hir = lower(&ast).expect("lower");
         let bytecode = compile(&hir).expect("compile");
+        if let Some(graph) = &bytecode.accel_graph {
+            let groups = graph.detect_fusion_groups();
+            assert!(
+                groups
+                    .iter()
+                    .any(|g| matches!(g.kind, runmat_accelerate::fusion::FusionKind::CenteredGram)),
+                "expected centered gram group"
+            );
+        } else {
+            panic!("bytecode missing accel graph");
+        }
 
         // Helper to run with/without GPU
         let run_with = |use_gpu: bool| -> Vec<Value> {
@@ -1620,6 +1838,8 @@ fn fused_elementwise_residency_and_gather() {
         let ast = parse(source).expect("parse");
         let hir = lower(&ast).expect("lower");
         let bytecode = compile(&hir).expect("compile");
+
+        dbg!(&bytecode.fusion_groups);
         let vars = interpret(&bytecode).expect("interpret");
 
         let y_index = bytecode
@@ -1732,5 +1952,449 @@ fn fused_literal_constant_and_extended_builtins() {
         let v_data = check_tensor(vars.get(v_index).expect("value for v"));
         let v_expected: Vec<f64> = [4.0f64, 5.0, 6.0].iter().map(|x| x.sqrt()).collect();
         assert_eq!(v_data, v_expected);
+    });
+}
+
+#[test]
+fn centered_gram_fusion_matches_cpu() {
+    gc_test_context(|| {
+        let rows = 5usize;
+        let cols = 3usize;
+        let source = r#"
+            rows = 5;
+            A = [
+                1.0, 2.0, 3.0;
+                4.0, 5.0, 6.0;
+                7.0, 8.0, 9.0;
+                -1.0, 0.5, 2.0;
+                3.0, -2.0, 4.0
+            ];
+            mu = mean(A, 1);
+            centered = A - mu;
+            cov = (centered.' * centered) / (rows - 1);
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir).expect("compile");
+
+        let cov_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .last()
+            .expect("cov store index");
+
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+
+        // Compute expected covariance on host
+        let data: [[f64; 3]; 5] = [
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+            [-1.0, 0.5, 2.0],
+            [3.0, -2.0, 4.0],
+        ];
+        let mut means = vec![0.0f64; cols];
+        for row in &data {
+            for (c, value) in row.iter().enumerate() {
+                means[c] += *value;
+            }
+        }
+        for mean in &mut means {
+            *mean /= rows as f64;
+        }
+        let mut cov_expected = vec![0.0f64; cols * cols];
+        for row in &data {
+            let mut centered = vec![0.0f64; cols];
+            for (c, value) in row.iter().enumerate() {
+                centered[c] = value - means[c];
+            }
+            for i in 0..cols {
+                for j in 0..cols {
+                    cov_expected[i * cols + j] += centered[i] * centered[j];
+                }
+            }
+        }
+        let denom = (rows as f64) - 1.0;
+        for value in &mut cov_expected {
+            *value /= denom;
+        }
+
+        ensure_provider_registered();
+        let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
+        let cov_gpu = vars_gpu.get(cov_index).expect("cov gpu");
+        assert!(
+            matches!(cov_gpu, Value::GpuTensor(_)),
+            "expected gpu tensor result"
+        );
+        let gathered_gpu = gather_if_needed(cov_gpu).expect("gather gpu");
+        let gpu_tensor = match gathered_gpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor cov (gpu), got {other:?}"),
+        };
+
+        assert_eq!(gpu_tensor.shape, vec![cols, cols], "shape mismatch");
+        let tol = 1e-6;
+        for (lhs, rhs) in cov_expected.iter().zip(gpu_tensor.data.iter()) {
+            let diff = (lhs - rhs).abs();
+            assert!(
+                diff <= tol,
+                "covariance mismatch: lhs={lhs}, rhs={rhs}, diff={diff}"
+            );
+        }
+    });
+}
+
+#[test]
+fn power_step_normalization_matches_cpu() {
+    gc_test_context(|| {
+        use runmat_accelerate::FusionKind;
+        let rows = 3usize;
+        let cols = 2usize;
+        let source = r#"
+        G = [
+            1.0, -0.5, 2.0;
+            0.0, 1.5, -1.0;
+            0.75, 0.25, 0.5
+        ];
+        Q = [
+            2.0, -1.0;
+            0.5, 3.0;
+            -2.0, 1.0
+        ];
+        Q = mtimes(G, Q);
+        norms = sqrt(sum(Q.^2, 1) + 1e-6);
+        Q = Q ./ norms;
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir).expect("compile");
+
+        if let Some(graph) = &bytecode.accel_graph {
+            let groups = graph.detect_fusion_groups();
+            assert!(
+                groups
+                    .iter()
+                    .any(|g| matches!(g.kind, FusionKind::PowerStepNormalize)),
+                "expected power-step group, got {:?}",
+                groups
+            );
+        }
+
+        let q_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .last()
+            .expect("store index for Q");
+
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let vars_cpu = interpret_function(&bytecode, vars.clone()).expect("cpu interpret");
+        let q_cpu = vars_cpu.get(q_index).expect("cpu Q");
+        let gathered_cpu = gather_if_needed(q_cpu).expect("gather cpu");
+        let cpu_tensor = match gathered_cpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor Q (cpu), got {other:?}"),
+        };
+        assert_eq!(cpu_tensor.shape, vec![rows, cols], "cpu shape mismatch");
+
+        ensure_provider_registered();
+        let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
+        let q_gpu = vars_gpu.get(q_index).expect("gpu Q");
+        assert!(
+            matches!(q_gpu, Value::GpuTensor(_)),
+            "expected gpu tensor result"
+        );
+        let gathered_gpu = gather_if_needed(q_gpu).expect("gather gpu");
+        let gpu_tensor = match gathered_gpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor Q (gpu), got {other:?}"),
+        };
+
+        assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
+        let tol = 1e-6;
+        for (lhs, rhs) in cpu_tensor.data.iter().zip(gpu_tensor.data.iter()) {
+            let diff = (lhs - rhs).abs();
+            assert!(
+                diff <= tol,
+                "power-step mismatch: lhs={lhs}, rhs={rhs}, diff={diff}"
+            );
+        }
+    });
+}
+
+#[test]
+fn explained_variance_matches_cpu() {
+    gc_test_context(|| {
+        use runmat_accelerate::FusionKind;
+        let source = r#"
+        rng(0);
+        rows = 4;
+        cols = 2;
+        G = rand(rows, rows);
+        Q = rand(rows, cols);
+        tmp = mtimes(Q.', G);
+        prod = mtimes(tmp, Q);
+        eval = diag(prod);
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir).expect("compile");
+
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            for (pc, instr) in bytecode.instructions.iter().enumerate() {
+                println!("instr {pc}: {instr:?}");
+            }
+        }
+
+        let (q_var_idx, g_var_idx) = if let Some(graph) = &bytecode.accel_graph {
+            let groups = graph.detect_fusion_groups();
+            assert!(
+                groups
+                    .iter()
+                    .any(|g| matches!(g.kind, FusionKind::ExplainedVariance)),
+                "expected explained-variance group, got {:?}",
+                groups
+            );
+            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            let explained = plan
+                .groups
+                .iter()
+                .find(|g| matches!(g.group.kind, FusionKind::ExplainedVariance))
+                .expect("explained variance plan");
+            let (q_vid, g_vid) = match explained.pattern.as_ref() {
+                Some(runmat_accelerate::fusion::FusionPattern::ExplainedVariance { q, g }) => {
+                    (*q, *g)
+                }
+                other => panic!("unexpected pattern {other:?}"),
+            };
+            let q_binding = graph
+                .var_binding(q_vid)
+                .expect("q binding available for explained variance");
+            let g_binding = graph
+                .var_binding(g_vid)
+                .expect("g binding available for explained variance");
+            (q_binding.index, g_binding.index)
+        } else {
+            panic!("expected accel graph")
+        };
+
+        let eval_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .last()
+            .expect("store index for eval");
+
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let vars_cpu = interpret_function(&bytecode, vars.clone()).expect("cpu interpret");
+        let eval_cpu = vars_cpu.get(eval_index).expect("cpu eval");
+        let gathered_cpu = gather_if_needed(eval_cpu).expect("gather cpu");
+        let cpu_tensor = match gathered_cpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor eval (cpu), got {other:#?}"),
+        };
+
+        let gather_tensor = |value: &Value| -> Tensor {
+            match gather_if_needed(value).expect("gather tensor") {
+                Value::Tensor(t) => t,
+                other => panic!("expected tensor, got {other:#?}"),
+            }
+        };
+
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            println!("q_var_idx {} g_var_idx {}", q_var_idx, g_var_idx);
+            println!(
+                "q tensor shape {:?}",
+                gather_tensor(
+                    vars_cpu
+                        .get(q_var_idx)
+                        .expect("q var present after cpu run")
+                )
+                .shape
+            );
+            println!(
+                "g tensor shape {:?}",
+                gather_tensor(
+                    vars_cpu
+                        .get(g_var_idx)
+                        .expect("g var present after cpu run")
+                )
+                .shape
+            );
+            println!(
+                "q tensor data {:?}",
+                gather_tensor(
+                    vars_cpu
+                        .get(q_var_idx)
+                        .expect("q var present after cpu run")
+                )
+                .data
+            );
+            println!(
+                "g tensor data {:?}",
+                gather_tensor(
+                    vars_cpu
+                        .get(g_var_idx)
+                        .expect("g var present after cpu run")
+                )
+                .data
+            );
+        }
+
+        let q_tensor = gather_tensor(
+            vars_cpu
+                .get(q_var_idx)
+                .expect("q var present after cpu run"),
+        );
+        let g_tensor = gather_tensor(
+            vars_cpu
+                .get(g_var_idx)
+                .expect("g var present after cpu run"),
+        );
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            println!("q tensor shape {:?}", q_tensor.shape);
+            println!("g tensor shape {:?}", g_tensor.shape);
+            println!("q tensor data {:?}", q_tensor.data);
+            println!("g tensor data {:?}", g_tensor.data);
+        }
+
+        let rows = q_tensor.shape.get(0).copied().unwrap_or(0);
+        let cols = q_tensor.shape.get(1).copied().unwrap_or(1);
+        assert!(
+            rows > 0 && cols > 0,
+            "explained variance requires non-empty Q"
+        );
+
+        // Recreate the interpreter's bug-compatible transpose by reinterpreting
+        // the column-major Q buffer with swapped dimensions (no data shuffle).
+        let mut tmp_bug = vec![0.0; cols * rows];
+        for j in 0..rows {
+            for i in 0..cols {
+                let mut acc = 0.0;
+                for k in 0..rows {
+                    let a_idx = i + cols * k;
+                    let b_idx = k + rows * j;
+                    acc += q_tensor.data[a_idx] * g_tensor.data[b_idx];
+                }
+                tmp_bug[i + cols * j] = acc;
+            }
+        }
+
+        let mut expected_diag = Vec::with_capacity(cols);
+        for i in 0..cols {
+            let mut acc = 0.0;
+            for j in 0..rows {
+                let tmp_ij = tmp_bug[i + cols * j];
+                let q_ji = q_tensor.data[j + rows * i];
+                acc += tmp_ij * q_ji;
+            }
+            expected_diag.push(acc);
+        }
+
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            println!("tmp runtime shape {:?}", vec![cols, rows]);
+            println!("tmp runtime data {:?}", tmp_bug);
+            println!("expected diag {:?}", expected_diag);
+            println!("cpu diag {:?}", cpu_tensor.data);
+            let tmp_idx = 4;
+            if let Some(tmp_value) = vars_cpu.get(tmp_idx) {
+                if let Ok(Value::Tensor(tmp_tensor)) = gather_if_needed(tmp_value) {
+                    println!(
+                        "tmp var idx {tmp_idx} shape {:?} data {:?}",
+                        tmp_tensor.shape, tmp_tensor.data
+                    );
+                }
+            }
+            let prod_idx = 5;
+            if let Some(prod_value) = vars_cpu.get(prod_idx) {
+                if let Ok(Value::Tensor(prod_tensor)) = gather_if_needed(prod_value) {
+                    println!(
+                        "prod var idx {prod_idx} shape {:?} data {:?}",
+                        prod_tensor.shape, prod_tensor.data
+                    );
+                }
+            }
+        }
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            for (lhs, rhs) in expected_diag.iter().zip(cpu_tensor.data.iter()) {
+                println!("cpu diag diff {}", (lhs - rhs).abs());
+            }
+        } else {
+            for (lhs, rhs) in expected_diag.iter().zip(cpu_tensor.data.iter()) {
+                assert!((lhs - rhs).abs() <= 1e-9, "cpu diag mismatch");
+            }
+        }
+
+        ensure_provider_registered();
+        let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
+        let eval_gpu = vars_gpu.get(eval_index).expect("gpu eval");
+        assert!(
+            matches!(eval_gpu, Value::GpuTensor(_)),
+            "expected gpu tensor result"
+        );
+        let gathered_gpu = gather_if_needed(eval_gpu).expect("gather gpu");
+        let gpu_tensor = match gathered_gpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor eval (gpu), got {other:#?}"),
+        };
+
+        assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
+        let tol = 1e-6;
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            for (lhs, rhs) in expected_diag.iter().zip(gpu_tensor.data.iter()) {
+                let diff = (lhs - rhs).abs();
+                println!("gpu diag diff lhs={lhs}, rhs={rhs}, diff={diff}");
+            }
+        } else {
+            for (lhs, rhs) in expected_diag.iter().zip(gpu_tensor.data.iter()) {
+                let diff = (lhs - rhs).abs();
+                assert!(
+                    diff <= tol,
+                    "explained variance mismatch: lhs={lhs}, rhs={rhs}, diff={diff}"
+                );
+            }
+        }
+
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            println!("Q tensor data {:?}", q_tensor.data);
+            println!("G tensor data {:?}", g_tensor.data);
+        }
+
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            for (idx, value) in vars_cpu.iter().enumerate() {
+                if let Ok(Value::Tensor(t)) = gather_if_needed(value) {
+                    if t.shape == vec![2, 2] {
+                        println!("tensor idx {idx} shape {:?} data {:?}", t.shape, t.data);
+                    }
+                }
+            }
+        }
+
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            let q_tensor_value = Value::Tensor(q_tensor.clone());
+            let g_tensor_value = Value::Tensor(g_tensor.clone());
+            let q_t_value = runmat_runtime::transpose(q_tensor_value.clone()).expect("transpose");
+            if let Value::Tensor(ref q_t_tensor) = q_t_value {
+                println!("q_t tensor data {:?}", q_t_tensor.data);
+            }
+            let tmp_via_runtime = runmat_runtime::matrix::value_matmul(&q_t_value, &g_tensor_value)
+                .expect("q' * g via runtime");
+            if let Value::Tensor(ref tmp_tensor) = tmp_via_runtime {
+                println!("tmp via runtime {:?}", tmp_tensor.data);
+            }
+        }
     });
 }

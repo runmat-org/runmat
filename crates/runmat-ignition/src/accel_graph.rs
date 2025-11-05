@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId,
-    PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarKind,
+    PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
 use runmat_builtins::{builtin_functions, AccelTag, Type, Value};
 
@@ -23,6 +23,7 @@ struct GraphBuilder<'a> {
     var_values: HashMap<VarKey, ValueId>,
     local_types: HashMap<usize, Type>,
     builtin_cache: HashMap<String, BuiltinInfo>,
+    var_bindings: HashMap<ValueId, VarBinding>,
 }
 
 #[derive(Clone)]
@@ -68,6 +69,7 @@ impl<'a> GraphBuilder<'a> {
             var_values: HashMap::new(),
             local_types: HashMap::new(),
             builtin_cache,
+            var_bindings: HashMap::new(),
         }
     }
 
@@ -78,6 +80,7 @@ impl<'a> GraphBuilder<'a> {
         AccelGraph {
             nodes: self.nodes,
             values: self.values,
+            var_bindings: self.var_bindings,
         }
     }
 
@@ -233,6 +236,13 @@ impl<'a> GraphBuilder<'a> {
             if let Some(ty) = self.var_types.get(idx) {
                 self.apply_type(value_id, ty);
             }
+            self.var_bindings.insert(
+                value_id,
+                VarBinding {
+                    kind: VarKind::Global,
+                    index: idx,
+                },
+            );
         } else {
             self.reset_stack();
         }
@@ -271,6 +281,13 @@ impl<'a> GraphBuilder<'a> {
                     .and_modify(|existing| *existing = existing.unify(&ty))
                     .or_insert(ty);
             }
+            self.var_bindings.insert(
+                value_id,
+                VarBinding {
+                    kind: VarKind::Local,
+                    index: idx,
+                },
+            );
         } else {
             self.reset_stack();
         }

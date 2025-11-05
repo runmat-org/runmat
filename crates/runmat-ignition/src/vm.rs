@@ -3,7 +3,9 @@ use crate::gc_roots::InterpretContext;
 use crate::instr::Instr;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
-    execute_elementwise, execute_matmul_epilogue, execute_reduction, FusionExecutionRequest,
+    execute_centered_gram, execute_elementwise, execute_explained_variance,
+    execute_matmul_epilogue, execute_power_step_normalize, execute_reduction,
+    FusionExecutionRequest,
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
@@ -12,7 +14,7 @@ use runmat_accelerate::{
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
-    active_group_plan_clone, FusionOp as AccelFusionOp, ShapeInfo, ValueOrigin, VarKind,
+    active_group_plan_clone, FusionKind, FusionOp as AccelFusionOp, ShapeInfo, ValueOrigin, VarKind,
 };
 use runmat_builtins::{Type, Value};
 use runmat_runtime::{
@@ -3034,6 +3036,7 @@ pub fn interpret_with_vars(
                 }
             }
             Instr::CallBuiltinMulti(name, arg_count, out_count) => {
+                let next_pc = pc + 1;
                 // Default behavior: try to call builtin; if success, use first output; pad rest with 0.0
                 let mut args = Vec::new();
                 for _ in 0..arg_count {
@@ -3053,6 +3056,7 @@ pub fn interpret_with_vars(
                     };
                     let len = eval.len();
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     if len == 1 {
@@ -3060,6 +3064,7 @@ pub fn interpret_with_vars(
                             vm_bail!(mex("TooManyOutputs", "gather: too many output arguments"));
                         }
                         stack.push(eval.into_first());
+                        pc = next_pc;
                         continue;
                     }
                     if out_count != len {
@@ -3071,6 +3076,7 @@ pub fn interpret_with_vars(
                     for value in eval.into_outputs() {
                         stack.push(value);
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "meshgrid" {
@@ -3081,6 +3087,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let available = eval.output_count();
@@ -3111,6 +3118,7 @@ pub fn interpret_with_vars(
                         };
                         stack.push(third);
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "load" {
@@ -3122,6 +3130,7 @@ pub fn interpret_with_vars(
                         if let Err(err) = assign_loaded_variables(&mut vars, eval.variables()) {
                             vm_bail!(err);
                         }
+                        pc = next_pc;
                         continue;
                     }
                     if out_count > 1 {
@@ -3134,6 +3143,7 @@ pub fn interpret_with_vars(
                     for _ in 1..out_count {
                         stack.push(Value::Num(0.0));
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "fopen" {
@@ -3143,6 +3153,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let outputs = eval.outputs();
@@ -3153,6 +3164,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "fgets" {
@@ -3170,6 +3182,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let outputs = eval.outputs();
@@ -3180,6 +3193,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "fclose" {
@@ -3189,6 +3203,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let outputs = eval.outputs();
@@ -3199,6 +3214,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "mkdir" {
@@ -3207,6 +3223,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let outputs = eval.outputs();
@@ -3217,6 +3234,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "setenv" {
@@ -3226,6 +3244,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let outputs = eval.outputs();
@@ -3236,6 +3255,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "savepath" {
@@ -3245,6 +3265,7 @@ pub fn interpret_with_vars(
                             Err(err) => vm_bail!(err),
                         };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let outputs = eval.outputs();
@@ -3255,6 +3276,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "copyfile" {
@@ -3264,6 +3286,7 @@ pub fn interpret_with_vars(
                             Err(err) => vm_bail!(err),
                         };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let outputs = eval.outputs();
@@ -3274,6 +3297,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "movefile" {
@@ -3283,6 +3307,7 @@ pub fn interpret_with_vars(
                             Err(err) => vm_bail!(err),
                         };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let outputs = eval.outputs();
@@ -3293,6 +3318,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "rmdir" {
@@ -3301,6 +3327,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let outputs = eval.outputs();
@@ -3311,6 +3338,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "orderfields" && !args.is_empty() {
@@ -3322,6 +3350,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let (ordered, permutation) = eval.into_values();
@@ -3334,6 +3363,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "chol" {
@@ -3354,11 +3384,13 @@ pub fn interpret_with_vars(
                                 vm_bail!("Matrix must be positive definite.".to_string());
                             }
                             stack.push(eval.factor());
+                            pc = next_pc;
                             continue;
                         }
                         2 => {
                             stack.push(eval.factor());
                             stack.push(eval.flag());
+                            pc = next_pc;
                             continue;
                         }
                         _ => vm_bail!(mex(
@@ -3382,17 +3414,20 @@ pub fn interpret_with_vars(
                         0 => continue,
                         1 => {
                             stack.push(eval.combined());
+                            pc = next_pc;
                             continue;
                         }
                         2 => {
                             stack.push(eval.lower());
                             stack.push(eval.upper());
+                            pc = next_pc;
                             continue;
                         }
                         3 => {
                             stack.push(eval.lower());
                             stack.push(eval.upper());
                             stack.push(eval.permutation());
+                            pc = next_pc;
                             continue;
                         }
                         _ => vm_bail!(mex(
@@ -3421,11 +3456,13 @@ pub fn interpret_with_vars(
                         0 => continue,
                         1 => {
                             stack.push(eval.solution());
+                            pc = next_pc;
                             continue;
                         }
                         2 => {
                             stack.push(eval.solution());
                             stack.push(eval.reciprocal_condition());
+                            pc = next_pc;
                             continue;
                         }
                         _ => vm_bail!(mex(
@@ -3447,25 +3484,25 @@ pub fn interpret_with_vars(
                     };
                     match out_count {
                         0 => {
-                            pc += 1;
+                            pc = next_pc;
                             continue;
                         }
                         1 => {
                             stack.push(eval.r());
-                            pc += 1;
+                            pc = next_pc;
                             continue;
                         }
                         2 => {
                             stack.push(eval.q());
                             stack.push(eval.r());
-                            pc += 1;
+                            pc = next_pc;
                             continue;
                         }
                         3 => {
                             stack.push(eval.q());
                             stack.push(eval.r());
                             stack.push(eval.permutation());
-                            pc += 1;
+                            pc = next_pc;
                             continue;
                         }
                         _ => vm_bail!(mex(
@@ -3489,17 +3526,20 @@ pub fn interpret_with_vars(
                         0 => continue,
                         1 => {
                             stack.push(eval.singular_values());
+                            pc = next_pc;
                             continue;
                         }
                         2 => {
                             stack.push(eval.u());
                             stack.push(eval.sigma());
+                            pc = next_pc;
                             continue;
                         }
                         3 => {
                             stack.push(eval.u());
                             stack.push(eval.sigma());
                             stack.push(eval.v());
+                            pc = next_pc;
                             continue;
                         }
                         _ => vm_bail!(mex(
@@ -3525,11 +3565,13 @@ pub fn interpret_with_vars(
                         0 => continue,
                         1 => {
                             stack.push(eval.eigenvalues());
+                            pc = next_pc;
                             continue;
                         }
                         2 => {
                             stack.push(eval.right());
                             stack.push(eval.diagonal());
+                            pc = next_pc;
                             continue;
                         }
                         3 => {
@@ -3540,6 +3582,7 @@ pub fn interpret_with_vars(
                                 Err(err) => vm_bail!(err),
                             };
                             stack.push(left);
+                            pc = next_pc;
                             continue;
                         }
                         _ => vm_bail!(mex(
@@ -3558,6 +3601,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     if out_count <= 1 {
@@ -3593,6 +3637,7 @@ pub fn interpret_with_vars(
                             }
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "regexp" && args.len() >= 2 {
@@ -3609,6 +3654,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     for _ in 0..out_count {
@@ -3618,6 +3664,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "deconv" {
@@ -3632,6 +3679,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     stack.push(eval.quotient());
@@ -3643,6 +3691,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "polyder" {
@@ -3663,6 +3712,7 @@ pub fn interpret_with_vars(
                         match result {
                             Ok(value) => {
                                 if out_count == 0 {
+                                    pc = next_pc;
                                     continue;
                                 }
                                 stack.push(value);
@@ -3674,6 +3724,7 @@ pub fn interpret_with_vars(
                                 stack.push(Value::Num(0.0));
                             }
                         }
+                        pc = next_pc;
                         continue;
                     }
                     if args.len() != 2 {
@@ -3697,6 +3748,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "polyval" {
@@ -3713,6 +3765,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     stack.push(eval.value());
@@ -3728,6 +3781,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "polyfit" {
@@ -3744,6 +3798,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     stack.push(eval.coefficients());
@@ -3758,6 +3813,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "filter" {
@@ -3774,6 +3830,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 1 {
@@ -3788,6 +3845,7 @@ pub fn interpret_with_vars(
                             }
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "sort" && !args.is_empty() {
@@ -3799,6 +3857,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let (sorted, indices) = eval.into_values();
@@ -3811,6 +3870,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "cummin" && !args.is_empty() {
@@ -3822,6 +3882,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let (values, indices) = eval.into_pair();
@@ -3834,6 +3895,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "min" && !args.is_empty() {
@@ -3845,6 +3907,7 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let (values, indices) = eval.into_pair();
@@ -3857,6 +3920,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "sortrows" && !args.is_empty() {
@@ -3869,6 +3933,7 @@ pub fn interpret_with_vars(
                             Err(err) => vm_bail!(err.to_string()),
                         };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     let (sorted, indices) = eval.into_values();
@@ -3881,6 +3946,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "ismember" && args.len() >= 2 {
@@ -3894,10 +3960,12 @@ pub fn interpret_with_vars(
                             Err(err) => vm_bail!(err.to_string()),
                         };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 1 {
                         stack.push(eval.into_mask_value());
+                        pc = next_pc;
                         continue;
                     }
                     let (mask, loc) = eval.into_pair();
@@ -3908,6 +3976,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "intersect" && args.len() >= 2 {
@@ -3921,16 +3990,19 @@ pub fn interpret_with_vars(
                             Err(err) => vm_bail!(err.to_string()),
                         };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 1 {
                         stack.push(eval.into_values_value());
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 2 {
                         let (values, ia) = eval.into_pair();
                         stack.push(values);
                         stack.push(ia);
+                        pc = next_pc;
                         continue;
                     }
                     let (values, ia, ib) = eval.into_triple();
@@ -3942,6 +4014,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "union" && args.len() >= 2 {
@@ -3954,16 +4027,19 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err.to_string()),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 1 {
                         stack.push(eval.into_values_value());
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 2 {
                         let (values, ia) = eval.into_pair();
                         stack.push(values);
                         stack.push(ia);
+                        pc = next_pc;
                         continue;
                     }
                     let (values, ia, ib) = eval.into_triple();
@@ -3975,6 +4051,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "histcounts" && !args.is_empty() {
@@ -3986,10 +4063,12 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err.to_string()),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 1 {
                         stack.push(eval.into_counts_value());
+                        pc = next_pc;
                         continue;
                     }
                     let (counts, edges) = eval.into_pair();
@@ -4000,6 +4079,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "histcounts2" && args.len() >= 2 {
@@ -4012,16 +4092,19 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err.to_string()),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 1 {
                         stack.push(eval.into_counts_value());
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 2 {
                         let (counts, xedges) = eval.into_pair();
                         stack.push(counts);
                         stack.push(xedges);
+                        pc = next_pc;
                         continue;
                     }
                     let (counts, xedges, yedges) = eval.into_triple();
@@ -4033,6 +4116,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 if name == "unique" && !args.is_empty() {
@@ -4044,16 +4128,19 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err.to_string()),
                     };
                     if out_count == 0 {
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 1 {
                         stack.push(eval.into_values_value());
+                        pc = next_pc;
                         continue;
                     }
                     if out_count == 2 {
                         let (values, ia) = eval.into_pair();
                         stack.push(values);
                         stack.push(ia);
+                        pc = next_pc;
                         continue;
                     }
                     let (values, ia, ic) = eval.into_triple();
@@ -4065,6 +4152,7 @@ pub fn interpret_with_vars(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    pc = next_pc;
                     continue;
                 }
                 match call_builtin(&name, &args) {
@@ -4107,6 +4195,7 @@ pub fn interpret_with_vars(
                         let mut resolved = None;
                         for (path, wildcard) in &imports {
                             if !*wildcard {
+                                pc = next_pc;
                                 continue;
                             }
                             let mut qual = String::new();
@@ -9440,6 +9529,12 @@ fn try_execute_fusion_group(
 
     let stack_needed = plan.stack_pattern.len();
     if stack.len() < stack_needed {
+        println!(
+            "fusion stack underflow: needed {} have {} pattern {:?}",
+            stack_needed,
+            stack.len(),
+            plan.stack_pattern
+        );
         return Err("fusion: stack underflow gathering inputs".to_string());
     }
 
@@ -9461,12 +9556,75 @@ fn try_execute_fusion_group(
         }
     }
 
+    for (idx, slot) in inputs.iter_mut().enumerate() {
+        if slot.is_some() {
+            continue;
+        }
+        let vid = plan.inputs[idx];
+        if let Some(info) = graph.value(vid) {
+            match &info.origin {
+                ValueOrigin::Variable { kind, index } => {
+                    let value_opt = match kind {
+                        VarKind::Global => vars.get(*index).cloned(),
+                        VarKind::Local => {
+                            if let Some(frame) = context.call_stack.last() {
+                                let absolute = frame.locals_start + index;
+                                context.locals.get(absolute).cloned()
+                            } else {
+                                vars.get(*index).cloned()
+                            }
+                        }
+                    };
+                    if let Some(value) = value_opt {
+                        *slot = Some(value);
+                        continue;
+                    }
+                }
+                ValueOrigin::Constant => {
+                    if let Some(value) = plan.const_values.get(&vid) {
+                        *slot = Some(value.clone());
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if slot.is_none() {
+            if let Some(binding) = graph.var_binding(vid) {
+                let value_opt = match binding.kind {
+                    VarKind::Global => vars.get(binding.index).cloned(),
+                    VarKind::Local => {
+                        if let Some(frame) = context.call_stack.last() {
+                            let absolute = frame.locals_start + binding.index;
+                            context.locals.get(absolute).cloned()
+                        } else {
+                            vars.get(binding.index).cloned()
+                        }
+                    }
+                };
+                if let Some(value) = value_opt {
+                    *slot = Some(value);
+                    continue;
+                }
+            }
+        }
+        if slot.is_none() {
+            if let Some(value) = plan.const_values.get(&vid) {
+                *slot = Some(value.clone());
+            }
+        }
+    }
+
     let inputs: Vec<Value> = inputs
         .into_iter()
         .map(|opt| opt.ok_or_else(|| "fusion: missing input value".to_string()))
         .collect::<Result<_, _>>()?;
 
     let request = FusionExecutionRequest { plan, inputs };
+    println!(
+        "dispatch fusion kind {:?}, supported {} inputs {:?}",
+        plan.group.kind, plan.kernel.supported, plan.inputs
+    );
     if plan.group.kind.is_elementwise() {
         match execute_elementwise(request) {
             Ok(result) => Ok(result),
@@ -9748,7 +9906,39 @@ fn try_execute_fusion_group(
                 Err(err.to_string())
             }
         }
-    } else if plan.group.kind == runmat_accelerate::fusion::FusionKind::MatmulEpilogue {
+    } else if plan.group.kind == FusionKind::CenteredGram {
+        match execute_centered_gram(request) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else if plan.group.kind == FusionKind::PowerStepNormalize {
+        match execute_power_step_normalize(request) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else if plan.group.kind == FusionKind::ExplainedVariance {
+        println!("explained variance plan inputs {:?}", plan.inputs);
+        match execute_explained_variance(request) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                println!("explained variance fusion fallback: {}", err);
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else if plan.group.kind == FusionKind::MatmulEpilogue {
         match execute_matmul_epilogue(request) {
             Ok(result) => Ok(result),
             Err(err) => {

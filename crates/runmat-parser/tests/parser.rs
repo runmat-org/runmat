@@ -310,6 +310,7 @@ fn whitespace_and_comma_mixed_elements() {
 #[test]
 fn tensor_in_index_and_end_arithmetic() {
     let ast = parse("A=[1 2 3; 4 5 6; 7 8 9]; B=A(1:end-1, [1 3]);").unwrap();
+    dbg!(&ast.body[1]);
     if let Stmt::Assign(_, Expr::Index(_, idxs), _) = &ast.body[1] {
         assert_eq!(idxs.len(), 2);
     } else {

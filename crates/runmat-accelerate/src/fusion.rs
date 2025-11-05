@@ -10,12 +10,16 @@ use crate::graph::{
     AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId, PrimitiveOp,
     ShapeInfo, ValueId, ValueOrigin,
 };
+use runmat_accelerate_api::CovNormalization;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FusionKind {
     ElementwiseChain,
     Reduction,
     MatmulEpilogue,
+    CenteredGram,
+    PowerStepNormalize,
+    ExplainedVariance,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +29,24 @@ pub struct FusionGroup {
     pub nodes: Vec<NodeId>,
     pub shape: ShapeInfo,
     pub span: InstrSpan,
+    pub pattern: Option<FusionPattern>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FusionPattern {
+    CenteredGram {
+        matrix: ValueId,
+        normalization: CovNormalization,
+    },
+    PowerStepNormalize {
+        lhs: ValueId,
+        rhs: ValueId,
+        epsilon: f64,
+    },
+    ExplainedVariance {
+        q: ValueId,
+        g: ValueId,
+    },
 }
 
 pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
@@ -36,6 +58,10 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
     let mut assigned: HashSet<NodeId> = HashSet::new();
     let mut groups = Vec::new();
     let mut group_id = 0usize;
+
+    detect_explained_variance(graph, &mut assigned, &mut groups, &mut group_id);
+    detect_power_step_normalize(graph, &mut assigned, &mut groups, &mut group_id);
+    detect_centered_gram(graph, &mut assigned, &mut groups, &mut group_id);
 
     for node in &graph.nodes {
         // Elementwise chains
@@ -86,6 +112,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
                 nodes: chain,
                 shape: current_shape.clone(),
                 span,
+                pattern: None,
             });
             group_id += 1;
         }
@@ -106,6 +133,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             nodes: vec![node.id],
             shape: node_output_shape(graph, node),
             span,
+            pattern: None,
         });
         group_id += 1;
     }
@@ -136,7 +164,9 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             }
             let Some(next_id) = next_id_opt else { break };
             let next = graph.node(next_id).unwrap();
-            if !next.is_elementwise() { break; }
+            if !next.is_elementwise() {
+                break;
+            }
             // Allow only primitive elementwise ops we can fold: add/sub/mul/div/elem variants
             let allowed = matches!(
                 next.label,
@@ -147,13 +177,17 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
                     | AccelNodeLabel::Primitive(PrimitiveOp::Div)
                     | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
             );
-            if !allowed { break; }
+            if !allowed {
+                break;
+            }
             chain.push(next_id);
             frontier = next_id;
             ok = true;
         }
         if ok {
-            for id in &chain { assigned.insert(*id); }
+            for id in &chain {
+                assigned.insert(*id);
+            }
             let span = group_span(graph, &chain);
             groups.push(FusionGroup {
                 id: group_id,
@@ -161,6 +195,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
                 nodes: chain,
                 shape: node_output_shape(graph, node),
                 span,
+                pattern: None,
             });
             group_id += 1;
         }
@@ -271,13 +306,13 @@ pub struct FusionGroupPlan {
     pub reduction_data: Option<ValueId>,
     // For reductions: the semantic mode (sum or mean)
     pub reduction_mode: Option<ReductionMode>,
+    pub pattern: Option<FusionPattern>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReductionMode {
     Sum,
     Mean,
 }
-
 
 #[derive(Debug, Clone)]
 pub enum FusionOp {
@@ -445,6 +480,7 @@ impl FusionGroupPlan {
                 continue;
             };
             for input in &node.inputs {
+                let binding = graph.var_binding(*input);
                 let (external, is_variable, maybe_constant) = match graph.value(*input) {
                     Some(info) => match &info.origin {
                         ValueOrigin::NodeOutput { node: origin, .. }
@@ -453,6 +489,7 @@ impl FusionGroupPlan {
                             (false, false, None)
                         }
                         ValueOrigin::Variable { .. } => (true, true, None),
+                        ValueOrigin::NodeOutput { .. } if binding.is_some() => (true, true, None),
                         ValueOrigin::Constant => (true, false, info.constant.clone()),
                         _ => (true, false, None),
                     },
@@ -477,18 +514,20 @@ impl FusionGroupPlan {
                         }
                     }
 
+                    let mut newly_added = false;
                     let input_idx = if let Some(idx) = seen_inputs.get(input) {
                         *idx
                     } else {
                         let idx = inputs.len();
                         inputs.push(*input);
                         seen_inputs.insert(*input, idx);
+                        newly_added = true;
                         idx
                     };
 
                     if let Some(constant) = maybe_constant.clone() {
                         constants.insert(input_idx, constant);
-                    } else if !is_variable {
+                    } else if !is_variable && newly_added {
                         stack_pattern.push(input_idx);
                     }
                 }
@@ -521,12 +560,17 @@ impl FusionGroupPlan {
                 let lname = name.to_ascii_lowercase();
                 if (lname == "sum" || lname == "mean") && !node.inputs.is_empty() {
                     reduction_data = Some(node.inputs[0]);
-                    reduction_mode = Some(if lname == "mean" { ReductionMode::Mean } else { ReductionMode::Sum });
+                    reduction_mode = Some(if lname == "mean" {
+                        ReductionMode::Mean
+                    } else {
+                        ReductionMode::Sum
+                    });
                 }
             }
         }
 
         let kind = group.kind.clone();
+        let pattern = group.pattern.clone();
         let mut plan = Self {
             index,
             group,
@@ -539,6 +583,7 @@ impl FusionGroupPlan {
             kernel: FusionKernelSpec::new(kind, true),
             reduction_data,
             reduction_mode,
+            pattern,
         };
 
         // Record constant ValueIds for all groups for easier downstream analysis
@@ -562,11 +607,23 @@ impl FusionGroupPlan {
                 let mut prod: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
                 for op in &plan.operations {
                     match op {
-                        FusionOp::Primitive { inputs, output, op: _ } => {
-                            if let Some(out) = output { prod.insert(*out, inputs.clone()); }
+                        FusionOp::Primitive {
+                            inputs,
+                            output,
+                            op: _,
+                        } => {
+                            if let Some(out) = output {
+                                prod.insert(*out, inputs.clone());
+                            }
                         }
-                        FusionOp::Builtin { name: _, inputs, output } => {
-                            if let Some(out) = output { prod.insert(*out, inputs.clone()); }
+                        FusionOp::Builtin {
+                            name: _,
+                            inputs,
+                            output,
+                        } => {
+                            if let Some(out) = output {
+                                prod.insert(*out, inputs.clone());
+                            }
                         }
                     }
                 }
@@ -575,13 +632,19 @@ impl FusionGroupPlan {
                 let mut visited: HashSet<ValueId> = HashSet::new();
                 let mut stack: Vec<ValueId> = vec![data_vid];
                 while let Some(cur) = stack.pop() {
-                    if !visited.insert(cur) { continue; }
+                    if !visited.insert(cur) {
+                        continue;
+                    }
                     if original_inputs.contains(&cur) {
-                        if !deps.contains(&cur) { deps.push(cur); }
+                        if !deps.contains(&cur) {
+                            deps.push(cur);
+                        }
                         continue;
                     }
                     if let Some(parents) = prod.get(&cur) {
-                        for p in parents { stack.push(*p); }
+                        for p in parents {
+                            stack.push(*p);
+                        }
                     }
                 }
                 plan.inputs = deps;
@@ -759,9 +822,28 @@ impl FusionGroupPlan {
         exprs.insert(ext_input, "v".to_string());
         for (vid, val) in &self.const_values {
             let lit = match val {
-                Value::Num(n) => if scalar_ty == "f64" { format!("f64({})", n) } else { format!("{}", *n as f32) },
-                Value::Int(i) => { let f = i.to_f64(); if scalar_ty == "f64" { format!("f64({})", f) } else { format!("{}", f as f32) } },
-                _ => if scalar_ty == "f64" { "f64(0.0)".to_string() } else { "0.0".to_string() },
+                Value::Num(n) => {
+                    if scalar_ty == "f64" {
+                        format!("f64({})", n)
+                    } else {
+                        format!("{}", *n as f32)
+                    }
+                }
+                Value::Int(i) => {
+                    let f = i.to_f64();
+                    if scalar_ty == "f64" {
+                        format!("f64({})", f)
+                    } else {
+                        format!("{}", f as f32)
+                    }
+                }
+                _ => {
+                    if scalar_ty == "f64" {
+                        "f64(0.0)".to_string()
+                    } else {
+                        "0.0".to_string()
+                    }
+                }
             };
             exprs.insert(*vid, lit);
         }
@@ -774,7 +856,11 @@ impl FusionGroupPlan {
                         }
                     }
                 }
-                FusionOp::Builtin { name, inputs, output } => {
+                FusionOp::Builtin {
+                    name,
+                    inputs,
+                    output,
+                } => {
                     if let Some(out) = output {
                         if let Some(code) = builtin_expr(name, inputs, &exprs, scalar_ty) {
                             exprs.insert(*out, code);
@@ -783,7 +869,10 @@ impl FusionGroupPlan {
                 }
             }
         }
-        let val_expr = match exprs.get(&data_vid) { Some(s) => s.clone(), None => return None };
+        let val_expr = match exprs.get(&data_vid) {
+            Some(s) => s.clone(),
+            None => return None,
+        };
 
         let mut shader = String::new();
         shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>, }};\n"));
@@ -798,7 +887,9 @@ impl FusionGroupPlan {
             "@group(0) @binding(2) var<uniform> params: MParams;\n\n"
         ));
         // Use a small fixed workgroup tile size to avoid driver stalls on some backends
-        shader.push_str(&format!("var<workgroup> tile: array<{scalar_ty}, @WG@u>;\n\n"));
+        shader.push_str(&format!(
+            "var<workgroup> tile: array<{scalar_ty}, @WG@u>;\n\n"
+        ));
         shader.push_str(&format!(
             "const OMITNAN: bool = {};\n\n",
             if omitnan { "true" } else { "false" }
@@ -806,12 +897,24 @@ impl FusionGroupPlan {
         let is_mean = matches!(self.reduction_mode, Some(ReductionMode::Mean));
         let post_scale = if is_mean {
             if axis == 0 {
-                if scalar_ty == "f64" { "(1.0 / f64(f32(params.nrows)))".to_string() } else { "(1.0 / f32(params.nrows))".to_string() }
+                if scalar_ty == "f64" {
+                    "(1.0 / f64(f32(params.nrows)))".to_string()
+                } else {
+                    "(1.0 / f32(params.nrows))".to_string()
+                }
             } else {
-                if scalar_ty == "f64" { "(1.0 / f64(f32(params.ncols)))".to_string() } else { "(1.0 / f32(params.ncols))".to_string() }
+                if scalar_ty == "f64" {
+                    "(1.0 / f64(f32(params.ncols)))".to_string()
+                } else {
+                    "(1.0 / f32(params.ncols))".to_string()
+                }
             }
         } else {
-            if scalar_ty == "f64" { "f64(1.0)".to_string() } else { "1.0".to_string() }
+            if scalar_ty == "f64" {
+                "f64(1.0)".to_string()
+            } else {
+                "1.0".to_string()
+            }
         };
         // Helper(s) at module scope
         shader.push_str(&format!(
@@ -840,16 +943,22 @@ impl FusionGroupPlan {
                 val = val_expr
             ));
             if scalar_ty == "f64" {
-                shader.push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n");
+                shader.push_str(
+                    "  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n",
+                );
             } else {
-                shader.push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f32>(0x7fc00000u); }\n");
+                shader
+                    .push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f32>(0x7fc00000u); }\n");
             }
             shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
             shader.push_str(
                 "  var off = (@WG@u) / 2u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",
             );
             // Final write: apply post-scale (sum=1, mean=1/rows)
-            shader.push_str(&format!("  if (lid.x == 0u) {{ output.data[col] = tile[0u] * {}; }}\n}}\n", post_scale));
+            shader.push_str(&format!(
+                "  if (lid.x == 0u) {{ output.data[col] = tile[0u] * {}; }}\n}}\n",
+                post_scale
+            ));
         } else {
             // Row-wise: reduce over cols; one output per row (nrows)
             shader.push_str(
@@ -871,15 +980,21 @@ impl FusionGroupPlan {
                 val = val_expr
             ));
             if scalar_ty == "f64" {
-                shader.push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n");
+                shader.push_str(
+                    "  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n",
+                );
             } else {
-                shader.push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f32>(0x7fc00000u); }\n");
+                shader
+                    .push_str("  if (!OMITNAN && saw_nan) { acc = bitcast<f32>(0x7fc00000u); }\n");
             }
             shader.push_str("  tile[lid.x] = acc;\n  workgroupBarrier();\n");
             shader.push_str(
                 "  var off = (@WG@u) / 2u;\n  loop { if (off == 0u) { break; } if (lid.x < off) {\n    let a = tile[lid.x]; let b = tile[lid.x + off];\n    tile[lid.x] = a + b;\n  } workgroupBarrier(); off = off / 2u; }\n",
             );
-            shader.push_str(&format!("  if (lid.x == 0u) {{ output.data[row] = tile[0u] * {}; }}\n}}\n", post_scale));
+            shader.push_str(&format!(
+                "  if (lid.x == 0u) {{ output.data[row] = tile[0u] * {}; }}\n}}\n",
+                post_scale
+            ));
         }
         Some(shader)
     }
@@ -908,6 +1023,577 @@ impl FusionKind {
 
     pub fn is_reduction(&self) -> bool {
         matches!(self, FusionKind::Reduction)
+    }
+}
+
+fn detect_centered_gram(
+    graph: &AccelGraph,
+    assigned: &mut HashSet<NodeId>,
+    groups: &mut Vec<FusionGroup>,
+    next_group_id: &mut usize,
+) {
+    for div_node in &graph.nodes {
+        if assigned.contains(&div_node.id) {
+            continue;
+        }
+        let div_op = match div_node.label {
+            AccelNodeLabel::Primitive(op) => op,
+            _ => continue,
+        };
+        if div_op != PrimitiveOp::Div && div_op != PrimitiveOp::ElemDiv {
+            continue;
+        }
+        if div_node.inputs.len() != 2 {
+            continue;
+        }
+        let (numerator_id, denom_id) = (div_node.inputs[0], div_node.inputs[1]);
+        let denom_info = match graph.value(denom_id) {
+            Some(info) => info,
+            None => continue,
+        };
+        let denom_const = match &denom_info.constant {
+            Some(Value::Num(v)) => Some(*v),
+            Some(Value::Int(i)) => Some(i.to_f64()),
+            _ => None,
+        };
+        if denom_const.is_some_and(|v| v == 0.0) {
+            continue;
+        }
+
+        let mul_node_id = match graph
+            .value(numerator_id)
+            .and_then(|info| match &info.origin {
+                ValueOrigin::NodeOutput { node, .. } => Some(*node),
+                _ => None,
+            }) {
+            Some(id) => id,
+            None => continue,
+        };
+        if assigned.contains(&mul_node_id) {
+            continue;
+        }
+        let mul_node = match graph.node(mul_node_id) {
+            Some(node) => node,
+            None => continue,
+        };
+        let mul_op = match mul_node.label {
+            AccelNodeLabel::Primitive(op) => op,
+            _ => continue,
+        };
+        if mul_op != PrimitiveOp::Mul && mul_op != PrimitiveOp::ElemMul {
+            continue;
+        }
+        if mul_node.inputs.len() != 2 {
+            continue;
+        }
+
+        let mut transpose_node_id: Option<NodeId> = None;
+        let mut centered_val_id: Option<ValueId> = None;
+        for input_vid in &mul_node.inputs {
+            let candidate_node_id =
+                match graph.value(*input_vid).and_then(|info| match &info.origin {
+                    ValueOrigin::NodeOutput { node, .. } => Some(*node),
+                    _ => None,
+                }) {
+                    Some(id) => id,
+                    None => continue,
+                };
+            if let Some(trans_node) = graph.node(candidate_node_id) {
+                if matches!(
+                    trans_node.label,
+                    AccelNodeLabel::Primitive(PrimitiveOp::Transpose)
+                ) {
+                    if let Some(centered) = trans_node.inputs.get(0).copied() {
+                        transpose_node_id = Some(candidate_node_id);
+                        centered_val_id = Some(centered);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let transpose_node_id = match transpose_node_id {
+            Some(id) if !assigned.contains(&id) => id,
+            _ => continue,
+        };
+        let centered_val_id = match centered_val_id {
+            Some(id) => id,
+            None => continue,
+        };
+
+        if assigned.contains(&transpose_node_id) {
+            continue;
+        }
+        if graph.node(transpose_node_id).is_none() {
+            continue;
+        }
+
+        let centered_node_id =
+            match graph
+                .value(centered_val_id)
+                .and_then(|info| match &info.origin {
+                    ValueOrigin::NodeOutput { node, .. } => Some(*node),
+                    _ => None,
+                }) {
+                Some(id) => id,
+                None => continue,
+            };
+        if assigned.contains(&centered_node_id) {
+            continue;
+        }
+        let centered_node = match graph.node(centered_node_id) {
+            Some(node) => node,
+            None => continue,
+        };
+        if !matches!(
+            centered_node.label,
+            AccelNodeLabel::Primitive(PrimitiveOp::Sub)
+        ) {
+            continue;
+        }
+        if centered_node.inputs.len() != 2 {
+            continue;
+        }
+        let matrix_val_id = centered_node.inputs[0];
+        let mean_val_id = centered_node.inputs[1];
+
+        let mean_node_id = match graph
+            .value(mean_val_id)
+            .and_then(|info| match &info.origin {
+                ValueOrigin::NodeOutput { node, .. } => Some(*node),
+                _ => None,
+            }) {
+            Some(id) => id,
+            None => continue,
+        };
+        if assigned.contains(&mean_node_id) {
+            continue;
+        }
+        let mean_node = match graph.node(mean_node_id) {
+            Some(node) => node,
+            None => continue,
+        };
+        match &mean_node.label {
+            AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mean") => {}
+            _ => continue,
+        }
+        if mean_node.inputs.is_empty() || mean_node.inputs[0] != matrix_val_id {
+            continue;
+        }
+
+        let matrix_info = match graph.value(matrix_val_id) {
+            Some(info) => info,
+            None => continue,
+        };
+        let matrix_rows = match &matrix_info.shape {
+            ShapeInfo::Tensor(dims) if !dims.is_empty() => dims[0].unwrap_or(0),
+            _ => 0,
+        };
+        let normalization = if matrix_rows > 1 {
+            if let Some(value) = denom_const {
+                let unbiased = (matrix_rows as f64 - 1.0).max(1.0);
+                let biased = matrix_rows as f64;
+                if approx_eq(value, unbiased) {
+                    CovNormalization::Unbiased
+                } else if approx_eq(value, biased) {
+                    CovNormalization::Biased
+                } else {
+                    CovNormalization::Unbiased
+                }
+            } else {
+                CovNormalization::Unbiased
+            }
+        } else {
+            CovNormalization::Unbiased
+        };
+
+        let mut nodes = vec![
+            mean_node_id,
+            centered_node_id,
+            transpose_node_id,
+            mul_node_id,
+            div_node.id,
+        ];
+        nodes.sort_by_key(|node_id| {
+            graph
+                .node(*node_id)
+                .map(|node| node.span.start)
+                .unwrap_or(usize::MAX)
+        });
+        let span = group_span(graph, &nodes);
+        let shape = node_output_shape(graph, div_node);
+
+        groups.push(FusionGroup {
+            id: *next_group_id,
+            kind: FusionKind::CenteredGram,
+            nodes: nodes.clone(),
+            shape,
+            span,
+            pattern: Some(FusionPattern::CenteredGram {
+                matrix: matrix_val_id,
+                normalization,
+            }),
+        });
+        *next_group_id += 1;
+        for id in nodes {
+            assigned.insert(id);
+        }
+    }
+}
+
+fn approx_eq(a: f64, b: f64) -> bool {
+    let scale = a.abs().max(b.abs()).max(1.0);
+    (a - b).abs() <= scale * 1e-6
+}
+
+fn detect_power_step_normalize(
+    graph: &AccelGraph,
+    assigned: &mut HashSet<NodeId>,
+    groups: &mut Vec<FusionGroup>,
+    next_group_id: &mut usize,
+) {
+    'outer: for div_node in &graph.nodes {
+        if assigned.contains(&div_node.id) {
+            continue;
+        }
+        let div_op = match div_node.label {
+            AccelNodeLabel::Primitive(op) => op,
+            _ => continue,
+        };
+        if div_op != PrimitiveOp::Div && div_op != PrimitiveOp::ElemDiv {
+            continue;
+        }
+        if div_node.inputs.len() != 2 {
+            continue;
+        }
+        let numerator_vid = div_node.inputs[0];
+        let denom_vid = div_node.inputs[1];
+
+        let (matmul_id, matmul_node) = match node_from_value(graph, numerator_vid) {
+            Some((id, node)) => (id, node),
+            None => continue,
+        };
+        if assigned.contains(&matmul_id) {
+            continue;
+        }
+        match &matmul_node.label {
+            AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mtimes") => {}
+            _ => continue,
+        }
+        if matmul_node.inputs.len() != 2 {
+            continue;
+        }
+
+        let Some(denom_info) = analyze_power_step_denominator(graph, denom_vid, numerator_vid)
+        else {
+            continue;
+        };
+        if assigned.contains(&denom_info.sqrt_node) {
+            continue;
+        }
+        if assigned.contains(&denom_info.sum_node) {
+            continue;
+        }
+        if assigned.contains(&denom_info.pow_node) {
+            continue;
+        }
+        if let Some(add_id) = denom_info.add_node {
+            if assigned.contains(&add_id) {
+                continue;
+            }
+        }
+        if denom_info.pow_input != numerator_vid {
+            continue;
+        }
+
+        let mut nodes = vec![matmul_id, denom_info.pow_node, denom_info.sum_node];
+        if let Some(add_id) = denom_info.add_node {
+            nodes.push(add_id);
+        }
+        nodes.push(denom_info.sqrt_node);
+        nodes.push(div_node.id);
+
+        for node_id in &nodes {
+            if assigned.contains(node_id) {
+                continue 'outer;
+            }
+        }
+
+        nodes.sort_by_key(|node_id| {
+            graph
+                .node(*node_id)
+                .map(|node| node.span.start)
+                .unwrap_or(usize::MAX)
+        });
+
+        let span = group_span(graph, &nodes);
+        let shape = node_output_shape(graph, div_node);
+
+        groups.push(FusionGroup {
+            id: *next_group_id,
+            kind: FusionKind::PowerStepNormalize,
+            nodes: nodes.clone(),
+            shape,
+            span,
+            pattern: Some(FusionPattern::PowerStepNormalize {
+                lhs: matmul_node.inputs[0],
+                rhs: matmul_node.inputs[1],
+                epsilon: denom_info.epsilon,
+            }),
+        });
+        *next_group_id += 1;
+        for id in nodes {
+            assigned.insert(id);
+        }
+    }
+}
+
+fn detect_explained_variance(
+    graph: &AccelGraph,
+    assigned: &mut HashSet<NodeId>,
+    groups: &mut Vec<FusionGroup>,
+    next_group_id: &mut usize,
+) {
+    for diag_node in &graph.nodes {
+        if assigned.contains(&diag_node.id) {
+            continue;
+        }
+        match &diag_node.label {
+            AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("diag") => {}
+            _ => continue,
+        }
+        if diag_node.inputs.len() != 1 {
+            continue;
+        }
+        let matmul2_vid = diag_node.inputs[0];
+        let (matmul2_id, matmul2_node) = match node_from_value(graph, matmul2_vid) {
+            Some(pair) => pair,
+            None => continue,
+        };
+        if assigned.contains(&matmul2_id) {
+            continue;
+        }
+        match &matmul2_node.label {
+            AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mtimes") => {}
+            _ => continue,
+        }
+        if matmul2_node.inputs.len() != 2 {
+            continue;
+        }
+
+        let (matmul1_id, matmul1_node, q_vid) = if let Some((mm_id, mm_node)) =
+            node_from_value(graph, matmul2_node.inputs[0])
+        {
+            if matches!(mm_node.label, AccelNodeLabel::Builtin { ref name } if name.eq_ignore_ascii_case("mtimes"))
+            {
+                (mm_id, mm_node, matmul2_node.inputs[1])
+            } else {
+                continue;
+            }
+        } else if let Some((mm_id, mm_node)) = node_from_value(graph, matmul2_node.inputs[1]) {
+            if matches!(mm_node.label, AccelNodeLabel::Builtin { ref name } if name.eq_ignore_ascii_case("mtimes"))
+            {
+                (mm_id, mm_node, matmul2_node.inputs[0])
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+
+        if assigned.contains(&matmul1_id) {
+            continue;
+        }
+
+        if matmul1_node.inputs.len() != 2 {
+            continue;
+        }
+
+        let (transpose_id, transpose_input_vid, g_vid) =
+            if let Some((t_id, src_vid)) = is_transpose_node(graph, matmul1_node.inputs[0]) {
+                (t_id, src_vid, matmul1_node.inputs[1])
+            } else if let Some((t_id, src_vid)) = is_transpose_node(graph, matmul1_node.inputs[1]) {
+                (t_id, src_vid, matmul1_node.inputs[0])
+            } else {
+                continue;
+            };
+
+        if assigned.contains(&transpose_id) {
+            continue;
+        }
+
+        if transpose_input_vid != q_vid {
+            continue;
+        }
+
+        let mut nodes = vec![diag_node.id, matmul2_id, matmul1_id, transpose_id];
+        nodes.sort_by_key(|node_id| {
+            graph
+                .node(*node_id)
+                .map(|node| node.span.start)
+                .unwrap_or(usize::MAX)
+        });
+        let span = group_span(graph, &nodes);
+        let shape = node_output_shape(graph, diag_node);
+        groups.push(FusionGroup {
+            id: *next_group_id,
+            kind: FusionKind::ExplainedVariance,
+            nodes: nodes.clone(),
+            shape,
+            span,
+            pattern: Some(FusionPattern::ExplainedVariance { q: q_vid, g: g_vid }),
+        });
+        *next_group_id += 1;
+        for id in nodes {
+            assigned.insert(id);
+        }
+    }
+}
+
+struct PowerStepDenominatorInfo {
+    sqrt_node: NodeId,
+    add_node: Option<NodeId>,
+    sum_node: NodeId,
+    pow_node: NodeId,
+    pow_input: ValueId,
+    epsilon: f64,
+}
+
+fn analyze_power_step_denominator(
+    graph: &AccelGraph,
+    denom_vid: ValueId,
+    expected_source_vid: ValueId,
+) -> Option<PowerStepDenominatorInfo> {
+    let (sqrt_node_id, sqrt_input_vid, add_node_opt, epsilon_from_outer) =
+        if let Some((sqrt_id, sqrt_in)) = is_sqrt_node(graph, denom_vid) {
+            if let Some((add_node, sum_vid, epsilon_inner)) =
+                extract_add_with_constant(graph, sqrt_in)
+            {
+                (sqrt_id, sum_vid, Some(add_node), epsilon_inner)
+            } else {
+                (sqrt_id, sqrt_in, None, 0.0)
+            }
+        } else if let Some((add_node, other_vid, epsilon_inner)) =
+            extract_add_with_constant(graph, denom_vid)
+        {
+            let (sqrt_id, sqrt_in) = is_sqrt_node(graph, other_vid)?;
+            (sqrt_id, sqrt_in, Some(add_node), epsilon_inner)
+        } else {
+            return None;
+        };
+
+    let (sum_node_id, sum_node) = node_from_value(graph, sqrt_input_vid)?;
+    match &sum_node.label {
+        AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("sum") => {}
+        _ => return None,
+    }
+    if sum_node.inputs.is_empty() {
+        return None;
+    }
+    let pow_vid = sum_node.inputs[0];
+    let (pow_node_id, pow_node) = node_from_value(graph, pow_vid)?;
+    let pow_input = match pow_node.label {
+        AccelNodeLabel::Primitive(PrimitiveOp::ElemPow) => {
+            if pow_node.inputs.len() != 2 {
+                return None;
+            }
+            let base = pow_node.inputs[0];
+            let exponent_vid = pow_node.inputs[1];
+            let exponent = value_constant_f64(graph, exponent_vid)?;
+            if !approx_eq(exponent, 2.0) {
+                return None;
+            }
+            base
+        }
+        _ => return None,
+    };
+
+    if pow_input != expected_source_vid {
+        return None;
+    }
+
+    let epsilon = epsilon_from_outer;
+    Some(PowerStepDenominatorInfo {
+        sqrt_node: sqrt_node_id,
+        add_node: add_node_opt,
+        sum_node: sum_node_id,
+        pow_node: pow_node_id,
+        pow_input,
+        epsilon,
+    })
+}
+
+fn node_from_value<'a>(graph: &'a AccelGraph, vid: ValueId) -> Option<(NodeId, &'a AccelNode)> {
+    let info = graph.value(vid)?;
+    match info.origin {
+        ValueOrigin::NodeOutput { node, .. } => graph.node(node).map(|n| (node, n)),
+        _ => None,
+    }
+}
+
+fn is_sqrt_node(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId)> {
+    let (node_id, node) = node_from_value(graph, vid)?;
+    match &node.label {
+        AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("sqrt") => {
+            let input = node.inputs.get(0).copied()?;
+            Some((node_id, input))
+        }
+        _ => None,
+    }
+}
+
+fn is_transpose_node(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId)> {
+    let (node_id, node) = node_from_value(graph, vid)?;
+    match &node.label {
+        AccelNodeLabel::Primitive(PrimitiveOp::Transpose) => {
+            let input = node.inputs.get(0).copied()?;
+            Some((node_id, input))
+        }
+        _ => None,
+    }
+}
+
+fn extract_add_with_constant(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId, f64)> {
+    let (node_id, node) = node_from_value(graph, vid)?;
+    match node.label {
+        AccelNodeLabel::Primitive(PrimitiveOp::Add) => {
+            if node.inputs.len() != 2 {
+                return None;
+            }
+            let lhs = node.inputs[0];
+            let rhs = node.inputs[1];
+            if let Some(eps) = value_constant_f64(graph, rhs) {
+                return Some((node_id, lhs, eps));
+            }
+            if let Some(eps) = value_constant_f64(graph, lhs) {
+                return Some((node_id, rhs, eps));
+            }
+            None
+        }
+        AccelNodeLabel::Primitive(PrimitiveOp::Sub) => {
+            if node.inputs.len() != 2 {
+                return None;
+            }
+            let lhs = node.inputs[0];
+            let rhs = node.inputs[1];
+            if let Some(eps) = value_constant_f64(graph, rhs) {
+                return Some((node_id, lhs, -eps));
+            }
+            if let Some(eps) = value_constant_f64(graph, lhs) {
+                return Some((node_id, rhs, eps));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn value_constant_f64(graph: &AccelGraph, vid: ValueId) -> Option<f64> {
+    let info = graph.value(vid)?;
+    match &info.constant {
+        Some(Value::Num(v)) => Some(*v),
+        Some(Value::Int(i)) => Some(i.to_f64()),
+        _ => None,
     }
 }
 
@@ -1100,6 +1786,7 @@ mod tests {
         AccelGraph {
             nodes: vec![node0, node1],
             values,
+            var_bindings: StdHashMap::new(),
         }
     }
 
@@ -1183,6 +1870,7 @@ mod tests {
         let graph = AccelGraph {
             nodes: vec![node0, node1],
             values,
+            var_bindings: StdHashMap::new(),
         };
 
         let groups = detect_fusion_groups(&graph);

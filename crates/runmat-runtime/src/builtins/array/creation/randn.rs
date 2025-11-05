@@ -364,8 +364,11 @@ fn randn_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
     match proto {
         Value::GpuTensor(handle) => randn_like_gpu(handle, shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => randn_complex(shape),
-        Value::Tensor(_)
-        | Value::Num(_)
+        Value::Tensor(t) => match t.dtype {
+            NumericDType::F32 => randn_single(shape),
+            NumericDType::F64 => randn_double(shape),
+        },
+        Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)
         | Value::LogicalArray(_) => randn_double(shape),

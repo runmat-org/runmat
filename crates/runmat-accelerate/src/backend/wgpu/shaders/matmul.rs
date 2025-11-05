@@ -150,10 +150,11 @@ struct Params {
 struct EpilogueF64 {
     alpha: f64,
     beta: f64,
-    has_row_scale: u32,
-    has_col_scale: u32,
-    row_is_div: u32,
-    col_is_div: u32,
+    clamp_min: f64,
+    clamp_max: f64,
+    pow_exponent: f64,
+    flags: u32,
+    _pad0: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -186,13 +187,24 @@ fn main(
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
     var val = acc * ep.alpha + ep.beta;
-    if (ep.has_row_scale != 0u) {
+
+    let flags = ep.flags;
+    if ((flags & 1u) != 0u) {
         let s = Row.data[row];
-        if (ep.row_is_div != 0u) { val = val / s; } else { val = val * s; }
+        if ((flags & 4u) != 0u) { val = val / s; } else { val = val * s; }
     }
-    if (ep.has_col_scale != 0u) {
+    if ((flags & 2u) != 0u) {
         let s = Col.data[col];
-        if (ep.col_is_div != 0u) { val = val / s; } else { val = val * s; }
+        if ((flags & 8u) != 0u) { val = val / s; } else { val = val * s; }
+    }
+    if ((flags & 16u) != 0u) {
+        val = max(val, ep.clamp_min);
+    }
+    if ((flags & 32u) != 0u) {
+        val = min(val, ep.clamp_max);
+    }
+    if ((flags & 64u) != 0u) {
+        val = pow(val, ep.pow_exponent);
     }
     let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = val;
@@ -220,10 +232,10 @@ struct Params {
 struct EpilogueF32 {
     alpha: f32,
     beta: f32,
-    has_row_scale: u32,
-    has_col_scale: u32,
-    row_is_div: u32,
-    col_is_div: u32,
+    clamp_min: f32,
+    clamp_max: f32,
+    pow_exponent: f32,
+    flags: u32,
 };
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -256,13 +268,23 @@ fn main(
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
     var val = acc * ep.alpha + ep.beta;
-    if (ep.has_row_scale != 0u) {
+    let flags = ep.flags;
+    if ((flags & 1u) != 0u) {
         let s = Row.data[row];
-        if (ep.row_is_div != 0u) { val = val / s; } else { val = val * s; }
+        if ((flags & 4u) != 0u) { val = val / s; } else { val = val * s; }
     }
-    if (ep.has_col_scale != 0u) {
+    if ((flags & 2u) != 0u) {
         let s = Col.data[col];
-        if (ep.col_is_div != 0u) { val = val / s; } else { val = val * s; }
+        if ((flags & 8u) != 0u) { val = val / s; } else { val = val * s; }
+    }
+    if ((flags & 16u) != 0u) {
+        val = max(val, ep.clamp_min);
+    }
+    if ((flags & 32u) != 0u) {
+        val = min(val, ep.clamp_max);
+    }
+    if ((flags & 64u) != 0u) {
+        val = pow(val, ep.pow_exponent);
     }
     let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = val;

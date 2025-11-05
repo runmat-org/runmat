@@ -336,10 +336,15 @@ pub struct MatmulParams {
 pub struct MatmulEpilogueParamsF64 {
     pub alpha: f64,
     pub beta: f64,
-    pub has_row_scale: u32,
-    pub has_col_scale: u32,
-    pub row_is_div: u32,
-    pub col_is_div: u32,
+    pub clamp_min: f64,
+    pub clamp_max: f64,
+    pub pow_exponent: f64,
+    pub flags: u32,
+    pub diag_offset: u32,
+    pub diag_stride: u32,
+    pub diag_rows: u32,
+    pub _pad: u32,
+    pub _pad2: u32,
 }
 
 #[repr(C)]
@@ -347,11 +352,35 @@ pub struct MatmulEpilogueParamsF64 {
 pub struct MatmulEpilogueParamsF32 {
     pub alpha: f32,
     pub beta: f32,
-    pub has_row_scale: u32,
-    pub has_col_scale: u32,
-    pub row_is_div: u32,
-    pub col_is_div: u32,
+    pub clamp_min: f32,
+    pub clamp_max: f32,
+    pub pow_exponent: f32,
+    pub flags: u32,
 }
+
+pub const MATMUL_EPILOGUE_FLAG_ROW_SCALE: u32 = 1 << 0;
+pub const MATMUL_EPILOGUE_FLAG_COL_SCALE: u32 = 1 << 1;
+pub const MATMUL_EPILOGUE_FLAG_ROW_DIV: u32 = 1 << 2;
+pub const MATMUL_EPILOGUE_FLAG_COL_DIV: u32 = 1 << 3;
+pub const MATMUL_EPILOGUE_FLAG_CLAMP_MIN: u32 = 1 << 4;
+pub const MATMUL_EPILOGUE_FLAG_CLAMP_MAX: u32 = 1 << 5;
+pub const MATMUL_EPILOGUE_FLAG_POW: u32 = 1 << 6;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct SyrkParams {
+    pub rows_total: u32,
+    pub cols: u32,
+    pub lda: u32,
+    pub ldc: u32,
+    pub row_offset: u32,
+    pub chunk_rows: u32,
+    pub flags: u32,
+    pub _pad: u32,
+}
+
+pub const SYRK_FLAG_ACCUMULATE: u32 = 1 << 0;
+pub const SYRK_FLAG_FILL_BOTH: u32 = 1 << 1;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

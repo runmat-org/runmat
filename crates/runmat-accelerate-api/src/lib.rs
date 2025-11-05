@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
 type ResidencyClearFn = fn(&GpuTensorHandle);
@@ -9,6 +9,9 @@ type ResidencyClearFn = fn(&GpuTensorHandle);
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 
 static LOGICAL_HANDLES: Lazy<RwLock<HashSet<u64>>> = Lazy::new(|| RwLock::new(HashSet::new()));
+
+static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Register a callback used to clear residency tracking when GPU tensors are
 /// gathered back to the host. Backends that maintain residency metadata should
@@ -22,6 +25,29 @@ pub fn register_residency_clear(handler: ResidencyClearFn) {
 pub fn clear_residency(handle: &GpuTensorHandle) {
     if let Some(handler) = RESIDENCY_CLEAR.get() {
         handler(handle);
+    }
+}
+
+/// Record the precision associated with a GPU tensor handle so host operations can
+/// reconstruct the original dtype when gathering back to the CPU.
+pub fn set_handle_precision(handle: &GpuTensorHandle, precision: ProviderPrecision) {
+    if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
+        guard.insert(handle.buffer_id, precision);
+    }
+}
+
+/// Look up the recorded precision for a GPU tensor handle, if any.
+pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
+    HANDLE_PRECISIONS
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+}
+
+/// Clear any recorded precision metadata for a GPU tensor handle.
+pub fn clear_handle_precision(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
+        guard.remove(&handle.buffer_id);
     }
 }
 
@@ -623,6 +649,25 @@ pub struct ProviderIirFilterResult {
 pub struct ProviderMoments2 {
     pub mean: GpuTensorHandle,
     pub ex2: GpuTensorHandle,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderDispatchStats {
+    /// Number of GPU dispatches recorded for this category.
+    pub count: u64,
+    /// Accumulated wall-clock time of dispatches in nanoseconds (host measured).
+    pub total_wall_time_ns: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProviderTelemetry {
+    pub fused_elementwise: ProviderDispatchStats,
+    pub fused_reduction: ProviderDispatchStats,
+    pub matmul: ProviderDispatchStats,
+    pub upload_bytes: u64,
+    pub download_bytes: u64,
+    pub fusion_cache_hits: u64,
+    pub fusion_cache_misses: u64,
 }
 
 /// Device/provider interface that backends implement and register into the runtime layer
@@ -1244,6 +1289,16 @@ pub trait AccelProvider: Send + Sync {
         }
         Err(anyhow::anyhow!("matmul_epilogue not supported by provider"))
     }
+    fn matmul_power_step(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+        _epilogue: &PowerStepEpilogue,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "matmul_power_step normalization not supported by provider"
+        ))
+    }
     fn linsolve(
         &self,
         _lhs: &GpuTensorHandle,
@@ -1495,7 +1550,9 @@ pub trait AccelProvider: Send + Sync {
         _a: &GpuTensorHandle,
         _dims_zero_based: &[usize],
     ) -> anyhow::Result<ProviderMoments2> {
-        Err(anyhow::anyhow!("reduce_moments_nd not supported by provider"))
+        Err(anyhow::anyhow!(
+            "reduce_moments_nd not supported by provider"
+        ))
     }
     fn reduce_mean_dim(
         &self,
@@ -1665,6 +1722,23 @@ pub trait AccelProvider: Send + Sync {
     fn last_warmup_millis(&self) -> Option<u64> {
         None
     }
+
+    /// Returns a snapshot of provider telemetry counters if supported.
+    fn telemetry_snapshot(&self) -> ProviderTelemetry {
+        let (hits, misses) = self.fused_cache_counters();
+        ProviderTelemetry {
+            fused_elementwise: ProviderDispatchStats::default(),
+            fused_reduction: ProviderDispatchStats::default(),
+            matmul: ProviderDispatchStats::default(),
+            upload_bytes: 0,
+            download_bytes: 0,
+            fusion_cache_hits: hits,
+            fusion_cache_misses: misses,
+        }
+    }
+
+    /// Reset all telemetry counters maintained by the provider, if supported.
+    fn reset_telemetry(&self) {}
 
     /// Default reduction workgroup size the provider prefers.
     fn default_reduction_workgroup_size(&self) -> u32 {
@@ -1889,6 +1963,18 @@ pub struct MatmulEpilogue {
     pub row_op: ScaleOp,
     /// Column scale operation (multiply or divide). Ignored when `col_scale` is None.
     pub col_op: ScaleOp,
+    /// Optional lower clamp bound applied after scale/bias.
+    #[serde(default)]
+    pub clamp_min: Option<f64>,
+    /// Optional upper clamp bound applied after scale/bias.
+    #[serde(default)]
+    pub clamp_max: Option<f64>,
+    /// Optional power exponent applied after clamp (final operation in the epilogue).
+    #[serde(default)]
+    pub pow_exponent: Option<f64>,
+    /// Optional output buffer for the diagonal of the result (length min(m, n)).
+    #[serde(default)]
+    pub diag_output: Option<GpuTensorHandle>,
 }
 
 impl MatmulEpilogue {
@@ -1900,6 +1986,10 @@ impl MatmulEpilogue {
             col_scale: None,
             row_op: ScaleOp::Multiply,
             col_op: ScaleOp::Multiply,
+            clamp_min: None,
+            clamp_max: None,
+            pow_exponent: None,
+            diag_output: None,
         }
     }
     pub fn is_noop(&self) -> bool {
@@ -1907,5 +1997,20 @@ impl MatmulEpilogue {
             && self.beta == 0.0
             && self.row_scale.is_none()
             && self.col_scale.is_none()
+            && self.clamp_min.is_none()
+            && self.clamp_max.is_none()
+            && self.pow_exponent.is_none()
+            && self.diag_output.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PowerStepEpilogue {
+    pub epsilon: f64,
+}
+
+impl Default for PowerStepEpilogue {
+    fn default() -> Self {
+        Self { epsilon: 0.0 }
     }
 }

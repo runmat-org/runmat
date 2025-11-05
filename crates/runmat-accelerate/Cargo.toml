@@ -37,3 +37,6 @@ pollster = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tempfile = "3.12"
+runmat-ignition = { workspace = true }
+runmat-parser = { workspace = true }
+runmat-hir = { workspace = true }

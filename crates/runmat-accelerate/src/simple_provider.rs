@@ -270,11 +270,12 @@ impl InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, data);
-        GpuTensorHandle {
+        let handle = GpuTensorHandle {
             shape,
             device_id: 0,
             buffer_id: id,
-        }
+        };
+        handle
     }
 
     fn load_polynomial(&self, handle: &GpuTensorHandle) -> Result<(Vec<f64>, PolyOrientation)> {
@@ -1242,6 +1243,7 @@ impl AccelProvider for InProcessProvider {
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_logical(h);
+        runmat_accelerate_api::clear_handle_precision(h);
         Ok(())
     }
 
@@ -1258,6 +1260,12 @@ impl AccelProvider for InProcessProvider {
             backend: Some("inprocess".to_string()),
         }
     }
+
+    fn telemetry_snapshot(&self) -> runmat_accelerate_api::ProviderTelemetry {
+        runmat_accelerate_api::ProviderTelemetry::default()
+    }
+
+    fn reset_telemetry(&self) {}
 
     fn sort_rows(
         &self,
@@ -4522,26 +4530,42 @@ impl AccelProvider for InProcessProvider {
         // Load optional scales from registry
         let row_scale: Option<Vec<f64>> = if let Some(ref h) = ep.row_scale {
             let guard = registry().lock().unwrap();
-            Some(
-                guard
-                    .get(&h.buffer_id)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("matmul_epilogue: unknown row scale buffer {}", h.buffer_id))?,
-            )
+            Some(guard.get(&h.buffer_id).cloned().ok_or_else(|| {
+                anyhow!("matmul_epilogue: unknown row scale buffer {}", h.buffer_id)
+            })?)
         } else {
             None
         };
         let col_scale: Option<Vec<f64>> = if let Some(ref h) = ep.col_scale {
             let guard = registry().lock().unwrap();
-            Some(
-                guard
-                    .get(&h.buffer_id)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("matmul_epilogue: unknown col scale buffer {}", h.buffer_id))?,
-            )
+            Some(guard.get(&h.buffer_id).cloned().ok_or_else(|| {
+                anyhow!("matmul_epilogue: unknown col scale buffer {}", h.buffer_id)
+            })?)
         } else {
             None
         };
+        let mut diag_output: Option<Vec<f64>> = if let Some(ref h) = ep.diag_output {
+            let guard = registry().lock().unwrap();
+            let vec = guard.get(&h.buffer_id).cloned().ok_or_else(|| {
+                anyhow!(
+                    "matmul_epilogue: unknown diag output buffer {}",
+                    h.buffer_id
+                )
+            })?;
+            Some(vec)
+        } else {
+            None
+        };
+        if let Some(ref diag) = diag_output {
+            let expected = rows.min(cols);
+            if diag.len() < expected {
+                return Err(anyhow!(
+                    "matmul_epilogue: diag_output length {} insufficient for diag size {}",
+                    diag.len(),
+                    expected
+                ));
+            }
+        }
 
         // Apply epilogue: alpha/beta, then per-row/col scales (matches GPU epilogue ordering)
         for j in 0..cols {
@@ -4562,11 +4586,71 @@ impl AccelProvider for InProcessProvider {
                         runmat_accelerate_api::ScaleOp::Divide => v / s,
                     };
                 }
+                if let Some(min_v) = ep.clamp_min {
+                    v = v.max(min_v);
+                }
+                if let Some(max_v) = ep.clamp_max {
+                    v = v.min(max_v);
+                }
+                if let Some(pow_v) = ep.pow_exponent {
+                    v = v.powf(pow_v);
+                }
+                if let Some(ref mut diag) = diag_output {
+                    if i == j && i < diag.len() {
+                        diag[i] = v;
+                    }
+                }
                 data[idx] = v;
             }
         }
 
         // Replace buffer contents with epilogued data
+        {
+            let mut guard = registry().lock().unwrap();
+            guard.insert(base.buffer_id, data);
+            if let Some(vec) = diag_output {
+                if let Some(ref h) = ep.diag_output {
+                    guard.insert(h.buffer_id, vec);
+                }
+            }
+        }
+        Ok(base)
+    }
+
+    fn matmul_power_step(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        ep: &runmat_accelerate_api::PowerStepEpilogue,
+    ) -> Result<GpuTensorHandle> {
+        let base = self.matmul(lhs, rhs)?;
+        let rows = base.shape[0];
+        let cols = base.shape[1];
+        let mut data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&base.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("matmul_power_step: unknown buffer {}", base.buffer_id))?
+        };
+        let mut norms = vec![0.0f64; cols];
+        for col in 0..cols {
+            let mut acc = 0.0f64;
+            for row in 0..rows {
+                let idx = row + col * rows;
+                let val = data[idx];
+                acc += val * val;
+            }
+            acc += ep.epsilon;
+            norms[col] = acc.sqrt();
+        }
+        for col in 0..cols {
+            let norm = norms[col];
+            for row in 0..rows {
+                let idx = row + col * rows;
+                data[idx] /= norm;
+            }
+        }
         {
             let mut guard = registry().lock().unwrap();
             guard.insert(base.buffer_id, data);

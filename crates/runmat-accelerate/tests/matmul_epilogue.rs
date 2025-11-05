@@ -49,14 +49,13 @@ fn matmul_epilogue_row_col_alpha_beta() {
     let hrow = p.upload(&HostTensorView { data: &row_scale, shape: &[ar, 1] }).expect("row scale");
     let hcol = p.upload(&HostTensorView { data: &col_scale, shape: &[1, bc] }).expect("col scale");
 
-    let ep = MatmulEpilogue {
-        alpha: 1.25,
-        beta: -0.5,
-        row_scale: Some(hrow.clone()),
-        col_scale: Some(hcol.clone()),
-        row_op: ScaleOp::Multiply,
-        col_op: ScaleOp::Multiply,
-    };
+    let mut ep = MatmulEpilogue::noop();
+    ep.alpha = 1.25;
+    ep.beta = -0.5;
+    ep.row_scale = Some(hrow.clone());
+    ep.col_scale = Some(hcol.clone());
+    ep.row_op = ScaleOp::Multiply;
+    ep.col_op = ScaleOp::Multiply;
 
     let hc = p.matmul_epilogue(&ha, &hb, &ep).expect("matmul_epilogue");
     let host = p.download(&hc).expect("download");
@@ -111,6 +110,44 @@ fn matmul_epilogue_col_divide() {
     // Expected: identity matmul gives A, then divide each column by denom
     let expected: Vec<f64> = vec![a[0]/2.0, a[1]/2.0, a[2]/4.0, a[3]/4.0];
     for i in 0..expected.len() { assert!((host.data[i]-expected[i]).abs() < 1e-9); }
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn matmul_epilogue_clamp_pow() {
+    let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
+    let p = runmat_accelerate_api::provider().expect("provider");
+
+    // Simple 2x2 matmul with known output
+    let a: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0]; // 2x2
+    let b: Vec<f64> = vec![2.0, 0.0, 0.0, 2.0]; // 2x2 diagonal scale
+    let ha = p.upload(&HostTensorView { data: &a, shape: &[2, 2] }).expect("upload A");
+    let hb = p.upload(&HostTensorView { data: &b, shape: &[2, 2] }).expect("upload B");
+
+    let mut ep = MatmulEpilogue::noop();
+    ep.alpha = 1.0;
+    ep.beta = 0.0;
+    ep.clamp_min = Some(4.0);
+    ep.clamp_max = Some(10.0);
+    ep.pow_exponent = Some(2.0);
+
+    let hc = p.matmul_epilogue(&ha, &hb, &ep).expect("matmul_epilogue");
+    let host = p.download(&hc).expect("download");
+    assert_eq!(host.shape, vec![2, 2]);
+
+    // CPU reference: pow(clamp(matmul, [4,10]), 2)
+    let base = cpu_matmul(&a, 2, 2, &b, 2, 2);
+    let mut expected = vec![0.0; base.len()];
+    for (idx, val) in base.iter().enumerate() {
+        let clamped = val.max(4.0).min(10.0);
+        expected[idx] = clamped.powf(2.0);
+    }
+    for idx in 0..expected.len() {
+        let got = host.data[idx];
+        let want = expected[idx];
+        let diff = (got - want).abs();
+        assert!(diff < 1e-8, "clamp+pow mismatch at {}: got={} want={} diff={}", idx, got, want, diff);
+    }
 }
 
 

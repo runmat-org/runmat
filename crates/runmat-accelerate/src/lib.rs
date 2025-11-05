@@ -20,6 +20,7 @@ mod host_lu;
 pub mod native_auto;
 pub mod simple_provider;
 mod sortrows_host;
+pub mod telemetry;
 pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
@@ -401,8 +402,10 @@ impl Accelerator {
     pub fn elementwise_add(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
         match (a, b) {
             (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
-                ExecutionTarget::Cpu => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
-                    .map_err(|e| anyhow::anyhow!(e)),
+                ExecutionTarget::Cpu => {
+                    runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
+                        .map_err(|e| anyhow::anyhow!(e))
+                }
                 ExecutionTarget::Gpu(_) => {
                     let bk = self
                         .planner

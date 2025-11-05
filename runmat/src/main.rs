@@ -252,7 +252,14 @@ enum Commands {
     /// Show system information
     Info,
     /// Show acceleration provider information
-    AccelInfo,
+    AccelInfo {
+        /// Output provider information and telemetry as JSON
+        #[arg(long)]
+        json: bool,
+        /// Reset provider telemetry counters after printing
+        #[arg(long)]
+        reset: bool,
+    },
 
     /// Garbage collection utilities
     Gc {
@@ -820,7 +827,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
             Ok(())
         }
         Commands::Info => show_system_info(cli).await,
-        Commands::AccelInfo => show_accel_info().await,
+        Commands::AccelInfo { json, reset } => show_accel_info(json, reset).await,
         Commands::Gc { gc_command } => execute_gc_command(gc_command).await,
         Commands::Benchmark {
             file,
@@ -1853,39 +1860,93 @@ async fn show_system_info(cli: &Cli) -> Result<()> {
 }
 
 #[cfg(feature = "wgpu")]
-async fn show_accel_info() -> Result<()> {
-    println!("Acceleration Provider Info");
-    println!("==========================");
+async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
     if let Some(p) = runmat_accelerate_api::provider() {
         let info = p.device_info_struct();
-        println!(
-            "Device: {} ({})",
-            info.name,
-            info.backend.unwrap_or_default()
-        );
-        //
-        #[allow(unused_variables)]
-        let (hits, misses) = p.fused_cache_counters();
-        println!("Fused pipeline cache: hits={}, misses={}", hits, misses);
-        println!(
-            "Reduction defaults: two_pass_threshold={}, workgroup_size={} (overridable via RUNMAT_TWO_PASS_THRESHOLD / RUNMAT_REDUCTION_WG)",
-            p.two_pass_threshold(),
-            p.default_reduction_workgroup_size()
-        );
-        if let Some(ms) = p.last_warmup_millis() {
-            println!("Warmup: last duration ~{} ms", ms);
+        let telemetry = p.telemetry_snapshot();
+
+        if json {
+            let payload = serde_json::json!({
+                "device": info,
+                "telemetry": telemetry,
+            });
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+        } else {
+            println!("Acceleration Provider Info");
+            println!("==========================");
+            println!(
+                "Device: {} ({})",
+                info.name,
+                info.backend.clone().unwrap_or_default()
+            );
+            println!(
+                "Fused pipeline cache: hits={}, misses={}",
+                telemetry.fusion_cache_hits, telemetry.fusion_cache_misses
+            );
+            println!(
+                "Reduction defaults: two_pass_threshold={}, workgroup_size={} (overridable via RUNMAT_TWO_PASS_THRESHOLD / RUNMAT_REDUCTION_WG)",
+                p.two_pass_threshold(),
+                p.default_reduction_workgroup_size()
+            );
+            if let Some(ms) = p.last_warmup_millis() {
+                println!("Warmup: last duration ~{} ms", ms);
+            }
+            let to_ms = |ns: u64| ns as f64 / 1_000_000.0;
+            println!("Telemetry:");
+            println!(
+                "  uploads: {} bytes, downloads: {} bytes",
+                telemetry.upload_bytes, telemetry.download_bytes
+            );
+            println!(
+                "  fused_elementwise: count={} wall_ms={:.3}",
+                telemetry.fused_elementwise.count,
+                to_ms(telemetry.fused_elementwise.total_wall_time_ns)
+            );
+            println!(
+                "  fused_reduction: count={} wall_ms={:.3}",
+                telemetry.fused_reduction.count,
+                to_ms(telemetry.fused_reduction.total_wall_time_ns)
+            );
+            println!(
+                "  matmul: count={} wall_ms={:.3}",
+                telemetry.matmul.count,
+                to_ms(telemetry.matmul.total_wall_time_ns)
+            );
         }
+
+        if reset {
+            p.reset_telemetry();
+        }
+    } else if json {
+        let payload = serde_json::json!({
+            "device": serde_json::Value::Null,
+            "telemetry": serde_json::Value::Null,
+            "error": "no acceleration provider registered",
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
+        println!("Acceleration Provider Info");
+        println!("==========================");
         println!("No acceleration provider registered");
     }
+
     Ok(())
 }
 
 #[cfg(not(feature = "wgpu"))]
-async fn show_accel_info() -> Result<()> {
-    println!("Acceleration Provider Info");
-    println!("==========================");
-    println!("This build was compiled without the 'wgpu' feature. No GPU provider available.");
+async fn show_accel_info(json: bool, _reset: bool) -> Result<()> {
+    if json {
+        let payload = serde_json::json!({
+            "device": serde_json::Value::Null,
+            "telemetry": serde_json::Value::Null,
+            "error": "wgpu feature not enabled",
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!("Acceleration Provider Info");
+        println!("==========================");
+        println!("This build was compiled without the 'wgpu' feature. No GPU provider available.");
+    }
     Ok(())
 }
 
