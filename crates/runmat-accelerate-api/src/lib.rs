@@ -9,9 +9,19 @@ type ResidencyClearFn = fn(&GpuTensorHandle);
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 
 static LOGICAL_HANDLES: Lazy<RwLock<HashSet<u64>>> = Lazy::new(|| RwLock::new(HashSet::new()));
+static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<u64, u64>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransposeInfo {
+    pub base_rows: usize,
+    pub base_cols: usize,
+}
 
 /// Register a callback used to clear residency tracking when GPU tensors are
 /// gathered back to the host. Backends that maintain residency metadata should
@@ -57,8 +67,14 @@ pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
     if let Ok(mut guard) = LOGICAL_HANDLES.write() {
         if logical {
             guard.insert(handle.buffer_id);
+            if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
+                *hits.entry(handle.buffer_id).or_insert(0) += 1;
+            }
         } else {
             guard.remove(&handle.buffer_id);
+            if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
+                hits.remove(&handle.buffer_id);
+            }
         }
     }
 }
@@ -74,6 +90,46 @@ pub fn handle_is_logical(handle: &GpuTensorHandle) -> bool {
         .read()
         .map(|guard| guard.contains(&handle.buffer_id))
         .unwrap_or(false)
+}
+
+pub fn handle_logical_hits(buffer_id: u64) -> Option<u64> {
+    LOGICAL_HANDLE_HITS
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&buffer_id).copied())
+}
+
+pub fn record_handle_transpose(
+    handle: &GpuTensorHandle,
+    base_rows: usize,
+    base_cols: usize,
+) {
+    if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
+        guard.insert(
+            handle.buffer_id,
+            TransposeInfo {
+                base_rows,
+                base_cols,
+            },
+        );
+    }
+}
+
+pub fn clear_handle_transpose(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
+        guard.remove(&handle.buffer_id);
+    }
+}
+
+pub fn handle_transpose_info(handle: &GpuTensorHandle) -> Option<TransposeInfo> {
+    TRANSPOSED_HANDLES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+}
+
+pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
+    handle_transpose_info(handle).is_some()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -668,6 +724,8 @@ pub struct ProviderTelemetry {
     pub download_bytes: u64,
     pub fusion_cache_hits: u64,
     pub fusion_cache_misses: u64,
+    pub bind_group_cache_hits: u64,
+    pub bind_group_cache_misses: u64,
 }
 
 /// Device/provider interface that backends implement and register into the runtime layer
@@ -1747,6 +1805,8 @@ pub trait AccelProvider: Send + Sync {
             download_bytes: 0,
             fusion_cache_hits: hits,
             fusion_cache_misses: misses,
+            bind_group_cache_hits: 0,
+            bind_group_cache_misses: 0,
         }
     }
 

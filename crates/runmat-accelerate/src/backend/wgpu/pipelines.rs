@@ -31,6 +31,8 @@ const KRON_SHADER_F64: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F
 const KRON_SHADER_F32: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F32;
 const MATMUL_SHADER_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F64;
 const MATMUL_SHADER_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F32;
+const MATMUL_SHADER_VEC4_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_VEC4_F64;
+const MATMUL_SHADER_VEC4_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_VEC4_F32;
 const MATMUL_EPILOGUE_SHADER_F64: &str =
     crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64;
 const MATMUL_EPILOGUE_SHADER_F32: &str =
@@ -142,6 +144,7 @@ pub struct WgpuPipelines {
     pub repmat: PipelineBundle,
     pub kron: PipelineBundle,
     pub matmul: PipelineBundle,
+    pub matmul_vec4: PipelineBundle,
     pub matmul_smallk: PipelineBundle,
     pub matmul_epilogue: PipelineBundle,
     pub syrk: PipelineBundle,
@@ -501,6 +504,23 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => MATMUL_SHADER_F64,
                 NumericPrecision::F32 => MATMUL_SHADER_F32,
+            },
+        );
+
+        let matmul_vec4 = create_pipeline(
+            device,
+            "runmat-matmul-vec4-layout",
+            "runmat-matmul-vec4-shader",
+            "runmat-matmul-vec4-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => MATMUL_SHADER_VEC4_F64,
+                NumericPrecision::F32 => MATMUL_SHADER_VEC4_F32,
             },
         );
 
@@ -923,6 +943,7 @@ impl WgpuPipelines {
             repmat,
             kron,
             matmul,
+            matmul_vec4,
             matmul_smallk,
             matmul_epilogue,
             syrk,

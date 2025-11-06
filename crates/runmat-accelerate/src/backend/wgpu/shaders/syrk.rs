@@ -213,3 +213,5 @@ fn main(
     }
 }
 "#;
+
+pub const SYRK_SHADER_VEC4_F64: &str = SYRK_SHADER_F64;

@@ -50,7 +50,7 @@ pub struct Conv1dParams {
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct FusionParams {
     pub len: u32,
-    pub _pad0: u32,
+    pub offset: u32,
     pub _pad1: u32,
     pub _pad2: u32,
 }
@@ -328,8 +328,11 @@ pub struct MatmulParams {
     pub offset_a: u32,
     pub offset_b: u32,
     pub offset_out: u32,
-    pub _pad: u32,
+    pub flags: u32,
 }
+
+pub const MATMUL_FLAG_TRANSPOSE_A: u32 = 1 << 0;
+pub const MATMUL_FLAG_TRANSPOSE_B: u32 = 1 << 1;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -402,7 +405,7 @@ pub struct SyrkParams {
     pub row_offset: u32,
     pub chunk_rows: u32,
     pub flags: u32,
-    pub _pad: u32,
+    pub offset_out: u32,
 }
 
 pub const SYRK_FLAG_ACCUMULATE: u32 = 1 << 0;

@@ -6,7 +6,7 @@ use crate::graph;
 use crate::graph::{ShapeInfo, ValueId};
 use runmat_accelerate_api::{
     provider, AccelProvider, CovRows, CovarianceOptions, GpuTensorHandle, HostTensorView,
-    PowerStepEpilogue, ProviderPrecision,
+    ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision,
 };
 use runmat_builtins::Value;
 
@@ -397,11 +397,18 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
         return Err(anyhow!("explained variance: G must be 2-D"));
     }
     if g_shape[0] != q_rows || g_shape[1] != q_rows {
+        return Err(anyhow!("explained variance: G shape mismatch"));
+    }
+
+    let mut tmp = provider.matmul(&q_handle, &g_handle)?;
+    let tmp_shape = tmp.shape.clone();
+    if tmp_shape.len() < 2 {
+        return Err(anyhow!("explained variance: intermediate must be 2-D"));
+    }
+    if tmp_shape[0] != q_cols {        
         return Err(anyhow!(
-            "explained variance: expected G shape [{} x {}], got {:?}",
-            q_rows,
-            q_rows,
-            g_shape
+            "explained variance: expected intermediate rows {}, got {}",
+            q_cols, tmp_shape[0]
         ));
     }
 
@@ -412,7 +419,7 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
     transposed_shape.swap(0, 1);
     let q_transposed_view = provider.reshape(&q_handle, &transposed_shape)?;
 
-    let tmp = provider.matmul(&q_transposed_view, &g_handle)?;
+    tmp = provider.matmul(&q_transposed_view, &g_handle)?;
 
     // Restore Q's original shape before the second multiplication.
     q_handle = provider.reshape(&q_handle, &q_shape)?;
@@ -440,7 +447,6 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
 
     let _ = provider.free(&tmp);
     let _ = provider.free(&product);
-
     if let Some(temp) = q_owned {
         let _ = provider.free(&temp);
     }
@@ -450,6 +456,59 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
 
     fusion_residency::mark(&diag);
     Ok(Value::GpuTensor(diag))
+}
+
+pub fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    crate::ensure_residency_hooks();
+    if request.plan.group.kind != FusionKind::ImageNormalize {
+        return Err(anyhow!("unsupported fusion kind"));
+    }
+    let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let (input_vid, epsilon, gain, bias, gamma) = match request.plan.pattern.as_ref() {
+        Some(FusionPattern::ImageNormalize {
+            input,
+            epsilon,
+            gain,
+            bias,
+            gamma,
+        }) => (*input, *epsilon, *gain, *bias, *gamma),
+        _ => return Err(anyhow!("image normalize: missing pattern metadata")),
+    };
+
+    let input_index = request
+        .plan
+        .inputs
+        .iter()
+        .position(|vid| *vid == input_vid)
+        .ok_or_else(|| anyhow!("image normalize: input not found"))?;
+
+    let input_value = request
+        .inputs
+        .get(input_index)
+        .ok_or_else(|| anyhow!("image normalize: runtime input missing"))?;
+
+    let (input_handle, owned_input) = ensure_gpu_tensor(provider, input_value)?;
+    if input_handle.shape.len() != 3 {
+        return Err(anyhow!("image normalize: expected 3-D tensor input"));
+    }
+    let desc = ImageNormalizeDescriptor {
+        batch: input_handle.shape[0],
+        height: input_handle.shape[1],
+        width: input_handle.shape[2],
+        epsilon,
+        gain,
+        bias,
+        gamma,
+    };
+
+    let output = provider.image_normalize(&input_handle, &desc)?;
+
+    if let Some(temp) = owned_input {
+        let _ = provider.free(&temp);
+    }
+
+    fusion_residency::mark(&output);
+    Ok(Value::GpuTensor(output))
 }
 
 pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Value> {

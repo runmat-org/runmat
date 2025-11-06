@@ -4,8 +4,8 @@ use crate::instr::Instr;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram, execute_elementwise, execute_explained_variance,
-    execute_matmul_epilogue, execute_power_step_normalize, execute_reduction,
-    FusionExecutionRequest,
+    execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
+    execute_reduction, FusionExecutionRequest,
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
@@ -9877,6 +9877,16 @@ fn try_execute_fusion_group(
                 Err(err.to_string())
             }
         }
+    } else if plan.group.kind == FusionKind::ImageNormalize {
+        match execute_image_normalize(request) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }        
     } else {
         // Unknown fusion kind; restore stack and report
         for value in consumed.into_iter().rev() {
