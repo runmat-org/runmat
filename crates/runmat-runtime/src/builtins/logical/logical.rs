@@ -183,7 +183,7 @@ See the references below and the RunMat source for implementation details.
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/logical/logical.rs`
-- Issues & feature requests: <https://github.com/runmat-org/runmat/issues/new/choose>
+- Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

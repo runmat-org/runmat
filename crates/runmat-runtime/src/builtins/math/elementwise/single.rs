@@ -202,7 +202,7 @@ implementation.
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/elementwise/single.rs`
-- Issues & feature requests: <https://github.com/runmat-org/runmat/issues/new/choose>
+- Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
