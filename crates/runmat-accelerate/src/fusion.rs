@@ -527,7 +527,6 @@ impl FusionGroupPlan {
 
                     if let Some(constant) = maybe_constant.clone() {
                         constants.insert(input_idx, constant);
-                        stack_pattern.push(input_idx);
                     } else if !is_variable && newly_added {
                         stack_pattern.push(input_idx);
                     } else if !is_variable
@@ -537,8 +536,6 @@ impl FusionGroupPlan {
                             Some(ValueOrigin::Constant)
                         )
                     {
-                    } else if !is_variable && newly_added {
-                        stack_pattern.push(input_idx);
                     }
                 }
             }
@@ -1741,7 +1738,7 @@ mod tests {
         AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan,
         PrimitiveOp, ValueId, ValueInfo, ValueOrigin, VarKind,
     };
-    use runmat_builtins::Type;
+    use runmat_builtins::{Type, Value};
     use std::collections::HashMap as StdHashMap;
 
     fn simple_elementwise_graph() -> AccelGraph {
@@ -1841,7 +1838,7 @@ mod tests {
             origin: ValueOrigin::Constant,
             ty: Type::tensor(),
             shape: ShapeInfo::Tensor(vec![Some(4)]),
-            constant: None,
+            constant: Some(Value::Num(1.0)),
         });
         values.push(ValueInfo {
             id: 2,
@@ -1888,8 +1885,9 @@ mod tests {
         let plan = FusionPlan::from_graph(&graph, &groups);
         let group_plan = &plan.groups[0];
         assert_eq!(group_plan.inputs.len(), 2);
-        assert_eq!(group_plan.stack_pattern.len(), 1);
-        assert!(group_plan.stack_pattern.iter().all(|idx| *idx == 1));
+        assert!(group_plan.stack_pattern.is_empty());
+        assert!(group_plan.constants.get(&1).is_some());
+        assert!(group_plan.const_values.contains_key(&1));
     }
 
     #[test]

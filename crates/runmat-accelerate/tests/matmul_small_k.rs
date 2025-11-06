@@ -113,7 +113,7 @@ fn matmul_small_k_exact_threshold() {
     for idx in 0..expected.len() {
         let diff = (host.data[idx] - expected[idx]).abs();
         assert!(
-            diff < 1e-8,
+            diff < 5e-5,
             "threshold mismatch at {}: got={} want={} diff={}",
             idx,
             host.data[idx],

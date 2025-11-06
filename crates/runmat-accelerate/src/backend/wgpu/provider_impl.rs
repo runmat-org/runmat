@@ -56,7 +56,8 @@ use crate::backend::wgpu::config::{DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESH
 use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
     DiffParams, FilterParams, ImageNormalizeUniforms, SymmetryParamsF32, SymmetryParamsF64,
-    IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA,
+    SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA,
+    SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::types::NumericPrecision;
@@ -5391,6 +5392,97 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(out_buffer, out_shape, len))
     }
 
+    pub(crate) fn syrk_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        if entry.shape.len() != 2 {
+            return Err(anyhow!("syrk: only 2D tensors supported"));
+        }
+        let rows = entry.shape[0];
+        let cols = entry.shape[1];
+        let out_shape = vec![cols, cols];
+        let len = cols
+            .checked_mul(cols)
+            .ok_or_else(|| anyhow!("syrk: output size overflow"))?;
+
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-syrk-out")?;
+        if len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+        }
+
+        let rows_u32 = u32::try_from(rows)
+            .map_err(|_| anyhow!("syrk: row count exceeds GPU limits"))?;
+        let cols_u32 = u32::try_from(cols)
+            .map_err(|_| anyhow!("syrk: column count exceeds GPU limits"))?;
+        let lda_u32 = rows_u32;
+        let ldc_u32 = cols_u32;
+
+        let tile = crate::backend::wgpu::config::effective_matmul_tile();
+        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(cols_u32, tile);
+        let groups_y = groups_x;
+
+        let mut offset = 0usize;
+        let mut first_chunk = true;
+        while offset < rows {
+            let remaining = rows - offset;
+            let chunk_rows = remaining;
+            let chunk_rows_u32 = u32::try_from(chunk_rows)
+                .map_err(|_| anyhow!("syrk: chunk rows exceed GPU limits"))?;
+            let row_offset_u32 = u32::try_from(offset)
+                .map_err(|_| anyhow!("syrk: row offset exceeds GPU limits"))?;
+
+            let mut flags = SYRK_FLAG_FILL_BOTH;
+            if !first_chunk {
+                flags |= SYRK_FLAG_ACCUMULATE;
+            }
+
+            let params = SyrkParams {
+                rows_total: rows_u32,
+                cols: cols_u32,
+                lda: lda_u32,
+                ldc: ldc_u32,
+                row_offset: row_offset_u32,
+                chunk_rows: chunk_rows_u32,
+                flags,
+                _pad: 0,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-syrk-params");
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-syrk-bind"),
+                    layout: &self.pipelines.syrk.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+
+            crate::backend::wgpu::dispatch::syrk::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.syrk.pipeline,
+                &bind_group,
+                groups_x,
+                groups_y,
+            );
+
+            offset += chunk_rows;
+            first_chunk = false;
+        }
+
+        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
+    }
+
     pub(crate) fn matmul_exec(
         &self,
         a: &GpuTensorHandle,
@@ -10634,6 +10726,10 @@ impl AccelProvider for WgpuProvider {
         self.matmul_exec(a, b)
     }
 
+    fn syrk(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.syrk_exec(a)
+    }
+
     fn matmul_epilogue(
         &self,
         a: &GpuTensorHandle,
@@ -10688,7 +10784,6 @@ impl AccelProvider for WgpuProvider {
         let has_row = ep.row_scale.is_some();
         let has_col = ep.col_scale.is_some();
         let dummy_rowcol = self.create_storage_buffer(1, "runmat-matmul-epilogue-dummy-scale");
-        let dummy_diag = self.create_storage_buffer(1, "runmat-matmul-epilogue-dummy-diag");
         let row_buf = match &ep.row_scale {
             Some(h) => self.get_entry(h)?.buffer.clone(),
             None => dummy_rowcol.clone(),
@@ -10698,25 +10793,13 @@ impl AccelProvider for WgpuProvider {
             None => dummy_rowcol.clone(),
         };
 
-        let (diag_buf, diag_rows, diag_stride, diag_offset, has_diag) = match &ep.diag_output {
-            Some(handle) => {
-                let entry = self.get_entry(handle)?;
-                if entry.shape.len() > 2 {
-                    return Err(anyhow!(
-                        "matmul_epilogue: diag_output must be 1D or 2D vector"
-                    ));
-                }
-                let expected_len = std::cmp::min(m, n);
-                if entry.len < expected_len {
-                    return Err(anyhow!(
-                        "matmul_epilogue: diag_output length {} insufficient for diag size {}",
-                        entry.len,
-                        expected_len
-                    ));
-                }
-                (entry.buffer.clone(), expected_len as u32, 1u32, 0u32, true)
+        let (diag_rows, diag_stride, diag_offset, has_diag) = match &ep.diag_output {
+            Some(_) => {
+                return Err(anyhow!(
+                    "matmul_epilogue: diag_output is not supported by the WGPU provider yet"
+                ));
             }
-            None => (dummy_diag.clone(), 0u32, 1u32, 0u32, false),
+            None => (0u32, 1u32, 0u32, false),
         };
 
         let mut flags: u32 = 0;
@@ -10863,10 +10946,6 @@ impl AccelProvider for WgpuProvider {
                     wgpu::BindGroupEntry {
                         binding: 6,
                         resource: ep_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: diag_buf.as_ref().as_entire_binding(),
                     },
                 ],
             });

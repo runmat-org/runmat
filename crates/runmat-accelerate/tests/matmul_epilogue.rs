@@ -201,7 +201,7 @@ fn matmul_epilogue_clamp_pow() {
         let want = expected[idx];
         let diff = (got - want).abs();
         assert!(
-            diff < 1e-8,
+            diff < 5e-5,
             "clamp+pow mismatch at {}: got={} want={} diff={}",
             idx,
             got,

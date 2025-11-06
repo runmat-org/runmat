@@ -34,7 +34,7 @@ fn main(
     let global_col = wid.x * tile + lid.x;
     let cols = params.cols;
 
-    let active = global_row < cols && global_col < cols && global_row <= global_col;
+    let is_active = global_row < cols && global_col < cols && global_row <= global_col;
 
     let rows_total = params.rows_total;
     let row_offset = params.row_offset;
@@ -62,7 +62,7 @@ fn main(
 
         workgroupBarrier();
 
-        if (active) {
+        if (is_active) {
             for (var p: u32 = 0u; p < tile; p = p + 1u) {
                 let a_val = tile_left[lid.y][p];
                 let b_val = tile_right[p][lid.x];
@@ -73,7 +73,7 @@ fn main(
         workgroupBarrier();
     }
 
-    if (!active) {
+    if (!is_active) {
         return;
     }
 
@@ -90,19 +90,17 @@ fn main(
         }
     }
 
-    let upper_val = if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
-        upper_prev + partial
-    } else {
-        partial
-    };
+    var upper_val: f64 = partial;
+    if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
+        upper_val = upper_prev + partial;
+    }
     Out.data[upper_index] = upper_val;
 
     if ((params.flags & SYRK_FLAG_FILL_BOTH) != 0u && global_row != global_col) {
-        let lower_val = if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
-            lower_prev + partial
-        } else {
-            partial
-        };
+        var lower_val: f64 = partial;
+        if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
+            lower_val = lower_prev + partial;
+        }
         Out.data[lower_index] = lower_val;
     }
 }
@@ -144,7 +142,7 @@ fn main(
     let global_col = wid.x * tile + lid.x;
     let cols = params.cols;
 
-    let active = global_row < cols && global_col < cols && global_row <= global_col;
+    let is_active = global_row < cols && global_col < cols && global_row <= global_col;
 
     let rows_total = params.rows_total;
     let row_offset = params.row_offset;
@@ -172,7 +170,7 @@ fn main(
 
         workgroupBarrier();
 
-        if (active) {
+        if (is_active) {
             for (var p: u32 = 0u; p < tile; p = p + 1u) {
                 let a_val = tile_left[lid.y][p];
                 let b_val = tile_right[p][lid.x];
@@ -183,7 +181,7 @@ fn main(
         workgroupBarrier();
     }
 
-    if (!active) {
+    if (!is_active) {
         return;
     }
 
@@ -200,19 +198,17 @@ fn main(
         }
     }
 
-    let upper_val = if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
-        upper_prev + partial
-    } else {
-        partial
-    };
+    var upper_val: f32 = partial;
+    if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
+        upper_val = upper_prev + partial;
+    }
     Out.data[upper_index] = upper_val;
 
     if ((params.flags & SYRK_FLAG_FILL_BOTH) != 0u && global_row != global_col) {
-        let lower_val = if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
-            lower_prev + partial
-        } else {
-            partial
-        };
+        var lower_val: f32 = partial;
+        if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
+            lower_val = lower_prev + partial;
+        }
         Out.data[lower_index] = lower_val;
     }
 }

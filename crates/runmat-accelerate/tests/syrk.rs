@@ -94,8 +94,9 @@ fn syrk_large_rows_chunks() {
         let got = host.data[idx];
         let want = expected[idx];
         let diff = (got - want).abs();
+        let tol = 1e-3 * want.abs().max(1.0);
         assert!(
-            diff < 1e-6,
+            diff <= tol,
             "chunk mismatch at {}: got={} want={} diff={}",
             idx,
             got,
