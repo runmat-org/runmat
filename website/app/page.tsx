@@ -324,10 +324,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
-              GPU Fusion Architecture, Why it's Fast
+              GPU Fusion Architecture, Why it&apos;s Fast
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-lg sm:leading-7">
-              RunMat fuses back-to-back math into fewer GPU steps and keeps arrays on the device between steps ("residency"). That means less memory traffic and fewer launches. so your scripts finish sooner.
+              RunMat fuses back-to-back math into fewer GPU steps and keeps arrays on the device between steps (&quot;residency&quot;). That means less memory traffic and fewer launches. so your scripts finish sooner.
             </p>
             <div className="w-full max-w-5xl flex justify-center mt-4">
               <Image
