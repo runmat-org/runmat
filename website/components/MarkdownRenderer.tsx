@@ -32,13 +32,13 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
 
   const defaultComponents: MarkdownRendererComponents = {
     h1: ({ children, ...props }: { children: React.ReactNode }) => (
-      <h1 className="text-4xl font-bold mt-12 mb-6 text-foreground first:mt-0" {...props}>{children}</h1>
+      <h1 className="text-4xl font-bold mt-12 mb-6 text-foreground first:mt-0 break-words" {...props}>{children}</h1>
     ),
     h2: ({ children, ...props }: { children: React.ReactNode }) => {
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h2 id={id} className="group scroll-mt-24 text-3xl font-semibold mt-10 mb-5 text-foreground" {...props}>
+        <h2 id={id} className="group scroll-mt-24 text-3xl font-semibold mt-10 mb-5 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h2>
@@ -48,7 +48,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h3 id={id} className="group scroll-mt-24 text-2xl font-semibold mt-8 mb-4 text-foreground" {...props}>
+        <h3 id={id} className="group scroll-mt-24 text-2xl font-semibold mt-8 mb-4 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h3>
@@ -58,7 +58,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h4 id={id} className="group scroll-mt-24 text-xl font-semibold mt-6 mb-3 text-foreground" {...props}>
+        <h4 id={id} className="group scroll-mt-24 text-xl font-semibold mt-6 mb-3 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h4>
@@ -68,7 +68,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h5 id={id} className="group scroll-mt-24 text-lg font-semibold mt-5 mb-2 text-foreground" {...props}>
+        <h5 id={id} className="group scroll-mt-24 text-lg font-semibold mt-5 mb-2 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h5>
@@ -78,7 +78,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h6 id={id} className="group scroll-mt-24 text-base font-semibold mt-4 mb-2 text-foreground" {...props}>
+        <h6 id={id} className="group scroll-mt-24 text-base font-semibold mt-4 mb-2 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h6>
@@ -93,22 +93,22 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         return false;
       });
       if (hasBlock) {
-        return <div className="my-6" {...props}>{children}</div>;
+        return <div className="my-6 break-words" {...props}>{children}</div>;
       }
-      return <p className="my-6 text-muted-foreground leading-relaxed" {...props}>{children}</p>;
+      return <p className="my-6 text-muted-foreground leading-relaxed break-words" {...props}>{children}</p>;
     },
     ul: ({ children, ...props }: { children: React.ReactNode }) => (
-      <ul className="my-6 ml-6 space-y-2 list-disc marker:text-blue-500" {...props}>{children}</ul>
+      <ul className="my-6 ml-6 space-y-2 list-disc marker:text-blue-500 break-words" {...props}>{children}</ul>
     ),
     ol: ({ children, ...props }: { children: React.ReactNode }) => (
-      <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-blue-500" {...props}>{children}</ol>
+      <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-blue-500 break-words" {...props}>{children}</ol>
     ),
     li: ({ children, ...props }: { children: React.ReactNode }) => (
-      <li className="text-muted-foreground leading-relaxed pl-2" {...props}>{children}</li>
+      <li className="text-muted-foreground leading-relaxed pl-2 break-words" {...props}>{children}</li>
     ),
     blockquote: ({ children, ...props }: { children: React.ReactNode }) => (
-      <blockquote className="my-6 pl-6 border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20 py-4 pr-4 rounded-r-lg" {...props}>
-        <div className="text-muted-foreground italic">{children}</div>
+      <blockquote className="my-6 pl-6 border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20 py-4 pr-4 rounded-r-lg break-words" {...props}>
+        <div className="text-muted-foreground italic break-words">{children}</div>
       </blockquote>
     ),
     hr: ({ ...props }: Record<string, unknown>) => (
@@ -120,8 +120,8 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       </a>
     ),
     table: ({ children, ...props }: { children: React.ReactNode }) => (
-      <div className="my-8 overflow-x-auto">
-        <table className="w-full border-collapse border border-border rounded-lg table-mobile-wrap" {...props}>{children}</table>
+      <div className="my-8 -mx-4 sm:mx-0 overflow-x-auto">
+        <table className="w-full min-w-full sm:min-w-[500px] border-collapse border border-border rounded-lg table-mobile-wrap" {...props}>{children}</table>
       </div>
     ),
     thead: ({ children, ...props }: { children: React.ReactNode }) => (
@@ -134,10 +134,10 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       <tr className="border-b border-border last:border-b-0" {...props}>{children}</tr>
     ),
     th: ({ children, ...props }: { children: React.ReactNode }) => (
-      <th className="border border-border px-4 py-3 text-left font-semibold text-foreground" {...props}>{children}</th>
+      <th className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-left font-semibold text-foreground" {...props}>{children}</th>
     ),
     td: ({ children, ...props }: { children: React.ReactNode }) => (
-      <td className="border border-border px-4 py-3 text-muted-foreground" {...props}>{children}</td>
+      <td className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-muted-foreground" {...props}>{children}</td>
     ),
     code: ({ children, className, ...props }: { children?: React.ReactNode; className?: string }) => {
       // Render Mermaid even if the renderer bypassed <pre> wrapper

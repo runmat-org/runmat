@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { loadBuiltins } from '@/lib/builtins';
 import BuiltinsExplorer from '@/components/BuiltinsExplorer';
 
@@ -16,7 +17,9 @@ export default async function BuiltinsIndexPage() {
             <p className="text-muted-foreground mb-6">
                 Discover MATLAB-compatible builtins implemented in RunMat. Search by name, category, or keywords.
             </p>
-            <BuiltinsExplorer builtins={builtins} />
+            <Suspense fallback={<div>Loading...</div>}>
+                <BuiltinsExplorer builtins={builtins} />
+            </Suspense>
         </div>
     );
 }

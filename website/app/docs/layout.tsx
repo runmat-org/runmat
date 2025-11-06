@@ -9,13 +9,28 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 md:px-6 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)] gap-6">
-          <Suspense fallback={<div className="hidden md:block" />}> 
-            <Sidebar />
-          </Suspense>
-          <main className="min-w-0 md:pl-6 md:border-l md:border-border/60">{children}</main>
-        </div>
+        <ConditionalLayout>{children}</ConditionalLayout>
       </div>
+    </div>
+  );
+}
+
+function ConditionalLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isElementsPage = pathname === '/docs/elements-of-matlab';
+  
+  if (isElementsPage) {
+    // For elements-of-matlab page, render full-width without sidebar
+    return <div>{children}</div>;
+  }
+  
+  // For other pages, render with sidebar grid layout
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)] gap-6">
+      <Suspense fallback={<div className="hidden md:block" />}> 
+        <Sidebar />
+      </Suspense>
+      <main className="min-w-0 md:pl-6 md:border-l md:border-border/60">{children}</main>
     </div>
   );
 }

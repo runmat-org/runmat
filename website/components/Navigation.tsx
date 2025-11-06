@@ -53,8 +53,8 @@ export default function Navigation() {
               </NavigationMenuItem>
               <NavigationMenuItem>
                 <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
-                  <Link href="/license">
-                    License
+                  <Link href="#benchmarks">
+                    Benchmarks
                   </Link>
                 </NavigationMenuLink>
               </NavigationMenuItem>
@@ -178,12 +178,12 @@ export default function Navigation() {
                 Configuration
               </Link>
               <Link
-                href="/license"
+                href="#benchmarks"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <Scale className="mr-2 h-4 w-4" />
-                License
+                Benchmarks
               </Link>
               <Link
                 href="/download"

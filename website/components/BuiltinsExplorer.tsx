@@ -3,14 +3,29 @@
 import { useEffect, useMemo, useState } from 'react';
 import Fuse from 'fuse.js';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import type { Builtin } from '@/lib/builtins';
 
 export default function BuiltinsExplorer({ builtins }: { builtins: Builtin[] }) {
+  const searchParams = useSearchParams();
   const [q, setQ] = useState('');
   const [hideInternal, setHideInternal] = useState(true);
-  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+  
+  // Initialize selected categories from URL params
+  const initialCategories = useMemo(() => {
+    const categories = searchParams?.getAll('category') || [];
+    return new Set(categories);
+  }, [searchParams]);
+  
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(initialCategories);
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(25);
+  
+  // Update selected categories when URL params change
+  useEffect(() => {
+    const categories = searchParams?.getAll('category') || [];
+    setSelectedCategories(new Set(categories));
+  }, [searchParams]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();

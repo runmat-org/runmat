@@ -74,7 +74,7 @@ export function BlogLayout({
 
               {/* Article Content */}
               <article className="max-w-4xl">
-                <div className="blog-content">
+                <div className="blog-content w-full">
                   {children}
                 </div>
               </article>
@@ -127,7 +127,7 @@ export function BlogLayout({
 
             {/* Article Content */}
             <article className="max-w-none">
-              <div className="blog-content">
+              <div className="blog-content w-full">
                 {children}
               </div>
             </article>
