@@ -5409,10 +5409,10 @@ impl WgpuProvider {
             return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
         }
 
-        let rows_u32 = u32::try_from(rows)
-            .map_err(|_| anyhow!("syrk: row count exceeds GPU limits"))?;
-        let cols_u32 = u32::try_from(cols)
-            .map_err(|_| anyhow!("syrk: column count exceeds GPU limits"))?;
+        let rows_u32 =
+            u32::try_from(rows).map_err(|_| anyhow!("syrk: row count exceeds GPU limits"))?;
+        let cols_u32 =
+            u32::try_from(cols).map_err(|_| anyhow!("syrk: column count exceeds GPU limits"))?;
         let lda_u32 = rows_u32;
         let ldc_u32 = cols_u32;
 
