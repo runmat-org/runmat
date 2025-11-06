@@ -46,6 +46,7 @@ use runmat_runtime::builtins::math::reduction::compute_median_inplace;
 use rustfft::FftPlanner;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::f64::consts::PI;
 use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, Mutex};
 use wgpu::util::DeviceExt;
@@ -54,12 +55,14 @@ use crate::backend::wgpu::cache::{key as cache_key, persist as cache_persist};
 use crate::backend::wgpu::config::{DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD};
 use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
-    DiffParams, FilterParams, SymmetryParamsF32, SymmetryParamsF64,
+    DiffParams, FilterParams, ImageNormalizeUniforms, SymmetryParamsF32, SymmetryParamsF64,
+    IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::types::NumericPrecision;
 use crate::host_lu::{lu_factor_host, LuHostFactors};
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
+use crate::telemetry::AccelTelemetry;
 
 #[derive(Clone, Debug)]
 pub struct WgpuProviderOptions {
@@ -83,6 +86,7 @@ pub struct WgpuProvider {
     adapter_info: wgpu::AdapterInfo,
     adapter_limits: wgpu::Limits,
     buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
+    buffer_pool: Mutex<HashMap<usize, Vec<Arc<wgpu::Buffer>>>>, // reuse storage buffers by element count
     next_id: AtomicU64,
     pipelines: WgpuPipelines,
     device_id: u32,
@@ -90,9 +94,13 @@ pub struct WgpuProvider {
     element_size: usize,
     fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
     metrics: crate::backend::wgpu::metrics::WgpuMetrics,
+    telemetry: AccelTelemetry,
     reduction_two_pass_threshold: usize,
     reduction_workgroup_size_default: u32,
     pipeline_cache_dir: Option<std::path::PathBuf>,
+    // Optimization caches
+    pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
+    moments_cache: Mutex<HashMap<(u64, Vec<usize>), (GpuTensorHandle, GpuTensorHandle)>>, // (base_buffer_id, dims) -> (mean, ex2)
 }
 
 #[derive(Clone)]
@@ -144,7 +152,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -174,7 +182,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -204,7 +212,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -234,7 +242,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -264,7 +272,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -294,7 +302,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -324,7 +332,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -354,7 +362,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -384,7 +392,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -414,7 +422,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -444,7 +452,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -474,7 +482,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -504,7 +512,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -534,7 +542,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -564,7 +572,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -594,7 +602,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -624,7 +632,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -654,7 +662,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -683,7 +691,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -711,7 +719,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -741,7 +749,7 @@ struct Params {
 
 fn isNan(x: f32) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -771,7 +779,7 @@ struct Params {
 
 fn isNan(x: f64) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -798,7 +806,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -828,7 +836,7 @@ struct Params {
 
 fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -858,7 +866,7 @@ struct Params {
 
 fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -888,7 +896,7 @@ struct Params {
 
 fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= params.len) {
@@ -1499,19 +1507,16 @@ fn sort_host_tensor(
     Ok((sorted, indices))
 }
 
+const RNG_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
+const MAX_SAFE_INTEGER: u64 = 1 << 53;
 const RNG_MULTIPLIER: u64 = 6364136223846793005;
 const RNG_INCREMENT: u64 = 1;
 const RNG_SHIFT: u32 = 11;
 const RNG_SCALE: f64 = 1.0 / ((1u64 << 53) as f64);
-const RNG_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
-const MAX_SAFE_INTEGER: u64 = 1 << 53;
+const RNG_MIN_UNIFORM: f64 = 1.0e-16;
+const TWO_PI: f64 = PI * 2.0;
 
-fn rng_state() -> &'static Mutex<u64> {
-    static RNG: OnceCell<Mutex<u64>> = OnceCell::new();
-    RNG.get_or_init(|| Mutex::new(RNG_DEFAULT_SEED))
-}
-
-fn next_uniform(state: &mut u64) -> f64 {
+fn next_uniform_f64(state: &mut u64) -> f64 {
     *state = state
         .wrapping_mul(RNG_MULTIPLIER)
         .wrapping_add(RNG_INCREMENT);
@@ -1519,17 +1524,123 @@ fn next_uniform(state: &mut u64) -> f64 {
     (bits as f64) * RNG_SCALE
 }
 
-fn next_normal_pair(state: &mut u64) -> (f64, f64) {
-    let mut u1 = next_uniform(state);
-    if u1 <= 0.0 {
-        u1 = f64::MIN_POSITIVE;
+fn uniform_sequence_f64(state: &mut u64, len: usize) -> Vec<f64> {
+    let mut out = Vec::with_capacity(len);
+    for _ in 0..len {
+        out.push(next_uniform_f64(state));
     }
-    let u2 = next_uniform(state);
-    let radius = (-2.0 * u1.ln()).sqrt();
-    let angle = 2.0 * std::f64::consts::PI * u2;
-    (radius * angle.cos(), radius * angle.sin())
+    out
+}
+
+fn normal_sequence_f64(state: &mut u64, len: usize) -> Vec<f64> {
+    let mut out = Vec::with_capacity(len);
+    while out.len() < len {
+        let mut u1 = next_uniform_f64(state);
+        if u1 <= 0.0 {
+            u1 = RNG_MIN_UNIFORM;
+        }
+        let u2 = next_uniform_f64(state);
+        let radius = (-2.0 * u1.ln()).sqrt();
+        let angle = TWO_PI * u2;
+        out.push(radius * angle.cos());
+        if out.len() < len {
+            out.push(radius * angle.sin());
+        }
+    }
+    out
+}
+
+fn integer_sequence_f64(
+    state: &mut u64,
+    len: usize,
+    lower: i64,
+    upper: i64,
+    span: u64,
+) -> Result<Vec<f64>> {
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+    if span == 1 {
+        return Ok(vec![lower as f64; len]);
+    }
+    let lower_i128 = lower as i128;
+    let upper_i128 = upper as i128;
+    let span_f = span as f64;
+    let mut out = Vec::with_capacity(len);
+    for _ in 0..len {
+        let mut offset = (next_uniform_f64(state) * span_f).floor() as u64;
+        if offset >= span {
+            offset = span - 1;
+        }
+        let mut value = lower_i128
+            .checked_add(offset as i128)
+            .ok_or_else(|| anyhow!("randi: integer overflow while sampling"))?;
+        if value > upper_i128 {
+            value = upper_i128;
+        }
+        out.push(value as f64);
+    }
+    Ok(out)
+}
+
+fn randperm_sequence_f64(state: &mut u64, n: usize, k: usize) -> Vec<f64> {
+    let mut values: Vec<f64> = if n == 0 {
+        Vec::new()
+    } else {
+        (1..=n).map(|v| v as f64).collect()
+    };
+    if k > 0 {
+        let uniforms = uniform_sequence_f64(state, k);
+        for (i, u) in uniforms.into_iter().enumerate() {
+            if i >= k || i >= n {
+                break;
+            }
+            let span = n - i;
+            if span == 0 {
+                break;
+            }
+            let mut offset = (u * span as f64).floor() as usize;
+            if offset >= span {
+                offset = span - 1;
+            }
+            let j = i + offset;
+            values.swap(i, j);
+        }
+    }
+    if values.len() > k {
+        values.truncate(k);
+    }
+    values
+}
+
+fn rng_state() -> &'static Mutex<u64> {
+    static RNG: OnceCell<Mutex<u64>> = OnceCell::new();
+    RNG.get_or_init(|| Mutex::new(RNG_DEFAULT_SEED))
 }
 impl WgpuProvider {
+    const BUFFER_POOL_MAX_PER_SIZE: usize = 8;
+
+    fn create_storage_buffer_checked(&self, len: usize, label: &str) -> Result<Arc<wgpu::Buffer>> {
+        // Centralised guard + warning for oversized allocations
+        let size_bytes = (len as u64) * self.element_size as u64;
+        if size_bytes >= (256u64 << 20) {
+            log::warn!(
+                "{}: large GPU allocation ({} bytes) len={} elems",
+                label,
+                size_bytes,
+                len
+            );
+        }
+        if size_bytes > (self.adapter_limits.max_buffer_size as u64) {
+            return Err(anyhow!(
+                "{}: requested {} bytes exceeds device max {}",
+                label,
+                size_bytes,
+                self.adapter_limits.max_buffer_size
+            ));
+        }
+        Ok(self.create_storage_buffer(len, label))
+    }
     pub fn device_id(&self) -> u32 {
         self.device_id
     }
@@ -1547,6 +1658,7 @@ impl WgpuProvider {
         crate::backend::wgpu::warmup::warmup_from_disk(
             &self.device,
             self.pipeline_cache_dir.as_deref(),
+            self.precision,
             |bytes, tag, wg| self.compute_pipeline_hash_bytes(bytes, tag, wg),
             |key, pl, module, label, src, tag, wg| {
                 self.get_or_create_pipeline(key, pl, module, label, src, tag, wg)
@@ -1571,6 +1683,97 @@ impl WgpuProvider {
             wg,
         );
         Ok(())
+    }
+
+    fn image_normalize_cpu_fallback(
+        &self,
+        input: &GpuTensorHandle,
+        desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
+    ) -> Result<GpuTensorHandle> {
+        let mut host = self.download(input)?;
+        ensure!(
+            host.shape.len() == 3,
+            "image_normalize: expected 3-D tensor, got {:?}",
+            host.shape
+        );
+        ensure!(
+            host.shape[0] == desc.batch
+                && host.shape[1] == desc.height
+                && host.shape[2] == desc.width,
+            "image_normalize: descriptor dims {:?} do not match tensor shape {:?}",
+            (desc.batch, desc.height, desc.width),
+            host.shape
+        );
+
+        let batch = desc.batch;
+        let height = desc.height;
+        let width = desc.width;
+        let plane = height * width;
+
+        if plane == 0 {
+            let view = HostTensorView {
+                data: &host.data,
+                shape: &host.shape,
+            };
+            return self.upload(&view);
+        }
+
+        let stride_h = batch;
+        let stride_w = batch * height;
+
+        let gain = desc.gain.unwrap_or(1.0);
+        let bias = desc.bias.unwrap_or(0.0);
+        let gamma = desc.gamma;
+
+        for b in 0..batch {
+            let mut sum = 0.0;
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    sum += host.data[idx];
+                }
+            }
+            let mean = sum / plane as f64;
+
+            let mut sq_sum = 0.0;
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    let diff = host.data[idx] - mean;
+                    sq_sum += diff * diff;
+                }
+            }
+            let variance = sq_sum / plane as f64;
+            let sigma = (variance + desc.epsilon).sqrt();
+            let inv_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    let mut value = (host.data[idx] - mean) * inv_sigma;
+                    if desc.gain.is_some() {
+                        value *= gain;
+                    }
+                    if desc.bias.is_some() {
+                        value += bias;
+                    }
+                    value = value.max(0.0);
+                    if let Some(gamma) = gamma {
+                        value = value.powf(gamma);
+                    }
+                    host.data[idx] = value;
+                }
+            }
+        }
+
+        let view = HostTensorView {
+            data: &host.data,
+            shape: &host.shape,
+        };
+        self.upload(&view)
     }
 
     /// Get or create a compute pipeline from cache using a caller-provided hash key.
@@ -1641,6 +1844,7 @@ impl WgpuProvider {
                 label,
                 layout_tag,
                 workgroup_size,
+                self.precision,
                 wgsl_src,
             );
         }
@@ -1747,6 +1951,7 @@ impl WgpuProvider {
             adapter_info,
             adapter_limits: limits.clone(),
             buffers: Mutex::new(HashMap::new()),
+            buffer_pool: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             pipelines,
             device_id,
@@ -1754,9 +1959,12 @@ impl WgpuProvider {
             element_size,
             fused_pipeline_cache: Mutex::new(HashMap::new()),
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::new(),
+            telemetry: AccelTelemetry::new(),
             reduction_two_pass_threshold: two_pass_threshold,
             reduction_workgroup_size_default: reduction_wg_default,
             pipeline_cache_dir: Some(cache_dir),
+            pow2_of: Mutex::new(HashMap::new()),
+            moments_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1779,6 +1987,7 @@ impl WgpuProvider {
             .lock()
             .expect("buffer mutex poisoned")
             .insert(id, entry);
+        log::trace!("wgpu register id={} len={} shape={:?}", id, len, &shape);
         let handle = GpuTensorHandle {
             shape,
             device_id: self.device_id,
@@ -1839,16 +2048,24 @@ impl WgpuProvider {
     }
 
     fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
+        if len > 0 {
+            if let Ok(mut pool) = self.buffer_pool.lock() {
+                if let Some(list) = pool.get_mut(&len) {
+                    if let Some(buf) = list.pop() {
+                        return buf;
+                    }
+                }
+            }
+        }
         let size_bytes = (len.max(1) as u64) * self.element_size as u64;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+        Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: size_bytes,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });
-        Arc::new(buffer)
+        }))
     }
 
     fn uniform_buffer<T: Pod>(&self, data: &T, label: &str) -> wgpu::Buffer {
@@ -2045,7 +2262,7 @@ impl WgpuProvider {
         let shader_hash = self.compute_pipeline_hash_bytes(
             shader.as_bytes(),
             &layout_tag,
-            Some(crate::backend::wgpu::config::WORKGROUP_SIZE),
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
         );
         let module = crate::backend::wgpu::pipelines::create_shader_module(
             self.device_ref(),
@@ -2059,56 +2276,149 @@ impl WgpuProvider {
             "runmat-fusion-pipeline",
             Some(shader.as_bytes()),
             Some(&layout_tag),
-            Some(crate::backend::wgpu::config::WORKGROUP_SIZE),
+            Some(crate::backend::wgpu::config::effective_workgroup_size()),
         );
-        let mut bind_entries = Vec::with_capacity(inputs.len() + 2);
-        for (idx, entry) in entries.iter().enumerate() {
-            bind_entries.push(wgpu::BindGroupEntry {
-                binding: idx as u32,
-                resource: entry.buffer.as_ref().as_entire_binding(),
-            });
-        }
-        bind_entries.push(wgpu::BindGroupEntry {
-            binding: inputs.len() as u32,
-            resource: output_buffer.as_ref().as_entire_binding(),
-        });
-        let params = crate::backend::wgpu::params::FusionParams {
-            len: len as u32,
-            _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-fusion-params");
-        bind_entries.push(wgpu::BindGroupEntry {
-            binding: (inputs.len() + 1) as u32,
-            resource: params_buffer.as_entire_binding(),
-        });
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fusion-bind-group"),
-                layout: &bind_group_layout,
-                entries: &bind_entries,
-            });
-        {
-            crate::backend::wgpu::dispatch::elementwise::warmup_noop(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-            );
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::elementwise::run(
+        // Warmup once
+        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
             self.device_ref(),
             self.queue_ref(),
             &pipeline,
-            &bind_group,
-            workgroups,
         );
+        self.device_ref().poll(wgpu::Maintain::Poll);
+
+        // Dispatch in chunks to satisfy 65535 limit
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut offset_elems = 0usize;
+        while offset_elems < len {
+            let remaining = len - offset_elems;
+            let chunk_len = remaining.min(chunk_capacity);
+
+            // Build bind entries per chunk
+            let mut bind_entries = Vec::with_capacity(inputs.len() + 2);
+            let byte_offset = (offset_elems * self.element_size) as u64;
+            let byte_size = std::num::NonZeroU64::new((chunk_len * self.element_size) as u64);
+
+            let broadcast_mode = shader.contains("out_shape") || shader.contains("a_shape");
+            for (idx, entry) in entries.iter().enumerate() {
+                let resource = if broadcast_mode {
+                    // Full binding; shader uses offset param for indexing
+                    entry.buffer.as_ref().as_entire_binding()
+                } else {
+                    wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: entry.buffer.as_ref(),
+                        offset: byte_offset,
+                        size: byte_size,
+                    })
+                };
+                bind_entries.push(wgpu::BindGroupEntry {
+                    binding: idx as u32,
+                    resource,
+                });
+            }
+            // Output binding
+            let out_resource = if broadcast_mode {
+                output_buffer.as_ref().as_entire_binding()
+            } else {
+                wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: output_buffer.as_ref(),
+                    offset: byte_offset,
+                    size: byte_size,
+                })
+            };
+            bind_entries.push(wgpu::BindGroupEntry {
+                binding: inputs.len() as u32,
+                resource: out_resource,
+            });
+
+            // Params buffer per chunk
+            let params_buffer = if broadcast_mode {
+                let rank = output_shape.len();
+                let max_rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
+                let mut bytes: Vec<u8> = Vec::with_capacity(4 * 4 + (max_rank * 4 * 4));
+                let write_u32 = |buf: &mut Vec<u8>, v: u32| buf.extend_from_slice(&v.to_ne_bytes());
+                write_u32(&mut bytes, chunk_len as u32);
+                write_u32(&mut bytes, offset_elems as u32); // offset
+                write_u32(&mut bytes, rank as u32);
+                write_u32(&mut bytes, 0u32);
+                let mut write_packed_array = |vals: &[u32]| {
+                    for &val in vals.iter() {
+                        write_u32(&mut bytes, val);
+                        write_u32(&mut bytes, 0);
+                        write_u32(&mut bytes, 0);
+                        write_u32(&mut bytes, 0);
+                    }
+                    for _ in vals.len()..max_rank {
+                        write_u32(&mut bytes, 0);
+                        write_u32(&mut bytes, 0);
+                        write_u32(&mut bytes, 0);
+                        write_u32(&mut bytes, 0);
+                    }
+                };
+                let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
+                write_packed_array(&out_shape_u32);
+                for h in inputs.iter() {
+                    let entry = self.get_entry(h)?;
+                    let mut shape = entry.shape.clone();
+                    if shape.len() < rank {
+                        let pad = rank - shape.len();
+                        let mut v = vec![1usize; pad];
+                        v.extend_from_slice(&shape);
+                        shape = v;
+                    }
+                    let shape_u32: Vec<u32> = shape.iter().map(|&d| d as u32).collect();
+                    write_packed_array(&shape_u32);
+                    let mut strides: Vec<u32> = vec![0; rank];
+                    let mut s: u64 = 1;
+                    for i in 0..rank {
+                        strides[i] = if shape[i] == 1 { 0 } else { s as u32 };
+                        s = s.saturating_mul(shape[i] as u64);
+                    }
+                    write_packed_array(&strides);
+                }
+                let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-fusion-params"),
+                    size: bytes.len() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                self.queue.write_buffer(&buffer, 0, &bytes);
+                buffer
+            } else {
+                let params = crate::backend::wgpu::params::FusionParams {
+                    len: chunk_len as u32,
+                    _pad0: 0,
+                    _pad1: 0,
+                    _pad2: 0,
+                };
+                self.uniform_buffer(&params, "runmat-fusion-params")
+            };
+            bind_entries.push(wgpu::BindGroupEntry {
+                binding: (inputs.len() + 1) as u32,
+                resource: params_buffer.as_entire_binding(),
+            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fusion-bind-group"),
+                    layout: &bind_group_layout,
+                    entries: &bind_entries,
+                });
+
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_len as u32,
+                crate::backend::wgpu::config::effective_workgroup_size(),
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &bind_group,
+                workgroups,
+            );
+
+            offset_elems += chunk_len;
+        }
         Ok(self.register_existing_buffer(output_buffer, output_shape.to_vec(), len))
     }
 
@@ -2143,7 +2453,7 @@ impl WgpuProvider {
         };
         let two_pass = reduce_len > self.two_pass_threshold() as usize;
         if !two_pass {
-            let layout_tag = "runmat-reduction-bgl";
+            let layout_tag = &format!("runmat-reduction-layout-{}", inputs.len());
             let module = crate::backend::wgpu::pipelines::create_shader_module(
                 self.device_ref(),
                 "runmat-fused-reduction-module",
@@ -2195,7 +2505,6 @@ impl WgpuProvider {
                         label: Some("runmat-flush-single-pass-gap"),
                     });
             self.submit(flush_enc);
-            let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
             let out_len = num_slices.max(1);
             let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
             #[repr(C)]
@@ -2218,25 +2527,33 @@ impl WgpuProvider {
                 flags,
             };
             let params_buffer = Arc::new(self.uniform_buffer(&params, "runmat-reduction-params"));
+            // Build entries dynamically: N inputs, 1 output, 1 params
+            let mut entries_vec: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(inputs.len() + 2);
+            let mut input_bufs: Vec<Arc<wgpu::Buffer>> = Vec::with_capacity(inputs.len());
+            for h in inputs.iter() {
+                let buf_arc = self.get_entry(h)?.buffer.clone();
+                input_bufs.push(buf_arc);
+            }
+            for (i, buf_arc) in input_bufs.iter().enumerate() {
+                entries_vec.push(wgpu::BindGroupEntry {
+                    binding: i as u32,
+                    resource: buf_arc.as_ref().as_entire_binding(),
+                });
+            }
+            entries_vec.push(wgpu::BindGroupEntry {
+                binding: inputs.len() as u32,
+                resource: out_buffer.as_ref().as_entire_binding(),
+            });
+            entries_vec.push(wgpu::BindGroupEntry {
+                binding: (inputs.len() + 1) as u32,
+                resource: params_buffer.as_ref().as_entire_binding(),
+            });
             let bg = self
                 .device_ref()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("runmat-reduction-bg"),
                     layout: &bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: input_buf.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_ref().as_entire_binding(),
-                        },
-                    ],
+                    entries: &entries_vec,
                 });
             let groups = (num_slices as u32).max(1);
             crate::backend::wgpu::dispatch::reduction::run_single_pass(
@@ -3050,7 +3367,10 @@ impl WgpuProvider {
                     },
                 ],
             });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(cols as u32, 256);
+        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            cols as u32,
+            crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
+        );
         crate::backend::wgpu::dispatch::scatter::run(
             self.device_ref(),
             self.queue_ref(),
@@ -5088,10 +5408,98 @@ impl WgpuProvider {
         }
         let out_shape = vec![m, n];
         let len = m * n;
-        let out_buffer = self.create_storage_buffer(len, "runmat-matmul-out");
         if len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
+            let out_buffer = self.create_storage_buffer(0, "runmat-matmul-out");
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
         }
+        // Heuristic: for very large k, accumulate in chunks to reduce long inner loops
+        const K_CHUNK: usize = 8192;
+        const K_CHUNK_SWITCH: usize = 65536; // only chunk for very large k to avoid regressions
+        if k_a >= K_CHUNK_SWITCH {
+            self.prepare_matmul_pipeline();
+            self.device_ref().poll(wgpu::Maintain::Poll);
+            let lda_u32 = entry_a.shape[0] as u32;
+            let ldb_u32 = entry_b.shape[0] as u32;
+            let m_u32 = m as u32;
+            let n_u32 = n as u32;
+            // Accumulator handle across chunks
+            let mut acc: Option<GpuTensorHandle> = None;
+            let mut k_off: usize = 0;
+            while k_off < k_a {
+                let k_sub = std::cmp::min(K_CHUNK, k_a - k_off);
+                // Create partial output buffer and bind group
+                let partial_buffer =
+                    self.create_storage_buffer_checked(len, "runmat-matmul-partial")?;
+                let offset_a_elems = k_off
+                    .checked_mul(entry_a.shape[0])
+                    .ok_or_else(|| anyhow!("matmul: offset overflow"))?;
+                let offset_a_u32 = u32::try_from(offset_a_elems)
+                    .map_err(|_| anyhow!("matmul: A offset exceeds GPU limits"))?;
+                let offset_b_u32 = u32::try_from(k_off)
+                    .map_err(|_| anyhow!("matmul: B offset exceeds GPU limits"))?;
+                let params = crate::backend::wgpu::params::MatmulParams {
+                    m: m_u32,
+                    n: n_u32,
+                    k: k_sub as u32,
+                    lda: lda_u32,
+                    ldb: ldb_u32,
+                    ldc: m_u32,
+                    offset_a: offset_a_u32,
+                    offset_b: offset_b_u32,
+                    offset_out: 0,
+                    _pad: 0,
+                };
+                let params_buffer = self.uniform_buffer(&params, "runmat-matmul-params");
+                let bg = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-matmul-bind"),
+                        layout: &self.pipelines.matmul.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry_a.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: entry_b.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: partial_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let tile = crate::backend::wgpu::config::effective_matmul_tile();
+                let groups_x =
+                    crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
+                let groups_y =
+                    crate::backend::wgpu::dispatch::common::dispatch_size_dim(m_u32, tile);
+                crate::backend::wgpu::dispatch::matmul::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.matmul.pipeline,
+                    &bg,
+                    groups_x,
+                    groups_y,
+                );
+                // Wrap partial buffer into handle
+                let partial = self.register_existing_buffer(partial_buffer, out_shape.clone(), len);
+                acc = match acc {
+                    None => Some(partial),
+                    Some(prev) => Some(self.elem_add(&prev, &partial)?),
+                };
+                k_off += k_sub;
+            }
+            return Ok(acc.expect("matmul chunking produced no output"));
+        }
+
+        // Default single-dispatch path
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-matmul-out")?;
         self.prepare_matmul_pipeline();
         self.device_ref().poll(wgpu::Maintain::Poll);
         let params = crate::backend::wgpu::params::MatmulParams {
@@ -5131,14 +5539,9 @@ impl WgpuProvider {
                     },
                 ],
             });
-        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
-            n as u32,
-            crate::backend::wgpu::config::MATMUL_TILE,
-        );
-        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
-            m as u32,
-            crate::backend::wgpu::config::MATMUL_TILE,
-        );
+        let tile = crate::backend::wgpu::config::effective_matmul_tile();
+        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n as u32, tile);
+        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile);
         crate::backend::wgpu::dispatch::matmul::run(
             self.device_ref(),
             self.queue_ref(),
@@ -5236,14 +5639,9 @@ impl WgpuProvider {
         let ldb = k_u32;
         let ldc = m_u32;
 
-        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
-            n_u32,
-            crate::backend::wgpu::config::MATMUL_TILE,
-        );
-        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(
-            m_u32,
-            crate::backend::wgpu::config::MATMUL_TILE,
-        );
+        let tile = crate::backend::wgpu::config::effective_matmul_tile();
+        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
+        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m_u32, tile);
 
         self.prepare_matmul_pipeline();
         self.device_ref().poll(wgpu::Maintain::Poll);
@@ -5686,6 +6084,16 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
+        // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
+        if matches!(direction, ProviderScanDirection::Reverse) {
+            let flipped_in = self.flip_exec(handle, &[dim])?;
+            let forward =
+                self.cumsum_exec(&flipped_in, dim, ProviderScanDirection::Forward, nan_mode)?;
+            let _ = self.free(&flipped_in);
+            let flipped_out = self.flip_exec(&forward, &[dim])?;
+            let _ = self.free(&forward);
+            return Ok(flipped_out);
+        }
         let entry = self.get_entry(handle)?;
         if entry.len == 0 {
             return Ok(handle.clone());
@@ -5760,9 +6168,6 @@ impl WgpuProvider {
         }
 
         let mut flags = 0u32;
-        if matches!(direction, ProviderScanDirection::Reverse) {
-            flags |= 1;
-        }
         if matches!(nan_mode, ProviderNanMode::Omit) {
             flags |= 2;
         }
@@ -5777,7 +6182,6 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-
         let params_buffer = self.uniform_buffer(&params, "runmat-cumsum-params");
         let bind_group = self
             .device_ref()
@@ -5799,7 +6203,6 @@ impl WgpuProvider {
                     },
                 ],
             });
-
         let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
             segments as u32,
             crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -5813,7 +6216,6 @@ impl WgpuProvider {
             "runmat-cumsum-encoder",
             "runmat-cumsum-pass",
         );
-
         Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
     }
 
@@ -5824,6 +6226,16 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
+        // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
+        if matches!(direction, ProviderScanDirection::Reverse) {
+            let flipped_in = self.flip_exec(handle, &[dim])?;
+            let forward =
+                self.cumprod_exec(&flipped_in, dim, ProviderScanDirection::Forward, nan_mode)?;
+            let _ = self.free(&flipped_in);
+            let flipped_out = self.flip_exec(&forward, &[dim])?;
+            let _ = self.free(&forward);
+            return Ok(flipped_out);
+        }
         let entry = self.get_entry(handle)?;
         if entry.len == 0 {
             return Ok(handle.clone());
@@ -5898,9 +6310,6 @@ impl WgpuProvider {
         }
 
         let mut flags = 0u32;
-        if matches!(direction, ProviderScanDirection::Reverse) {
-            flags |= 1;
-        }
         if matches!(nan_mode, ProviderNanMode::Omit) {
             flags |= 2;
         }
@@ -5915,7 +6324,6 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-
         let params_buffer = self.uniform_buffer(&params, "runmat-cumprod-params");
         let bind_group = self
             .device_ref()
@@ -5937,7 +6345,6 @@ impl WgpuProvider {
                     },
                 ],
             });
-
         let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
             segments as u32,
             crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -5951,7 +6358,6 @@ impl WgpuProvider {
             "runmat-cumprod-encoder",
             "runmat-cumprod-pass",
         );
-
         Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
     }
 
@@ -6273,54 +6679,75 @@ impl WgpuProvider {
             "fill: tensor length exceeds GPU dispatch limits"
         );
 
-        let params_buffer = match self.precision {
-            NumericPrecision::F64 => {
-                let params = crate::backend::wgpu::params::FillParamsF64 {
-                    value,
-                    len: total_len as u32,
-                    _pad: [0, 0, 0],
-                };
-                self.uniform_buffer(&params, "runmat-fill-params-f64")
-            }
-            NumericPrecision::F32 => {
-                let params = crate::backend::wgpu::params::FillParamsF32 {
-                    value: value as f32,
-                    len: total_len as u32,
-                    _pad: [0, 0],
-                };
-                self.uniform_buffer(&params, "runmat-fill-params-f32")
-            }
-        };
+        // chunked dispatch below will build per-chunk params buffers
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fill-bind"),
-                layout: &self.pipelines.fill.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            total_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::creation::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.fill.pipeline,
-            &bind_group,
-            workgroups,
-            "runmat-fill-encoder",
-            "runmat-fill-pass",
-        );
+        // Dispatch in chunks to satisfy per-dimension group limits (<= 65535)
+        let wg_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
+        let max_groups: u32 = 65535;
+        let max_elems_per_dispatch = (max_groups as usize) * (wg_size as usize);
+        let mut processed: usize = 0;
+        while processed < total_len {
+            let remain = total_len - processed;
+            let chunk_len = remain.min(max_elems_per_dispatch);
+
+            // Per-chunk params (length)
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = crate::backend::wgpu::params::FillParamsF64 {
+                        value,
+                        len: chunk_len as u32,
+                        _pad: [0, 0, 0],
+                    };
+                    self.uniform_buffer(&params, "runmat-fill-params-f64")
+                }
+                NumericPrecision::F32 => {
+                    let params = crate::backend::wgpu::params::FillParamsF32 {
+                        value: value as f32,
+                        len: chunk_len as u32,
+                        _pad: [0, 0],
+                    };
+                    self.uniform_buffer(&params, "runmat-fill-params-f32")
+                }
+            };
+
+            // Bind only the range for this chunk
+            let byte_offset = (processed * self.element_size) as u64;
+            let byte_size = std::num::NonZeroU64::new((chunk_len * self.element_size) as u64);
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fill-bind"),
+                    layout: &self.pipelines.fill.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: out_buffer.as_ref(),
+                                offset: byte_offset,
+                                size: byte_size,
+                            }),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+
+            let workgroups =
+                crate::backend::wgpu::dispatch::common::dispatch_size(chunk_len as u32, wg_size);
+            crate::backend::wgpu::dispatch::creation::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.fill.pipeline,
+                &bind_group,
+                workgroups,
+                "runmat-fill-encoder",
+                "runmat-fill-pass",
+            );
+
+            processed += chunk_len;
+        }
 
         Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
     }
@@ -6618,7 +7045,14 @@ impl WgpuProvider {
 
     pub(crate) fn zeros_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
-        let buffer = self.create_storage_buffer(len, "zeros");
+        let buffer = self.create_storage_buffer_checked(len, "zeros")?;
+        // Explicitly zero-initialize the storage buffer; pooled buffers may contain old data
+        let size_bytes = (len.max(1) as u64) * (self.element_size as u64);
+        if size_bytes > 0 {
+            // Write zeros across the entire buffer
+            let zero_bytes = vec![0u8; size_bytes as usize];
+            self.queue.write_buffer(buffer.as_ref(), 0, &zero_bytes);
+        }
         Ok(self.register_existing_buffer(buffer, shape.to_vec(), len))
     }
 
@@ -6727,43 +7161,74 @@ impl WgpuProvider {
     pub(crate) fn random_uniform_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("rand: tensor size exceeds GPU limits"))?;
-        let mut data = Vec::with_capacity(total_len);
-        if total_len > 0 {
+        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-uniform-out")?;
+        if total_len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
+        }
+        ensure!(
+            total_len <= u32::MAX as usize,
+            "rand: tensor length too large"
+        );
+        let values = {
             let mut guard = rng_state()
                 .lock()
                 .map_err(|_| anyhow!("rand: provider RNG mutex poisoned"))?;
-            for _ in 0..total_len {
-                data.push(next_uniform(&mut *guard));
+            let mut state = *guard;
+            let samples = uniform_sequence_f64(&mut state, total_len);
+            *guard = state;
+            samples
+        };
+        let upload_bytes = (total_len as u64) * (self.element_size as u64);
+        match self.precision {
+            NumericPrecision::F64 => {
+                self.queue
+                    .write_buffer(out_buffer.as_ref(), 0, cast_slice(&values));
             }
-            drop(guard);
+            NumericPrecision::F32 => {
+                let data: Vec<f32> = values.iter().map(|v| *v as f32).collect();
+                self.queue
+                    .write_buffer(out_buffer.as_ref(), 0, cast_slice(&data));
+            }
         }
-        let view = HostTensorView { data: &data, shape };
-        let handle = <Self as AccelProvider>::upload(self, &view)?;
-        Ok(handle)
+        self.telemetry.record_upload_bytes(upload_bytes);
+        Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), total_len))
     }
 
     pub(crate) fn random_normal_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("randn: tensor size exceeds GPU limits"))?;
-        let mut data = Vec::with_capacity(total_len);
-        if total_len > 0 {
+        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-normal-out")?;
+        if total_len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
+        }
+        ensure!(
+            total_len <= u32::MAX as usize,
+            "randn: tensor length too large"
+        );
+        let values = {
             let mut guard = rng_state()
                 .lock()
                 .map_err(|_| anyhow!("randn: provider RNG mutex poisoned"))?;
-            while data.len() < total_len {
-                let (z0, z1) = next_normal_pair(&mut *guard);
-                data.push(z0);
-                if data.len() < total_len {
-                    data.push(z1);
-                }
+            let mut state = *guard;
+            let samples = normal_sequence_f64(&mut state, total_len);
+            *guard = state;
+            samples
+        };
+        let upload_bytes = (total_len as u64) * (self.element_size as u64);
+        match self.precision {
+            NumericPrecision::F64 => {
+                self.queue
+                    .write_buffer(out_buffer.as_ref(), 0, cast_slice(&values));
             }
-            drop(guard);
+            NumericPrecision::F32 => {
+                let data: Vec<f32> = values.iter().map(|v| *v as f32).collect();
+                self.queue
+                    .write_buffer(out_buffer.as_ref(), 0, cast_slice(&data));
+            }
         }
-        let view = HostTensorView { data: &data, shape };
-        let handle = <Self as AccelProvider>::upload(self, &view)?;
-        Ok(handle)
+        self.telemetry.record_upload_bytes(upload_bytes);
+        Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), total_len))
     }
-
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         let spec =
             runtime_fspecial_spec_from_request(&request.filter).map_err(|e: String| anyhow!(e))?;
@@ -6903,61 +7368,54 @@ impl WgpuProvider {
         upper: i64,
         shape: &[usize],
     ) -> Result<GpuTensorHandle> {
+        ensure!(lower <= upper, "randi: lower bound must be <= upper bound");
+        let total_len = product_checked(shape)
+            .ok_or_else(|| anyhow!("randi: tensor size exceeds GPU limits"))?;
+        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-int-out")?;
+        if total_len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
+        }
         ensure!(
-            lower <= upper,
-            "randi: lower bound must be <= upper bound for wgpu provider"
+            total_len <= u32::MAX as usize,
+            "randi: tensor length too large"
         );
         let span_i128 = (upper as i128)
             .checked_sub(lower as i128)
-            .and_then(|delta| delta.checked_add(1))
+            .and_then(|d| d.checked_add(1))
             .ok_or_else(|| anyhow!("randi: integer range overflow"))?;
         ensure!(span_i128 > 0, "randi: integer range must be non-empty");
         ensure!(
             span_i128 <= (1i128 << 53),
-            "randi: integer range exceeds 2^53 and cannot be represented exactly"
+            "randi: range cannot exceed 2^53"
         );
-        let span = span_i128 as u64;
-
-        let total_len = product_checked(shape)
-            .ok_or_else(|| anyhow!("randi: tensor size exceeds GPU limits"))?;
-        let mut data = Vec::with_capacity(total_len);
-        if total_len > 0 {
-            if span == 1 {
-                data.resize(total_len, lower as f64);
-            } else {
-                let mut guard = rng_state()
-                    .lock()
-                    .map_err(|_| anyhow!("randi: provider RNG mutex poisoned"))?;
-                let span_f64 = span as f64;
-                for _ in 0..total_len {
-                    let mut u = next_uniform(&mut *guard);
-                    if u >= 1.0 {
-                        u = 0.9999999999999999;
-                    }
-                    let mut offset = (u * span_f64).floor() as u64;
-                    if offset >= span {
-                        offset = span - 1;
-                    }
-                    let value = (lower as i128 + offset as i128) as f64;
-                    data.push(value);
-                }
-                drop(guard);
+        let values = {
+            let mut guard = rng_state()
+                .lock()
+                .map_err(|_| anyhow!("randi: provider RNG mutex poisoned"))?;
+            let mut state = *guard;
+            let samples =
+                integer_sequence_f64(&mut state, total_len, lower, upper, span_i128 as u64)?;
+            *guard = state;
+            samples
+        };
+        let upload_bytes = (total_len as u64) * (self.element_size as u64);
+        match self.precision {
+            NumericPrecision::F64 => {
+                self.queue
+                    .write_buffer(out_buffer.as_ref(), 0, cast_slice(&values));
+            }
+            NumericPrecision::F32 => {
+                let data: Vec<f32> = values.iter().map(|v| *v as f32).collect();
+                self.queue
+                    .write_buffer(out_buffer.as_ref(), 0, cast_slice(&data));
             }
         }
-
-        let view = HostTensorView { data: &data, shape };
-        let handle = <Self as AccelProvider>::upload(self, &view)?;
-        Ok(handle)
+        self.telemetry.record_upload_bytes(upload_bytes);
+        Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), total_len))
     }
     pub(crate) fn randperm_exec(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
-        ensure!(
-            k <= n,
-            "randperm: K must satisfy 0 <= K <= N for wgpu provider"
-        );
-        ensure!(
-            (n as u64) <= MAX_SAFE_INTEGER,
-            "randperm: N exceeds 2^53 and cannot be represented exactly"
-        );
+        ensure!(k <= n, "randperm: K must satisfy 0 <= K <= N");
+        ensure!((n as u64) <= MAX_SAFE_INTEGER, "randperm: N exceeds 2^53");
         ensure!(
             n <= u32::MAX as usize,
             "randperm: N exceeds GPU dispatch limits"
@@ -6969,45 +7427,33 @@ impl WgpuProvider {
 
         let effective_k = k.min(n);
         let shape_vec = vec![1, effective_k];
+        let out_buffer = self.create_storage_buffer_checked(effective_k, "runmat-randperm-out")?;
         if effective_k == 0 {
-            let buffer = self.create_storage_buffer(0, "runmat-randperm-out");
-            return Ok(self.register_existing_buffer(buffer, shape_vec, 0));
+            return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
         }
-
-        let mut values: Vec<f64> = (1..=n).map(|v| v as f64).collect();
-        if effective_k > 0 {
+        let values = {
             let mut guard = rng_state()
                 .lock()
                 .map_err(|_| anyhow!("randperm: provider RNG mutex poisoned"))?;
-            for i in 0..effective_k {
-                let span = n - i;
-                if span == 0 {
-                    break;
-                }
-                let mut u = next_uniform(&mut *guard);
-                if u >= 1.0 {
-                    u = 0.9999999999999999;
-                }
-                let mut offset = (u * span as f64).floor() as usize;
-                if offset >= span {
-                    offset = span - 1;
-                }
-                let j = i + offset;
-                values.swap(i, j);
-            }
-            drop(guard);
-        }
-
-        if values.len() > effective_k {
-            values.truncate(effective_k);
-        }
-
-        let view = HostTensorView {
-            data: &values,
-            shape: &shape_vec,
+            let mut state = *guard;
+            let samples = randperm_sequence_f64(&mut state, n, effective_k);
+            *guard = state;
+            samples
         };
-        let handle = <Self as AccelProvider>::upload(self, &view)?;
-        Ok(handle)
+        let upload_bytes = (effective_k as u64) * (self.element_size as u64);
+        match self.precision {
+            NumericPrecision::F64 => {
+                self.queue
+                    .write_buffer(out_buffer.as_ref(), 0, cast_slice(&values));
+            }
+            NumericPrecision::F32 => {
+                let data: Vec<f32> = values.iter().map(|v| *v as f32).collect();
+                self.queue
+                    .write_buffer(out_buffer.as_ref(), 0, cast_slice(&data));
+            }
+        }
+        self.telemetry.record_upload_bytes(upload_bytes);
+        Ok(self.register_existing_buffer(out_buffer, shape_vec, effective_k))
     }
 
     pub(crate) fn polyval_exec(
@@ -7534,7 +7980,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, shape, count))
     }
-
     pub(crate) fn diag_from_vector_exec(
         &self,
         vector: &GpuTensorHandle,
@@ -7721,7 +8166,8 @@ impl WgpuProvider {
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("shape mismatch for binary op"));
+            // Attempt general N-D broadcasted binary op
+            return self.binary_op_broadcast_exec(op, a, b);
         }
         let len = entry_a.len;
         if len == 0 {
@@ -7806,6 +8252,153 @@ impl WgpuProvider {
             offset += chunk_len;
         }
         Ok(self.register_existing_buffer(out_buffer, entry_a.shape, len))
+    }
+
+    fn binary_op_broadcast_exec(
+        &self,
+        op: crate::backend::wgpu::types::BinaryOpCode,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        use crate::backend::wgpu::params::{AlignedU32, BinaryBroadcastParams, BCAST_MAX_RANK};
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        // Compute broadcasted output shape
+        let mut shape_a = entry_a.shape.clone();
+        let mut shape_b = entry_b.shape.clone();
+        let rank = shape_a.len().max(shape_b.len());
+        if rank > BCAST_MAX_RANK {
+            return Err(anyhow!("broadcast rank exceeds limit"));
+        }
+        if shape_a.len() < rank {
+            let pad = rank - shape_a.len();
+            let mut v = vec![1usize; pad];
+            v.extend_from_slice(&shape_a);
+            shape_a = v;
+        }
+        if shape_b.len() < rank {
+            let pad = rank - shape_b.len();
+            let mut v = vec![1usize; pad];
+            v.extend_from_slice(&shape_b);
+            shape_b = v;
+        }
+        let mut out_shape: Vec<usize> = vec![1; rank];
+        for i in 0..rank {
+            let da = shape_a[i];
+            let db = shape_b[i];
+            if da == db {
+                out_shape[i] = da;
+            } else if da == 1 {
+                out_shape[i] = db;
+            } else if db == 1 {
+                out_shape[i] = da;
+            } else {
+                return Err(anyhow!("shape mismatch for broadcast"));
+            }
+        }
+        let len: usize = out_shape
+            .iter()
+            .copied()
+            .fold(1usize, |a, b| a.saturating_mul(b));
+        if len == 0 {
+            let out_buffer = self.create_storage_buffer(0, "runmat-binary-bcast-out");
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+        }
+        if len > (u32::MAX as usize) {
+            return Err(anyhow!("tensor too large for GPU buffer"));
+        }
+        // Compute strides (column-major)
+        let mut stride_a: Vec<u32> = vec![0; rank];
+        let mut stride_b: Vec<u32> = vec![0; rank];
+        let mut s: u64 = 1;
+        for i in 0..rank {
+            stride_a[i] = if shape_a[i] == 1 { 0 } else { s as u32 };
+            s = s.saturating_mul(shape_a[i] as u64);
+        }
+        s = 1;
+        for i in 0..rank {
+            stride_b[i] = if shape_b[i] == 1 { 0 } else { s as u32 };
+            s = s.saturating_mul(shape_b[i] as u64);
+        }
+
+        // Create output buffer
+        let out_buffer = self.create_storage_buffer(len, "runmat-binary-bcast-out");
+        // Prepare params buffer and bind group once; update params per chunk
+        let params_size = std::mem::size_of::<BinaryBroadcastParams>() as u64;
+        let params_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-binary-bcast-params"),
+            size: params_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group_layout = &self.pipelines.binary_broadcast.layout;
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-binary-bcast-bind"),
+                layout: bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.get_entry(a)?.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.get_entry(b)?.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+        // Dispatch in chunks
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+        while offset < len {
+            let remaining = len - offset;
+            let chunk_len = remaining.min(chunk_capacity);
+            // Pack params
+            let mut params = BinaryBroadcastParams {
+                len: chunk_len as u32,
+                offset: offset as u32,
+                rank: rank as u32,
+                op: op as u32,
+                out_shape: [AlignedU32::new(0); BCAST_MAX_RANK],
+                a_shape: [AlignedU32::new(0); BCAST_MAX_RANK],
+                b_shape: [AlignedU32::new(0); BCAST_MAX_RANK],
+                a_strides: [AlignedU32::new(0); BCAST_MAX_RANK],
+                b_strides: [AlignedU32::new(0); BCAST_MAX_RANK],
+            };
+            for i in 0..rank {
+                params.out_shape[i] = AlignedU32::new(out_shape[i] as u32);
+                params.a_shape[i] = AlignedU32::new(shape_a[i] as u32);
+                params.b_shape[i] = AlignedU32::new(shape_b[i] as u32);
+                params.a_strides[i] = AlignedU32::new(stride_a[i]);
+                params.b_strides[i] = AlignedU32::new(stride_b[i]);
+            }
+            self.queue_ref()
+                .write_buffer(&params_buffer, 0, bytemuck::bytes_of(&params));
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.binary_broadcast.pipeline,
+                &bind_group,
+                groups,
+            );
+            offset += chunk_len;
+        }
+        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
     }
 
     pub(crate) fn dot_exec(
@@ -8358,52 +8951,66 @@ impl WgpuProvider {
         let mut current = entry.buffer.clone();
         let mut current_len = entry.len;
         while current_len > 1 {
-            let output_len = ((current_len
-                + (crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE as usize * 2)
-                - 1)
-                / (crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE as usize * 2))
-                .max(1);
-            let out_buffer = self.create_storage_buffer(output_len, "runmat-reduce-pass");
-            let params = crate::backend::wgpu::params::ReduceGlobalParams {
-                len: current_len as u32,
-                op: op as u32,
-                _pad0: 0,
-                _pad1: 0,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-reduce-global-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-reduce-global-bind"),
-                    layout: &self.pipelines.reduce_global.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: current.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size_reduce(
-                current_len as u32,
-                crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::reduction::run_single_pass(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.reduce_global.pipeline,
-                &bind_group,
-                groups,
-            );
+            let wg = crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE as usize;
+            let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
+            let elems_per_group = 2 * wg;
+            let max_input_per_pass = max_groups * elems_per_group;
+
+            let output_len_total = ((current_len + elems_per_group - 1) / elems_per_group).max(1);
+            let out_buffer = self.create_storage_buffer(output_len_total, "runmat-reduce-pass");
+
+            let mut in_offset_elems = 0usize;
+            let mut _out_offset_elems = 0usize;
+            while in_offset_elems < current_len {
+                let remain = current_len - in_offset_elems;
+                let chunk_in = remain.min(max_input_per_pass);
+                let chunk_out = ((chunk_in + elems_per_group - 1) / elems_per_group).max(1);
+
+                let params = crate::backend::wgpu::params::ReduceGlobalParams {
+                    len: chunk_in as u32,
+                    op: op as u32,
+                    offset: in_offset_elems as u32,
+                    total: current_len as u32,
+                };
+                let params_buffer = self.uniform_buffer(&params, "runmat-reduce-global-params");
+
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-reduce-global-bind"),
+                        layout: &self.pipelines.reduce_global.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: current.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let groups = crate::backend::wgpu::dispatch::common::dispatch_size_reduce(
+                    chunk_in as u32,
+                    crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::reduction::run_single_pass(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.reduce_global.pipeline,
+                    &bind_group,
+                    groups,
+                );
+                in_offset_elems += chunk_in;
+                _out_offset_elems += chunk_out;
+            }
+
             current = out_buffer;
-            current_len = output_len;
+            current_len = output_len_total;
         }
         Ok(self.register_existing_buffer(current, vec![1, 1], 1))
     }
@@ -8464,7 +9071,7 @@ impl WgpuProvider {
             });
         let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
             out_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
+            crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
         );
         crate::backend::wgpu::dispatch::reduction::run_single_pass(
             self.device_ref(),
@@ -9375,6 +9982,22 @@ impl AccelProvider for WgpuProvider {
         self.triu_exec(matrix, offset)
     }
 
+    fn reduce_mean_nd(
+        &self,
+        a: &GpuTensorHandle,
+        dims_zero_based: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        self.reduce_nd_mean_exec(a, dims_zero_based)
+    }
+
+    fn reduce_moments_nd(
+        &self,
+        a: &GpuTensorHandle,
+        dims_zero_based: &[usize],
+    ) -> Result<runmat_accelerate_api::ProviderMoments2> {
+        self.reduce_moments_nd_exec(a, dims_zero_based)
+    }
+
     fn elem_add(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Add, a, b)
     }
@@ -9385,6 +10008,14 @@ impl AccelProvider for WgpuProvider {
 
     fn elem_sub(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, a, b)
+    }
+
+    fn elem_max(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Max, a, b)
+    }
+
+    fn elem_min(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Min, a, b)
     }
 
     fn elem_div(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -9548,6 +10179,10 @@ impl AccelProvider for WgpuProvider {
         self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log, a)
     }
 
+    fn unary_log1p(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log1p, a)
+    }
+
     fn unary_sqrt(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, a)
     }
@@ -9567,7 +10202,12 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn unary_pow2(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, a)
+        let out = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, a)?;
+        // Record squared->base mapping for later reduction fusion (moments reuse)
+        if let Ok(mut map) = self.pow2_of.lock() {
+            map.insert(out.buffer_id, a.buffer_id);
+        }
+        Ok(out)
     }
 
     fn pow2_scale(
@@ -9602,6 +10242,14 @@ impl AccelProvider for WgpuProvider {
 
     fn scalar_mul(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
         self.scalar_op_exec(crate::backend::wgpu::types::ScalarOpCode::Mul, a, scalar)
+    }
+
+    fn scalar_max(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        self.scalar_op_exec(crate::backend::wgpu::types::ScalarOpCode::Max, a, scalar)
+    }
+
+    fn scalar_min(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        self.scalar_op_exec(crate::backend::wgpu::types::ScalarOpCode::Min, a, scalar)
     }
 
     fn scalar_div(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
@@ -9982,12 +10630,429 @@ impl AccelProvider for WgpuProvider {
             perm_vector,
         })
     }
-
     fn matmul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.matmul_exec(a, b)
     }
+
+    fn matmul_epilogue(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        ep: &runmat_accelerate_api::MatmulEpilogue,
+    ) -> Result<GpuTensorHandle> {
+        use runmat_accelerate_api::ProviderPrecision;
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 {
+            return Err(anyhow!("matmul_epilogue: only 2D tensors supported"));
+        }
+        let (m, k_a) = (entry_a.shape[0], entry_a.shape[1]);
+        let (k_b, n) = (entry_b.shape[0], entry_b.shape[1]);
+        if k_a != k_b {
+            return Err(anyhow!("matmul_epilogue: inner dimensions must match"));
+        }
+        let out_shape = vec![m, n];
+        let len = m * n;
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-matmul-epilogue-out")?;
+        if len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
+        }
+
+        let start = std::time::Instant::now();
+
+        // Ensure pipelines exist
+        self.prepare_matmul_pipeline();
+        self.device_ref().poll(wgpu::Maintain::Poll);
+
+        let params = crate::backend::wgpu::params::MatmulParams {
+            m: m as u32,
+            n: n as u32,
+            k: k_a as u32,
+            lda: entry_a.shape[0] as u32,
+            ldb: entry_b.shape[0] as u32,
+            ldc: m as u32,
+            offset_a: 0,
+            offset_b: 0,
+            offset_out: 0,
+            _pad: 0,
+        };
+        let params_buffer = self.uniform_buffer(&params, "runmat-matmul-epilogue-params");
+
+        // Resolve optional scales and epilogue params by precision
+        use crate::backend::wgpu::params::{
+            MATMUL_EPILOGUE_FLAG_CLAMP_MAX, MATMUL_EPILOGUE_FLAG_CLAMP_MIN,
+            MATMUL_EPILOGUE_FLAG_COL_DIV, MATMUL_EPILOGUE_FLAG_COL_SCALE,
+            MATMUL_EPILOGUE_FLAG_DIAG_WRITE, MATMUL_EPILOGUE_FLAG_POW,
+            MATMUL_EPILOGUE_FLAG_ROW_DIV, MATMUL_EPILOGUE_FLAG_ROW_SCALE,
+        };
+        let has_row = ep.row_scale.is_some();
+        let has_col = ep.col_scale.is_some();
+        let dummy_rowcol = self.create_storage_buffer(1, "runmat-matmul-epilogue-dummy-scale");
+        let dummy_diag = self.create_storage_buffer(1, "runmat-matmul-epilogue-dummy-diag");
+        let row_buf = match &ep.row_scale {
+            Some(h) => self.get_entry(h)?.buffer.clone(),
+            None => dummy_rowcol.clone(),
+        };
+        let col_buf = match &ep.col_scale {
+            Some(h) => self.get_entry(h)?.buffer.clone(),
+            None => dummy_rowcol.clone(),
+        };
+
+        let (diag_buf, diag_rows, diag_stride, diag_offset, has_diag) = match &ep.diag_output {
+            Some(handle) => {
+                let entry = self.get_entry(handle)?;
+                if entry.shape.len() > 2 {
+                    return Err(anyhow!(
+                        "matmul_epilogue: diag_output must be 1D or 2D vector"
+                    ));
+                }
+                let expected_len = std::cmp::min(m, n);
+                if entry.len < expected_len {
+                    return Err(anyhow!(
+                        "matmul_epilogue: diag_output length {} insufficient for diag size {}",
+                        entry.len,
+                        expected_len
+                    ));
+                }
+                (entry.buffer.clone(), expected_len as u32, 1u32, 0u32, true)
+            }
+            None => (dummy_diag.clone(), 0u32, 1u32, 0u32, false),
+        };
+
+        let mut flags: u32 = 0;
+        if has_row {
+            flags |= MATMUL_EPILOGUE_FLAG_ROW_SCALE;
+            if matches!(ep.row_op, runmat_accelerate_api::ScaleOp::Divide) {
+                flags |= MATMUL_EPILOGUE_FLAG_ROW_DIV;
+            }
+        }
+        if has_col {
+            flags |= MATMUL_EPILOGUE_FLAG_COL_SCALE;
+            if matches!(ep.col_op, runmat_accelerate_api::ScaleOp::Divide) {
+                flags |= MATMUL_EPILOGUE_FLAG_COL_DIV;
+            }
+        }
+
+        let mut clamp_min = 0.0f64;
+        if let Some(v) = ep.clamp_min {
+            clamp_min = v;
+            flags |= MATMUL_EPILOGUE_FLAG_CLAMP_MIN;
+        }
+        let mut clamp_max = 0.0f64;
+        if let Some(v) = ep.clamp_max {
+            clamp_max = v;
+            flags |= MATMUL_EPILOGUE_FLAG_CLAMP_MAX;
+        }
+        let mut pow_exponent = 1.0f64;
+        if let Some(v) = ep.pow_exponent {
+            pow_exponent = v;
+            flags |= MATMUL_EPILOGUE_FLAG_POW;
+        }
+        if has_diag {
+            flags |= MATMUL_EPILOGUE_FLAG_DIAG_WRITE;
+        }
+
+        let tile = crate::backend::wgpu::config::effective_matmul_tile();
+        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n as u32, tile);
+        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile);
+
+        // Build a layout tag incorporating the epilogue mask for cache keying
+        let layout_tag = format!("runmat-matmul-epilogue-layout-flags-{flags:08x}");
+
+        // Create module from the static WGSL (token substitution handled inside)
+        let (shader_src, ep_buf, pipeline_layout) = match self.precision() {
+            ProviderPrecision::F64 => {
+                let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF64 {
+                    alpha: ep.alpha,
+                    beta: ep.beta,
+                    clamp_min,
+                    clamp_max,
+                    pow_exponent,
+                    flags,
+                    diag_offset,
+                    diag_stride,
+                    diag_rows,
+                    _pad: 0,
+                    _pad2: 0,
+                };
+                let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
+                let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                    self.device_ref(),
+                    "runmat-matmul-epilogue-pl",
+                    &self.pipelines.matmul_epilogue.layout,
+                );
+                (
+                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64,
+                    ep_buf,
+                    pl,
+                )
+            }
+            ProviderPrecision::F32 => {
+                let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF32 {
+                    alpha: ep.alpha as f32,
+                    beta: ep.beta as f32,
+                    clamp_min: clamp_min as f32,
+                    clamp_max: clamp_max as f32,
+                    pow_exponent: pow_exponent as f32,
+                    flags,
+                    diag_offset,
+                    diag_stride,
+                    diag_rows,
+                    _pad: 0,
+                };
+                let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
+                let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                    self.device_ref(),
+                    "runmat-matmul-epilogue-pl",
+                    &self.pipelines.matmul_epilogue.layout,
+                );
+                (
+                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F32,
+                    ep_buf,
+                    pl,
+                )
+            }
+        };
+
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-matmul-epilogue-module",
+            shader_src,
+        );
+        let key = self.compute_pipeline_hash_bytes(shader_src.as_bytes(), &layout_tag, Some(tile));
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-matmul-epilogue",
+            Some(shader_src.as_bytes()),
+            Some(&layout_tag),
+            Some(tile),
+        );
+
+        let bg = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-matmul-epilogue-bind"),
+                layout: &self.pipelines.matmul_epilogue.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry_a.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: entry_b.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: row_buf.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: col_buf.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: ep_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: diag_buf.as_ref().as_entire_binding(),
+                    },
+                ],
+            });
+        crate::backend::wgpu::dispatch::matmul::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &pipeline,
+            &bg,
+            groups_x,
+            groups_y,
+        );
+
+        self.telemetry.record_matmul_duration(start.elapsed());
+
+        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
+    }
     fn pagefun(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
         self.pagefun_exec(request)
+    }
+    fn image_normalize(
+        &self,
+        input: &GpuTensorHandle,
+        desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(input)?;
+        ensure!(
+            entry.shape.len() == 3,
+            "image_normalize: expected 3-D tensor, got {:?}",
+            entry.shape
+        );
+        ensure!(
+            entry.shape[0] == desc.batch
+                && entry.shape[1] == desc.height
+                && entry.shape[2] == desc.width,
+            "image_normalize: descriptor dims {:?} do not match tensor shape {:?}",
+            (desc.batch, desc.height, desc.width),
+            entry.shape
+        );
+
+        if entry.len == 0 {
+            return self.image_normalize_cpu_fallback(input, desc);
+        }
+
+        match self.precision {
+            NumericPrecision::F64 => self.image_normalize_cpu_fallback(input, desc),
+            NumericPrecision::F32 => {
+                ensure!(
+                    desc.epsilon.is_finite(),
+                    "image_normalize: epsilon must be finite"
+                );
+                ensure!(
+                    desc.epsilon >= 0.0,
+                    "image_normalize: epsilon must be non-negative"
+                );
+
+                let batches = entry.shape[0];
+                let height = entry.shape[1];
+                let width = entry.shape[2];
+                let plane = height
+                    .checked_mul(width)
+                    .ok_or_else(|| anyhow!("image_normalize: height*width overflow"))?;
+                ensure!(
+                    entry.len == plane * batches,
+                    "image_normalize: inconsistent tensor length {} vs dims {:?}",
+                    entry.len,
+                    entry.shape
+                );
+
+                let stride_h = batches;
+                let stride_w = batches
+                    .checked_mul(height)
+                    .ok_or_else(|| anyhow!("image_normalize: stride overflow"))?;
+
+                let batches_u32 = u32::try_from(batches)
+                    .map_err(|_| anyhow!("image_normalize: batch size too large"))?;
+                let height_u32 = u32::try_from(height)
+                    .map_err(|_| anyhow!("image_normalize: height too large"))?;
+                let width_u32 = u32::try_from(width)
+                    .map_err(|_| anyhow!("image_normalize: width too large"))?;
+                let plane_u32 = u32::try_from(plane)
+                    .map_err(|_| anyhow!("image_normalize: plane size too large"))?;
+                let stride_h_u32 = u32::try_from(stride_h)
+                    .map_err(|_| anyhow!("image_normalize: stride_h too large"))?;
+                let stride_w_u32 = u32::try_from(stride_w)
+                    .map_err(|_| anyhow!("image_normalize: stride_w too large"))?;
+
+                let mut flags = 0u32;
+                if desc.gain.is_some() {
+                    flags |= IMAGE_NORMALIZE_FLAG_GAIN;
+                }
+                if desc.bias.is_some() {
+                    flags |= IMAGE_NORMALIZE_FLAG_BIAS;
+                }
+                if desc.gamma.is_some() {
+                    flags |= IMAGE_NORMALIZE_FLAG_GAMMA;
+                }
+
+                let uniforms = ImageNormalizeUniforms {
+                    batches: batches_u32,
+                    height: height_u32,
+                    width: width_u32,
+                    plane: plane_u32,
+                    stride_h: stride_h_u32,
+                    stride_w: stride_w_u32,
+                    flags,
+                    _pad0: 0,
+                    epsilon: desc.epsilon as f32,
+                    gain: desc.gain.unwrap_or(1.0) as f32,
+                    bias: desc.bias.unwrap_or(0.0) as f32,
+                    gamma: desc.gamma.unwrap_or(1.0) as f32,
+                };
+
+                let out_buffer =
+                    self.create_storage_buffer_checked(entry.len, "runmat-image-normalize-out")?;
+                let uniform_buf = self.uniform_buffer(&uniforms, "runmat-image-normalize-uniform");
+
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-image-normalize-bind"),
+                    layout: &self.pipelines.image_normalize.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: uniform_buf.as_entire_binding(),
+                        },
+                    ],
+                });
+
+                crate::backend::wgpu::dispatch::image_normalize::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.image_normalize,
+                    &bind_group,
+                    batches_u32,
+                );
+
+                Ok(self.register_existing_buffer(out_buffer, entry.shape.clone(), entry.len))
+            }
+        }
+    }
+    fn matmul_power_step(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        epilogue: &runmat_accelerate_api::PowerStepEpilogue,
+    ) -> Result<GpuTensorHandle> {
+        let product = self.matmul_exec(lhs, rhs)?;
+        let squared = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            &product,
+            &product,
+        )?;
+        let mut sum_sq = self.reduce_dim_sum_mean_exec(
+            &squared,
+            0,
+            crate::backend::wgpu::types::DimReduceOp::Sum,
+        )?;
+        let _ = self.free(&squared);
+        if epilogue.epsilon != 0.0 {
+            let eps = self.fill_exec(&sum_sq.shape, epilogue.epsilon)?;
+            let adjusted = self.binary_op_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Add,
+                &sum_sq,
+                &eps,
+            )?;
+            let _ = self.free(&sum_sq);
+            let _ = self.free(&eps);
+            sum_sq = adjusted;
+        }
+        let norms = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, &sum_sq)?;
+        let _ = self.free(&sum_sq);
+        let normalized = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Div,
+            &product,
+            &norms,
+        )?;
+        let _ = self.free(&product);
+        let _ = self.free(&norms);
+        Ok(normalized)
     }
     fn covariance(
         &self,
@@ -10705,6 +11770,60 @@ impl AccelProvider for WgpuProvider {
         symrcm_host_real_data(&host.shape, &host.data).map_err(|e| anyhow!(e))
     }
 
+    fn read_scalar(&self, h: &GpuTensorHandle, linear_index: usize) -> Result<f64> {
+        let entry = self.get_entry(h)?;
+        let elem_size = match entry.precision {
+            NumericPrecision::F64 => std::mem::size_of::<f64>() as u64,
+            NumericPrecision::F32 => std::mem::size_of::<f32>() as u64,
+        };
+        let total_bytes = (linear_index as u64)
+            .checked_mul(elem_size)
+            .ok_or_else(|| anyhow!("read_scalar: index overflow"))?;
+        if (linear_index + 1) > entry.len {
+            return Err(anyhow!(
+                "read_scalar: index {} out of bounds (len {})",
+                linear_index + 1,
+                entry.len
+            ));
+        }
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-read-scalar-staging"),
+            size: elem_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-read-scalar-enc"),
+            });
+        encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), total_bytes, &staging, 0, elem_size);
+        self.submit(encoder);
+        let slice = staging.slice(..);
+        let (tx, rx) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+        rx.recv()
+            .map_err(|_| anyhow!("read_scalar: map_async dropped"))?
+            .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
+        let mapped = slice.get_mapped_range();
+        let value = match entry.precision {
+            NumericPrecision::F64 => {
+                let words: &[f64] = cast_slice(&mapped);
+                words.get(0).copied().unwrap_or(0.0)
+            }
+            NumericPrecision::F32 => {
+                let words: &[f32] = cast_slice(&mapped);
+                words.get(0).copied().unwrap_or(0.0) as f64
+            }
+        };
+        drop(mapped);
+        staging.unmap();
+        Ok(value)
+    }
+
     fn fused_elementwise(
         &self,
         shader: &str,
@@ -10712,7 +11831,41 @@ impl AccelProvider for WgpuProvider {
         output_shape: &[usize],
         len: usize,
     ) -> Result<GpuTensorHandle> {
-        self.fused_elementwise_exec(shader, inputs, output_shape, len)
+        let start = std::time::Instant::now();
+        let result = self.fused_elementwise_exec(shader, inputs, output_shape, len);
+        if result.is_ok() {
+            let elapsed = start.elapsed();
+            self.telemetry.record_fused_elementwise_duration(elapsed);
+        }
+        result
+    }
+
+    fn map_nan_to_zero(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        let len = entry.len;
+        if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-nan-to-zero-empty");
+            return Ok(self.register_existing_buffer(out, entry.shape, 0));
+        }
+        let shader = match self.precision {
+            NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F64,
+            NumericPrecision::F32 => crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F32,
+        };
+        self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)
+    }
+
+    fn not_nan_mask(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(a)?;
+        let len = entry.len;
+        if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-not-nan-mask-empty");
+            return Ok(self.register_existing_buffer(out, entry.shape, 0));
+        }
+        let shader = match self.precision {
+            NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NOT_NAN_MASK_SHADER_F64,
+            NumericPrecision::F32 => crate::backend::wgpu::shaders::nan::NOT_NAN_MASK_SHADER_F32,
+        };
+        self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)
     }
 
     fn fused_reduction(
@@ -10724,16 +11877,21 @@ impl AccelProvider for WgpuProvider {
         num_slices: usize,
         workgroup_size: u32,
     ) -> Result<GpuTensorHandle> {
-        self.fused_reduction_exec(
+        let start = std::time::Instant::now();
+        let result = self.fused_reduction_exec(
             shader,
             inputs,
             output_shape,
             reduce_len,
             num_slices,
             workgroup_size,
-        )
+        );
+        if result.is_ok() {
+            let elapsed = start.elapsed();
+            self.telemetry.record_fused_reduction_duration(elapsed);
+        }
+        result
     }
-
     fn warmup(&self) {
         if std::env::var("RUNMAT_WGPU_SKIP_WARMUP")
             .ok()
@@ -10763,6 +11921,49 @@ impl AccelProvider for WgpuProvider {
 
         let start = std::time::Instant::now();
         self.warmup_from_disk();
+        // Proactively warm common pipelines used by normalization and reduction chains
+        let pl = &self.pipelines;
+        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+            self.device_ref(),
+            self.queue_ref(),
+            &pl.binary.pipeline,
+        );
+        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+            self.device_ref(),
+            self.queue_ref(),
+            &pl.binary_broadcast.pipeline,
+        );
+        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+            self.device_ref(),
+            self.queue_ref(),
+            &pl.unary.pipeline,
+        );
+        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+            self.device_ref(),
+            self.queue_ref(),
+            &pl.scalar.pipeline,
+        );
+        crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+            self.device_ref(),
+            self.queue_ref(),
+            &pl.reduce_dim_sum_mean.pipeline,
+        );
+        crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+            self.device_ref(),
+            self.queue_ref(),
+            &pl.reduce_nd_mean.pipeline,
+        );
+        crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+            self.device_ref(),
+            self.queue_ref(),
+            &pl.reduce_global.pipeline,
+        );
+        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+            self.device_ref(),
+            self.queue_ref(),
+            &pl.fill.pipeline,
+        );
+
         let ms = start.elapsed().as_millis() as u64;
         self.metrics.set_last_warmup_millis(ms);
     }
@@ -10773,6 +11974,16 @@ impl AccelProvider for WgpuProvider {
 
     fn last_warmup_millis(&self) -> Option<u64> {
         Some(self.metrics.last_warmup_millis())
+    }
+
+    fn telemetry_snapshot(&self) -> runmat_accelerate_api::ProviderTelemetry {
+        let (hits, misses) = self.metrics.counters();
+        self.telemetry.snapshot(hits, misses)
+    }
+
+    fn reset_telemetry(&self) {
+        self.telemetry.reset();
+        self.metrics.reset();
     }
 
     fn default_reduction_workgroup_size(&self) -> u32 {
@@ -10863,10 +12074,13 @@ impl AccelProvider for WgpuProvider {
                     }
                 }
             };
+        let bytes = (len as u64).saturating_mul(self.element_size as u64);
+        self.telemetry.record_upload_bytes(bytes);
         Ok(self.register_existing_buffer(buffer, shape, len))
     }
 
     fn download(&self, h: &GpuTensorHandle) -> Result<HostTensorOwned> {
+        log::trace!("wgpu download id={} shape={:?}", h.buffer_id, &h.shape);
         let entry = self.get_entry(h)?;
         if entry.len == 0 {
             return Ok(HostTensorOwned {
@@ -10912,6 +12126,7 @@ impl AccelProvider for WgpuProvider {
         }
         drop(data);
         staging.unmap();
+        self.telemetry.record_download_bytes(size_bytes);
         Ok(HostTensorOwned {
             data: out,
             shape: h.shape.clone(),
@@ -10919,8 +12134,24 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
+        // Remove from handle table and return buffer to pool for reuse
+        log::trace!("wgpu free id={}", h.buffer_id);
         let mut guard = self.buffers.lock().expect("buffer mutex poisoned");
-        guard.remove(&h.buffer_id);
+        if let Some(entry) = guard.remove(&h.buffer_id) {
+            if entry.len > 0 {
+                let mut pool = self.buffer_pool.lock().expect("buffer pool mutex poisoned");
+                let list = pool.entry(entry.len).or_default();
+                if list.len() < Self::BUFFER_POOL_MAX_PER_SIZE {
+                    list.push(entry.buffer.clone());
+                } else {
+                    // Drop buffer instead of pooling to cap memory footprint
+                    log::trace!(
+                        "buffer_pool: dropping buffer (len={} elems) due to pool cap",
+                        entry.len
+                    );
+                }
+            }
+        }
         runmat_accelerate_api::clear_handle_logical(h);
         Ok(())
     }
@@ -10946,5 +12177,440 @@ impl AccelProvider for WgpuProvider {
             memory_bytes,
             backend: Some(backend),
         }
+    }
+}
+
+impl WgpuProvider {
+    fn reduce_nd_mean_exec(
+        &self,
+        a: &GpuTensorHandle,
+        dims_zero_based: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        // If input is a known square of a base tensor, reuse or compute ex2 via moments
+        if let Ok(map) = self.pow2_of.lock() {
+            if let Some(&base_id) = map.get(&a.buffer_id) {
+                drop(map);
+                // Try cache
+                if let Ok(cache) = self.moments_cache.lock() {
+                    if let Some((_mean_h, ex2_h)) = cache.get(&(base_id, dims_zero_based.to_vec()))
+                    {
+                        return Ok(ex2_h.clone());
+                    }
+                }
+                // Build a handle for the base buffer id
+                let base_entry = {
+                    let guard = self.buffers.lock().expect("buffer mutex poisoned");
+                    guard.get(&base_id).cloned()
+                };
+                if let Some(entry) = base_entry {
+                    let base_handle = GpuTensorHandle {
+                        shape: entry.shape.clone(),
+                        device_id: self.device_id,
+                        buffer_id: base_id,
+                    };
+                    let moments = self.reduce_moments_nd_exec(&base_handle, dims_zero_based)?;
+                    if let Ok(mut cache2) = self.moments_cache.lock() {
+                        cache2.insert(
+                            (base_id, dims_zero_based.to_vec()),
+                            (moments.mean.clone(), moments.ex2.clone()),
+                        );
+                    }
+                    return Ok(moments.ex2);
+                }
+            }
+        }
+        // Prefer computing moments once and caching ex2 for future reuse
+        if let Ok(cache) = self.moments_cache.lock() {
+            let key = (a.buffer_id, dims_zero_based.to_vec());
+            if let Some((mean_h, _ex2_h)) = cache.get(&key) {
+                return Ok(mean_h.clone());
+            }
+            // Compute moments and store
+            drop(cache);
+            let moments = self.reduce_moments_nd_exec(a, dims_zero_based)?;
+            if let Ok(mut cache2) = self.moments_cache.lock() {
+                cache2.insert(
+                    (a.buffer_id, dims_zero_based.to_vec()),
+                    (moments.mean.clone(), moments.ex2.clone()),
+                );
+            }
+            return Ok(moments.mean);
+        }
+        let entry = self.get_entry(a)?;
+        let rank = entry.shape.len();
+        ensure!(rank > 0, "reduce_mean_nd: rank must be > 0");
+        let mut reduce: Vec<usize> = dims_zero_based
+            .iter()
+            .copied()
+            .filter(|&d| d < rank)
+            .collect();
+        reduce.sort_unstable();
+        reduce.dedup();
+        ensure!(
+            !reduce.is_empty(),
+            "reduce_mean_nd: no valid dims to reduce"
+        );
+        let kept: Vec<usize> = (0..rank).filter(|i| !reduce.contains(i)).collect();
+
+        // Compute strides (MATLAB/column-major)
+        let mut strides: Vec<usize> = vec![0; rank];
+        let mut s = 1usize;
+        for i in 0..rank {
+            strides[i] = s;
+            s = s
+                .checked_mul(entry.shape[i])
+                .ok_or_else(|| anyhow!("reduce_mean_nd: shape too large"))?;
+        }
+
+        let kept_sizes: Vec<u32> = kept.iter().map(|&i| entry.shape[i] as u32).collect();
+        let reduce_sizes: Vec<u32> = reduce.iter().map(|&i| entry.shape[i] as u32).collect();
+        let kept_strides: Vec<u32> = kept.iter().map(|&i| strides[i] as u32).collect();
+        let reduce_strides: Vec<u32> = reduce.iter().map(|&i| strides[i] as u32).collect();
+
+        let rows: usize = reduce
+            .iter()
+            .fold(1usize, |acc, &i| acc.saturating_mul(entry.shape[i]));
+        let cols: usize = kept
+            .iter()
+            .fold(1usize, |acc, &i| acc.saturating_mul(entry.shape[i]));
+        ensure!(rows > 0 && cols > 0, "reduce_mean_nd: empty tensor");
+        if rows as u64 > u32::MAX as u64 || cols as u64 > u32::MAX as u64 {
+            return Err(anyhow!("reduce_mean_nd: tensor exceeds GPU limits"));
+        }
+
+        // Heuristic fallback: for very large row extents, prefer sequenced dim-reductions.
+        if rows >= self.two_pass_threshold() {
+            let mut current = a.clone();
+            let mut owned = false;
+            for &d in &reduce {
+                let next = self.reduce_mean_dim(&current, d)?;
+                if owned {
+                    let _ = self.free(&current);
+                }
+                current = next;
+                owned = true;
+            }
+            return Ok(current);
+        }
+
+        let out_buffer = self.create_storage_buffer(cols, "runmat-reduce-nd-mean-out");
+        let mut out_shape = entry.shape.clone();
+        for &d in &reduce {
+            out_shape[d] = 1;
+        }
+
+        match entry.precision {
+            NumericPrecision::F64 => {
+                let mut params = crate::backend::wgpu::params::ReduceNdParams {
+                    rank: rank as u32,
+                    kept_count: kept.len() as u32,
+                    reduce_count: reduce.len() as u32,
+                    _pad: 0,
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    _pad2: [0; 2],
+                    kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                };
+                for (i, v) in kept_sizes.iter().enumerate() {
+                    params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in reduce_sizes.iter().enumerate() {
+                    params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in kept_strides.iter().enumerate() {
+                    params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in reduce_strides.iter().enumerate() {
+                    params.reduce_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                let pbuf = self.uniform_buffer(&params, "runmat-reduce-nd-mean-params-f64");
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-reduce-nd-mean-bind-f64"),
+                    layout: &self.pipelines.reduce_nd_mean.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: pbuf.as_entire_binding(),
+                        },
+                    ],
+                });
+                // One workgroup per output column (kept slice)
+                let groups_x = cols as u32;
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.reduce_nd_mean.pipeline,
+                    &bind_group,
+                    groups_x,
+                );
+            }
+            NumericPrecision::F32 => {
+                let mut params = crate::backend::wgpu::params::ReduceNdParams {
+                    rank: rank as u32,
+                    kept_count: kept.len() as u32,
+                    reduce_count: reduce.len() as u32,
+                    _pad: 0,
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    _pad2: [0; 2],
+                    kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                };
+                for (i, v) in kept_sizes.iter().enumerate() {
+                    params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in reduce_sizes.iter().enumerate() {
+                    params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in kept_strides.iter().enumerate() {
+                    params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in reduce_strides.iter().enumerate() {
+                    params.reduce_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                let pbuf = self.uniform_buffer(&params, "runmat-reduce-nd-mean-params-f32");
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-reduce-nd-mean-bind-f32"),
+                    layout: &self.pipelines.reduce_nd_mean.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: pbuf.as_entire_binding(),
+                        },
+                    ],
+                });
+                // One workgroup per output column (kept slice)
+                let groups_x = cols as u32;
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.reduce_nd_mean.pipeline,
+                    &bind_group,
+                    groups_x,
+                );
+            }
+        }
+
+        Ok(self.register_existing_buffer(out_buffer, out_shape, cols))
+    }
+
+    fn reduce_moments_nd_exec(
+        &self,
+        a: &GpuTensorHandle,
+        dims_zero_based: &[usize],
+    ) -> Result<runmat_accelerate_api::ProviderMoments2> {
+        let entry = self.get_entry(a)?;
+        let rank = entry.shape.len();
+        ensure!(rank > 0, "reduce_moments_nd: rank must be > 0");
+        let mut reduce: Vec<usize> = dims_zero_based
+            .iter()
+            .copied()
+            .filter(|&d| d < rank)
+            .collect();
+        reduce.sort_unstable();
+        reduce.dedup();
+        ensure!(
+            !reduce.is_empty(),
+            "reduce_moments_nd: no valid dims to reduce"
+        );
+        let kept: Vec<usize> = (0..rank).filter(|i| !reduce.contains(i)).collect();
+
+        // Strides in column-major
+        let mut strides: Vec<usize> = vec![0; rank];
+        let mut s = 1usize;
+        for i in 0..rank {
+            strides[i] = s;
+            s = s
+                .checked_mul(entry.shape[i])
+                .ok_or_else(|| anyhow!("reduce_moments_nd: shape too large"))?;
+        }
+
+        let kept_sizes: Vec<u32> = kept.iter().map(|&i| entry.shape[i] as u32).collect();
+        let reduce_sizes: Vec<u32> = reduce.iter().map(|&i| entry.shape[i] as u32).collect();
+        let kept_strides: Vec<u32> = kept.iter().map(|&i| strides[i] as u32).collect();
+        let reduce_strides: Vec<u32> = reduce.iter().map(|&i| strides[i] as u32).collect();
+
+        let rows: usize = reduce
+            .iter()
+            .fold(1usize, |acc, &i| acc.saturating_mul(entry.shape[i]));
+        let cols: usize = kept
+            .iter()
+            .fold(1usize, |acc, &i| acc.saturating_mul(entry.shape[i]));
+        ensure!(rows > 0 && cols > 0, "reduce_moments_nd: empty tensor");
+        if rows as u64 > u32::MAX as u64 || cols as u64 > u32::MAX as u64 {
+            return Err(anyhow!("reduce_moments_nd: tensor exceeds GPU limits"));
+        }
+
+        // Allocate outputs
+        let mean_out = self.create_storage_buffer(cols, "runmat-reduce-nd-moments-mean");
+        let ex2_out = self.create_storage_buffer(cols, "runmat-reduce-nd-moments-ex2");
+        let mut out_shape = entry.shape.clone();
+        for &d in &reduce {
+            out_shape[d] = 1;
+        }
+
+        match entry.precision {
+            NumericPrecision::F64 => {
+                let mut params = crate::backend::wgpu::params::ReduceNdParams {
+                    rank: rank as u32,
+                    kept_count: kept.len() as u32,
+                    reduce_count: reduce.len() as u32,
+                    _pad: 0,
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    _pad2: [0; 2],
+                    kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                };
+                for (i, v) in kept_sizes.iter().enumerate() {
+                    params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in reduce_sizes.iter().enumerate() {
+                    params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in kept_strides.iter().enumerate() {
+                    params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in reduce_strides.iter().enumerate() {
+                    params.reduce_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                let pbuf = self.uniform_buffer(&params, "runmat-reduce-nd-moments-params-f64");
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-reduce-nd-moments-bind-f64"),
+                    layout: &self.pipelines.reduce_nd_moments.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: mean_out.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: ex2_out.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: pbuf.as_entire_binding(),
+                        },
+                    ],
+                });
+                // One workgroup per output column (kept slice)
+                let groups_x = cols as u32;
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.reduce_nd_moments.pipeline,
+                    &bind_group,
+                    groups_x,
+                );
+            }
+            NumericPrecision::F32 => {
+                let mut params = crate::backend::wgpu::params::ReduceNdParams {
+                    rank: rank as u32,
+                    kept_count: kept.len() as u32,
+                    reduce_count: reduce.len() as u32,
+                    _pad: 0,
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    _pad2: [0; 2],
+                    kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                        crate::backend::wgpu::params::BCAST_MAX_RANK],
+                };
+                for (i, v) in kept_sizes.iter().enumerate() {
+                    params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in reduce_sizes.iter().enumerate() {
+                    params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in kept_strides.iter().enumerate() {
+                    params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                for (i, v) in reduce_strides.iter().enumerate() {
+                    params.reduce_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                }
+                let pbuf = self.uniform_buffer(&params, "runmat-reduce-nd-moments-params-f32");
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-reduce-nd-moments-bind-f32"),
+                    layout: &self.pipelines.reduce_nd_moments.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: mean_out.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: ex2_out.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: pbuf.as_entire_binding(),
+                        },
+                    ],
+                });
+                let groups_x = cols as u32;
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.reduce_nd_moments.pipeline,
+                    &bind_group,
+                    groups_x,
+                );
+            }
+        }
+
+        let mean_handle = self.register_existing_buffer(mean_out, out_shape.clone(), cols);
+        let ex2_handle = self.register_existing_buffer(ex2_out, out_shape, cols);
+        Ok(runmat_accelerate_api::ProviderMoments2 {
+            mean: mean_handle,
+            ex2: ex2_handle,
+        })
     }
 }

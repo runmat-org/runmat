@@ -20,11 +20,14 @@ mod host_lu;
 pub mod native_auto;
 pub mod simple_provider;
 mod sortrows_host;
+pub mod telemetry;
 pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
-    is_sink, prepare_builtin_args, promote_binary, promote_reduction_args, promote_unary, BinaryOp,
-    ReductionOp, UnaryOp,
+    auto_offload_report, is_sink, prepare_builtin_args, promote_binary, promote_reduction_args,
+    promote_unary, reset_auto_offload_log, AutoOffloadDecisionEntry, AutoOffloadDisposition,
+    AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason, ReductionOp, ThresholdBase,
+    ThresholdSnapshot, UnaryOp,
 };
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;
@@ -402,7 +405,8 @@ impl Accelerator {
         match (a, b) {
             (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
                 ExecutionTarget::Cpu => {
-                    runmat_runtime::elementwise_add(a, b).map_err(|e| anyhow::anyhow!(e))
+                    runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
+                        .map_err(|e| anyhow::anyhow!(e))
                 }
                 ExecutionTarget::Gpu(_) => {
                     let bk = self
@@ -431,7 +435,8 @@ impl Accelerator {
                 let hb = self.gather_handle(gb)?;
                 self.elementwise_add(other, &hb)
             }
-            _ => runmat_runtime::elementwise_add(a, b).map_err(|e| anyhow::anyhow!(e)),
+            _ => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
+                .map_err(|e| anyhow::anyhow!(e)),
         }
     }
 

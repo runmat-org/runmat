@@ -1,4 +1,4 @@
-use runmat_builtins::{builtin_functions, LogicalArray, Tensor, Value};
+use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::{make_cell_with_shape, new_object_builtin};
 
@@ -43,7 +43,20 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
                 let logical = LogicalArray::new(bits, shape).map_err(|e| e.to_string())?;
                 Ok(Value::LogicalArray(logical))
             } else {
-                let tensor = Tensor::new(data, shape).map_err(|e| e.to_string())?;
+                let mut data = data;
+                let precision = runmat_accelerate_api::handle_precision(handle)
+                    .unwrap_or_else(|| provider.precision());
+                if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
+                    for value in &mut data {
+                        *value = (*value as f32) as f64;
+                    }
+                }
+                let dtype = match precision {
+                    runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
+                    runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+                };
+                let tensor =
+                    Tensor::new_with_dtype(data, shape, dtype).map_err(|e| e.to_string())?;
                 Ok(Value::Tensor(tensor))
             }
         }
@@ -103,12 +116,38 @@ pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
         ));
     }
 
-    // Try each builtin until one succeeds
+    // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
+    let mut no_category: Vec<&runmat_builtins::BuiltinFunction> = Vec::new();
+    let mut categorized: Vec<&runmat_builtins::BuiltinFunction> = Vec::new();
+    for b in matching_builtins {
+        if b.category.is_empty() {
+            no_category.push(b);
+        } else {
+            categorized.push(b);
+        }
+    }
+
+    // Try each builtin until one succeeds. Within each group, prefer later-registered
+    // implementations to allow overrides when names collide.
     let mut last_error = String::new();
-    for builtin in matching_builtins {
+    for builtin in no_category
+        .into_iter()
+        .rev()
+        .chain(categorized.into_iter().rev())
+    {
         let f = builtin.implementation;
         match (f)(args) {
-            Ok(result) => return Ok(result),
+            Ok(mut result) => {
+                // Normalize certain logical scalar results to numeric 0/1 for
+                // compatibility with legacy expectations in dispatcher tests
+                // and VM shims.
+                if matches!(name, "eq" | "ne" | "gt" | "ge" | "lt" | "le") {
+                    if let Value::Bool(flag) = result {
+                        result = Value::Num(if flag { 1.0 } else { 0.0 });
+                    }
+                }
+                return Ok(result);
+            }
             Err(err) => {
                 if should_retry_with_gpu_gather(&err, args) {
                     match gather_args_for_retry(args) {

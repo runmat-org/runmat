@@ -11,7 +11,7 @@ use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
-#[cfg_attr(not(feature = "doc_export"), allow(dead_code))]
+#[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
 title: "gpuInfo"
 category: "acceleration/gpu"
@@ -173,26 +173,12 @@ register_builtin_fusion_spec!(FUSION_SPEC);
 #[cfg(feature = "doc_export")]
 register_builtin_doc_text!("gpuInfo", DOC_MD);
 
-#[cfg_attr(
-    feature = "doc_export",
-    runtime_builtin(
-        name = "gpuInfo",
-        category = "acceleration/gpu",
-        summary = "Return a formatted status string that describes the active GPU provider.",
-        keywords = "gpu,gpuInfo,device,info,accelerate",
-        examples = "disp(gpuInfo())",
-        doc_md = DOC_MD
-    )
-)]
-#[cfg_attr(
-    not(feature = "doc_export"),
-    runtime_builtin(
-        name = "gpuInfo",
-        category = "acceleration/gpu",
-        summary = "Return a formatted status string that describes the active GPU provider.",
-        keywords = "gpu,gpuInfo,device,info,accelerate",
-        examples = "disp(gpuInfo())"
-    )
+#[runtime_builtin(
+    name = "gpuInfo",
+    category = "acceleration/gpu",
+    summary = "Return a formatted status string that describes the active GPU provider.",
+    keywords = "gpu,gpuInfo,device,info,accelerate",
+    examples = "disp(gpuInfo())"
 )]
 fn gpu_info_builtin() -> Result<Value, String> {
     match active_device_struct() {
@@ -339,6 +325,7 @@ mod tests {
 
     #[test]
     #[allow(non_snake_case)]
+    #[cfg(feature = "doc_export")]
     fn gpuInfo_doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty(), "expected at least one MATLAB example");

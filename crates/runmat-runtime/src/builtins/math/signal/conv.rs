@@ -444,6 +444,7 @@ fn convert_tensor(tensor: Tensor) -> Result<ConvInput, String> {
         shape: _,
         rows,
         cols,
+        ..
     } = tensor;
     let len = data.len();
     let hint = classify_orientation(rows, cols, len);

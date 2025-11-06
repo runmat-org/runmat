@@ -123,7 +123,7 @@ fn state_linear_index(
     return offset;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let channel = gid.x;
     if channel >= params.channel_count {
@@ -391,7 +391,7 @@ fn state_linear_index(
     return offset;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let channel = gid.x;
     if channel >= params.channel_count {

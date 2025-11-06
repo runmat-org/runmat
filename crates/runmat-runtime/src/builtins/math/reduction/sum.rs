@@ -593,21 +593,42 @@ fn sum_gpu_with_omitnan(
         return sum_gpu_fallback(&handle, parsed);
     };
     let resolved = resolve_dims(&handle.shape, &parsed.selection)?;
-    if resolved.dims_in_bounds.len() != 1 || handle.shape.len() != 2 {
-        return sum_gpu_fallback(&handle, parsed);
+    if resolved.dims_in_bounds.is_empty() {
+        return Ok(Value::GpuTensor(handle));
     }
-    let axis = resolved.dims_in_bounds[0];
-    let expected_shape = reduced_shape(&handle.shape, &[axis]);
-    if expected_shape.is_empty() {
-        return sum_gpu_fallback(&handle, parsed);
+
+    // Replace NaNs with 0 on device, then reduce along requested dims.
+    let cleaned = provider
+        .map_nan_to_zero(&handle)
+        .map_err(|e| e.to_string())?;
+
+    // Reduce along requested dimensions iteratively on device.
+    let mut current = cleaned.clone();
+    for &dim in &resolved.dims_in_bounds {
+        match provider.reduce_sum_dim(&current, dim) {
+            Ok(next) => {
+                // free previous intermediate if it is owned
+                if !std::ptr::eq(&current, &cleaned) {
+                    let _ = provider.free(&current);
+                }
+                current = next;
+            }
+            Err(_) => {
+                // Clean up and fall back to host for correctness (should be rare)
+                let _ = provider.free(&cleaned);
+                if !std::ptr::eq(&current, &cleaned) {
+                    let _ = provider.free(&current);
+                }
+                return sum_gpu_fallback(&handle, parsed);
+            }
+        }
     }
-    if let Some(result) = reduce_omitnan_2d(provider, &handle, axis, &expected_shape) {
-        Ok(Value::GpuTensor(result))
-    } else {
-        sum_gpu_fallback(&handle, parsed)
-    }
+    // Free the cleaned input if it wasn't freed in loop
+    let _ = provider.free(&cleaned);
+    Ok(Value::GpuTensor(current))
 }
 
+#[allow(dead_code)]
 fn reduce_omitnan_2d(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
@@ -640,6 +661,7 @@ fn reduce_omitnan_2d(
         .ok()
 }
 
+#[allow(dead_code)]
 fn build_omitnan_shader(scalar_ty: &str, axis_is_row: bool) -> String {
     let mut shader = String::new();
     shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>; }}\n"));
@@ -692,6 +714,20 @@ fn build_omitnan_shader(scalar_ty: &str, axis_is_row: bool) -> String {
         shader.push_str("  if (lid.x == 0u) { output.data[col] = tile[0u]; }\n}\n");
     }
     shader
+}
+
+#[allow(dead_code)]
+fn reduced_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
+    if shape.is_empty() {
+        return Vec::new();
+    }
+    let mut out = shape.to_vec();
+    for &dim in dims {
+        if dim < out.len() {
+            out[dim] = 1;
+        }
+    }
+    out
 }
 
 fn sum_gpu_fallback(handle: &GpuTensorHandle, parsed: &ParsedArguments) -> Result<Value, String> {
@@ -921,19 +957,6 @@ fn sum_complex_tensor(
     }
 
     ComplexTensor::new(output, output_shape).map_err(|e| format!("sum: {e}"))
-}
-
-fn reduced_shape(shape: &[usize], dims: &[usize]) -> Vec<usize> {
-    if shape.is_empty() {
-        return Vec::new();
-    }
-    let mut out = shape.to_vec();
-    for &dim in dims {
-        if dim < out.len() {
-            out[dim] = 1;
-        }
-    }
-    out
 }
 
 fn linear_to_multi(index: usize, shape: &[usize], out: &mut [usize]) {

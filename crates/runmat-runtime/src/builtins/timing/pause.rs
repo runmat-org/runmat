@@ -3,6 +3,7 @@
 use once_cell::sync::Lazy;
 use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
+#[cfg(not(test))]
 use std::io::{self, IsTerminal, Read};
 use std::sync::RwLock;
 use std::thread;
@@ -226,10 +227,17 @@ fn perform_wait(wait: PauseWait) -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
+fn wait_for_key_press() -> Result<(), String> {
+    // During crate-level tests we treat pause as non-interactive so unit tests
+    // never block waiting for a key press on an interactive terminal.
+    Ok(())
+}
+
+#[cfg(not(test))]
 fn wait_for_key_press() -> Result<(), String> {
     let stdin = io::stdin();
     if !stdin.is_terminal() {
-        // Non-interactive input (e.g., during automated tests) should not block.
         thread::sleep(Duration::from_millis(1));
         return Ok(());
     }

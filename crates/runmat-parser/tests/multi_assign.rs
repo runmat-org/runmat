@@ -20,3 +20,35 @@ fn multi_assign_parses() {
         _ => panic!("expected multi-assign"),
     }
 }
+
+#[test]
+fn multi_assign_semicolon_and_newline_behavior() {
+    let program = parse("[a,b] = f(x);\n[c, d] = g(y)").unwrap();
+    assert_eq!(program.body.len(), 2);
+
+    match &program.body[0] {
+        Stmt::MultiAssign(names, rhs, suppressed) => {
+            assert_eq!(names, &vec!["a".to_string(), "b".to_string()]);
+            assert!(*suppressed);
+            if let Expr::FuncCall(name, _) = rhs {
+                assert_eq!(name, "f");
+            } else {
+                panic!("expected first RHS as function call");
+            }
+        }
+        other => panic!("unexpected first stmt: {other:?}"),
+    }
+
+    match &program.body[1] {
+        Stmt::MultiAssign(names, rhs, suppressed) => {
+            assert_eq!(names, &vec!["c".to_string(), "d".to_string()]);
+            assert!(!*suppressed);
+            if let Expr::FuncCall(name, _) = rhs {
+                assert_eq!(name, "g");
+            } else {
+                panic!("expected second RHS as function call");
+            }
+        }
+        other => panic!("unexpected second stmt: {other:?}"),
+    }
+}

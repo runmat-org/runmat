@@ -4,6 +4,15 @@ pub enum NumericPrecision {
     F64,
 }
 
+impl NumericPrecision {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            NumericPrecision::F32 => "f32",
+            NumericPrecision::F64 => "f64",
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum BinaryOpCode {
     Add = 0,
@@ -13,6 +22,8 @@ pub enum BinaryOpCode {
     Hypot = 4,
     Atan2 = 5,
     Pow = 6,
+    Max = 7,
+    Min = 8,
 }
 
 #[derive(Clone, Copy)]
@@ -59,6 +70,8 @@ pub enum ScalarOpCode {
     Div = 3,
     RSub = 4,
     RDiv = 5,
+    Max = 6,
+    Min = 7,
 }
 
 #[derive(Clone, Copy)]

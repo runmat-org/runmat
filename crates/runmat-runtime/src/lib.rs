@@ -1,7 +1,6 @@
 use crate::builtins::common::format::format_variadic;
 use runmat_builtins::Value;
 use runmat_gc_api::GcPtr;
-use runmat_macros::runtime_builtin;
 
 pub mod dispatcher;
 
@@ -13,7 +12,6 @@ pub mod constants;
 pub mod elementwise;
 pub mod indexing;
 pub mod introspection;
-pub mod io;
 pub mod mathematics;
 pub mod matrix;
 pub mod plotting;
@@ -35,16 +33,19 @@ extern crate openblas_src;
 
 pub use dispatcher::{call_builtin, gather_if_needed, is_gpu_value, value_contains_gpu};
 
-pub use arrays::*;
-pub use comparison::*;
-pub use concatenation::*;
-// Explicitly re-export for external users (ignition VM) that build matrices from values
+// Transitional public shim for tests using matrix_transpose
+pub use crate::matrix::matrix_transpose;
+
+// Pruned legacy re-exports; prefer builtins::* and explicit shims only
+// Transitional root-level shims for widely used helpers
+pub use arrays::create_range;
 pub use concatenation::create_matrix_from_values;
+pub use elementwise::{elementwise_div, elementwise_mul, elementwise_neg, elementwise_pow, power};
+pub use indexing::perform_indexing;
+// Explicitly re-export for external users (ignition VM) that build matrices from values
+// (kept above)
 // Note: constants and mathematics modules only contain #[runtime_builtin] functions
 // and don't export public items, so they don't need to be re-exported
-pub use elementwise::*;
-pub use indexing::*;
-pub use matrix::*;
 
 #[cfg(feature = "blas-lapack")]
 pub use blas::*;
@@ -170,27 +171,6 @@ fn to_string_scalar(v: &Value) -> Result<String, String> {
     Ok(s)
 }
 
-#[runmat_macros::runtime_builtin(name = "strrep")]
-fn strrep_builtin(a: Value, old: Value, newv: Value) -> Result<Value, String> {
-    let old_s = to_string_scalar(&old)?;
-    let new_s = to_string_scalar(&newv)?;
-    match a {
-        Value::String(s) => Ok(Value::String(s.replace(&old_s, &new_s))),
-        Value::StringArray(sa) => {
-            let data: Vec<String> = sa.data.iter().map(|x| x.replace(&old_s, &new_s)).collect();
-            Ok(Value::StringArray(
-                runmat_builtins::StringArray::new(data, sa.shape)
-                    .map_err(|e| format!("strrep: {e}"))?,
-            ))
-        }
-        Value::CharArray(ca) => {
-            let s: String = ca.data.iter().collect();
-            Ok(Value::String(s.replace(&old_s, &new_s)))
-        }
-        other => Err(format!("strrep: unsupported input {other:?}")),
-    }
-}
-
 fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
     match v {
         Value::String(s) => runmat_builtins::StringArray::new(vec![s.clone()], vec![1, 1])
@@ -210,72 +190,6 @@ fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
         }
         other => Err(format!("cannot convert to string array: {other:?}")),
     }
-}
-
-#[runmat_macros::runtime_builtin(name = "strcat")]
-fn strcat_builtin(rest: Vec<Value>) -> Result<Value, String> {
-    if rest.is_empty() {
-        return Ok(Value::String(String::new()));
-    }
-    // Normalize all inputs to StringArray; allow scalars (1x1) to broadcast to the max shape if equal
-    let mut arrays: Vec<runmat_builtins::StringArray> = Vec::new();
-    for v in &rest {
-        arrays.push(to_string_array(v)?);
-    }
-    // Determine result shape by choosing the first non-1x1 shape; require all non-1x1 equal
-    let mut shape: Vec<usize> = vec![1, 1];
-    for a in &arrays {
-        if a.shape != vec![1, 1] {
-            if shape == vec![1, 1] {
-                shape = a.shape.clone();
-            } else if shape != a.shape {
-                return Err("strcat: shape mismatch".to_string());
-            }
-        }
-    }
-    let total = shape.iter().product::<usize>().max(1);
-    let mut out: Vec<String> = vec![String::new(); total];
-    for a in &arrays {
-        if a.shape == vec![1, 1] {
-            let s = &a.data[0];
-            for item in out.iter_mut().take(total) {
-                item.push_str(s);
-            }
-        } else {
-            for (i, item) in out.iter_mut().enumerate().take(total) {
-                item.push_str(&a.data[i]);
-            }
-        }
-    }
-    Ok(Value::StringArray(
-        runmat_builtins::StringArray::new(out, shape).map_err(|e| format!("strcat: {e}"))?,
-    ))
-}
-
-#[runmat_macros::runtime_builtin(name = "erase")]
-fn erase_builtin(a: Value, pat: Value) -> Result<Value, String> {
-    let s = to_string_scalar(&a)?;
-    let p = to_string_scalar(&pat)?;
-    Ok(Value::String(s.replace(&p, "")))
-}
-
-#[runmat_macros::runtime_builtin(name = "eraseBetween")]
-fn erase_between_builtin(a: Value, start: Value, stop: Value) -> Result<Value, String> {
-    let s = to_string_scalar(&a)?;
-    let st = to_string_scalar(&start)?;
-    let en = to_string_scalar(&stop)?;
-    if st.is_empty() || en.is_empty() {
-        return Ok(Value::String(s));
-    }
-    if let Some(i) = s.find(&st) {
-        if let Some(j) = s[i + st.len()..].find(&en) {
-            let mut out = String::new();
-            out.push_str(&s[..i + st.len()]);
-            out.push_str(&s[i + st.len() + j..]);
-            return Ok(Value::String(out));
-        }
-    }
-    Ok(Value::String(s))
 }
 
 #[runmat_macros::runtime_builtin(name = "strtrim")]
@@ -1188,7 +1102,7 @@ pub fn transpose(value: Value) -> Result<Value, String> {
             }
             Err("transpose: unsupported for gpuArray".to_string())
         }
-        Value::Tensor(ref m) => Ok(Value::Tensor(matrix_transpose(m))),
+        Value::Tensor(ref m) => Ok(Value::Tensor(crate::matrix::matrix_transpose(m))),
         // For complex scalars, transpose is conjugate transpose => scalar transpose is conjugate
         Value::Complex(re, im) => Ok(Value::Complex(re, -im)),
         Value::ComplexTensor(ref ct) => {
@@ -1262,162 +1176,6 @@ fn gather_builtin(x: Value) -> Result<Value, String> {
             }
         }
         v => Ok(v),
-    }
-}
-
-// consolidate scalar max into helper; keep one registered varargs form below
-fn max_scalar(a: f64, b: f64) -> f64 {
-    a.max(b)
-}
-
-fn max_vector_builtin(a: Value) -> Result<Value, String> {
-    match a {
-        Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider() {
-                // Reduce across all elements -> 1x1 handle
-                if let Ok(hc) = p.reduce_max(&h) {
-                    return Ok(Value::GpuTensor(hc));
-                }
-            }
-            Err("max: unsupported for gpuArray".to_string())
-        }
-        Value::Tensor(t) => {
-            if t.shape.len() == 2 && t.shape[1] == 1 {
-                let mut max_val = f64::NEG_INFINITY;
-                let mut idx = 1usize;
-                for (i, &v) in t.data.iter().enumerate() {
-                    if v > max_val {
-                        max_val = v;
-                        idx = i + 1;
-                    }
-                }
-                // Return a 2x1 column [max; idx] for expansion (value then index)
-                let out = runmat_builtins::Tensor::new(vec![max_val, idx as f64], vec![2, 1])
-                    .map_err(|e| format!("max: {e}"))?;
-                Ok(Value::Tensor(out))
-            } else {
-                // Reduce across all elements -> scalar
-                let max_val = t.data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                Ok(Value::Num(max_val))
-            }
-        }
-        Value::Num(n) => Ok(Value::Num(n)),
-        _ => Err("max: unsupported input".to_string()),
-    }
-}
-
-fn max_dim_builtin(a: Value, dim: f64) -> Result<Value, String> {
-    if let Value::GpuTensor(h) = a {
-        if let Some(p) = runmat_accelerate_api::provider() {
-            let d = if dim < 1.0 { 1 } else { dim as usize };
-            if let Ok(res) = p.reduce_max_dim(&h, d) {
-                // Return cell {values, indices} with GPU handles
-                return make_cell(
-                    vec![Value::GpuTensor(res.values), Value::GpuTensor(res.indices)],
-                    1,
-                    2,
-                );
-            }
-        }
-        return Err("max: unsupported for gpuArray".to_string());
-    }
-    let t = match a {
-        Value::Tensor(t) => t,
-        _ => return Err("max: expected tensor for dim variant".to_string()),
-    };
-    let dim = if dim < 1.0 { 1usize } else { dim as usize };
-    if t.shape.len() < 2 {
-        return Err("max: dim variant expects 2D tensor".to_string());
-    }
-    let rows = t.shape[0];
-    let cols = t.shape[1];
-    if dim == 1 {
-        // column-wise maxima: return {M_row, I_row}
-        let mut m: Vec<f64> = vec![f64::NEG_INFINITY; cols];
-        let mut idx: Vec<f64> = vec![1.0; cols];
-        for c in 0..cols {
-            for r in 0..rows {
-                let v = t.data[r + c * rows];
-                if v > m[c] {
-                    m[c] = v;
-                    idx[c] = (r + 1) as f64;
-                }
-            }
-        }
-        let m_t =
-            runmat_builtins::Tensor::new(m, vec![1, cols]).map_err(|e| format!("max: {e}"))?;
-        let i_t =
-            runmat_builtins::Tensor::new(idx, vec![1, cols]).map_err(|e| format!("max: {e}"))?;
-        make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
-    } else if dim == 2 {
-        // row-wise maxima: return {M_col, I_col}
-        let mut m: Vec<f64> = vec![f64::NEG_INFINITY; rows];
-        let mut idx: Vec<f64> = vec![1.0; rows];
-        for r in 0..rows {
-            for c in 0..cols {
-                let v = t.data[r + c * rows];
-                if v > m[r] {
-                    m[r] = v;
-                    idx[r] = (c + 1) as f64;
-                }
-            }
-        }
-        let m_t =
-            runmat_builtins::Tensor::new(m, vec![rows, 1]).map_err(|e| format!("max: {e}"))?;
-        let i_t =
-            runmat_builtins::Tensor::new(idx, vec![rows, 1]).map_err(|e| format!("max: {e}"))?;
-        make_cell(vec![Value::Tensor(m_t), Value::Tensor(i_t)], 1, 2)
-    } else {
-        Err("max: dim out of range".to_string())
-    }
-}
-
-#[runmat_macros::runtime_builtin(name = "max", accel = "reduction")]
-fn max_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
-    if rest.is_empty() {
-        return max_vector_builtin(a);
-    }
-    if rest.len() == 1 {
-        let r0 = &rest[0];
-        // Scalar pair max(a,b)
-        if let (Value::Num(a0), Value::Num(b0)) = (a.clone(), r0.clone()) {
-            return Ok(Value::Num(max_scalar(a0, b0)));
-        }
-        // Optional dim variant max(A, dim)
-        if matches!(r0, Value::Num(_) | Value::Int(_)) {
-            return max_dim_builtin(
-                a,
-                match r0 {
-                    Value::Num(d) => *d,
-                    Value::Int(i) => i.to_i64() as f64,
-                    _ => unreachable!(),
-                },
-            );
-        }
-    }
-    Err("max: unsupported arguments".to_string())
-}
-
-#[runtime_builtin(name = "sqrt")]
-fn sqrt_builtin(x: f64) -> Result<f64, String> {
-    if x < 0.0 {
-        Err("MATLAB:domainError: Cannot take square root of negative number".to_string())
-    } else {
-        Ok(x.sqrt())
-    }
-}
-
-#[runtime_builtin(name = "exp")]
-fn exp_builtin(x: f64) -> Result<f64, String> {
-    Ok(x.exp())
-}
-
-#[runtime_builtin(name = "log")]
-fn log_builtin(x: f64) -> Result<f64, String> {
-    if x <= 0.0 {
-        Err("MATLAB:domainError: Cannot take logarithm of non-positive number".to_string())
-    } else {
-        Ok(x.ln())
     }
 }
 

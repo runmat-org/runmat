@@ -34,13 +34,13 @@ pub(crate) fn matmul_real(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 /// Multiply a real tensor by a real scalar.
 pub(crate) fn scalar_mul_real(a: &Tensor, scalar: f64) -> Tensor {
     let data: Vec<f64> = a.data.iter().map(|x| x * scalar).collect();
-    Tensor::new_2d(data, a.rows(), a.cols()).expect("scalar_mul_real: invalid tensor")
+    Tensor::new(data, a.shape.clone()).expect("scalar_mul_real: invalid tensor")
 }
 
 /// Multiply a real tensor by a complex scalar, producing a complex tensor.
 pub(crate) fn scalar_mul_complex(a: &Tensor, cr: f64, ci: f64) -> ComplexTensor {
     let data: Vec<(f64, f64)> = a.data.iter().map(|&x| (x * cr, x * ci)).collect();
-    ComplexTensor::new_2d(data, a.rows(), a.cols()).expect("scalar_mul_complex: invalid tensor")
+    ComplexTensor::new(data, a.shape.clone()).expect("scalar_mul_complex: invalid tensor")
 }
 
 /// Multiply a complex tensor by a complex scalar.

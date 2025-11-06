@@ -241,6 +241,7 @@ struct ParsedRand {
 #[derive(Clone)]
 enum RandTemplate {
     Double,
+    Single,
     Like(Value),
 }
 
@@ -272,9 +273,9 @@ impl ParsedRand {
                         continue;
                     }
                     "single" => {
-                        return Err(
-                            "rand: single precision output is not implemented yet".to_string()
-                        );
+                        template = Some(RandTemplate::Single);
+                        idx += 1;
+                        continue;
                     }
                     other => {
                         return Err(format!("rand: unrecognised option '{other}'"));
@@ -325,6 +326,7 @@ impl ParsedRand {
 fn build_output(parsed: ParsedRand) -> Result<Value, String> {
     match parsed.template {
         RandTemplate::Double => rand_double(&parsed.shape),
+        RandTemplate::Single => rand_single(&parsed.shape),
         RandTemplate::Like(proto) => rand_like(&proto, &parsed.shape),
     }
 }
@@ -348,6 +350,11 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
         Value::CharArray(_) | Value::Cell(_) => rand_double(shape),
         other => Err(format!("rand: unsupported prototype {other:?}")),
     }
+}
+
+fn rand_single(shape: &[usize]) -> Result<Value, String> {
+    let _ = shape; // silence unused warning when feature flags remove paths
+    Err("rand: single precision generation is not yet supported".to_string())
 }
 
 fn rand_complex(shape: &[usize]) -> Result<Value, String> {
@@ -390,10 +397,15 @@ mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
 
+    fn reset_rng_clean() {
+        runmat_accelerate_api::clear_provider();
+        random::reset_rng();
+    }
+
     #[test]
     fn rand_default_scalar() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let result = rand_builtin(Vec::new()).expect("rand");
         let expected = random::expected_uniform_sequence(1)[0];
         match result {
@@ -408,7 +420,7 @@ mod tests {
     #[test]
     fn rand_square_from_single_dimension() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let args = vec![Value::Num(3.0)];
         let result = rand_builtin(args).expect("rand");
         match result {
@@ -427,7 +439,7 @@ mod tests {
     #[test]
     fn rand_like_tensor_infers_shape() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = rand_builtin(args).expect("rand");
@@ -446,7 +458,7 @@ mod tests {
     #[test]
     fn rand_like_complex_produces_complex_tensor() {
         let _guard = random::test_lock().lock().unwrap();
-        random::reset_rng();
+        reset_rng_clean();
         let args = vec![
             Value::Num(2.0),
             Value::Num(2.0),

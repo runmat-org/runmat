@@ -1259,6 +1259,12 @@ impl AccelProvider for InProcessProvider {
         }
     }
 
+    fn telemetry_snapshot(&self) -> runmat_accelerate_api::ProviderTelemetry {
+        runmat_accelerate_api::ProviderTelemetry::default()
+    }
+
+    fn reset_telemetry(&self) {}
+
     fn sort_rows(
         &self,
         handle: &GpuTensorHandle,
@@ -1491,6 +1497,21 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow!("symrcm: unknown tensor handle {}", matrix.buffer_id))?
         };
         symrcm_host_real_data(&matrix.shape, &data).map_err(|e| anyhow!(e))
+    }
+
+    fn read_scalar(&self, h: &GpuTensorHandle, linear_index: usize) -> Result<f64> {
+        let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+        let buf = guard
+            .get(&h.buffer_id)
+            .ok_or_else(|| anyhow!("read_scalar: unknown buffer {}", h.buffer_id))?;
+        if linear_index >= buf.len() {
+            return Err(anyhow!(
+                "read_scalar: index {} out of bounds (len {})",
+                linear_index + 1,
+                buf.len()
+            ));
+        }
+        Ok(buf[linear_index])
     }
 
     fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -4485,6 +4506,245 @@ impl AccelProvider for InProcessProvider {
             device_id: 0,
             buffer_id: id,
         })
+    }
+
+    fn matmul_epilogue(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        ep: &runmat_accelerate_api::MatmulEpilogue,
+    ) -> Result<GpuTensorHandle> {
+        // Compute plain matmul first
+        let base = self.matmul(a, b)?;
+        let (rows, cols) = (base.shape[0], base.shape[1]);
+        let mut data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&base.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("matmul_epilogue: unknown buffer {}", base.buffer_id))?
+        };
+
+        // Load optional scales from registry
+        let row_scale: Option<Vec<f64>> = if let Some(ref h) = ep.row_scale {
+            let guard = registry().lock().unwrap();
+            Some(guard.get(&h.buffer_id).cloned().ok_or_else(|| {
+                anyhow!("matmul_epilogue: unknown row scale buffer {}", h.buffer_id)
+            })?)
+        } else {
+            None
+        };
+        let col_scale: Option<Vec<f64>> = if let Some(ref h) = ep.col_scale {
+            let guard = registry().lock().unwrap();
+            Some(guard.get(&h.buffer_id).cloned().ok_or_else(|| {
+                anyhow!("matmul_epilogue: unknown col scale buffer {}", h.buffer_id)
+            })?)
+        } else {
+            None
+        };
+        let mut diag_output: Option<Vec<f64>> = if let Some(ref h) = ep.diag_output {
+            let guard = registry().lock().unwrap();
+            let vec = guard.get(&h.buffer_id).cloned().ok_or_else(|| {
+                anyhow!(
+                    "matmul_epilogue: unknown diag output buffer {}",
+                    h.buffer_id
+                )
+            })?;
+            Some(vec)
+        } else {
+            None
+        };
+        if let Some(ref diag) = diag_output {
+            let expected = rows.min(cols);
+            if diag.len() < expected {
+                return Err(anyhow!(
+                    "matmul_epilogue: diag_output length {} insufficient for diag size {}",
+                    diag.len(),
+                    expected
+                ));
+            }
+        }
+
+        // Apply epilogue: alpha/beta, then per-row/col scales (matches GPU epilogue ordering)
+        for j in 0..cols {
+            for i in 0..rows {
+                let idx = i + j * rows;
+                let mut v = data[idx] * ep.alpha + ep.beta;
+                if let Some(ref rs) = row_scale {
+                    let s = *rs.get(i).unwrap_or(&1.0);
+                    v = match ep.row_op {
+                        runmat_accelerate_api::ScaleOp::Multiply => v * s,
+                        runmat_accelerate_api::ScaleOp::Divide => v / s,
+                    };
+                }
+                if let Some(ref cs) = col_scale {
+                    let s = *cs.get(j).unwrap_or(&1.0);
+                    v = match ep.col_op {
+                        runmat_accelerate_api::ScaleOp::Multiply => v * s,
+                        runmat_accelerate_api::ScaleOp::Divide => v / s,
+                    };
+                }
+                if let Some(min_v) = ep.clamp_min {
+                    v = v.max(min_v);
+                }
+                if let Some(max_v) = ep.clamp_max {
+                    v = v.min(max_v);
+                }
+                if let Some(pow_v) = ep.pow_exponent {
+                    v = v.powf(pow_v);
+                }
+                if let Some(ref mut diag) = diag_output {
+                    if i == j && i < diag.len() {
+                        diag[i] = v;
+                    }
+                }
+                data[idx] = v;
+            }
+        }
+
+        // Replace buffer contents with epilogued data
+        {
+            let mut guard = registry().lock().unwrap();
+            guard.insert(base.buffer_id, data);
+            if let Some(vec) = diag_output {
+                if let Some(ref h) = ep.diag_output {
+                    guard.insert(h.buffer_id, vec);
+                }
+            }
+        }
+        Ok(base)
+    }
+
+    fn matmul_power_step(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        ep: &runmat_accelerate_api::PowerStepEpilogue,
+    ) -> Result<GpuTensorHandle> {
+        let base = self.matmul(lhs, rhs)?;
+        let rows = base.shape[0];
+        let cols = base.shape[1];
+        let mut data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&base.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("matmul_power_step: unknown buffer {}", base.buffer_id))?
+        };
+        let mut norms = vec![0.0f64; cols];
+        for col in 0..cols {
+            let mut acc = 0.0f64;
+            for row in 0..rows {
+                let idx = row + col * rows;
+                let val = data[idx];
+                acc += val * val;
+            }
+            acc += ep.epsilon;
+            norms[col] = acc.sqrt();
+        }
+        for col in 0..cols {
+            let norm = norms[col];
+            for row in 0..rows {
+                let idx = row + col * rows;
+                data[idx] /= norm;
+            }
+        }
+        {
+            let mut guard = registry().lock().unwrap();
+            guard.insert(base.buffer_id, data);
+        }
+        Ok(base)
+    }
+
+    fn image_normalize(
+        &self,
+        input: &GpuTensorHandle,
+        desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
+    ) -> Result<GpuTensorHandle> {
+        ensure!(
+            input.shape.len() == 3,
+            "image_normalize: expected 3-D tensor, got {:?}",
+            input.shape
+        );
+        ensure!(
+            input.shape[0] == desc.batch
+                && input.shape[1] == desc.height
+                && input.shape[2] == desc.width,
+            "image_normalize: descriptor dims {:?} do not match tensor shape {:?}",
+            (desc.batch, desc.height, desc.width),
+            input.shape
+        );
+
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&input.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("image_normalize: unknown buffer {}", input.buffer_id))?
+        };
+
+        let batch = desc.batch;
+        let height = desc.height;
+        let width = desc.width;
+        let plane = height * width;
+        if plane == 0 {
+            return Ok(self.allocate_tensor(vec![], input.shape.clone()));
+        }
+
+        let stride_h = batch;
+        let stride_w = batch * height;
+
+        let gain = desc.gain.unwrap_or(1.0);
+        let bias = desc.bias.unwrap_or(0.0);
+        let gamma = desc.gamma;
+
+        let mut output = data.clone();
+
+        for b in 0..batch {
+            let mut sum = 0.0;
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    sum += data[idx];
+                }
+            }
+            let mean = sum / plane as f64;
+
+            let mut sq_sum = 0.0;
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    let diff = data[idx] - mean;
+                    sq_sum += diff * diff;
+                }
+            }
+            let variance = sq_sum / plane as f64;
+            let sigma = (variance + desc.epsilon).sqrt();
+            let inv_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+
+            for w in 0..width {
+                let base_w = w * stride_w;
+                for h in 0..height {
+                    let idx = b + h * stride_h + base_w;
+                    let mut value = (data[idx] - mean) * inv_sigma;
+                    if desc.gain.is_some() {
+                        value *= gain;
+                    }
+                    if desc.bias.is_some() {
+                        value += bias;
+                    }
+                    value = value.max(0.0);
+                    if let Some(gamma) = gamma {
+                        value = value.powf(gamma);
+                    }
+                    output[idx] = value;
+                }
+            }
+        }
+
+        Ok(self.allocate_tensor(output, input.shape.clone()))
     }
 
     fn pagefun(&self, _request: &PagefunRequest) -> Result<GpuTensorHandle> {

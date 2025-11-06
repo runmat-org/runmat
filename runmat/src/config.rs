@@ -1140,7 +1140,7 @@ mod tests {
         let accel = AccelerateConfig::default();
         let opts = accel.to_init_options();
         assert!(opts.enabled);
-        assert_eq!(opts.provider, AccelerateProviderPreference::Auto);
+        assert_eq!(opts.provider, AccelerateProviderPreference::Wgpu);
     }
 
     #[test]

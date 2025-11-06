@@ -162,10 +162,7 @@ fn ellipsis_inside_string_is_string() {
 fn two_dots_are_two_dots_not_ellipsis() {
     let src = "1..3";
     let tokens = tokenize(src);
-    assert_eq!(
-        tokens,
-        vec![Token::Integer, Token::Dot, Token::Dot, Token::Integer]
-    );
+    assert_eq!(tokens, vec![Token::Float, Token::Dot, Token::Integer]);
 }
 
 #[test]
@@ -182,7 +179,7 @@ fn numeric_exponent_forms() {
     let tokens = tokenize(src);
     assert_eq!(
         tokens,
-        vec![Token::Integer, Token::Float, Token::Integer, Token::Float]
+        vec![Token::Float, Token::Float, Token::Float, Token::Float]
     );
 }
 

@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
 type ResidencyClearFn = fn(&GpuTensorHandle);
@@ -9,6 +9,9 @@ type ResidencyClearFn = fn(&GpuTensorHandle);
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 
 static LOGICAL_HANDLES: Lazy<RwLock<HashSet<u64>>> = Lazy::new(|| RwLock::new(HashSet::new()));
+
+static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Register a callback used to clear residency tracking when GPU tensors are
 /// gathered back to the host. Backends that maintain residency metadata should
@@ -22,6 +25,29 @@ pub fn register_residency_clear(handler: ResidencyClearFn) {
 pub fn clear_residency(handle: &GpuTensorHandle) {
     if let Some(handler) = RESIDENCY_CLEAR.get() {
         handler(handle);
+    }
+}
+
+/// Record the precision associated with a GPU tensor handle so host operations can
+/// reconstruct the original dtype when gathering back to the CPU.
+pub fn set_handle_precision(handle: &GpuTensorHandle, precision: ProviderPrecision) {
+    if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
+        guard.insert(handle.buffer_id, precision);
+    }
+}
+
+/// Look up the recorded precision for a GPU tensor handle, if any.
+pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
+    HANDLE_PRECISIONS
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+}
+
+/// Clear any recorded precision metadata for a GPU tensor handle.
+pub fn clear_handle_precision(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_PRECISIONS.write() {
+        guard.remove(&handle.buffer_id);
     }
 }
 
@@ -619,6 +645,31 @@ pub struct ProviderIirFilterResult {
     pub final_state: Option<GpuTensorHandle>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderMoments2 {
+    pub mean: GpuTensorHandle,
+    pub ex2: GpuTensorHandle,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderDispatchStats {
+    /// Number of GPU dispatches recorded for this category.
+    pub count: u64,
+    /// Accumulated wall-clock time of dispatches in nanoseconds (host measured).
+    pub total_wall_time_ns: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProviderTelemetry {
+    pub fused_elementwise: ProviderDispatchStats,
+    pub fused_reduction: ProviderDispatchStats,
+    pub matmul: ProviderDispatchStats,
+    pub upload_bytes: u64,
+    pub download_bytes: u64,
+    pub fusion_cache_hits: u64,
+    pub fusion_cache_misses: u64,
+}
+
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: Send + Sync {
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
@@ -639,6 +690,11 @@ pub trait AccelProvider: Send + Sync {
 
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
+    }
+
+    /// Read a single scalar at linear index from a device tensor, returning it as f64.
+    fn read_scalar(&self, _h: &GpuTensorHandle, _linear_index: usize) -> anyhow::Result<f64> {
+        Err(anyhow::anyhow!("read_scalar not supported by provider"))
     }
 
     /// Allocate a zero-initialised tensor with the provided shape on the device.
@@ -921,6 +977,20 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("elem_mul not supported by provider"))
     }
+    fn elem_max(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_max not supported by provider"))
+    }
+    fn elem_min(
+        &self,
+        _a: &GpuTensorHandle,
+        _b: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("elem_min not supported by provider"))
+    }
     fn elem_sub(
         &self,
         _a: &GpuTensorHandle,
@@ -1167,6 +1237,12 @@ pub trait AccelProvider: Send + Sync {
     fn scalar_mul(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scalar_mul not supported by provider"))
     }
+    fn scalar_max(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_max not supported by provider"))
+    }
+    fn scalar_min(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("scalar_min not supported by provider"))
+    }
     fn scalar_div(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scalar_div not supported by provider"))
     }
@@ -1196,6 +1272,41 @@ pub trait AccelProvider: Send + Sync {
     }
     fn pagefun(&self, _request: &PagefunRequest) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("pagefun not supported by provider"))
+    }
+
+    /// Optional: matrix multiplication with an epilogue applied before store.
+    ///
+    /// The default implementation falls back to `matmul` when the epilogue is effectively a no-op
+    /// (alpha=1, beta=0, no row/col scales), and otherwise returns `Err`.
+    fn matmul_epilogue(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        epilogue: &MatmulEpilogue,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        if epilogue.is_noop() {
+            return self.matmul(a, b);
+        }
+        Err(anyhow::anyhow!("matmul_epilogue not supported by provider"))
+    }
+    fn image_normalize(
+        &self,
+        _input: &GpuTensorHandle,
+        _desc: &ImageNormalizeDescriptor,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "image_normalize fusion not supported by provider"
+        ))
+    }
+    fn matmul_power_step(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+        _epilogue: &PowerStepEpilogue,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "matmul_power_step normalization not supported by provider"
+        ))
     }
     fn linsolve(
         &self,
@@ -1433,6 +1544,25 @@ pub trait AccelProvider: Send + Sync {
     fn reduce_mean(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("reduce_mean not supported by provider"))
     }
+    /// Reduce mean across multiple zero-based dimensions in one device pass.
+    fn reduce_mean_nd(
+        &self,
+        _a: &GpuTensorHandle,
+        _dims_zero_based: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("reduce_mean_nd not supported by provider"))
+    }
+    /// Reduce moments across multiple zero-based dimensions in one device pass.
+    /// Returns mean (E[x]) and mean of squares (E[x^2]).
+    fn reduce_moments_nd(
+        &self,
+        _a: &GpuTensorHandle,
+        _dims_zero_based: &[usize],
+    ) -> anyhow::Result<ProviderMoments2> {
+        Err(anyhow::anyhow!(
+            "reduce_moments_nd not supported by provider"
+        ))
+    }
     fn reduce_mean_dim(
         &self,
         _a: &GpuTensorHandle,
@@ -1561,6 +1691,16 @@ pub trait AccelProvider: Send + Sync {
         ))
     }
 
+    /// Build a numeric tensor where NaNs in `a` are replaced with 0.0 (device side).
+    fn map_nan_to_zero(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("map_nan_to_zero not supported by provider"))
+    }
+
+    /// Build a numeric mask tensor with 1.0 where value is not NaN and 0.0 where value is NaN.
+    fn not_nan_mask(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("not_nan_mask not supported by provider"))
+    }
+
     /// Generic fused reduction entrypoint.
     ///
     /// The shader is expected to implement a column-major reduction across `reduce_len` with
@@ -1591,6 +1731,23 @@ pub trait AccelProvider: Send + Sync {
     fn last_warmup_millis(&self) -> Option<u64> {
         None
     }
+
+    /// Returns a snapshot of provider telemetry counters if supported.
+    fn telemetry_snapshot(&self) -> ProviderTelemetry {
+        let (hits, misses) = self.fused_cache_counters();
+        ProviderTelemetry {
+            fused_elementwise: ProviderDispatchStats::default(),
+            fused_reduction: ProviderDispatchStats::default(),
+            matmul: ProviderDispatchStats::default(),
+            upload_bytes: 0,
+            download_bytes: 0,
+            fusion_cache_hits: hits,
+            fusion_cache_misses: misses,
+        }
+    }
+
+    /// Reset all telemetry counters maintained by the provider, if supported.
+    fn reset_telemetry(&self) {}
 
     /// Default reduction workgroup size the provider prefers.
     fn default_reduction_workgroup_size(&self) -> u32 {
@@ -1715,6 +1872,13 @@ pub fn provider() -> Option<&'static dyn AccelProvider> {
         .and_then(|guard| guard.as_ref().copied())
 }
 
+/// Clear the globally registered provider. Intended for tests to ensure deterministic behaviour.
+pub fn clear_provider() {
+    if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
+        *guard = None;
+    }
+}
+
 /// Convenience: perform elementwise add via provider if possible; otherwise return None
 pub fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
@@ -1729,6 +1893,26 @@ pub fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTenso
 pub fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
     if let Some(p) = provider() {
         if let Ok(h) = p.elem_hypot(a, b) {
+            return Some(h);
+        }
+    }
+    None
+}
+
+/// Convenience: perform elementwise max via provider if possible; otherwise return None
+pub fn try_elem_max(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+    if let Some(p) = provider() {
+        if let Ok(h) = p.elem_max(a, b) {
+            return Some(h);
+        }
+    }
+    None
+}
+
+/// Convenience: perform elementwise min via provider if possible; otherwise return None
+pub fn try_elem_min(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
+    if let Some(p) = provider() {
+        if let Ok(h) = p.elem_min(a, b) {
             return Some(h);
         }
     }
@@ -1768,4 +1952,95 @@ pub struct MeshgridAxisView<'a> {
 #[derive(Debug, Clone)]
 pub struct ProviderMeshgridResult {
     pub outputs: Vec<GpuTensorHandle>,
+}
+
+/// Descriptor for GEMM epilogues applied to `C = A * B` before storing to `C`.
+///
+/// Supported operations:
+/// - Scale by `alpha` and add scalar `beta`.
+/// - Multiply output by per-row and/or per-column scale vectors (broadcasted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScaleOp {
+    Multiply,
+    Divide,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MatmulEpilogue {
+    /// Scalar multiply applied to each output element.
+    pub alpha: f64,
+    /// Scalar add applied to each output element after scaling.
+    pub beta: f64,
+    /// Optional per-row scale (length m). When present, output[row, col] *= row_scale[row].
+    pub row_scale: Option<GpuTensorHandle>,
+    /// Optional per-column scale (length n). When present, output[row, col] *= col_scale[col].
+    pub col_scale: Option<GpuTensorHandle>,
+    /// Row scale operation (multiply or divide). Ignored when `row_scale` is None.
+    pub row_op: ScaleOp,
+    /// Column scale operation (multiply or divide). Ignored when `col_scale` is None.
+    pub col_op: ScaleOp,
+    /// Optional lower clamp bound applied after scale/bias.
+    #[serde(default)]
+    pub clamp_min: Option<f64>,
+    /// Optional upper clamp bound applied after scale/bias.
+    #[serde(default)]
+    pub clamp_max: Option<f64>,
+    /// Optional power exponent applied after clamp (final operation in the epilogue).
+    #[serde(default)]
+    pub pow_exponent: Option<f64>,
+    /// Optional output buffer for the diagonal of the result (length min(m, n)).
+    #[serde(default)]
+    pub diag_output: Option<GpuTensorHandle>,
+}
+
+impl MatmulEpilogue {
+    pub fn noop() -> Self {
+        Self {
+            alpha: 1.0,
+            beta: 0.0,
+            row_scale: None,
+            col_scale: None,
+            row_op: ScaleOp::Multiply,
+            col_op: ScaleOp::Multiply,
+            clamp_min: None,
+            clamp_max: None,
+            pow_exponent: None,
+            diag_output: None,
+        }
+    }
+    pub fn is_noop(&self) -> bool {
+        self.alpha == 1.0
+            && self.beta == 0.0
+            && self.row_scale.is_none()
+            && self.col_scale.is_none()
+            && self.clamp_min.is_none()
+            && self.clamp_max.is_none()
+            && self.pow_exponent.is_none()
+            && self.diag_output.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PowerStepEpilogue {
+    pub epsilon: f64,
+}
+
+impl Default for PowerStepEpilogue {
+    fn default() -> Self {
+        Self { epsilon: 0.0 }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImageNormalizeDescriptor {
+    pub batch: usize,
+    pub height: usize,
+    pub width: usize,
+    pub epsilon: f64,
+    #[serde(default)]
+    pub gain: Option<f64>,
+    #[serde(default)]
+    pub bias: Option<f64>,
+    #[serde(default)]
+    pub gamma: Option<f64>,
 }

@@ -56,7 +56,206 @@ pub fn build_bgl_for_layout_tag(device: &wgpu::Device, tag: &str) -> Option<wgpu
             );
         }
     }
+    if let Some(rest) = tag.strip_prefix("runmat-reduction-layout-") {
+        if let Ok(n_inputs) = rest.parse::<usize>() {
+            let mut entries = Vec::with_capacity(n_inputs + 2);
+            for i in 0..n_inputs {
+                entries.push(storage_read_entry(i as u32));
+            }
+            entries.push(storage_read_write_entry(n_inputs as u32));
+            entries.push(uniform_entry((n_inputs + 1) as u32));
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("runmat-reduction-dyn-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+    }
     match tag {
+        "runmat-eye-layout" => {
+            let entries = [storage_read_write_entry(0), uniform_entry(1)];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-eye-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-fill-layout" => {
+            let entries = [storage_read_write_entry(0), uniform_entry(1)];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-fill-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-linspace-layout" => {
+            let entries = [storage_read_write_entry(0), uniform_entry(1)];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-linspace-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-random-int-layout" => {
+            let entries = [storage_read_write_entry(0), uniform_entry(1)];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-random-int-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-random-uniform-layout" => {
+            let entries = [storage_read_write_entry(0), uniform_entry(1)];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-random-uniform-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-random-normal-layout" => {
+            let entries = [storage_read_write_entry(0), uniform_entry(1)];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-random-normal-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-randperm-layout" => {
+            let entries = [storage_read_write_entry(0), uniform_entry(1)];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-randperm-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-fspecial-layout" => {
+            let entries = [storage_read_write_entry(0), uniform_entry(1)];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-fspecial-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-polyval-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-polyval-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-polyder-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-polyder-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-polyint-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-polyint-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-reduce-dim-minmax-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-reduce-dim-minmax-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-reduce-nd-moments-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-reduce-nd-moments-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-find-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                storage_read_write_entry(3),
+                storage_read_write_entry(4),
+                storage_read_write_entry(5),
+                uniform_entry(6),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-find-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-bandwidth-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-bandwidth-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
+        "runmat-symmetry-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-symmetry-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
         "runmat-reduction-bgl" | "runmat-reduction-p1-bgl" | "runmat-reduction-p2-bgl" => {
             let entries = [
                 storage_read_entry(0),

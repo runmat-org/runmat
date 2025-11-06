@@ -195,7 +195,7 @@ precision.
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/elementwise/double.rs`
-- Issues & feature requests: <https://github.com/runmat-org/runmat/issues/new/choose>
+- Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -289,7 +289,6 @@ fn double_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
         if provider.precision() == ProviderPrecision::F64 {
             match provider.unary_double(&handle) {
                 Ok(result) => {
-                    let _ = provider.free(&handle);
                     return Ok(Value::GpuTensor(result));
                 }
                 Err(err) => {
@@ -306,7 +305,6 @@ fn double_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 
     let tensor = gpu_helpers::gather_tensor(&handle)?;
     if let Some(provider) = provider {
-        let _ = provider.free(&handle);
         if provider.precision() == ProviderPrecision::F64 {
             let view = HostTensorView {
                 data: &tensor.data,
@@ -435,7 +433,9 @@ fn convert_to_host_like(value: Value) -> Result<Value, String> {
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::{HostTensorView, ProviderPrecision};
+    use runmat_accelerate_api::HostTensorView;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::ProviderPrecision;
     use runmat_builtins::IntValue;
 
     #[test]

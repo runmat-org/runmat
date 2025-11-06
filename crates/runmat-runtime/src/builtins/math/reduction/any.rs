@@ -282,6 +282,10 @@ fn any_gpu(
         Some(p) => p,
         None => return gpu_fallback(handle, spec, nan_mode),
     };
+    if matches!(nan_mode, ReductionNaN::Omit) {
+        // Logical reductions return host results; gather to ensure exact omitnan semantics
+        return gpu_fallback(handle, spec, nan_mode);
+    }
     match try_any_gpu(provider, &handle, &spec, nan_mode)? {
         Some(host) => logical_from_host(host),
         None => gpu_fallback(handle, spec, nan_mode),
@@ -305,15 +309,15 @@ fn try_any_gpu(
 ) -> Result<Option<HostTensorOwned>, String> {
     let omit_nan = matches!(nan_mode, ReductionNaN::Omit);
 
-    match spec {
-        ReductionSpec::All => {
+    // For omitnan, prefer explicit truth-mask path to ensure semantics match host exactly
+    if !omit_nan {
+        if let ReductionSpec::All = spec {
             if let Ok(tmp) = provider.reduce_any(handle, omit_nan) {
                 let host = provider.download(&tmp).map_err(|e| e.to_string())?;
                 let _ = provider.free(&tmp);
                 return Ok(Some(host));
             }
         }
-        _ => {}
     }
 
     reduce_dims_gpu(provider, handle, spec, omit_nan)
@@ -356,9 +360,41 @@ fn reduce_dims_gpu(
             }
             return Ok(None);
         }
-        let next = provider
-            .reduce_any_dim(&current, axis, omit_nan)
-            .map_err(|e| e.to_string());
+        let next = if omit_nan {
+            // Build truth mask: (!isnan(current)) && (current != 0)
+            let zeros = provider.zeros_like(&current).map_err(|e| e.to_string())?;
+            let ne_zero = provider
+                .elem_ne(&current, &zeros)
+                .map_err(|e| e.to_string())?;
+            let _ = provider.free(&zeros);
+            let is_nan = provider
+                .logical_isnan(&current)
+                .map_err(|e| e.to_string())?;
+            let not_nan = provider.logical_not(&is_nan).map_err(|e| e.to_string())?;
+            let _ = provider.free(&is_nan);
+            let truth = provider
+                .logical_and(&ne_zero, &not_nan)
+                .map_err(|e| e.to_string())?;
+            let _ = provider.free(&ne_zero);
+            let _ = provider.free(&not_nan);
+
+            // Sum along axis to count any true; then threshold > 0
+            let summed = provider
+                .reduce_sum_dim(&truth, axis)
+                .map_err(|e| e.to_string())?;
+            let _ = provider.free(&truth);
+            let zeros_out = provider.zeros_like(&summed).map_err(|e| e.to_string())?;
+            let gt_zero = provider
+                .elem_gt(&summed, &zeros_out)
+                .map_err(|e| e.to_string())?;
+            let _ = provider.free(&summed);
+            let _ = provider.free(&zeros_out);
+            Ok(gt_zero)
+        } else {
+            provider
+                .reduce_any_dim(&current, axis, omit_nan)
+                .map_err(|e| e.to_string())
+        };
         match next {
             Ok(new_handle) => {
                 if current_owned {

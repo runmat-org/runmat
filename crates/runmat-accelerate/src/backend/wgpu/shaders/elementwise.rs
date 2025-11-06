@@ -28,11 +28,13 @@ fn apply(a: f64, b: f64) -> f64 {
         case 4u: { return hypot(a, b); }
         case 5u: { return atan2(a, b); }
         case 6u: { return pow(a, b); }
+        case 7u: { return max(a, b); }
+        case 8u: { return min(a, b); }
         default: { return a; }
     }
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(512)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local = gid.x;
     if local >= params.len {
@@ -76,11 +78,13 @@ fn apply(a: f32, b: f32) -> f32 {
         case 4u: { return hypot(a, b); }
         case 5u: { return atan2(a, b); }
         case 6u: { return pow(a, b); }
+        case 7u: { return max(a, b); }
+        case 8u: { return min(a, b); }
         default: { return a; }
     }
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(512)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local = gid.x;
     if local >= params.len {
@@ -91,6 +95,175 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     Out.data[idx] = apply(A.data[idx], B.data[idx]);
+}
+"#;
+
+// Broadcast-aware binary shader (N-D implicit expansion)
+pub const BINARY_BROADCAST_SHADER_F64: &str = r#"
+const MAX_RANK: u32 = 128u;
+
+struct PackedValue {
+    value: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+alias PackedArray = array<PackedValue, MAX_RANK>;
+
+struct Tensor { data: array<f64>, };
+
+struct Params {
+    len: u32,
+    offset: u32,
+    rank: u32,
+    op: u32,
+    out_shape: PackedArray,
+    a_shape: PackedArray,
+    b_shape: PackedArray,
+    a_stride: PackedArray,
+    b_stride: PackedArray,
+};
+
+@group(0) @binding(0) var<storage, read> A: Tensor;
+@group(0) @binding(1) var<storage, read> B: Tensor;
+@group(0) @binding(2) var<storage, read_write> Out: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+fn hypot(a: f64, b: f64) -> f64 { return sqrt((a * a) + (b * b)); }
+
+fn apply(a: f64, b: f64) -> f64 {
+    switch params.op {
+        case 0u: { return a + b; }
+        case 1u: { return a - b; }
+        case 2u: { return a * b; }
+        case 3u: { return a / b; }
+        case 4u: { return hypot(a, b); }
+        case 5u: { return atan2(a, b); }
+        case 6u: { return pow(a, b); }
+        case 7u: { return max(a, b); }
+        case 8u: { return min(a, b); }
+        default: { return a; }
+    }
+}
+
+@compute @workgroup_size(512)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let local = gid.x;
+    if local >= params.len { return; }
+    let idx = params.offset + local;
+
+    // Compute N-D coordinates from linear index (column-major order)
+    var coord: array<u32, MAX_RANK>;
+    var tmp: u32 = idx;
+    var d: u32 = 0u;
+    loop {
+        if d >= params.rank { break; }
+        let dim = params.out_shape[d].value;
+        if dim == 0u { coord[d] = 0u; }
+        else { coord[d] = tmp % dim; tmp = tmp / dim; }
+        d = d + 1u;
+    }
+
+    // Map to A and B indices with broadcasting
+    var ia: u32 = 0u;
+    var ib: u32 = 0u;
+    d = 0u;
+    loop {
+        if d >= params.rank { break; }
+        let ad = params.a_shape[d].value;
+        let bd = params.b_shape[d].value;
+        let ca = select(coord[d], 0u, ad == 1u);
+        let cb = select(coord[d], 0u, bd == 1u);
+        ia = ia + ca * params.a_stride[d].value;
+        ib = ib + cb * params.b_stride[d].value;
+        d = d + 1u;
+    }
+
+    Out.data[idx] = apply(A.data[ia], B.data[ib]);
+}
+"#;
+
+pub const BINARY_BROADCAST_SHADER_F32: &str = r#"
+const MAX_RANK: u32 = 128u;
+
+struct PackedValue {
+    value: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+alias PackedArray = array<PackedValue, MAX_RANK>;
+
+struct Tensor { data: array<f32>, };
+
+struct Params {
+    len: u32,
+    offset: u32,
+    rank: u32,
+    op: u32,
+    out_shape: PackedArray,
+    a_shape: PackedArray,
+    b_shape: PackedArray,
+    a_stride: PackedArray,
+    b_stride: PackedArray,
+};
+
+@group(0) @binding(0) var<storage, read> A: Tensor;
+@group(0) @binding(1) var<storage, read> B: Tensor;
+@group(0) @binding(2) var<storage, read_write> Out: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+fn hypot(a: f32, b: f32) -> f32 { return sqrt((a * a) + (b * b)); }
+
+fn apply(a: f32, b: f32) -> f32 {
+    switch params.op {
+        case 0u: { return a + b; }
+        case 1u: { return a - b; }
+        case 2u: { return a * b; }
+        case 3u: { return a / b; }
+        case 4u: { return hypot(a, b); }
+        case 5u: { return atan2(a, b); }
+        case 6u: { return pow(a, b); }
+        case 7u: { return max(a, b); }
+        case 8u: { return min(a, b); }
+        default: { return a; }
+    }
+}
+
+@compute @workgroup_size(512)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let local = gid.x;
+    if local >= params.len { return; }
+    let idx = params.offset + local;
+
+    var coord: array<u32, MAX_RANK>;
+    var tmp: u32 = idx;
+    var d: u32 = 0u;
+    loop {
+        if d >= params.rank { break; }
+        let dim = params.out_shape[d].value;
+        if dim == 0u { coord[d] = 0u; }
+        else { coord[d] = tmp % dim; tmp = tmp / dim; }
+        d = d + 1u;
+    }
+
+    var ia: u32 = 0u;
+    var ib: u32 = 0u;
+    d = 0u;
+    loop {
+        if d >= params.rank { break; }
+        let ad = params.a_shape[d].value;
+        let bd = params.b_shape[d].value;
+        let ca = select(coord[d], 0u, ad == 1u);
+        let cb = select(coord[d], 0u, bd == 1u);
+        ia = ia + ca * params.a_stride[d].value;
+        ib = ib + cb * params.b_stride[d].value;
+        d = d + 1u;
+    }
+
+    Out.data[idx] = apply(A.data[ia], B.data[ib]);
 }
 "#;
 
@@ -295,7 +468,7 @@ fn apply(a: f64) -> f64 {
     }
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(512)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local = gid.x;
     if local >= params.len {
@@ -510,7 +683,7 @@ fn apply(a: f32) -> f32 {
     }
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(512)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local = gid.x;
     if local >= params.len {
@@ -548,7 +721,7 @@ struct Params {
 
 fn isNan(x: f64) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(512)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len {
@@ -564,6 +737,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         case 3u: { result = a / scalar; }
         case 4u: { result = scalar - a; }
         case 5u: { result = scalar / a; }
+        case 6u: { result = max(a, scalar); }
+        case 7u: { result = min(a, scalar); }
         default: { result = a; }
     }
     Out.data[idx] = result;
@@ -591,7 +766,7 @@ struct Params {
 
 fn isNan(x: f32) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(512)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local = gid.x;
     if local >= params.len {
@@ -611,6 +786,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         case 3u: { result = a / s; }
         case 4u: { result = s - a; }
         case 5u: { result = s / a; }
+        case 6u: { result = max(a, s); }
+        case 7u: { result = min(a, s); }
         default: { result = a; }
     }
     Out.data[idx] = result;

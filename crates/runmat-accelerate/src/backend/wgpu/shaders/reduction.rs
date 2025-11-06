@@ -41,7 +41,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-var<workgroup> tile: array<f64, 256>;
+var<workgroup> tile: array<f64, @WG@>;
 
 fn combine(a: f64, b: f64, op: u32) -> f64 {
     switch op {
@@ -74,12 +74,12 @@ fn map_value(v: f64, op: u32) -> f64 {
     return v;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
 ) {
-    let base = wid.x * 512u;
+    let base = params.offset + wid.x * 512u;
     let idx = base + lid.x;
     var acc = identity(params.op);
     if idx < params.len {
@@ -100,7 +100,7 @@ fn main(
         stride = stride / 2u;
         workgroupBarrier();
     }
-    if lid.x == 0u { OutBuf.data[wid.x] = tile[0u]; }
+    if lid.x == 0u { let out_index = (params.offset / 512u) + wid.x; OutBuf.data[out_index] = tile[0u]; }
 }
 "#;
 
@@ -120,7 +120,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-var<workgroup> tile: array<f32, 256>;
+var<workgroup> tile: array<f32, @WG@>;
 
 fn combine(a: f32, b: f32, op: u32) -> f32 {
     switch op {
@@ -153,12 +153,12 @@ fn map_value(v: f32, op: u32) -> f32 {
     return v;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
 ) {
-    let base = wid.x * 512u;
+    let base = params.offset + wid.x * 512u;
     let idx = base + lid.x;
     var acc = identity(params.op);
     if idx < params.len {
@@ -179,7 +179,7 @@ fn main(
         stride = stride / 2u;
         workgroupBarrier();
     }
-    if lid.x == 0u { OutBuf.data[wid.x] = tile[0u]; }
+    if lid.x == 0u { let out_index = (params.offset / 512u) + wid.x; OutBuf.data[out_index] = tile[0u]; }
 }
 "#;
 
@@ -201,7 +201,7 @@ struct Params {
 
 fn isNan(x: f64) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     let op_any_include = params.op == 3u;
@@ -401,7 +401,7 @@ struct Params {
 
 fn isNan(x: f32) -> bool { return x != x; }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     let op_any_include = params.op == 3u;
@@ -605,7 +605,7 @@ fn better(current: f64, candidate: f64, op: u32) -> bool {
     return candidate > current;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if params.dim == 1u {
@@ -658,7 +658,7 @@ fn better(current: f32, candidate: f32, op: u32) -> bool {
     return candidate > current;
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if params.dim == 1u {
@@ -686,5 +686,343 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         OutVals.data[idx] = best;
         OutIdx.data[idx] = f32(best_idx);
     }
+}
+"#;
+
+pub const REDUCE_ND_MEAN_SHADER_F64: &str = r#"
+const MAX_RANK: u32 = 128u;
+struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32, };
+alias PackedArray = array<PackedValue, MAX_RANK>;
+
+struct Tensor { data: array<f64>, };
+struct Params {
+  rank: u32,
+  kept_count: u32,
+  reduce_count: u32,
+  _pad: u32,
+  rows: u32,
+  cols: u32,
+  _pad2: vec2<u32>,
+  kept_sizes: PackedArray,
+  reduce_sizes: PackedArray,
+  kept_strides: PackedArray,
+  reduce_strides: PackedArray,
+};
+@group(0) @binding(0) var<storage, read> InBuf: Tensor;
+@group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+var<workgroup> tile: array<f64, @WG@u>;
+
+fn map_col_to_base(col: u32) -> u32 {
+  var rem = col;
+  var base: u32 = 0u;
+  for (var j: u32 = 0u; j < params.kept_count; j = j + 1u) {
+    let size = params.kept_sizes[j].value;
+    if (size == 0u) { continue; }
+    let coord = rem % size;
+    rem = rem / size;
+    base = base + coord * params.kept_strides[j].value;
+  }
+  return base;
+}
+
+fn map_row_offset(r: u32) -> u32 {
+  var rem = r;
+  var off: u32 = 0u;
+  for (var j: u32 = 0u; j < params.reduce_count; j = j + 1u) {
+    let size = params.reduce_sizes[j].value;
+    if (size == 0u) { continue; }
+    let coord = rem % size;
+    rem = rem / size;
+    off = off + coord * params.reduce_strides[j].value;
+  }
+  return off;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
+  let col = wid.x;
+  if (col >= params.cols) { return; }
+  let base = map_col_to_base(col);
+  var acc: f64 = 0.0;
+  var r = lid.x;
+  while (r < params.rows) {
+    let idx = base + map_row_offset(r);
+    acc = acc + InBuf.data[idx];
+    r = r + 512u;
+  }
+  tile[lid.x] = acc;
+  workgroupBarrier();
+  var off = 256u;
+  loop {
+    if (off == 0u) { break; }
+    if (lid.x < off) { tile[lid.x] = tile[lid.x] + tile[lid.x + off]; }
+    workgroupBarrier();
+    off = off / 2u;
+  }
+  if (lid.x == 0u) {
+    let count = max(params.rows, 1u);
+    OutBuf.data[col] = tile[0u] / f64(count);
+  }
+}
+"#;
+
+pub const REDUCE_ND_MEAN_SHADER_F32: &str = r#"
+const MAX_RANK: u32 = 128u;
+struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32, };
+alias PackedArray = array<PackedValue, MAX_RANK>;
+
+struct Tensor { data: array<f32>, };
+struct Params {
+  rank: u32,
+  kept_count: u32,
+  reduce_count: u32,
+  _pad: u32,
+  rows: u32,
+  cols: u32,
+  _pad2: vec2<u32>,
+  kept_sizes: PackedArray,
+  reduce_sizes: PackedArray,
+  kept_strides: PackedArray,
+  reduce_strides: PackedArray,
+};
+@group(0) @binding(0) var<storage, read> InBuf: Tensor;
+@group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+
+var<workgroup> tile: array<f32, @WG@u>;
+
+fn map_col_to_base(col: u32) -> u32 {
+  var rem = col;
+  var base: u32 = 0u;
+  for (var j: u32 = 0u; j < params.kept_count; j = j + 1u) {
+    let size = params.kept_sizes[j].value;
+    if (size == 0u) { continue; }
+    let coord = rem % size;
+    rem = rem / size;
+    base = base + coord * params.kept_strides[j].value;
+  }
+  return base;
+}
+
+fn map_row_offset(r: u32) -> u32 {
+  var rem = r;
+  var off: u32 = 0u;
+  for (var j: u32 = 0u; j < params.reduce_count; j = j + 1u) {
+    let size = params.reduce_sizes[j].value;
+    if (size == 0u) { continue; }
+    let coord = rem % size;
+    rem = rem / size;
+    off = off + coord * params.reduce_strides[j].value;
+  }
+  return off;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
+  let col = wid.x;
+  if (col >= params.cols) { return; }
+  let base = map_col_to_base(col);
+  var acc: f32 = 0.0f;
+  var r = lid.x;
+  while (r < params.rows) {
+    let idx = base + map_row_offset(r);
+    acc = acc + InBuf.data[idx];
+    r = r + 512u;
+  }
+  tile[lid.x] = acc;
+  workgroupBarrier();
+  var off = 256u;
+  loop {
+    if (off == 0u) { break; }
+    if (lid.x < off) { tile[lid.x] = tile[lid.x] + tile[lid.x + off]; }
+    workgroupBarrier();
+    off = off / 2u;
+  }
+  if (lid.x == 0u) {
+    let count = max(params.rows, 1u);
+    OutBuf.data[col] = tile[0u] / f32(count);
+  }
+}
+"#;
+
+pub const REDUCE_ND_MOMENTS_SHADER_F64: &str = r#"
+const MAX_RANK: u32 = 128u;
+struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32, };
+alias PackedArray = array<PackedValue, MAX_RANK>;
+
+struct Tensor { data: array<f64>, };
+struct Params {
+  rank: u32,
+  kept_count: u32,
+  reduce_count: u32,
+  _pad: u32,
+  rows: u32,
+  cols: u32,
+  _pad2: vec2<u32>,
+  kept_sizes: PackedArray,
+  reduce_sizes: PackedArray,
+  kept_strides: PackedArray,
+  reduce_strides: PackedArray,
+};
+@group(0) @binding(0) var<storage, read> InBuf: Tensor;
+@group(0) @binding(1) var<storage, read_write> MeanOut: Tensor;
+@group(0) @binding(2) var<storage, read_write> Ex2Out: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+var<workgroup> tile_sum: array<f64, @WG@u>;
+var<workgroup> tile_sumsq: array<f64, @WG@u>;
+
+fn map_col_to_base(col: u32) -> u32 {
+  var rem = col;
+  var base: u32 = 0u;
+  for (var j: u32 = 0u; j < params.kept_count; j = j + 1u) {
+    let size = params.kept_sizes[j].value;
+    if (size == 0u) { continue; }
+    let coord = rem % size;
+    rem = rem / size;
+    base = base + coord * params.kept_strides[j].value;
+  }
+  return base;
+}
+
+fn map_row_offset(r: u32) -> u32 {
+  var rem = r;
+  var off: u32 = 0u;
+  for (var j: u32 = 0u; j < params.reduce_count; j = j + 1u) {
+    let size = params.reduce_sizes[j].value;
+    if (size == 0u) { continue; }
+    let coord = rem % size;
+    rem = rem / size;
+    off = off + coord * params.reduce_strides[j].value;
+  }
+  return off;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
+  let col = wid.x;
+  if (col >= params.cols) { return; }
+  let base = map_col_to_base(col);
+  var acc: f64 = 0.0;
+  var acc2: f64 = 0.0;
+  var r = lid.x;
+  while (r < params.rows) {
+    let idx = base + map_row_offset(r);
+    let v = InBuf.data[idx];
+    acc = acc + v;
+    acc2 = acc2 + v * v;
+    r = r + 512u;
+  }
+  tile_sum[lid.x] = acc;
+  tile_sumsq[lid.x] = acc2;
+  workgroupBarrier();
+  var off = 256u;
+  loop {
+    if (off == 0u) { break; }
+    if (lid.x < off) {
+      tile_sum[lid.x] = tile_sum[lid.x] + tile_sum[lid.x + off];
+      tile_sumsq[lid.x] = tile_sumsq[lid.x] + tile_sumsq[lid.x + off];
+    }
+    workgroupBarrier();
+    off = off / 2u;
+  }
+  if (lid.x == 0u) {
+    let count = max(params.rows, 1u);
+    let denom = f64(count);
+    MeanOut.data[col] = tile_sum[0u] / denom;
+    Ex2Out.data[col] = tile_sumsq[0u] / denom;
+  }
+}
+"#;
+
+pub const REDUCE_ND_MOMENTS_SHADER_F32: &str = r#"
+const MAX_RANK: u32 = 128u;
+struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32, };
+alias PackedArray = array<PackedValue, MAX_RANK>;
+
+struct Tensor { data: array<f32>, };
+struct Params {
+  rank: u32,
+  kept_count: u32,
+  reduce_count: u32,
+  _pad: u32,
+  rows: u32,
+  cols: u32,
+  _pad2: vec2<u32>,
+  kept_sizes: PackedArray,
+  reduce_sizes: PackedArray,
+  kept_strides: PackedArray,
+  reduce_strides: PackedArray,
+};
+@group(0) @binding(0) var<storage, read> InBuf: Tensor;
+@group(0) @binding(1) var<storage, read_write> MeanOut: Tensor;
+@group(0) @binding(2) var<storage, read_write> Ex2Out: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+
+var<workgroup> tile_sum: array<f32, @WG@u>;
+var<workgroup> tile_sumsq: array<f32, @WG@u>;
+
+fn map_col_to_base(col: u32) -> u32 {
+  var rem = col;
+  var base: u32 = 0u;
+  for (var j: u32 = 0u; j < params.kept_count; j = j + 1u) {
+    let size = params.kept_sizes[j].value;
+    if (size == 0u) { continue; }
+    let coord = rem % size;
+    rem = rem / size;
+    base = base + coord * params.kept_strides[j].value;
+  }
+  return base;
+}
+
+fn map_row_offset(r: u32) -> u32 {
+  var rem = r;
+  var off: u32 = 0u;
+  for (var j: u32 = 0u; j < params.reduce_count; j = j + 1u) {
+    let size = params.reduce_sizes[j].value;
+    if (size == 0u) { continue; }
+    let coord = rem % size;
+    rem = rem / size;
+    off = off + coord * params.reduce_strides[j].value;
+  }
+  return off;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {
+  let col = wid.x;
+  if (col >= params.cols) { return; }
+  let base = map_col_to_base(col);
+  var acc: f32 = 0.0f;
+  var acc2: f32 = 0.0f;
+  var r = lid.x;
+  while (r < params.rows) {
+    let idx = base + map_row_offset(r);
+    let v = InBuf.data[idx];
+    acc = acc + v;
+    acc2 = acc2 + v * v;
+    r = r + 512u;
+  }
+  tile_sum[lid.x] = acc;
+  tile_sumsq[lid.x] = acc2;
+  workgroupBarrier();
+  var off = 256u;
+  loop {
+    if (off == 0u) { break; }
+    if (lid.x < off) {
+      tile_sum[lid.x] = tile_sum[lid.x] + tile_sum[lid.x + off];
+      tile_sumsq[lid.x] = tile_sumsq[lid.x] + tile_sumsq[lid.x + off];
+    }
+    workgroupBarrier();
+    off = off / 2u;
+  }
+  if (lid.x == 0u) {
+    let count = max(params.rows, 1u);
+    let denom = f32(count);
+    MeanOut.data[col] = tile_sum[0u] / denom;
+    Ex2Out.data[col] = tile_sumsq[0u] / denom;
+  }
 }
 "#;

@@ -477,6 +477,43 @@ fn ldivide_gpu_pair(divisor: GpuTensorHandle, numerator: GpuTensorHandle) -> Res
                 return Ok(Value::GpuTensor(handle));
             }
         }
+        // Try N-D broadcast on device using repmat + elem_div (B ./ A)
+        if let Some((out_shape, reps_num, reps_div)) =
+            broadcast_reps(&numerator.shape, &divisor.shape)
+        {
+            let made_num = reps_num.iter().any(|&r| r != 1);
+            let made_div = reps_div.iter().any(|&r| r != 1);
+            let num_expanded = if made_num {
+                provider
+                    .repmat(&numerator, &reps_num)
+                    .map_err(|e| e.to_string())?
+            } else {
+                numerator.clone()
+            };
+            let div_expanded = if made_div {
+                provider
+                    .repmat(&divisor, &reps_div)
+                    .map_err(|e| e.to_string())?
+            } else {
+                divisor.clone()
+            };
+            let result = provider
+                .elem_div(&num_expanded, &div_expanded)
+                .map_err(|e| e.to_string());
+            if made_num {
+                let _ = provider.free(&num_expanded);
+            }
+            if made_div {
+                let _ = provider.free(&div_expanded);
+            }
+            if let Ok(handle) = result {
+                if handle.shape == out_shape {
+                    return Ok(Value::GpuTensor(handle));
+                } else {
+                    let _ = provider.free(&handle);
+                }
+            }
+        }
         if is_scalar_shape(&divisor.shape) {
             if let Some(scalar) = gpu_scalar_value(&divisor)? {
                 if let Ok(handle) = provider.scalar_div(&numerator, scalar) {
@@ -495,6 +532,36 @@ fn ldivide_gpu_pair(divisor: GpuTensorHandle, numerator: GpuTensorHandle) -> Res
     let divisor_host = gpu_helpers::gather_tensor(&divisor)?;
     let numerator_host = gpu_helpers::gather_tensor(&numerator)?;
     ldivide_host(Value::Tensor(divisor_host), Value::Tensor(numerator_host))
+}
+
+fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
+    let rank = a.len().max(b.len()).max(1);
+    let mut out = vec![1usize; rank];
+    let mut aa = vec![1usize; rank];
+    let mut bb = vec![1usize; rank];
+    for i in 0..rank {
+        aa[i] = *a.get(i).unwrap_or(&1);
+        bb[i] = *b.get(i).unwrap_or(&1);
+    }
+    for i in 0..rank {
+        let (ad, bd) = (aa[i], bb[i]);
+        if ad == bd {
+            out[i] = ad;
+        } else if ad == 1 {
+            out[i] = bd;
+        } else if bd == 1 {
+            out[i] = ad;
+        } else {
+            return None;
+        }
+    }
+    let reps_a: Vec<usize> = (0..rank)
+        .map(|i| if aa[i] == out[i] { 1 } else { out[i] })
+        .collect();
+    let reps_b: Vec<usize> = (0..rank)
+        .map(|i| if bb[i] == out[i] { 1 } else { out[i] })
+        .collect();
+    Some((out, reps_a, reps_b))
 }
 
 fn ldivide_gpu_host_left(divisor: GpuTensorHandle, numerator: Value) -> Result<Value, String> {
@@ -995,21 +1062,20 @@ mod tests {
             data: &rhs.data,
             shape: &rhs.shape,
         };
-        let ha = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view_l)
-            .unwrap();
-        let hb = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view_r)
-            .unwrap();
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let ha = provider.upload(&view_l).unwrap();
+        let hb = provider.upload(&view_r).unwrap();
         let gpu = ldivide_gpu_pair(ha, hb).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(t) => {
                 assert_eq!(gathered.data.len(), t.data.len());
+                let tol = match provider.precision() {
+                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+                };
                 for (ga, ca) in gathered.data.iter().zip(t.data.iter()) {
-                    assert!((ga - ca).abs() < EPS);
+                    assert!((ga - ca).abs() < tol);
                 }
             }
             Value::Num(n) => assert_eq!(gathered.data, vec![n]),

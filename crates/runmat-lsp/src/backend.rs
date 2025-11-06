@@ -374,10 +374,7 @@ impl RunMatLanguageServer {
 #[async_trait]
 impl LanguageServer for RunMatLanguageServer {
     async fn initialize(&self, _: InitializeParams) -> RpcResult<InitializeResult> {
-        info!(
-            "Initializing RunMat language server v{}",
-            SERVER_VERSION
-        );
+        info!("Initializing RunMat language server v{}", SERVER_VERSION);
         let server_info = Some(ServerInfo {
             name: "RunMat Language Server".to_string(),
             version: Some(SERVER_VERSION.to_string()),

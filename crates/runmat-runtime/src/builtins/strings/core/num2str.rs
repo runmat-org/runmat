@@ -210,7 +210,6 @@ register_builtin_doc_text!("num2str", DOC_MD);
         category = "strings/core",
         summary = "Format numeric scalars, vectors, and matrices as character arrays.",
         keywords = "num2str,number,string,format,precision,gpu",
-        doc_md = DOC_MD,
         accel = "sink"
     )
 )]

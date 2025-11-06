@@ -202,7 +202,7 @@ implementation.
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/elementwise/single.rs`
-- Issues & feature requests: <https://github.com/runmat-org/runmat/issues/new/choose>
+- Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -644,6 +644,28 @@ mod tests {
     }
 
     #[test]
+    fn single_large_ones_preserve_values() {
+        // Create a large ones tensor and ensure single() preserves ones exactly.
+        let m = 200_000usize;
+        let tensor = Tensor::ones(vec![m, 1]);
+        let result = single_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("single");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, tensor.shape);
+                // Sum should equal m exactly.
+                let sum: f64 = t.data.iter().copied().sum();
+                assert!(
+                    (sum - (m as f64)).abs() < 1e-9,
+                    "sum expected {m}, got {sum}"
+                );
+                // All entries must be exactly 1.0
+                assert!(t.data.iter().all(|&v| v == 1.0));
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
     #[cfg(feature = "wgpu")]
     fn single_wgpu_matches_cpu() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -661,5 +683,32 @@ mod tests {
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
         assert_eq!(gathered.data, cpu.data);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn single_wgpu_large_ones_all_ones() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let m = 200_000usize;
+        let tensor = Tensor::ones(vec![m, 1]);
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let view = HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let gpu_value = single_from_gpu(handle).expect("gpu single");
+        let gathered = test_support::gather(gpu_value).expect("gather");
+        assert_eq!(gathered.shape, tensor.shape);
+        let sum: f64 = gathered.data.iter().copied().sum();
+        assert!(
+            (sum - (m as f64)).abs() < 1e-9,
+            "sum expected {} got {}",
+            m,
+            sum
+        );
+        assert!(gathered.data.iter().all(|&v| v == 1.0));
     }
 }

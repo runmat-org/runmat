@@ -244,6 +244,22 @@ pub struct RepmatParams {
     pub base_strides: [AlignedU32; REPMAT_MAX_RANK],
 }
 
+pub const BCAST_MAX_RANK: usize = PERMUTE_MAX_RANK;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct BinaryBroadcastParams {
+    pub len: u32,
+    pub offset: u32,
+    pub rank: u32,
+    pub op: u32,
+    pub out_shape: [AlignedU32; BCAST_MAX_RANK],
+    pub a_shape: [AlignedU32; BCAST_MAX_RANK],
+    pub b_shape: [AlignedU32; BCAST_MAX_RANK],
+    pub a_strides: [AlignedU32; BCAST_MAX_RANK],
+    pub b_strides: [AlignedU32; BCAST_MAX_RANK],
+}
+
 pub const KRON_MAX_RANK: usize = PERMUTE_MAX_RANK;
 
 #[repr(C)]
@@ -317,11 +333,88 @@ pub struct MatmulParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MatmulEpilogueParamsF64 {
+    pub alpha: f64,
+    pub beta: f64,
+    pub clamp_min: f64,
+    pub clamp_max: f64,
+    pub pow_exponent: f64,
+    pub flags: u32,
+    pub diag_offset: u32,
+    pub diag_stride: u32,
+    pub diag_rows: u32,
+    pub _pad: u32,
+    pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MatmulEpilogueParamsF32 {
+    pub alpha: f32,
+    pub beta: f32,
+    pub clamp_min: f32,
+    pub clamp_max: f32,
+    pub pow_exponent: f32,
+    pub flags: u32,
+    pub diag_offset: u32,
+    pub diag_stride: u32,
+    pub diag_rows: u32,
+    pub _pad: u32,
+}
+
+pub const MATMUL_EPILOGUE_FLAG_ROW_SCALE: u32 = 1 << 0;
+pub const MATMUL_EPILOGUE_FLAG_COL_SCALE: u32 = 1 << 1;
+pub const MATMUL_EPILOGUE_FLAG_ROW_DIV: u32 = 1 << 2;
+pub const MATMUL_EPILOGUE_FLAG_COL_DIV: u32 = 1 << 3;
+pub const MATMUL_EPILOGUE_FLAG_CLAMP_MIN: u32 = 1 << 4;
+pub const MATMUL_EPILOGUE_FLAG_CLAMP_MAX: u32 = 1 << 5;
+pub const MATMUL_EPILOGUE_FLAG_POW: u32 = 1 << 6;
+pub const MATMUL_EPILOGUE_FLAG_DIAG_WRITE: u32 = 1 << 7;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ImageNormalizeUniforms {
+    pub batches: u32,
+    pub height: u32,
+    pub width: u32,
+    pub plane: u32,
+    pub stride_h: u32,
+    pub stride_w: u32,
+    pub flags: u32,
+    pub _pad0: u32,
+    pub epsilon: f32,
+    pub gain: f32,
+    pub bias: f32,
+    pub gamma: f32,
+}
+
+pub const IMAGE_NORMALIZE_FLAG_GAIN: u32 = 1 << 0;
+pub const IMAGE_NORMALIZE_FLAG_BIAS: u32 = 1 << 1;
+pub const IMAGE_NORMALIZE_FLAG_GAMMA: u32 = 1 << 2;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct SyrkParams {
+    pub rows_total: u32,
+    pub cols: u32,
+    pub lda: u32,
+    pub ldc: u32,
+    pub row_offset: u32,
+    pub chunk_rows: u32,
+    pub flags: u32,
+    pub _pad: u32,
+}
+
+pub const SYRK_FLAG_ACCUMULATE: u32 = 1 << 0;
+pub const SYRK_FLAG_FILL_BOTH: u32 = 1 << 1;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ReduceGlobalParams {
     pub len: u32,
     pub op: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
+    pub offset: u32,
+    pub total: u32,
 }
 
 #[repr(C)]
@@ -558,4 +651,20 @@ pub struct TriuParams {
     pub diag_offset: i32,
     pub _pad0: u32,
     pub _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct ReduceNdParams {
+    pub rank: u32,
+    pub kept_count: u32,
+    pub reduce_count: u32,
+    pub _pad: u32,
+    pub rows: u32,
+    pub cols: u32,
+    pub _pad2: [u32; 2],
+    pub kept_sizes: [AlignedU32; BCAST_MAX_RANK],
+    pub reduce_sizes: [AlignedU32; BCAST_MAX_RANK],
+    pub kept_strides: [AlignedU32; BCAST_MAX_RANK],
+    pub reduce_strides: [AlignedU32; BCAST_MAX_RANK],
 }

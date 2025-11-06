@@ -126,12 +126,20 @@ impl Default for StructValue {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NumericDType {
+    F64,
+    F32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
     pub data: Vec<f64>,
     pub shape: Vec<usize>, // Column-major layout
     pub rows: usize,       // Compatibility for 2D usage
     pub cols: usize,       // Compatibility for 2D usage
+    /// Logical numeric class of this tensor; host storage remains f64.
+    pub dtype: NumericDType,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -278,11 +286,22 @@ impl Tensor {
             shape,
             rows,
             cols,
+            dtype: NumericDType::F64,
         })
     }
 
     pub fn new_2d(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new(data, vec![rows, cols])
+    }
+
+    pub fn new_with_dtype(
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        dtype: NumericDType,
+    ) -> Result<Self, String> {
+        let mut t = Self::new(data, shape)?;
+        t.dtype = dtype;
+        Ok(t)
     }
 
     pub fn zeros(shape: Vec<usize>) -> Self {
@@ -299,6 +318,7 @@ impl Tensor {
             shape,
             rows,
             cols,
+            dtype: NumericDType::F64,
         }
     }
 
@@ -316,6 +336,7 @@ impl Tensor {
             shape,
             rows,
             cols,
+            dtype: NumericDType::F64,
         }
     }
 
@@ -365,6 +386,7 @@ impl Tensor {
             shape: vec![rows, cols],
             rows,
             cols,
+            dtype: NumericDType::F64,
         }
     }
     // No-compat constructors: prefer new/new_2d/zeros/zeros2/ones/ones2

@@ -2,20 +2,29 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::{auto_offload_options, fusion::active_fusion, fusion_residency, AutoOffloadLogLevel};
+use crate::{
+    auto_offload_options,
+    fusion::{active_fusion, FusionKind},
+    fusion_residency, AutoOffloadLogLevel,
+};
 use anyhow::{anyhow, Result};
 use log::{debug, info, trace};
-use once_cell::sync::OnceCell;
-use runmat_accelerate_api::{AccelProvider, HostTensorView};
+use once_cell::sync::{Lazy, OnceCell};
+use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
 use runmat_runtime::gather_if_needed;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
 const DEFAULT_CPU_REDUCTION_PER_ELEM: f64 = 1.2e-7;
 const DEFAULT_CPU_MATMUL_PER_FLOP: f64 = 2.5e-11;
+const SMALL_BATCH_DEFAULT_MAX_DIM: usize = 8;
+const SMALL_BATCH_DEFAULT_MIN_ELEMS: usize = 1_048_576;
+const DECISION_LOG_CAPACITY: usize = 128;
+const CALIBRATION_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinaryOp {
@@ -37,7 +46,7 @@ pub enum ReductionOp {
     Max,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ThresholdConfig {
     unary_min_elems: usize,
     binary_min_elems: usize,
@@ -46,6 +55,8 @@ struct ThresholdConfig {
     cpu_elem_per_elem: f64,
     cpu_reduction_per_elem: f64,
     cpu_matmul_per_flop: f64,
+    small_batch_max_dim: usize,
+    small_batch_min_elems: usize,
 }
 
 impl Default for ThresholdConfig {
@@ -53,12 +64,253 @@ impl Default for ThresholdConfig {
         Self {
             unary_min_elems: 4_096,
             binary_min_elems: 4_096,
-            reduction_min_elems: 4_096,
+            reduction_min_elems: 256,
             matmul_min_flops: 1_000_000, // roughly 100x100x100
             cpu_elem_per_elem: DEFAULT_CPU_ELEM_PER_ELEM,
             cpu_reduction_per_elem: DEFAULT_CPU_REDUCTION_PER_ELEM,
             cpu_matmul_per_flop: DEFAULT_CPU_MATMUL_PER_FLOP,
+            small_batch_max_dim: SMALL_BATCH_DEFAULT_MAX_DIM,
+            small_batch_min_elems: SMALL_BATCH_DEFAULT_MIN_ELEMS,
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AutoOffloadDecisionEntry {
+    pub timestamp_ms: u128,
+    pub operation: String,
+    pub elements: Option<usize>,
+    pub flops: Option<usize>,
+    pub batch: Option<usize>,
+    pub decision: AutoOffloadDisposition,
+    pub reason: DecisionReason,
+    pub cpu_estimate_ms: Option<f64>,
+    pub gpu_estimate_ms: Option<f64>,
+    pub threshold: Option<usize>,
+    pub fusion_kind: Option<FusionKind>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoOffloadDisposition {
+    Gpu,
+    Cpu,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DecisionReason {
+    FusionOverride,
+    SmallBatchGuard,
+    ProfileModel,
+    Threshold,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThresholdSnapshot {
+    pub unary_min_elems: usize,
+    pub binary_min_elems: usize,
+    pub reduction_min_elems: usize,
+    pub matmul_min_flops: usize,
+    pub cpu_elem_per_elem: f64,
+    pub cpu_reduction_per_elem: f64,
+    pub cpu_matmul_per_flop: f64,
+    pub small_batch_max_dim: usize,
+    pub small_batch_min_elems: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AutoOffloadReport {
+    pub provider: Option<CachedProviderInfo>,
+    pub thresholds: ThresholdSnapshot,
+    pub base_source: ThresholdBase,
+    pub env_overrides_applied: bool,
+    pub cache_path: Option<String>,
+    pub calibrate_duration_ms: Option<u128>,
+    pub decisions: Vec<AutoOffloadDecisionEntry>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThresholdBase {
+    BuiltInDefault,
+    LoadedFromCache,
+    Calibrated,
+}
+
+impl ThresholdBase {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ThresholdBase::BuiltInDefault => "built-in-default",
+            ThresholdBase::LoadedFromCache => "loaded-from-cache",
+            ThresholdBase::Calibrated => "calibrated",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CachedProviderInfo {
+    pub name: String,
+    pub vendor: String,
+    pub backend: Option<String>,
+    pub device_id: u32,
+}
+
+#[derive(Debug, Clone)]
+struct AutoOffloadState {
+    provider: Option<CachedProviderInfo>,
+    thresholds: ThresholdConfig,
+    base_source: ThresholdBase,
+    env_overrides_applied: bool,
+    cache_path: Option<String>,
+    calibrate_duration_ms: Option<u128>,
+}
+
+#[derive(Clone)]
+struct DecisionEvaluation {
+    recommend_gpu: bool,
+    reason: DecisionReason,
+    cpu_secs: Option<f64>,
+    gpu_secs: Option<f64>,
+    threshold: Option<usize>,
+    fusion_kind: Option<FusionKind>,
+    batch: Option<usize>,
+}
+
+struct DecisionLog {
+    entries: Vec<AutoOffloadDecisionEntry>,
+}
+
+impl DecisionLog {
+    fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, entry: AutoOffloadDecisionEntry) {
+        self.entries.push(entry);
+        if self.entries.len() > DECISION_LOG_CAPACITY {
+            let overflow = self.entries.len() - DECISION_LOG_CAPACITY;
+            self.entries.drain(0..overflow);
+        }
+    }
+
+    fn snapshot(&self) -> Vec<AutoOffloadDecisionEntry> {
+        self.entries.clone()
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+static DECISION_LOG: Lazy<Mutex<DecisionLog>> = Lazy::new(|| Mutex::new(DecisionLog::new()));
+static AUTO_STATE: OnceCell<AutoOffloadState> = OnceCell::new();
+
+fn record_decision(entry: AutoOffloadDecisionEntry) {
+    if let Ok(mut log) = DECISION_LOG.lock() {
+        log.push(entry);
+    }
+}
+
+fn snapshot_decisions() -> Vec<AutoOffloadDecisionEntry> {
+    DECISION_LOG
+        .lock()
+        .map(|log| log.snapshot())
+        .unwrap_or_default()
+}
+
+fn clear_decisions() {
+    if let Ok(mut log) = DECISION_LOG.lock() {
+        log.clear();
+    }
+}
+
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_millis()
+}
+
+fn threshold_snapshot(cfg: &ThresholdConfig) -> ThresholdSnapshot {
+    ThresholdSnapshot {
+        unary_min_elems: cfg.unary_min_elems,
+        binary_min_elems: cfg.binary_min_elems,
+        reduction_min_elems: cfg.reduction_min_elems,
+        matmul_min_flops: cfg.matmul_min_flops,
+        cpu_elem_per_elem: cfg.cpu_elem_per_elem,
+        cpu_reduction_per_elem: cfg.cpu_reduction_per_elem,
+        cpu_matmul_per_flop: cfg.cpu_matmul_per_flop,
+        small_batch_max_dim: cfg.small_batch_max_dim,
+        small_batch_min_elems: cfg.small_batch_min_elems,
+    }
+}
+
+fn cached_provider_info(info: &ApiDeviceInfo) -> CachedProviderInfo {
+    CachedProviderInfo {
+        name: info.name.clone(),
+        vendor: info.vendor.clone(),
+        backend: info.backend.clone(),
+        device_id: info.device_id,
+    }
+}
+
+fn cpu_estimate(per_unit: f64, units: usize) -> Option<f64> {
+    if per_unit.is_finite() && per_unit > 0.0 {
+        Some(per_unit * units as f64)
+    } else {
+        None
+    }
+}
+
+fn value_shape(value: &Value) -> Option<&[usize]> {
+    match value {
+        Value::Tensor(t) => Some(&t.shape),
+        Value::GpuTensor(handle) => Some(&handle.shape),
+        _ => None,
+    }
+}
+
+fn batch_dimension_from_value(value: &Value) -> Option<usize> {
+    let shape = value_shape(value)?;
+    if shape.len() < 3 {
+        return None;
+    }
+    shape.last().copied()
+}
+
+fn batch_dimension_from_values(values: &[&Value]) -> Option<usize> {
+    values
+        .iter()
+        .filter_map(|value| batch_dimension_from_value(value))
+        .min()
+}
+
+fn decision_entry(
+    operation: &str,
+    elements: Option<usize>,
+    flops: Option<usize>,
+    eval: &DecisionEvaluation,
+) -> AutoOffloadDecisionEntry {
+    AutoOffloadDecisionEntry {
+        timestamp_ms: now_millis(),
+        operation: operation.to_string(),
+        elements,
+        flops,
+        batch: eval.batch,
+        decision: if eval.recommend_gpu {
+            AutoOffloadDisposition::Gpu
+        } else {
+            AutoOffloadDisposition::Cpu
+        },
+        reason: eval.reason,
+        cpu_estimate_ms: eval.cpu_secs.map(|secs| secs * 1_000.0),
+        gpu_estimate_ms: eval.gpu_secs.map(|secs| secs * 1_000.0),
+        threshold: eval.threshold,
+        fusion_kind: eval.fusion_kind.clone(),
     }
 }
 
@@ -122,29 +374,89 @@ pub fn global() -> Option<&'static NativeAutoOffload> {
 
 fn initialize() -> Option<NativeAutoOffload> {
     if !auto_enabled() {
+        clear_decisions();
         return None;
     }
     let provider = runmat_accelerate_api::provider()?;
+    let device_info = provider.device_info_struct();
     let mut config = ThresholdConfig::default();
-    apply_env_overrides(&mut config);
-    if calibrate_enabled() {
-        if let Err(err) = auto_calibrate(provider, &mut config) {
-            debug!("Native auto-offload calibration failed: {err}");
+    let mut base_source = ThresholdBase::BuiltInDefault;
+    let mut cache_path: Option<PathBuf> = None;
+    let mut calibrate_duration_ms: Option<u128> = None;
+    let refresh_calibration = calibrate_refresh_enabled();
+
+    if !refresh_calibration {
+        if let Some((cached, path)) = load_cached_thresholds(&device_info) {
+            info!(
+                "Native auto-offload: loaded cached calibration for '{}' from {}",
+                device_info.name,
+                path.display()
+            );
+            config = cached;
+            cache_path = Some(path);
+            base_source = ThresholdBase::LoadedFromCache;
         }
     }
+
+    let needs_calibration = calibrate_enabled() && (refresh_calibration || cache_path.is_none());
+    if needs_calibration {
+        let start = Instant::now();
+        match auto_calibrate(provider, &mut config) {
+            Ok(()) => {
+                calibrate_duration_ms = Some(start.elapsed().as_millis());
+                base_source = ThresholdBase::Calibrated;
+                match persist_thresholds(&device_info, &config) {
+                    Ok(path) => {
+                        cache_path = Some(path.clone());
+                        info!(
+                            "Native auto-offload: persisted calibration for '{}' to {}",
+                            device_info.name,
+                            path.display()
+                        );
+                    }
+                    Err(err) => {
+                        debug!("Native auto-offload: failed to persist calibration: {err}");
+                    }
+                }
+            }
+            Err(err) => {
+                debug!("Native auto-offload calibration failed: {err}");
+            }
+        }
+    }
+
+    let env_overrides_applied = apply_env_overrides(&mut config);
     let model_status = if profile_cost_model().is_some() {
         "profile"
     } else {
         "fallback"
     };
     info!(
-        "Native auto-offload thresholds: unary={} binary={} reduction={} matmul_flops={} (model: {})",
+        "Native auto-offload thresholds: unary={} binary={} reduction={} matmul_flops={} small_batch_dim={} small_batch_min_elems={} (model: {}, source: {}, env_overrides={})",
         config.unary_min_elems,
         config.binary_min_elems,
         config.reduction_min_elems,
         config.matmul_min_flops,
-        model_status
+        config.small_batch_max_dim,
+        config.small_batch_min_elems,
+        model_status,
+        base_source.as_str(),
+        env_overrides_applied
     );
+
+    let cache_path_str = cache_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned());
+    let state = AutoOffloadState {
+        provider: Some(cached_provider_info(&device_info)),
+        thresholds: config.clone(),
+        base_source,
+        env_overrides_applied,
+        cache_path: cache_path_str,
+        calibrate_duration_ms,
+    };
+    let _ = AUTO_STATE.set(state);
+
     Some(NativeAutoOffload::new(provider, config))
 }
 
@@ -191,34 +503,40 @@ impl NativeAutoOffload {
         Ok(Value::GpuTensor(handle))
     }
 
+    fn small_batch_guard(&self, elements: usize, batch: Option<usize>) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let Some(batch) = batch else {
+            return false;
+        };
+        if batch == 0 {
+            return false;
+        }
+        let thresholds = &self.thresholds;
+        thresholds.small_batch_max_dim > 0
+            && thresholds.small_batch_min_elems > 0
+            && batch <= thresholds.small_batch_max_dim
+            && elements >= thresholds.small_batch_min_elems
+    }
+
     fn promote_binary(&self, op: BinaryOp, a: &Value, b: &Value) -> Result<(Value, Value)> {
         if !self.enabled {
             return Ok((a.clone(), b.clone()));
         }
         match op {
             BinaryOp::Elementwise => {
-                let mut elems = element_count_pair(a, b).unwrap_or(0);
-                if let Some(active) = active_fusion() {
-                    if active.kind.is_elementwise() {
-                        if let Some(ec) = active.element_count {
-                            elems = ec;
-                        }
-                    }
-                }
-                let should_gpu = self
-                    .should_gpu_elementwise(elems)
-                    .unwrap_or(elems >= self.thresholds.binary_min_elems);
-                if should_gpu {
+                let elems = element_count_pair(a, b).unwrap_or(0);
+                let eval = self.evaluate_elementwise(elems, &[a, b]);
+                record_decision(decision_entry("elementwise", Some(elems), None, &eval));
+                if eval.recommend_gpu {
                     log_promotion(|| format!("Elementwise offload accepted ({} elems)", elems));
-                }
-                let threshold = if should_gpu {
-                    1
+                    let a_p = self.promote_tensor_if_large(a, 1)?;
+                    let b_p = self.promote_tensor_if_large(b, 1)?;
+                    Ok((a_p, b_p))
                 } else {
-                    self.thresholds.binary_min_elems
-                };
-                let a_p = self.promote_tensor_if_large(a, threshold)?;
-                let b_p = self.promote_tensor_if_large(b, threshold)?;
-                Ok((a_p, b_p))
+                    Ok((a.clone(), b.clone()))
+                }
             }
             BinaryOp::MatMul => {
                 if let (Some((ra, ca)), Some((rb, cb))) = (tensor_rows_cols(a), tensor_rows_cols(b))
@@ -226,11 +544,10 @@ impl NativeAutoOffload {
                     if ca != rb {
                         return Ok((a.clone(), b.clone()));
                     }
-                    let flops = ra * ca * cb;
-                    let should_gpu = self
-                        .should_gpu_matmul(flops)
-                        .unwrap_or(flops >= self.thresholds.matmul_min_flops);
-                    if should_gpu {
+                    let flops = ra.saturating_mul(ca).saturating_mul(cb);
+                    let eval = self.evaluate_matmul(flops);
+                    record_decision(decision_entry("matmul", None, Some(flops), &eval));
+                    if eval.recommend_gpu {
                         log_promotion(|| {
                             format!(
                                 "Promoting matmul operands (flops={}, threshold={})",
@@ -252,16 +569,18 @@ impl NativeAutoOffload {
             return Ok(v.clone());
         }
         let elems = value_len(v).unwrap_or(0);
-        let base = self.thresholds.unary_min_elems;
-        let use_gpu = match op {
-            UnaryOp::Transpose => self.should_gpu_transpose(elems).unwrap_or(elems >= base),
-            UnaryOp::Generic => elems >= base,
+        let eval = self.evaluate_unary(elems, op, v);
+        let op_label = match op {
+            UnaryOp::Transpose => "transpose",
+            UnaryOp::Generic => "unary",
         };
-        if use_gpu {
+        record_decision(decision_entry(op_label, Some(elems), None, &eval));
+        if eval.recommend_gpu {
             log_promotion(|| format!("Unary offload accepted ({:?}, {} elems)", op, elems));
+            self.promote_tensor_if_large(v, 1)
+        } else {
+            Ok(v.clone())
         }
-        let threshold = if use_gpu { 1 } else { base };
-        self.promote_tensor_if_large(v, threshold)
     }
 
     fn promote_reduction(&self, _op: ReductionOp, args: &[Value]) -> Result<Vec<Value>> {
@@ -269,30 +588,199 @@ impl NativeAutoOffload {
             return Ok(args.to_vec());
         }
         let elems = value_len(&args[0]).unwrap_or(0);
-        let should_gpu = self
-            .should_gpu_reduction(elems)
-            .unwrap_or(elems >= self.thresholds.reduction_min_elems);
-        if should_gpu {
-            log_promotion(|| format!("Reduction offload accepted ({} elems)", elems));
+        let eval = self.evaluate_reduction(elems);
+        record_decision(decision_entry("reduction", Some(elems), None, &eval));
+        if !eval.recommend_gpu {
+            return Ok(args.to_vec());
         }
-        let threshold = if should_gpu {
-            1
-        } else {
-            self.thresholds.reduction_min_elems
-        };
+        log_promotion(|| format!("Reduction offload accepted ({} elems)", elems));
         let mut out = Vec::with_capacity(args.len());
         if let Some(first) = args.first() {
-            out.push(self.promote_tensor_if_large(first, threshold)?);
-            for rest in &args[1..] {
-                out.push(rest.clone());
-            }
+            out.push(self.promote_tensor_if_large(first, 1)?);
+            out.extend(args.iter().skip(1).cloned());
         }
         Ok(out)
+    }
+
+    fn evaluate_elementwise(&self, elements: usize, values: &[&Value]) -> DecisionEvaluation {
+        let fusion = active_fusion();
+        let fusion_kind = fusion.as_ref().map(|f| f.kind.clone());
+        let batch = batch_dimension_from_values(values);
+        let cpu_secs = cpu_estimate(self.thresholds.cpu_elem_per_elem, elements);
+
+        if let Some(active) = fusion.as_ref() {
+            if active.kind.is_elementwise() && active.supported {
+                return DecisionEvaluation {
+                    recommend_gpu: true,
+                    reason: DecisionReason::FusionOverride,
+                    cpu_secs,
+                    gpu_secs: None,
+                    threshold: Some(self.thresholds.binary_min_elems),
+                    fusion_kind,
+                    batch,
+                };
+            }
+        }
+
+        if self.small_batch_guard(elements, batch) {
+            return DecisionEvaluation {
+                recommend_gpu: false,
+                reason: DecisionReason::SmallBatchGuard,
+                cpu_secs,
+                gpu_secs: None,
+                threshold: Some(self.thresholds.binary_min_elems),
+                fusion_kind,
+                batch,
+            };
+        }
+
+        if let Some(model) = profile_cost_model() {
+            if let Some(gpu_duration) = model.estimate_elemwise(elements) {
+                let gpu_secs = Some(gpu_duration.as_secs_f64());
+                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
+                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
+                return DecisionEvaluation {
+                    recommend_gpu: recommend,
+                    reason: DecisionReason::ProfileModel,
+                    cpu_secs,
+                    gpu_secs,
+                    threshold: Some(self.thresholds.binary_min_elems),
+                    fusion_kind,
+                    batch,
+                };
+            }
+        }
+
+        DecisionEvaluation {
+            recommend_gpu: elements >= self.thresholds.binary_min_elems,
+            reason: DecisionReason::Threshold,
+            cpu_secs,
+            gpu_secs: None,
+            threshold: Some(self.thresholds.binary_min_elems),
+            fusion_kind,
+            batch,
+        }
+    }
+
+    fn evaluate_matmul(&self, flops: usize) -> DecisionEvaluation {
+        let cpu_secs = cpu_estimate(self.thresholds.cpu_matmul_per_flop, flops);
+        if let Some(model) = profile_cost_model() {
+            if let Some(gpu_duration) = model.estimate_matmul_flops(flops) {
+                let gpu_secs = Some(gpu_duration.as_secs_f64());
+                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
+                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
+                return DecisionEvaluation {
+                    recommend_gpu: recommend,
+                    reason: DecisionReason::ProfileModel,
+                    cpu_secs,
+                    gpu_secs,
+                    threshold: Some(self.thresholds.matmul_min_flops),
+                    fusion_kind: None,
+                    batch: None,
+                };
+            }
+        }
+
+        DecisionEvaluation {
+            recommend_gpu: flops >= self.thresholds.matmul_min_flops,
+            reason: DecisionReason::Threshold,
+            cpu_secs,
+            gpu_secs: None,
+            threshold: Some(self.thresholds.matmul_min_flops),
+            fusion_kind: None,
+            batch: None,
+        }
+    }
+
+    fn evaluate_reduction(&self, elements: usize) -> DecisionEvaluation {
+        let fusion_kind = active_fusion().map(|f| f.kind.clone());
+        let cpu_secs = cpu_estimate(self.thresholds.cpu_reduction_per_elem, elements);
+        if let Some(model) = profile_cost_model() {
+            if let Some(gpu_duration) = model.estimate_reduction(elements) {
+                let gpu_secs = Some(gpu_duration.as_secs_f64());
+                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
+                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
+                return DecisionEvaluation {
+                    recommend_gpu: recommend,
+                    reason: DecisionReason::ProfileModel,
+                    cpu_secs,
+                    gpu_secs,
+                    threshold: Some(self.thresholds.reduction_min_elems),
+                    fusion_kind,
+                    batch: None,
+                };
+            }
+        }
+
+        DecisionEvaluation {
+            recommend_gpu: elements >= self.thresholds.reduction_min_elems,
+            reason: DecisionReason::Threshold,
+            cpu_secs,
+            gpu_secs: None,
+            threshold: Some(self.thresholds.reduction_min_elems),
+            fusion_kind,
+            batch: None,
+        }
+    }
+
+    fn evaluate_unary(&self, elements: usize, op: UnaryOp, value: &Value) -> DecisionEvaluation {
+        let fusion_kind = active_fusion().map(|f| f.kind.clone());
+        let batch = batch_dimension_from_values(&[value]);
+        if matches!(op, UnaryOp::Generic) && self.small_batch_guard(elements, batch) {
+            return DecisionEvaluation {
+                recommend_gpu: false,
+                reason: DecisionReason::SmallBatchGuard,
+                cpu_secs: cpu_estimate(self.thresholds.cpu_elem_per_elem, elements),
+                gpu_secs: None,
+                threshold: Some(self.thresholds.unary_min_elems),
+                fusion_kind,
+                batch,
+            };
+        }
+
+        let cpu_secs = cpu_estimate(self.thresholds.cpu_elem_per_elem, elements);
+        if let Some(model) = profile_cost_model() {
+            let gpu_duration = match op {
+                UnaryOp::Transpose => model.estimate_transpose(elements),
+                UnaryOp::Generic => model.estimate_elemwise(elements),
+            };
+            if let Some(gpu_duration) = gpu_duration {
+                let gpu_secs = Some(gpu_duration.as_secs_f64());
+                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
+                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
+                return DecisionEvaluation {
+                    recommend_gpu: recommend,
+                    reason: DecisionReason::ProfileModel,
+                    cpu_secs,
+                    gpu_secs,
+                    threshold: Some(self.thresholds.unary_min_elems),
+                    fusion_kind,
+                    batch,
+                };
+            }
+        }
+
+        DecisionEvaluation {
+            recommend_gpu: elements >= self.thresholds.unary_min_elems,
+            reason: DecisionReason::Threshold,
+            cpu_secs,
+            gpu_secs: None,
+            threshold: Some(self.thresholds.unary_min_elems),
+            fusion_kind,
+            batch,
+        }
     }
 
     fn prepare_builtin(&self, name: &str, args: &[Value]) -> Result<Vec<Value>> {
         if !self.enabled {
             return Ok(args.to_vec());
+        }
+        // Do not attempt to promote 'double' on providers that cannot store f64.
+        // Offloading a cast to double requires device-side f64; otherwise keep host.
+        if name.eq_ignore_ascii_case("double") {
+            if self.provider.precision() != runmat_accelerate_api::ProviderPrecision::F64 {
+                return Ok(args.to_vec());
+            }
         }
         if let Some(policy) = builtin_policy(name) {
             if policy.is_sink {
@@ -362,51 +850,6 @@ impl NativeAutoOffload {
         }
         Ok(args.to_vec())
     }
-
-    fn should_gpu_elementwise(&self, elements: usize) -> Option<bool> {
-        if let Some(active) = active_fusion() {
-            if active.kind.is_elementwise() {
-                return Some(true);
-            }
-        }
-        if elements == 0 {
-            return Some(false);
-        }
-        let cpu_cost = self.thresholds.cpu_elem_per_elem * elements as f64;
-        profile_cost_model()
-            .and_then(|model| model.estimate_elemwise(elements))
-            .map(|gpu| gpu.as_secs_f64() * 0.95 < cpu_cost)
-    }
-
-    fn should_gpu_reduction(&self, elements: usize) -> Option<bool> {
-        if elements == 0 {
-            return Some(false);
-        }
-        let cpu_cost = self.thresholds.cpu_reduction_per_elem * elements as f64;
-        profile_cost_model()
-            .and_then(|model| model.estimate_reduction(elements))
-            .map(|gpu| gpu.as_secs_f64() * 0.95 < cpu_cost)
-    }
-
-    fn should_gpu_matmul(&self, flops: usize) -> Option<bool> {
-        if flops == 0 {
-            return Some(false);
-        }
-        let cpu_cost = self.thresholds.cpu_matmul_per_flop * flops as f64;
-        profile_cost_model()
-            .and_then(|model| model.estimate_matmul_flops(flops))
-            .map(|gpu| gpu.as_secs_f64() * 0.95 < cpu_cost)
-    }
-
-    fn should_gpu_transpose(&self, elements: usize) -> Option<bool> {
-        if elements == 0 {
-            return Some(false);
-        }
-        let cpu_cost = self.thresholds.cpu_elem_per_elem * elements as f64;
-        profile_cost_model()
-            .and_then(|model| model.estimate_transpose(elements))
-            .map(|gpu| gpu.as_secs_f64() * 0.95 < cpu_cost)
-    }
 }
 
 fn tensor_rows_cols(value: &Value) -> Option<(usize, usize)> {
@@ -473,40 +916,166 @@ fn calibrate_enabled() -> bool {
     auto_offload_options().calibrate
 }
 
-fn apply_env_overrides(cfg: &mut ThresholdConfig) {
+fn calibrate_refresh_enabled() -> bool {
+    env_bool("RUNMAT_ACCEL_CALIBRATE_REFRESH").unwrap_or(false)
+}
+
+fn apply_env_overrides(cfg: &mut ThresholdConfig) -> bool {
+    let mut applied = false;
     if let Some(val) = env_usize("RUNMAT_ACCEL_THRESHOLD_UNARY") {
         cfg.unary_min_elems = val;
+        applied = true;
     }
     if let Some(val) = env_usize("RUNMAT_ACCEL_THRESHOLD_ELEMWISE") {
         cfg.binary_min_elems = val;
+        applied = true;
     }
     if let Some(val) = env_usize("RUNMAT_ACCEL_THRESHOLD_REDUCTION") {
         cfg.reduction_min_elems = val;
+        applied = true;
     }
     if let Some(val) = env_usize("RUNMAT_ACCEL_THRESHOLD_MATMUL") {
         cfg.matmul_min_flops = val;
+        applied = true;
     }
     if let Some(val) = env_usize("RUNMAT_ACCEL_THRESHOLD_ALL") {
         cfg.unary_min_elems = val;
         cfg.binary_min_elems = val;
         cfg.reduction_min_elems = val;
+        applied = true;
     }
+    if let Some(val) = env_usize("RUNMAT_ACCEL_SMALL_BATCH_MAX_DIM") {
+        cfg.small_batch_max_dim = val;
+        applied = true;
+    }
+    if let Some(val) = env_usize("RUNMAT_ACCEL_SMALL_BATCH_MIN_ELEMS") {
+        cfg.small_batch_min_elems = val;
+        applied = true;
+    }
+    applied
 }
 
 fn env_usize(key: &str) -> Option<usize> {
     env::var(key).ok().and_then(|v| v.parse::<usize>().ok())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CalibrationRecord {
+    version: u32,
+    recorded_at: u64,
+    provider: CalibrationProviderDetails,
+    thresholds: ThresholdConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CalibrationProviderDetails {
+    name: String,
+    vendor: String,
+    backend: Option<String>,
+    device_id: u32,
+}
+
+fn load_cached_thresholds(info: &ApiDeviceInfo) -> Option<(ThresholdConfig, PathBuf)> {
+    let path = calibration_cache_file(info)?;
+    let contents = fs::read_to_string(&path).ok()?;
+    match serde_json::from_str::<CalibrationRecord>(&contents) {
+        Ok(record) => {
+            if record.version != CALIBRATION_VERSION {
+                debug!(
+                    "Native auto-offload calibration cache version mismatch (found {}, expected {})",
+                    record.version,
+                    CALIBRATION_VERSION
+                );
+                None
+            } else {
+                Some((record.thresholds, path))
+            }
+        }
+        Err(err) => {
+            debug!(
+                "Native auto-offload failed to parse cached calibration for '{}': {err}",
+                info.name
+            );
+            None
+        }
+    }
+}
+
+fn persist_thresholds(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -> Result<PathBuf> {
+    let path = calibration_cache_file(info)
+        .ok_or_else(|| anyhow!("unable to determine calibration cache directory"))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| anyhow!(e.to_string()))?;
+    }
+    let record = CalibrationRecord {
+        version: CALIBRATION_VERSION,
+        recorded_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::from_secs(0))
+            .as_secs(),
+        provider: CalibrationProviderDetails {
+            name: info.name.clone(),
+            vendor: info.vendor.clone(),
+            backend: info.backend.clone(),
+            device_id: info.device_id,
+        },
+        thresholds: cfg.clone(),
+    };
+    let payload = serde_json::to_string_pretty(&record).map_err(|e| anyhow!(e.to_string()))?;
+    fs::write(&path, payload).map_err(|e| anyhow!(e.to_string()))?;
+    Ok(path)
+}
+
+fn calibration_cache_file(info: &ApiDeviceInfo) -> Option<PathBuf> {
+    let mut dir = calibration_cache_dir()?;
+    let vendor = slugify(&info.vendor);
+    let name = slugify(&info.name);
+    let backend = slugify(info.backend.as_deref().unwrap_or("unknown"));
+    let file = format!("{}-{}-{}-{}.json", vendor, name, backend, info.device_id);
+    dir.push(file);
+    Some(dir)
+}
+
+fn calibration_cache_dir() -> Option<PathBuf> {
+    dirs::cache_dir().map(|base| base.join("runmat").join("auto_offload"))
+}
+
+fn slugify(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut last_underscore = false;
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_underscore = false;
+        } else if !last_underscore {
+            out.push('_');
+            last_underscore = true;
+        }
+    }
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() {
+        "device".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn auto_calibrate(provider: &'static dyn AccelProvider, cfg: &mut ThresholdConfig) -> Result<()> {
     if let Some(elem_threshold) = calibrate_elemwise(provider, cfg).transpose()? {
-        cfg.binary_min_elems = elem_threshold;
-        cfg.unary_min_elems = cfg.unary_min_elems.min(elem_threshold);
+        if elem_threshold != usize::MAX {
+            cfg.binary_min_elems = elem_threshold;
+            cfg.unary_min_elems = cfg.unary_min_elems.min(elem_threshold);
+        }
     }
     if let Some(red_threshold) = calibrate_reduction(provider, cfg).transpose()? {
-        cfg.reduction_min_elems = red_threshold;
+        if red_threshold != usize::MAX {
+            cfg.reduction_min_elems = red_threshold;
+        }
     }
     if let Some(matmul_threshold) = calibrate_matmul(provider, cfg).transpose()? {
-        cfg.matmul_min_flops = matmul_threshold;
+        if matmul_threshold != usize::MAX {
+            cfg.matmul_min_flops = matmul_threshold;
+        }
     }
     Ok(())
 }
@@ -539,7 +1108,7 @@ fn compare_elemwise(
     let tensor = Tensor::new(data.clone(), vec![elements, 1]).map_err(|e| anyhow!(e))?;
     let a = Value::Tensor(tensor.clone());
     let b = Value::Tensor(tensor.clone());
-    let cpu_time = time(|| runmat_runtime::elementwise_add(&a, &b))?;
+    let cpu_time = time(|| runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]))?;
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {
@@ -717,6 +1286,23 @@ where
     let start = Instant::now();
     let _ = f().map_err(|e| anyhow!(e))?;
     Ok(start.elapsed())
+}
+
+pub fn auto_offload_report() -> Option<AutoOffloadReport> {
+    let state = AUTO_STATE.get()?;
+    Some(AutoOffloadReport {
+        provider: state.provider.clone(),
+        thresholds: threshold_snapshot(&state.thresholds),
+        base_source: state.base_source,
+        env_overrides_applied: state.env_overrides_applied,
+        cache_path: state.cache_path.clone(),
+        calibrate_duration_ms: state.calibrate_duration_ms,
+        decisions: snapshot_decisions(),
+    })
+}
+
+pub fn reset_auto_offload_log() {
+    clear_decisions();
 }
 
 #[derive(Clone, Deserialize, Debug)]

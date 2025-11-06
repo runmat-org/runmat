@@ -349,6 +349,28 @@ fn is_zero_scalar(value: &Value) -> bool {
         Value::Num(n) => n.abs() <= EPS_SCALAR,
         Value::Int(i) => i.to_i64() == 0,
         Value::Bool(b) => !b,
+        Value::Tensor(t) => {
+            if t.data.len() == 1 {
+                t.data[0].abs() <= EPS_SCALAR
+            } else {
+                false
+            }
+        }
+        Value::GpuTensor(handle) => {
+            // Best-effort: treat 1-element gpuArray with ~0 value as zero option
+            if handle.shape.iter().product::<usize>() == 1 {
+                if let Some(p) = runmat_accelerate_api::provider() {
+                    if let Ok(host) = p.download(handle) {
+                        return host
+                            .data
+                            .first()
+                            .map(|v| v.abs() <= EPS_SCALAR)
+                            .unwrap_or(false);
+                    }
+                }
+            }
+            false
+        }
         _ => false,
     }
 }

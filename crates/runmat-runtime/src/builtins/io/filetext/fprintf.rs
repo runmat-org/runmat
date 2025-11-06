@@ -7,8 +7,7 @@ use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::format::{
-    decode_escape_sequences, extract_format_string, flatten_arguments, format_variadic_with_cursor,
-    ArgCursor,
+    decode_escape_sequences, flatten_arguments, format_variadic_with_cursor, ArgCursor,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -263,22 +262,144 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
         return Err("fprintf: not enough input arguments".to_string());
     }
 
-    let first_host = gather_value(&args[0])?;
-    let mut rest_host = Vec::with_capacity(args.len().saturating_sub(1));
-    for value in &args[1..] {
-        rest_host.push(gather_value(value)?);
+    // Gather all arguments to host first
+    let mut all: Vec<Value> = Vec::with_capacity(args.len());
+    for v in args {
+        all.push(gather_value(v)?);
     }
 
-    let (target, format_value, data_args) = resolve_target(&first_host, &rest_host)?;
-    let raw_format = extract_format_string(format_value, "fprintf")?;
+    // Locate the first valid formatSpec anywhere in the list
+    let mut fmt_idx: Option<usize> = None;
+    let mut format_string_val: Option<String> = None;
+    for i in 0..all.len() {
+        // Never interpret a stream label ('stdout'/'stderr') as the format string
+        if match_stream_label(&all[i]).is_some() {
+            continue;
+        }
+        match coerce_to_format_string(&all[i])? {
+            Some(Value::String(s)) => {
+                fmt_idx = Some(i);
+                format_string_val = Some(s);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let fmt_idx = fmt_idx.ok_or_else(|| MISSING_FORMAT_MESSAGE.to_string())?;
+    let raw_format = format_string_val.unwrap();
+
+    // Determine output target by scanning only arguments BEFORE the format
+    let mut target_idx: Option<usize> = None;
+    let mut target: OutputTarget = OutputTarget::Stdout;
+    // Prefer explicit stream labels over numeric fids if both appear
+    let mut first_stream: Option<(usize, SpecialStream)> = None;
+    for i in 0..fmt_idx {
+        if let Some(stream) = match_stream_label(&all[i]) {
+            first_stream = Some((i, stream));
+            break;
+        }
+    }
+    if let Some((idx, stream)) = first_stream {
+        target_idx = Some(idx);
+        target = match stream {
+            SpecialStream::Stdout => OutputTarget::Stdout,
+            SpecialStream::Stderr => OutputTarget::Stderr,
+        };
+    } else {
+        // Try to parse a numeric fid that appears before the format
+        for i in 0..fmt_idx {
+            if matches!(all[i], Value::Num(_) | Value::Int(_) | Value::Tensor(_)) {
+                if let Ok(fid) = parse_fid(&all[i]) {
+                    target_idx = Some(i);
+                    target = target_from_fid(fid)?;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Remaining arguments are data, excluding the chosen target and the format
+    let mut data_args: Vec<Value> = Vec::with_capacity(all.len().saturating_sub(1));
+    for (i, v) in all.into_iter().enumerate() {
+        if i == fmt_idx {
+            continue;
+        }
+        if let Some(tidx) = target_idx {
+            if i == tidx {
+                continue;
+            }
+        }
+        data_args.push(v);
+    }
+
     let format_string = decode_escape_sequences("fprintf", &raw_format)?;
-    let flattened_args = flatten_arguments(data_args, "fprintf")?;
+    let flattened_args = flatten_arguments(&data_args, "fprintf")?;
     let rendered = format_with_repetition(&format_string, &flattened_args)?;
     let bytes = encode_output(&rendered, target.encoding_label())?;
     target.write(&bytes)?;
     Ok(FprintfEval {
         bytes_written: bytes.len(),
     })
+}
+
+// kind_of was used for debugging logs; removed to avoid dead code in production builds.
+
+fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>> {
+    match value {
+        Value::Tensor(t) => {
+            let is_row = (t.shape.len() == 2 && t.shape[0] == 1 && t.data.len() == t.shape[1])
+                || (t.shape.len() == 1 && t.data.len() == t.shape[0]);
+            if is_row {
+                let mut out = String::with_capacity(t.data.len());
+                for &code in &t.data {
+                    if !code.is_finite() {
+                        return Some(Err(
+                            "fprintf: formatSpec must be a character row vector or string scalar"
+                                .to_string(),
+                        ));
+                    }
+                    let v = code as u32;
+                    // Allow full Unicode range; MATLAB chars are UTF-16 but format strings are ASCII-compatible typically
+                    if let Some(ch) = char::from_u32(v) {
+                        out.push(ch);
+                    } else {
+                        return Some(Err(
+                            "fprintf: formatSpec contains invalid character code".to_string()
+                        ));
+                    }
+                }
+                return Some(Ok(out));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
+    match value {
+        Value::String(s) => Ok(Some(Value::String(s.clone()))),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Some(Value::String(sa.data[0].clone()))),
+        Value::CharArray(ca) => {
+            let s: String = ca.data.iter().collect();
+            Ok(Some(Value::String(s)))
+        }
+        Value::Tensor(t) => {
+            // Only accept numeric codepoint vectors of length >= 2 as formatSpec.
+            // This avoids misinterpreting stray 1x1 numerics (e.g., accidental stack values)
+            // as a valid format string.
+            if t.data.len() >= 2 {
+                match try_tensor_char_row_as_string(value) {
+                    Some(Ok(s)) => Ok(Some(Value::String(s))),
+                    Some(Err(e)) => Err(e),
+                    None => Ok(None),
+                }
+            } else {
+                Ok(None)
+            }
+        }
+        _ => Ok(None),
+    }
 }
 
 #[runtime_builtin(
@@ -350,6 +471,7 @@ fn gather_value(value: &Value) -> Result<Value, String> {
     gather_if_needed(value).map_err(|e| format!("fprintf: {e}"))
 }
 
+#[allow(dead_code)]
 fn resolve_target<'a>(
     first: &'a Value,
     rest: &'a [Value],
@@ -370,11 +492,21 @@ fn resolve_target<'a>(
             let fid = parse_fid(first)?;
             resolve_fid_target(fid, rest)
         }
+        Value::Tensor(t) => {
+            // If this looks like a 1xN row of character codes, treat it as a format string to stdout
+            if t.shape.len() == 2 && t.shape[0] == 1 && t.data.len() == t.shape[1] {
+                return Ok((OutputTarget::Stdout, first, rest));
+            }
+            // Otherwise only scalar numeric tensors are valid as fids
+            let fid = parse_fid(first)?;
+            resolve_fid_target(fid, rest)
+        }
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
             let target = OutputTarget::Stdout;
             Ok((target, first, rest))
         }
-        _ => Err("fprintf: unsupported first argument type".to_string()),
+        // Be permissive: if it's not a numeric fid or stream label, interpret as format string to stdout
+        _ => Ok((OutputTarget::Stdout, first, rest)),
     }
 }
 
@@ -410,10 +542,39 @@ fn resolve_fid_target<'a>(
     }
 }
 
+fn target_from_fid(fid: i32) -> Result<OutputTarget, String> {
+    if fid < 0 {
+        return Err("fprintf: file identifier must be non-negative".to_string());
+    }
+    match fid {
+        0 => Err("fprintf: file identifier 0 (stdin) is not writable".to_string()),
+        1 => Ok(OutputTarget::Stdout),
+        2 => Ok(OutputTarget::Stderr),
+        _ => {
+            let info =
+                registry::info_for(fid).ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
+            ensure_writable(&info)?;
+            let handle =
+                registry::take_handle(fid).ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
+            Ok(OutputTarget::File {
+                handle,
+                encoding: info.encoding.clone(),
+            })
+        }
+    }
+}
+
 fn parse_fid(value: &Value) -> Result<i32, String> {
     let scalar = match value {
         Value::Num(n) => *n,
         Value::Int(int) => int.to_f64(),
+        Value::Tensor(t) => {
+            if t.shape == vec![1, 1] && t.data.len() == 1 {
+                t.data[0]
+            } else {
+                return Err("fprintf: file identifier must be numeric".to_string());
+            }
+        }
         _ => return Err("fprintf: file identifier must be numeric".to_string()),
     };
     if !scalar.is_finite() {

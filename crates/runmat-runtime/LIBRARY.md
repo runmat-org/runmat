@@ -21,7 +21,7 @@
 | Completed | Path                | Name(s)                                                                                              | Purpose                         | GPU | Fusion | BLAS/LAPACK/FFTs               | Notes                                                                                   |
 |-----------|---------------------|-----------------------------------------------------------------------------------------------------|---------------------------------|-----|--------|--------------------|-----------------------------------------------------------------------------------------|
 |     ✅     | array/creation      | zeros, ones, eye, diag, linspace, logspace, randi, rand, randn, randperm, fill, range, colon         | Constructors & ranges           | ✓   | E      | —                  | RNG integrates rng streams; colon(a,b,…) implements :.                                   |
-|      ✅    | array/creation      |  meshgrid                                                                                           | Grid generators                 | ✓   | T      | —                  | X/Y grid; device index kernels.                                                             |
+|     ✅     | array/creation      |  meshgrid                                                                                           | Grid generators                 | ✓   | T      | —                  | X/Y grid; device index kernels.                                                             |
 |     ✅     | array/shape         | reshape, squeeze, permute, ipermute, repmat, kron, cat, horzcat, vertcat, flip, fliplr, flipud, rot90, circshift, tril, triu, diag | Layout transforms               | ✓   | T      | BLAS (for kron via GEMM blocks) | Device-side index kernels; fuse where possible.                                          |
 |     ✅     | array/indexing      | sub2ind, ind2sub, find                                                                               | Index conversions & queries     | ✓   | P      | —                  | find supports dim/k variants; device kernels for masks.                                 |
 |     ✅     | array/sorting-sets  | sort, sortrows, argsort (internal), unique, union, intersect, setdiff, ismember, issorted            | Ordering & set ops              | ✓   | P      | —                  | GPU sort; host Timsort/ radix; full semantics.                                         |
@@ -33,8 +33,8 @@
 |-----------|---------------------|----------------------------------------------------------------------------------|-----------------------------|-----|--------|------------------|------------------------------|
 |     ✅     | math/elementwise    | abs, sign, real, imag, conj, angle                                              | Complex helpers             | ✓   | E      | —                | Complex tensors supported.   |
 |     ✅     | math/elementwise    | exp, expm1, log, log1p, log10, log2, sqrt, hypot, pow2                          | Exponentials & roots        | ✓   | E      | —                | Provider hooks unary_*.      |
-|      ✅    | math/elementwise    |  single, double                                                                | Numeric casting (array/scalar) | ✓   | E      | —                | Type conversion to f32/f64. |
-|      ✅    | math/elementwise    |  times, rdivide, ldivide, power, gamma, factorial                              | Elementwise ops & specials  | ✓   | E      | —                | GPU-aware; broadcast semantics. |
+|     ✅     | math/elementwise    |  single, double                                                                | Numeric casting (array/scalar) | ✓   | E      | —                | Type conversion to f32/f64. |
+|     ✅     | math/elementwise    |  plus, minus, times, rdivide, ldivide, power, gamma, factorial                 | Elementwise ops & specials  | ✓   | E      | —                | GPU-aware; broadcast semantics. |
 |     ✅     | math/trigonometry   | sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, asinh, acosh, atanh   | Trig & hyperbolic           | ✓   | E      | —                | sin, asinh, acosh, atanh implemented; others mirror. |
 |     ✅     | math/rounding       | round, floor, ceil, fix, mod, rem                                               | Rounding & modulo           | ✓   | E      | —                | mod/rem MATLAB semantics.    |
 |     ✅     | math/reduction      | sum, prod, mean, median, min, max, any, all, std, var, cumsum, cumprod, cummin, cummax, diff, nnz | Reductions & cumulatives    | ✓   | R      | —                | omitnan host fallback initially; GPU reductions via hooks. |
@@ -44,7 +44,7 @@
 | Completed | Path                   | Name(s)                                               | Purpose                           | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                               |
 |-----------|------------------------|------------------------------------------------------|-----------------------------------|-----|--------|------------------|-----------------------------------------------------|
 |     ✅     | math/linalg/ops        | mtimes (*), mrdivide (/), mldivide (\), transpose (.'), ctranspose ('), trace | Core ops            | ✓   | M/T    | BLAS              | GEMM/GEMV; fall back to host BLAS; GPU matmul hooks.|
-|      ✅    | math/linalg/ops        |  dot, mpower                                                | Dot product; matrix power      | ✓   | M      | BLAS              | Device/offload support via provider hooks.             |
+|     ✅     | math/linalg/ops        |  dot, mpower                                                | Dot product; matrix power      | ✓   | M      | BLAS              | Device/offload support via provider hooks.             |
 |     ✅     | math/linalg/factor     | lu, qr, chol, svd, eig                               | Factorizations & eigensolvers     | ✓   | —      | LAPACK           | GPU optional via provider; host uses LAPACK.        |
 |     ✅     | math/linalg/solve      | linsolve, pinv, inv, det, rank, rcond, cond, norm    | Solves & metrics                  | ✓   | —      | LAPACK/BLAS      | Encourage \ instead of inv(A)*b.                    |
 |     ✅     | math/linalg/structure  | bandwidth, issymmetric, ishermitian, symrcm| Structure queries                 | —   | —      | —                | Useful diagnostics.                                 |
@@ -79,7 +79,7 @@
 |     ✅     | logical/rel    | eq, ne, gt, ge, lt, le                 | Relational ops     | ✓   | E      | —                | Implemented for scalars/tensors/strings. |
 |     ✅     | logical/bit    | and, or, xor, not                      | Logical ops        | ✓   | E      | —                | Elementwise semantics.               |
 |     ✅     | logical/tests  | isnan, isinf, isfinite, isreal, islogical, isnumeric | Predicates       | ✓   | E      | —                | Device kernels for masks.            |
-|      ✅    | logical         |  logical                             | Type conversion    | ✓   | E      | —                | Produces logical arrays/scalars.     |
+|     ✅     | logical         |  logical                             | Type conversion    | ✓   | E      | —                | Produces logical arrays/scalars.     |
 
 ## Strings & text
 
@@ -96,7 +96,7 @@
 
 | Completed | Path            | Name(s)                                          | Purpose               | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                            |
 |-----------|-----------------|--------------------------------------------------|-----------------------|-----|--------|------------------|--------------------------------------------------|
-|     ✅      | structs/core    | struct, fieldnames, isfield, getfield, setfield, rmfield, orderfields | Struct manipulation | —   | —      | —                |                                                  |
+|     ✅     | structs/core    | struct, fieldnames, isfield, getfield, setfield, rmfield, orderfields | Struct manipulation | —   | —      | —                |                                                  |
 |     ✅     | cells/core      | cell, cell2mat, mat2cell, cellfun                 | Cell arrays & ops     | —   | P      | —                | cellfun maps to fusion where trivial.            |
 |     ✅     | cells/core      |  cellstr                                      | Cell/string conversion | —   | —      | —                |                                                  |
 |     ✅     | containers/map  | containers.Map (constructor)                      | String→value map      | —   | —      | —                | Handy; small footprint.             |

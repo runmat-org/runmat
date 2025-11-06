@@ -1,112 +1,43 @@
-### RunMat Performance Benchmarks
+# RunMat Performance Benchmarks
 
-This suite compares RunMat and GNU Octave across representative MATLAB-style workloads. It builds RunMat (if needed), runs each script in Octave, RunMat interpreter, and RunMat JIT, and writes a YAML report with system info and speedups.
+This directory contains reproducible, cross-language benchmarks and shareable articles comparing RunMat against common alternatives for representative workloads.
 
-### What's included
+## Structure
 
-- **Startup Time** (`startup_time.m`): end-to-end cold script execution.
-- **Matrix Operations** (`matrix_operations.m`): add, matmul, transpose, scalar-mul over sizes `[100, 300, 500]`.
-- **Math Functions** (`math_functions.m`): `sin, cos, exp, log, sqrt, sum, mean, std` over `[50k, 200k, 500k]`.
-- **Control Flow** (`control_flow.m`): simple loop, nested loops, conditionals, and function calls over `n = [1k, 5k, 10k]`.
+- harness/: shared Python utilities to run implementations, time them, and collect results
+- <case>/
+  - runmat.m: MATLAB-syntax script for RunMat
+  - octave: benchmark reuses runmat.m via `octave -qf runmat.m`
+  - python_numpy.py: NumPy implementation
+  - python_torch.py: PyTorch implementation (uses GPU if available)
+  - julia.jl: Julia implementation
+  - ARTICLE.md: public-facing writeup for the case
 
-Per-size timings are printed by the scripts via `fprintf`, while the runner measures total wall-clock time per script (warmup + repeated runs) for the YAML.
-
-### Prerequisites
-
-- Rust toolchain and Cargo
-- `bc` (for basic math in the runner)
-- Optional: `yq` (pretty-printing YAML locally)
-- Optional: GNU Octave in `PATH` (for Octave comparisons)
-  - macOS: `brew install octave`
-  - Ubuntu/Debian: `sudo apt-get install octave`
-
-### Quick start
+## Benchmark Harness Usage (example – 4k image processing)
 
 ```bash
-cd benchmarks
-./run_benchmarks.sh
+python3 ./.harness/run_bench.py --case 4k-image-processing --iterations 3 --output ../results/4k_image_processing.json
 ```
 
-What the runner does:
-- Builds RunMat (release) if missing
-- Gathers OS/CPU/memory and tool versions
-- For each script: 1 warmup + 3 timed runs for Octave, interpreter, and JIT
-- Computes avg/min/max and speedups; writes `results/benchmark_<timestamp>.yaml`
+## Suite runner (all cases with parity checks)
 
-### Manual use
+Run the entire benchmark suite (size sweeps, parity checks, plots):
 
 ```bash
-# Octave
-octave --no-gui matrix_operations.m
+python3 ./.harness/run_suite.py \
+  --suite ./.harness/suite.json \
+  --output ../results/suite_results.json
 
-# RunMat interpreter only
-../target/release/runmat --no-jit matrix_operations.m
-
-# RunMat with JIT
-../target/release/runmat matrix_operations.m
+# Generate per-case scaling and speedup plots
+python3 ./.harness/plot_suite.py --input ../results/suite_results.json --output_dir ../results
 ```
 
-### Output format (YAML)
+Notes:
+- The suite config also exists as YAML at `./.harness/suite.yaml`. If you prefer YAML, install PyYAML: `python3 -m pip install pyyaml`.
+- Parity is enforced via regex-defined metrics in the suite config; failures are summarized in `suite_results.json`.
+- Torch is run with MPS/CUDA if available; RunMat uses WGPU when available. Device info is recorded in each implementation’s `stderr_tail`.
 
-```yaml
-metadata:
-  timestamp: "YYYYMMDD_HHMMSS"
-  date: "ISO-8601"
-system:
-  os: Darwin|Linux
-  architecture: arm64|x86_64
-  cpu:
-    model: "Apple M2 Max"
-    cores: 12
-  memory_gb: 32.0
-software:
-  octave:
-    version: "9.4.0"        # if available
-  runmat:
-    version: "runmat 0.0.1"
-    build_features: ["blas-lapack"]
-benchmark_config:
-  warmup_runs: 1
-  timing_runs: 3
-  scripts: [startup_time.m, matrix_operations.m, math_functions.m, control_flow.m]
-results:
-  matrix_operations:
-    octave: { avg_time: 0.822, min_time: 0.819, max_time: 0.826 }
-    runmat_interpreter: { avg_time: 0.005, min_time: 0.005, max_time: 0.005, speedup_vs_octave: "164.40x" }
-    runmat_jit: { avg_time: 0.005, min_time: 0.005, max_time: 0.005, speedup_vs_octave: "164.40x", speedup_vs_interpreter: "1.00x" }
-```
-
-Note: The YAML aggregates total script time. Per-size timings in the script output are for human inspection and are not parsed into YAML.
-
-### Formatting and logging
-
-- `fprintf` in RunMat supports `%d`, `%f`, and `%.Nf` plus `\n` (newline). Prefer `%.6f` for timings.
-- Scripts use `tic`/`toc` for intra-script measurements; the runner uses external wall-clock time.
-
-### Customize sizes
-
-Edit within the scripts:
-- `matrix_operations.m`: `sizes = [100, 300, 500];`
-- `math_functions.m`: `sizes = [50000, 200000, 500000];`
-- `control_flow.m`: `iterations = [1000, 5000, 10000];`
-
-### Adding a new benchmark
-
-- Create a `.m` file that:
-  - prints a header with `fprintf`,
-  - measures its sections with `tic`/`toc`,
-  - prints numeric results using `%` formats (e.g., `%.6f`).
-- Add the script (without extension) to the `benchmarks` array in `run_benchmarks.sh`.
-- Re-run the suite.
-
-### Troubleshooting
-
-- **Octave times are N/A**: Ensure Octave is installed and on `PATH`.
-- **Permissions**: `chmod +x run_benchmarks.sh`.
-- **Headless environments**: All benchmarks are non-GUI; Octave runs with `--no-gui`.
-
-### Reproducibility notes
-
-- System metadata and tool versions are embedded in each YAML.
-- BLAS/LAPACK features are recorded in `software.runmat.build_features`.
-- For cross-machine comparisons, run on AC power with minimal background load.
+## Notes
+- The harness auto-detects available interpreters (RunMat, Python, Octave, Julia) and skips missing ones.
+- For RunMat, the harness prefers a `runmat` binary on PATH; if not present, it falls back to `cargo run -q -p runmat --release --`, which requires a Rust toolchain and will be slower.
+- Reported metric is wall-clock time (ms) per run. Individual implementations may also print additional timing info; the harness records wall-clock consistently across languages.

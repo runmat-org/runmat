@@ -105,3 +105,18 @@ fn multiple_assignment_kinds_sequence() {
     let program = parse("A=1; A(1)=2; A{1}=3; s.f = 4").unwrap();
     assert_eq!(program.body.len(), 4);
 }
+
+#[test]
+fn dynamic_member_assignment_parses() {
+    let program = parse("s.(idx) = value").unwrap();
+    assert_eq!(program.body.len(), 1);
+    match &program.body[0] {
+        Stmt::AssignLValue(LValue::MemberDynamic(base, name_expr), rhs, suppressed) => {
+            assert!(!*suppressed);
+            assert!(matches!(**base, Expr::Ident(ref n) if n == "s"));
+            assert!(matches!(**name_expr, Expr::Ident(ref n) if n == "idx"));
+            assert!(matches!(rhs, Expr::Ident(ref n) if n == "value"));
+        }
+        other => panic!("expected dynamic member assignment, got {other:?}"),
+    }
+}

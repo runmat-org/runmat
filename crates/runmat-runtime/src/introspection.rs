@@ -1,16 +1,18 @@
-use crate::builtins::common::shape::value_numel;
+#[cfg(test)]
 use runmat_builtins::Value;
-use runmat_macros::runtime_builtin;
 
-#[runtime_builtin(name = "numel")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn numel_builtin(a: Value) -> Result<f64, String> {
-    Ok(value_numel(&a) as f64)
+    Ok(crate::builtins::common::shape::value_numel(&a) as f64)
 }
 
 // ---------------------------
 // String predicates and ops
 // ---------------------------
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn extract_scalar_string(v: &Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s.clone()),
@@ -26,20 +28,18 @@ fn extract_scalar_string(v: &Value) -> Option<String> {
     }
 }
 
-#[runtime_builtin(name = "strcmp")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn strcmp_builtin(a: Value, b: Value) -> Result<bool, String> {
-    let sa = extract_scalar_string(&a)
-        .ok_or_else(|| "strcmp: expected string/char scalar inputs".to_string())?;
-    let sb = extract_scalar_string(&b)
-        .ok_or_else(|| "strcmp: expected string/char scalar inputs".to_string())?;
+    let sa = extract_scalar_string(&a).ok_or("strcmp: expected scalar string")?;
+    let sb = extract_scalar_string(&b).ok_or("strcmp: expected scalar string")?;
     Ok(sa == sb)
 }
 
-#[runtime_builtin(name = "strcmpi")]
+#[cfg(test)]
+#[allow(dead_code)]
 fn strcmpi_builtin(a: Value, b: Value) -> Result<bool, String> {
-    let sa = extract_scalar_string(&a)
-        .ok_or_else(|| "strcmpi: expected string/char scalar inputs".to_string())?;
-    let sb = extract_scalar_string(&b)
-        .ok_or_else(|| "strcmpi: expected string/char scalar inputs".to_string())?;
-    Ok(sa.eq_ignore_ascii_case(&sb))
+    let sa = extract_scalar_string(&a).ok_or("strcmpi: expected scalar string")?;
+    let sb = extract_scalar_string(&b).ok_or("strcmpi: expected scalar string")?;
+    Ok(sa.to_lowercase() == sb.to_lowercase())
 }

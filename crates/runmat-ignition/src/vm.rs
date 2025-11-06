@@ -3,7 +3,9 @@ use crate::gc_roots::InterpretContext;
 use crate::instr::Instr;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
-    execute_elementwise, execute_reduction, FusionExecutionRequest,
+    execute_centered_gram, execute_elementwise, execute_explained_variance,
+    execute_matmul_epilogue, execute_power_step_normalize, execute_reduction,
+    FusionExecutionRequest,
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
@@ -12,7 +14,7 @@ use runmat_accelerate::{
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
-    active_group_plan_clone, FusionOp as AccelFusionOp, ShapeInfo, ValueOrigin, VarKind,
+    active_group_plan_clone, FusionKind, FusionOp as AccelFusionOp, ShapeInfo, ValueOrigin, VarKind,
 };
 use runmat_builtins::{Type, Value};
 use runmat_runtime::{
@@ -853,7 +855,7 @@ pub fn interpret_with_vars(
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = runmat_runtime::elementwise_add(&a, &b)?;
+                                let v = call_builtin("plus", &vec![a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -867,7 +869,7 @@ pub fn interpret_with_vars(
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = runmat_runtime::elementwise_add(&a, &b)?;
+                                let v = call_builtin("plus", &vec![a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -875,7 +877,7 @@ pub fn interpret_with_vars(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = runmat_runtime::elementwise_add(&a_acc, &b_acc)?;
+                        let v = call_builtin("plus", &vec![a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -893,7 +895,7 @@ pub fn interpret_with_vars(
                         match call_builtin("minus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = runmat_runtime::elementwise_sub(&a, &b)?;
+                                let v = call_builtin("minus", &vec![a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -903,7 +905,7 @@ pub fn interpret_with_vars(
                         match call_builtin("uminus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = runmat_runtime::elementwise_sub(&a, &b)?;
+                                let v = call_builtin("minus", &vec![a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -911,7 +913,7 @@ pub fn interpret_with_vars(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = runmat_runtime::elementwise_sub(&a_acc, &b_acc)?;
+                        let v = call_builtin("minus", &vec![a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -978,7 +980,7 @@ pub fn interpret_with_vars(
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                let v = runmat_runtime::elementwise_div(&a_acc, &b_acc)?;
+                                let v = runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?;
                                 stack.push(v)
                             }
                         }
@@ -994,7 +996,7 @@ pub fn interpret_with_vars(
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                let v = runmat_runtime::elementwise_div(&a_acc, &b_acc)?;
+                                let v = runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?;
                                 stack.push(v)
                             }
                         }
@@ -1002,7 +1004,7 @@ pub fn interpret_with_vars(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = runmat_runtime::elementwise_div(&a_acc, &b_acc)?;
+                        let v = runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -1052,13 +1054,19 @@ pub fn interpret_with_vars(
                         match call_builtin("uminus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let result = runmat_runtime::elementwise_neg(&value)?;
+                                let result = runmat_runtime::call_builtin(
+                                    "times",
+                                    &[value.clone(), runmat_builtins::Value::Num(-1.0)],
+                                )?;
                                 stack.push(result)
                             }
                         }
                     }
                     _ => {
-                        let result = runmat_runtime::elementwise_neg(&value)?;
+                        let result = runmat_runtime::call_builtin(
+                            "times",
+                            &[value.clone(), runmat_builtins::Value::Num(-1.0)],
+                        )?;
                         stack.push(result);
                     }
                 }
@@ -1105,7 +1113,7 @@ pub fn interpret_with_vars(
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack.push(runmat_runtime::elementwise_mul(&a_acc, &b_acc)?)
+                                stack.push(runmat_runtime::call_builtin("times", &[a_acc, b_acc])?)
                             }
                         }
                     }
@@ -1120,14 +1128,14 @@ pub fn interpret_with_vars(
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack.push(runmat_runtime::elementwise_mul(&a_acc, &b_acc)?)
+                                stack.push(runmat_runtime::call_builtin("times", &[a_acc, b_acc])?)
                             }
                         }
                     }
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        stack.push(runmat_runtime::elementwise_mul(&a_acc, &b_acc)?)
+                        stack.push(runmat_runtime::call_builtin("times", &[a_acc, b_acc])?)
                     }
                 }
             }
@@ -1150,7 +1158,8 @@ pub fn interpret_with_vars(
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack.push(runmat_runtime::elementwise_div(&a_acc, &b_acc)?)
+                                stack
+                                    .push(runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?)
                             }
                         }
                     }
@@ -1165,14 +1174,15 @@ pub fn interpret_with_vars(
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack.push(runmat_runtime::elementwise_div(&a_acc, &b_acc)?)
+                                stack
+                                    .push(runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?)
                             }
                         }
                     }
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        stack.push(runmat_runtime::elementwise_div(&a_acc, &b_acc)?)
+                        stack.push(runmat_runtime::call_builtin("rdivide", &[a_acc, b_acc])?)
                     }
                 }
             }
@@ -1198,14 +1208,14 @@ pub fn interpret_with_vars(
                             Err(_) => {
                                 let (a_acc, b_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                                stack.push(runmat_runtime::elementwise_pow(&a_acc, &b_acc)?)
+                                stack.push(runmat_runtime::call_builtin("power", &[a_acc, b_acc])?)
                             }
                         }
                     }
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        stack.push(runmat_runtime::elementwise_pow(&a_acc, &b_acc)?)
+                        stack.push(runmat_runtime::call_builtin("power", &[a_acc, b_acc])?)
                     }
                 }
             }
@@ -1228,7 +1238,8 @@ pub fn interpret_with_vars(
                             Err(_) => {
                                 let (b_acc, a_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
-                                stack.push(runmat_runtime::elementwise_div(&b_acc, &a_acc)?)
+                                stack
+                                    .push(runmat_runtime::call_builtin("rdivide", &[b_acc, a_acc])?)
                             }
                         }
                     }
@@ -1243,14 +1254,15 @@ pub fn interpret_with_vars(
                             Err(_) => {
                                 let (b_acc, a_acc) =
                                     accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
-                                stack.push(runmat_runtime::elementwise_div(&b_acc, &a_acc)?)
+                                stack
+                                    .push(runmat_runtime::call_builtin("rdivide", &[b_acc, a_acc])?)
                             }
                         }
                     }
                     _ => {
                         let (b_acc, a_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a)?;
-                        stack.push(runmat_runtime::elementwise_div(&b_acc, &a_acc)?)
+                        stack.push(runmat_runtime::call_builtin("rdivide", &[b_acc, a_acc])?)
                     }
                 }
             }
@@ -1776,6 +1788,7 @@ pub fn interpret_with_vars(
                     continue;
                 }
                 let mut args = Vec::new();
+
                 for _ in 0..arg_count {
                     args.push(
                         stack
@@ -1784,6 +1797,7 @@ pub fn interpret_with_vars(
                     );
                 }
                 args.reverse();
+
                 let prepared_primary = accel_prepare_args(&name, &args)?;
                 match runmat_runtime::call_builtin(&name, &prepared_primary) {
                     Ok(result) => stack.push(result),
@@ -3444,20 +3458,26 @@ pub fn interpret_with_vars(
                         Err(err) => vm_bail!(err),
                     };
                     match out_count {
-                        0 => continue,
+                        0 => {
+                            pc += 1;
+                            continue;
+                        }
                         1 => {
                             stack.push(eval.r());
+                            pc += 1;
                             continue;
                         }
                         2 => {
                             stack.push(eval.q());
                             stack.push(eval.r());
+                            pc += 1;
                             continue;
                         }
                         3 => {
                             stack.push(eval.q());
                             stack.push(eval.r());
                             stack.push(eval.permutation());
+                            pc += 1;
                             continue;
                         }
                         _ => vm_bail!(mex(
@@ -9432,6 +9452,12 @@ fn try_execute_fusion_group(
 
     let stack_needed = plan.stack_pattern.len();
     if stack.len() < stack_needed {
+        println!(
+            "fusion stack underflow: needed {} have {} pattern {:?}",
+            stack_needed,
+            stack.len(),
+            plan.stack_pattern
+        );
         return Err("fusion: stack underflow gathering inputs".to_string());
     }
 
@@ -9453,12 +9479,77 @@ fn try_execute_fusion_group(
         }
     }
 
+    for (idx, slot) in inputs.iter_mut().enumerate() {
+        if slot.is_some() {
+            continue;
+        }
+        let vid = plan.inputs[idx];
+        if let Some(info) = graph.value(vid) {
+            match &info.origin {
+                ValueOrigin::Variable { kind, index } => {
+                    let value_opt = match kind {
+                        VarKind::Global => vars.get(*index).cloned(),
+                        VarKind::Local => {
+                            if let Some(frame) = context.call_stack.last() {
+                                let absolute = frame.locals_start + index;
+                                context.locals.get(absolute).cloned()
+                            } else {
+                                vars.get(*index).cloned()
+                            }
+                        }
+                    };
+                    if let Some(value) = value_opt {
+                        *slot = Some(value);
+                        continue;
+                    }
+                }
+                ValueOrigin::Constant => {
+                    if let Some(value) = plan.const_values.get(&vid) {
+                        *slot = Some(value.clone());
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if slot.is_none() {
+            if let Some(binding) = graph.var_binding(vid) {
+                let value_opt = match binding.kind {
+                    VarKind::Global => vars.get(binding.index).cloned(),
+                    VarKind::Local => {
+                        if let Some(frame) = context.call_stack.last() {
+                            let absolute = frame.locals_start + binding.index;
+                            context.locals.get(absolute).cloned()
+                        } else {
+                            vars.get(binding.index).cloned()
+                        }
+                    }
+                };
+                if let Some(value) = value_opt {
+                    *slot = Some(value);
+                    continue;
+                }
+            }
+        }
+        if slot.is_none() {
+            if let Some(value) = plan.const_values.get(&vid) {
+                *slot = Some(value.clone());
+            }
+        }
+    }
+
     let inputs: Vec<Value> = inputs
         .into_iter()
         .map(|opt| opt.ok_or_else(|| "fusion: missing input value".to_string()))
         .collect::<Result<_, _>>()?;
 
     let request = FusionExecutionRequest { plan, inputs };
+    log::debug!(
+        "dispatch fusion kind {:?}, supported {} inputs {:?}",
+        plan.group.kind,
+        plan.kernel.supported,
+        plan.inputs
+    );
     if plan.group.kind.is_elementwise() {
         match execute_elementwise(request) {
             Ok(result) => Ok(result),
@@ -9723,8 +9814,61 @@ fn try_execute_fusion_group(
             return Err("fusion: reduction shape unresolved".to_string());
         }
 
+        // Optional escape hatch: disable fused reductions to force provider path
+        if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION")
+            .ok()
+            .as_deref()
+            == Some("1")
+        {
+            for value in consumed.into_iter().rev() {
+                stack.push(value);
+            }
+            return Err("fusion: fused reductions disabled".to_string());
+        }
         let workgroup_size = 256u32;
         match execute_reduction(request, reduce_len, num_slices, workgroup_size) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else if plan.group.kind == FusionKind::CenteredGram {
+        match execute_centered_gram(request) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else if plan.group.kind == FusionKind::PowerStepNormalize {
+        match execute_power_step_normalize(request) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else if plan.group.kind == FusionKind::ExplainedVariance {
+        log::debug!("explained variance plan inputs {:?}", plan.inputs);
+        match execute_explained_variance(request) {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                log::debug!("explained variance fusion fallback: {}", err);
+                for value in consumed.into_iter().rev() {
+                    stack.push(value);
+                }
+                Err(err.to_string())
+            }
+        }
+    } else if plan.group.kind == FusionKind::MatmulEpilogue {
+        match execute_matmul_epilogue(request) {
             Ok(result) => Ok(result),
             Err(err) => {
                 for value in consumed.into_iter().rev() {

@@ -18,7 +18,7 @@ struct DiagVecParams {
 @group(0) @binding(1) var<storage, read_write> Output: Matrix;
 @group(0) @binding(2) var<uniform> params: DiagVecParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len {
@@ -57,7 +57,7 @@ struct DiagVecParams {
 @group(0) @binding(1) var<storage, read_write> Output: Matrix;
 @group(0) @binding(2) var<uniform> params: DiagVecParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.len {
@@ -96,7 +96,7 @@ struct DiagExtractParams {
 @group(0) @binding(1) var<storage, read_write> Output: Vector;
 @group(0) @binding(2) var<uniform> params: DiagExtractParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.diag_len {
@@ -135,7 +135,7 @@ struct DiagExtractParams {
 @group(0) @binding(1) var<storage, read_write> Output: Vector;
 @group(0) @binding(2) var<uniform> params: DiagExtractParams;
 
-@compute @workgroup_size(256)
+@compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if idx >= params.diag_len {

@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use runmat_builtins::{LogicalArray, Tensor, Value};
+use runmat_builtins::{LogicalArray, NumericDType, Tensor, Value};
 
 /// Return the total number of elements for a given shape.
 pub fn element_count(shape: &[usize]) -> usize {
@@ -16,6 +16,18 @@ pub fn zeros(shape: &[usize]) -> Result<Tensor, String> {
 /// Construct an one-filled tensor with the provided shape.
 pub fn ones(shape: &[usize]) -> Result<Tensor, String> {
     Tensor::new(vec![1.0; element_count(shape)], shape.to_vec())
+        .map_err(|e| format!("tensor ones: {e}"))
+}
+
+/// Construct a zero-filled tensor with an explicit dtype flag.
+pub fn zeros_with_dtype(shape: &[usize], dtype: NumericDType) -> Result<Tensor, String> {
+    Tensor::new_with_dtype(vec![0.0; element_count(shape)], shape.to_vec(), dtype)
+        .map_err(|e| format!("tensor zeros: {e}"))
+}
+
+/// Construct a one-filled tensor with an explicit dtype flag.
+pub fn ones_with_dtype(shape: &[usize], dtype: NumericDType) -> Result<Tensor, String> {
+    Tensor::new_with_dtype(vec![1.0; element_count(shape)], shape.to_vec(), dtype)
         .map_err(|e| format!("tensor ones: {e}"))
 }
 

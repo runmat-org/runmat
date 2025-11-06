@@ -24,6 +24,48 @@ pub mod generations;
 pub mod roots;
 pub mod stats;
 
+// Finalizer support
+use std::collections::HashMap;
+
+/// A finalizer that runs when a GC-managed Value is collected.
+///
+/// Finalizers must be fast, non-panicking, and avoid allocating.
+pub trait GcFinalizer: Send + Sync {
+    fn finalize(&self);
+}
+
+static FINALIZERS: once_cell::sync::Lazy<
+    parking_lot::Mutex<HashMap<usize, std::sync::Arc<dyn GcFinalizer>>>,
+> = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(HashMap::new()));
+
+/// Register a finalizer for the provided GC pointer.
+pub fn gc_register_finalizer(ptr: GcPtr<Value>, f: std::sync::Arc<dyn GcFinalizer>) -> Result<()> {
+    let addr = unsafe { ptr.as_raw() } as usize;
+    if addr == 0 {
+        return Ok(());
+    }
+    FINALIZERS.lock().insert(addr, f);
+    Ok(())
+}
+
+/// Remove any registered finalizer for the provided GC pointer.
+pub fn gc_unregister_finalizer(ptr: GcPtr<Value>) -> Result<()> {
+    let addr = unsafe { ptr.as_raw() } as usize;
+    if addr == 0 {
+        return Ok(());
+    }
+    FINALIZERS.lock().remove(&addr);
+    Ok(())
+}
+
+/// Internal: run and remove finalizer for an address if present.
+pub(crate) fn gc_run_finalizer_for_addr(addr: usize) {
+    if let Some(f) = FINALIZERS.lock().remove(&addr) {
+        // Run finalizer; avoid panicking across GC boundaries
+        f.finalize();
+    }
+}
+
 #[cfg(feature = "pointer-compression")]
 pub mod compression;
 
@@ -113,12 +155,38 @@ impl HighPerformanceGC {
             let _ = self.collect_minor();
         }
 
+        // Capture GPU handle if present to attach a finalizer after allocation
+        let gpu_handle: Option<runmat_accelerate_api::GpuTensorHandle> =
+            if let Value::GpuTensor(h) = &value {
+                Some(h.clone())
+            } else {
+                None
+            };
+
         let mut allocator = self.allocator.lock();
         let ptr = allocator.allocate(value, &self.stats)?;
         let usage = allocator.young_generation_usage();
         let alloc_count = allocator.young_allocations_count();
         let cfg = self.config.read().clone();
         drop(allocator);
+
+        // Register finalizer for GPU tensors so buffers are freed on collection
+        if let Some(handle) = gpu_handle {
+            struct GpuTensorFinalizer {
+                handle: runmat_accelerate_api::GpuTensorHandle,
+            }
+            impl GcFinalizer for GpuTensorFinalizer {
+                fn finalize(&self) {
+                    if let Some(p) = runmat_accelerate_api::provider() {
+                        let _ = p.free(&self.handle);
+                        runmat_accelerate_api::clear_handle_logical(&self.handle);
+                    }
+                }
+            }
+            let fin = std::sync::Arc::new(GpuTensorFinalizer { handle });
+            let _ = gc_register_finalizer(ptr.clone(), fin);
+        }
+
         // Heuristic triggers:
         // - Utilization threshold
         // - Aggressive mode: periodic minor GC by allocation count to satisfy stress configs

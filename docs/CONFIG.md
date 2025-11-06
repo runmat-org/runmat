@@ -343,12 +343,18 @@ Boolean parsing accepts `1/0`, `true/false`, `yes/no`, `on/off`, `enable/disable
 
 Provider-specific env vars are read by the WGPU backend and fusion code:
 
+- `RUNMAT_WG` (u32)
+  - Global compute workgroup size used in WGSL at module creation.
+    Applies to elementwise kernels and fused kernels. Default: `512`.
+- `RUNMAT_MATMUL_TILE` (u32)
+  - Square tile size used by matmul kernels.
+    Default: `16`.
+- `RUNMAT_REDUCTION_WG` (u32)
+  - Default reduction workgroup size when call sites opt into provider defaults
+    (passing `0`). Default: `512`.
 - `RUNMAT_TWO_PASS_THRESHOLD` (usize)
   - Controls when two-pass reductions are used (per-slice length threshold).
   - Default: `1024`.
-- `RUNMAT_REDUCTION_WG` (u32)
-  - Default reduction workgroup size when call sites opt into provider default
-    (passing 0). Default: `256`.
 - `RUNMAT_DEBUG_PIPELINE_ONLY` (bool)
   - If set, provider may compile pipelines and skip buffer/dispatch paths to
     isolate driver issues during development.

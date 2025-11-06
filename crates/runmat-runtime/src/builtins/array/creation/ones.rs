@@ -13,6 +13,7 @@ use crate::builtins::common::tensor;
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_builtins::NumericDType;
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
@@ -247,6 +248,9 @@ struct ParsedOnes {
 #[derive(Clone)]
 enum OutputTemplate {
     Double,
+    /// See zeros: host tensors are f64; honour 'single' as numeric ones and
+    /// allow GPU paths to select f32 where applicable via 'like' or provider hooks.
+    Single,
     Logical,
     Like(Value),
 }
@@ -301,9 +305,12 @@ impl ParsedOnes {
                         continue;
                     }
                     "single" => {
-                        return Err(
-                            "ones: single precision output is not implemented yet".to_string()
-                        );
+                        if like_proto.is_some() {
+                            return Err("ones: cannot combine 'like' with 'single'".to_string());
+                        }
+                        class_override = Some(OutputTemplate::Single);
+                        idx += 1;
+                        continue;
                     }
                     other => {
                         return Err(format!("ones: unrecognised option '{other}'"));
@@ -362,6 +369,7 @@ impl ParsedOnes {
 fn build_output(parsed: ParsedOnes) -> Result<Value, String> {
     match parsed.template {
         OutputTemplate::Double => ones_double(&parsed.shape),
+        OutputTemplate::Single => ones_single(&parsed.shape),
         OutputTemplate::Logical => ones_logical(&parsed.shape),
         OutputTemplate::Like(proto) => ones_like(&proto, &parsed.shape),
     }
@@ -369,6 +377,11 @@ fn build_output(parsed: ParsedOnes) -> Result<Value, String> {
 
 fn ones_double(shape: &[usize]) -> Result<Value, String> {
     let tensor = tensor::ones(shape)?;
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+fn ones_single(shape: &[usize]) -> Result<Value, String> {
+    let tensor = tensor::ones_with_dtype(shape, NumericDType::F32)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -390,7 +403,11 @@ fn ones_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
                 .map_err(|e| format!("ones: {e}"))
         }
         Value::GpuTensor(handle) => ones_like_gpu(handle, shape),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => ones_double(shape),
+        Value::Tensor(t) => match t.dtype {
+            NumericDType::F32 => ones_single(shape),
+            NumericDType::F64 => ones_double(shape),
+        },
+        Value::Num(_) | Value::Int(_) => ones_double(shape),
         Value::CharArray(_) | Value::Cell(_) => ones_double(shape),
         _ => ones_double(shape),
     }
@@ -415,7 +432,13 @@ fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Str
             }
         }
 
-        if let Ok(host) = tensor::ones(shape) {
+        if let Ok(host) = tensor::ones_with_dtype(
+            shape,
+            match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
+                runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+            },
+        ) {
             let view = HostTensorView {
                 data: &host.data,
                 shape: &host.shape,
