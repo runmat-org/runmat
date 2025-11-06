@@ -195,7 +195,7 @@ precision.
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/elementwise/double.rs`
-- Issues & feature requests: <https://github.com/runmat-org/runmat/issues/new/choose>
+- Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

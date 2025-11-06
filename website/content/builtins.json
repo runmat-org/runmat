@@ -533,8 +533,7 @@
     ],
     "keywords": [
       "any",
-      "logical",
-      "reduction",
+      "logical reduction",
       "omitnan",
       "all",
       "gpu"
@@ -5025,7 +5024,7 @@
     "category": [
       "acceleration/gpu"
     ],
-    "summary": "Bring gpuArray data back to host memory.",
+    "summary": "Transfer gpuArray data back to host memory, recursively handling cells, structs, and objects.",
     "description": "`gather(X)` copies data that resides on the GPU or in another distributed storage back into host memory.",
     "status": "implemented",
     "signatures": [
@@ -5077,8 +5076,10 @@
     "keywords": [
       "gather",
       "gpuArray",
+      "download",
+      "host copy",
       "accelerate",
-      "download"
+      "residency"
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/gather.mdx"
@@ -14711,10 +14712,32 @@
     "category": [
       "math/reduction"
     ],
-    "summary": "Variance of scalars, vectors, matrices, or N-D tensors.",
+    "summary": "Variance of scalars, vectors, matrices, or N-D tensors with MATLAB-compatible options.",
     "description": "`var(x)` measures the spread of the elements in `x` by returning their variance.",
     "status": "implemented",
     "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
       {
         "in": [
           "x",
@@ -14733,28 +14756,6 @@
         "nargin": {
           "min": 0,
           "max": 2
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "Tensor"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
         },
         "nargout": {
           "min": 0,
@@ -14827,28 +14828,6 @@
     "signatures": [
       {
         "in": [
-          "x"
-        ],
-        "inTypes": [
-          "any"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "any"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [
           "x",
           "y"
         ],
@@ -14865,6 +14844,28 @@
         "nargin": {
           "min": 0,
           "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
         },
         "nargout": {
           "min": 0,
