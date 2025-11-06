@@ -27,53 +27,66 @@ export type Builtin = {
 
 // Extract the first paragraph from MDX content (before first heading)
 function extractFirstParagraphFromMDX(mdxContent: string): string | null {
-  const lines = mdxContent.split(/\r?\n/);
-  let inFence = false;
-  const paraLines: string[] = [];
-  
-  for (const line of lines) {
-    const trimmed = line.trim();
-    
-    // Skip code fences
-    if (trimmed.startsWith('```')) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-    
-    // Stop at first heading
-    if (trimmed.startsWith('#')) {
-      break;
-    }
-    
-    // Skip empty lines (but allow paragraph to accumulate)
-    if (trimmed === '') {
-      if (paraLines.length > 0) {
-        break; // End of first paragraph
-      }
-      continue;
-    }
-    
-    // Skip blockquotes, lists, etc.
-    if (trimmed.startsWith('>') || trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-      continue;
-    }
-    
-    paraLines.push(trimmed);
-  }
-  
-  if (paraLines.length === 0) {
+  if (!mdxContent || typeof mdxContent !== 'string') {
     return null;
   }
   
-  // Join lines and clean up
-  let paragraph = paraLines.join(' ').trim();
-  // Remove markdown code backticks but keep the content
-  paragraph = paragraph.replace(/`([^`]+)`/g, '$1');
-  // Remove markdown links but keep text
-  paragraph = paragraph.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
-  
-  return paragraph || null;
+  try {
+    const lines = mdxContent.split(/\r?\n/);
+    let inFence = false;
+    const paraLines: string[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      // Skip code fences
+      if (trimmed.startsWith('```')) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      
+      // Stop at first heading
+      if (trimmed.startsWith('#')) {
+        break;
+      }
+      
+      // Skip empty lines (but allow paragraph to accumulate)
+      if (trimmed === '') {
+        if (paraLines.length > 0) {
+          break; // End of first paragraph
+        }
+        continue;
+      }
+      
+      // Skip blockquotes, lists, etc.
+      if (trimmed.startsWith('>') || trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        continue;
+      }
+      
+      paraLines.push(trimmed);
+    }
+    
+    if (paraLines.length === 0) {
+      return null;
+    }
+    
+    // Join lines and clean up
+    let paragraph = paraLines.join(' ').trim();
+    if (!paragraph || paragraph.length === 0) {
+      return null;
+    }
+    
+    // Remove markdown code backticks but keep the content
+    paragraph = paragraph.replace(/`([^`]+)`/g, '$1');
+    // Remove markdown links but keep text
+    paragraph = paragraph.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+    
+    return paragraph || null;
+  } catch (error) {
+    // If extraction fails, return null
+    return null;
+  }
 }
 
 export function loadBuiltins(): Builtin[] {
@@ -92,12 +105,17 @@ export function loadBuiltins(): Builtin[] {
       if (existsSync(mdxPath)) {
         const mdxContent = readFileSync(mdxPath, 'utf-8');
         const firstParagraph = extractFirstParagraphFromMDX(mdxContent);
-        if (firstParagraph) {
+        if (firstParagraph && firstParagraph.length > 0) {
           return { ...builtin, firstParagraph };
         }
       }
-    } catch {
+    } catch (error) {
       // If MDX file doesn't exist or can't be read, continue without it
+      // Silently fail to avoid breaking the build
+      // Only log in development to avoid cluttering production logs
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`Failed to load first paragraph for ${builtin.name}:`, error);
+      }
     }
     
     return builtin;

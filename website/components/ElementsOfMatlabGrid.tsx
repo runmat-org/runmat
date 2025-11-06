@@ -13,7 +13,6 @@ import { POPULAR_FUNCTIONS_BY_CATEGORY, getJsonCategoriesForDisplayCategory } fr
 import { getCategoryColor } from '@/lib/category-colors';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 
 type GroupedBuiltins = {
   category: DisplayCategory;
@@ -143,36 +142,60 @@ export default function ElementsOfMatlabGrid({ builtins }: { builtins: Builtin[]
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search tiles (e.g., size, colon, table, plot)"
-          className="flex-1 text-sm rounded-md border border-border bg-muted/40 pr-3 pl-3 py-2 h-9 focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary placeholder:text-muted-foreground/80 shadow-sm"
+          className="flex-1 text-sm rounded-md border border-border bg-muted/40 pr-3 pl-3 py-2.5 h-10 focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary placeholder:text-muted-foreground/80 shadow-sm"
         />
-        <div className="flex items-center gap-1 border border-border rounded-md p-1 bg-muted/40">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setViewMode('grid')}
-            className={`h-7 px-2 ${viewMode === 'grid' ? 'bg-background shadow-sm' : ''}`}
-            aria-label="Grid view"
-          >
-            <Grid3x3 className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setViewMode('list')}
-            className={`h-7 px-2 ${viewMode === 'list' ? 'bg-background shadow-sm' : ''}`}
-            aria-label="List view"
-          >
-            <List className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setViewMode('tags')}
-            className={`h-7 px-2 ${viewMode === 'tags' ? 'bg-background shadow-sm' : ''}`}
-            aria-label="Tags view"
-          >
-            <Tags className="h-4 w-4" />
-          </Button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">View:</span>
+          <div className="flex items-center gap-1 border border-border rounded-md p-1 bg-muted/40">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`h-8 px-3 text-sm font-medium rounded-md transition-all inline-flex items-center justify-center gap-1.5 ${
+                viewMode === 'grid' 
+                  ? 'shadow-sm' 
+                  : 'hover:bg-accent hover:text-accent-foreground'
+              }`}
+              style={viewMode === 'grid' ? {
+                backgroundColor: '#ffffff',
+                color: '#000000',
+              } : undefined}
+              aria-label="Grid view"
+            >
+              <Grid3x3 className="h-4 w-4" />
+              Cards
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`h-8 px-3 text-sm font-medium rounded-md transition-all inline-flex items-center justify-center gap-1.5 ${
+                viewMode === 'list' 
+                  ? 'shadow-sm' 
+                  : 'hover:bg-accent hover:text-accent-foreground'
+              }`}
+              style={viewMode === 'list' ? {
+                backgroundColor: '#ffffff',
+                color: '#000000',
+              } : undefined}
+              aria-label="List view"
+            >
+              <List className="h-4 w-4" />
+              List
+            </button>
+            <button
+              onClick={() => setViewMode('tags')}
+              className={`h-8 px-3 text-sm font-medium rounded-md transition-all inline-flex items-center justify-center gap-1.5 ${
+                viewMode === 'tags' 
+                  ? 'shadow-sm' 
+                  : 'hover:bg-accent hover:text-accent-foreground'
+              }`}
+              style={viewMode === 'tags' ? {
+                backgroundColor: '#ffffff',
+                color: '#000000',
+              } : undefined}
+              aria-label="Chips view"
+            >
+              <Tags className="h-4 w-4" />
+              Chips
+            </button>
+          </div>
         </div>
       </div>
 
@@ -288,46 +311,63 @@ function ElementTile({ builtin }: { builtin: Builtin }) {
   const displayCategory = getDisplayCategory(builtin);
   const categoryColor = getCategoryColor(displayCategory);
   const [isHovered, setIsHovered] = useState(false);
-  const [tooltipPosition, setTooltipPosition] = useState<'top' | 'bottom' | 'left' | 'right'>('top');
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<'top' | 'bottom' | 'left' | 'right'>('bottom');
   const tileRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Get first paragraph - prefer MDX first paragraph, fallback to description/summary
-  const firstParagraph = builtin.firstParagraph || builtin.description || builtin.summary || 'No description available';
+  const firstParagraph = (builtin.firstParagraph ?? builtin.description ?? builtin.summary ?? 'No description available').trim();
 
-  // Update tooltip position based on available space
+  // Calculate position before showing tooltip to prevent jumpiness
   useEffect(() => {
-    if (isHovered && tileRef.current && tooltipRef.current) {
-      // Use requestAnimationFrame to ensure tooltip has rendered
-      requestAnimationFrame(() => {
-        if (!tileRef.current || !tooltipRef.current) return;
+    if (isHovered && tileRef.current) {
+      // Small delay to prevent flickering
+      hoverTimeoutRef.current = setTimeout(() => {
+        if (!tileRef.current) return;
         
         const tileRect = tileRef.current.getBoundingClientRect();
-        const tooltipRect = tooltipRef.current.getBoundingClientRect();
         const viewportHeight = window.innerHeight;
         const viewportWidth = window.innerWidth;
 
-        // Determine best position
+        // Determine best position based on available space
         const spaceAbove = tileRect.top;
         const spaceBelow = viewportHeight - tileRect.bottom;
         const spaceLeft = tileRect.left;
         const spaceRight = viewportWidth - tileRect.right;
 
-        // Estimate tooltip height (320px max width, roughly 200-300px height)
+        // Estimate tooltip dimensions
         const estimatedTooltipHeight = 250;
         const estimatedTooltipWidth = 300;
 
+        let position: 'top' | 'bottom' | 'left' | 'right' = 'bottom';
         if (spaceBelow >= estimatedTooltipHeight + 20 || spaceBelow > spaceAbove) {
-          setTooltipPosition('bottom');
+          position = 'bottom';
         } else if (spaceAbove >= estimatedTooltipHeight + 20) {
-          setTooltipPosition('top');
+          position = 'top';
         } else if (spaceRight >= estimatedTooltipWidth + 20) {
-          setTooltipPosition('right');
+          position = 'right';
         } else {
-          setTooltipPosition('left');
+          position = 'left';
         }
-      });
+
+        setTooltipPosition(position);
+        setShowTooltip(true);
+      }, 100); // Small delay to prevent jumpiness
+    } else {
+      setShowTooltip(false);
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
     }
+
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
   }, [isHovered]);
 
   return (
@@ -372,10 +412,10 @@ function ElementTile({ builtin }: { builtin: Builtin }) {
       </Link>
 
       {/* Hover Tooltip */}
-      {isHovered && (
+      {showTooltip && (
         <div
           ref={tooltipRef}
-          className={`absolute z-50 pointer-events-none transition-opacity duration-200 ${
+          className={`absolute z-50 pointer-events-none transition-opacity duration-150 ${
             tooltipPosition === 'top' ? 'bottom-full left-1/2 -translate-x-1/2 mb-2' :
             tooltipPosition === 'bottom' ? 'top-full left-1/2 -translate-x-1/2 mt-2' :
             tooltipPosition === 'left' ? 'right-full top-1/2 -translate-y-1/2 mr-2' :
@@ -384,25 +424,13 @@ function ElementTile({ builtin }: { builtin: Builtin }) {
           style={{
             maxWidth: '320px',
             minWidth: '280px',
+            opacity: showTooltip ? 1 : 0,
           }}
         >
           <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-4 text-sm relative" style={{ backgroundColor: '#111827' }}>
             {/* Function Name */}
-            <div className="font-semibold text-base mb-2 text-white flex items-center gap-2 flex-wrap">
-              <span>{builtin.name}</span>
-              {badges.length > 0 && (
-                <div className="flex gap-1">
-                  {badges.map((badge) => (
-                    <Badge
-                      key={badge}
-                      variant="secondary"
-                      className="text-xs px-1.5 py-0.5 bg-gray-700 text-gray-200 border-gray-600"
-                    >
-                      {badge}
-                    </Badge>
-                  ))}
-                </div>
-              )}
+            <div className="font-semibold text-base mb-2 text-white">
+              {builtin.name}
             </div>
             
             {/* First Paragraph Description */}
@@ -501,12 +529,6 @@ function TagsView({ builtins, searchQuery, fuse }: { builtins: Builtin[], search
               className="h-1 flex-1 rounded"
               style={{ backgroundColor: getCategoryColor(group.category) }}
             />
-            <Link
-              href={`/docs/reference/builtins?${(group.subcategories && group.subcategories.length > 0 ? group.subcategories : [group.category]).map(c => `category=${encodeURIComponent(c)}`).join('&')}`}
-              className="text-xs text-muted-foreground hover:text-foreground shrink-0"
-            >
-              View All ({group.items.length}) →
-            </Link>
           </div>
           <div className="flex flex-wrap gap-2">
             {group.items.map((builtin) => (
@@ -528,24 +550,132 @@ function TagChip({ builtin }: { builtin: Builtin }) {
   const badges = getBuiltinBadges(builtin);
   const displayCategory = getDisplayCategory(builtin);
   const categoryColor = getCategoryColor(displayCategory);
+  const [isHovered, setIsHovered] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<'top' | 'bottom' | 'left' | 'right'>('bottom');
+  const chipRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get first paragraph - prefer MDX first paragraph, fallback to description/summary
+  const firstParagraph = (builtin.firstParagraph ?? builtin.description ?? builtin.summary ?? 'No description available').trim();
+
+  // Calculate position before showing tooltip to prevent jumpiness
+  useEffect(() => {
+    if (isHovered && chipRef.current) {
+      // Small delay to prevent flickering
+      hoverTimeoutRef.current = setTimeout(() => {
+        if (!chipRef.current) return;
+        
+        const chipRect = chipRef.current.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
+        const viewportWidth = window.innerWidth;
+
+        const spaceAbove = chipRect.top;
+        const spaceBelow = viewportHeight - chipRect.bottom;
+        const spaceLeft = chipRect.left;
+        const spaceRight = viewportWidth - chipRect.right;
+
+        const estimatedTooltipHeight = 250;
+        const estimatedTooltipWidth = 300;
+
+        let position: 'top' | 'bottom' | 'left' | 'right' = 'bottom';
+        if (spaceBelow >= estimatedTooltipHeight + 20 || spaceBelow > spaceAbove) {
+          position = 'bottom';
+        } else if (spaceAbove >= estimatedTooltipHeight + 20) {
+          position = 'top';
+        } else if (spaceRight >= estimatedTooltipWidth + 20) {
+          position = 'right';
+        } else {
+          position = 'left';
+        }
+
+        setTooltipPosition(position);
+        setShowTooltip(true);
+      }, 100); // Small delay to prevent jumpiness
+    } else {
+      setShowTooltip(false);
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
+    }
+
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, [isHovered]);
 
   return (
-    <Link href={`/docs/reference/builtins/${builtin.slug}`} className="group">
-      <div
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all hover:scale-105 hover:shadow-md cursor-pointer border border-transparent hover:border-white/20"
-        style={{ 
-          backgroundColor: categoryColor,
-          color: 'white'
-        }}
-      >
-        <span>{builtin.name}</span>
-        {badges.length > 0 && (
-          <span className="text-xs opacity-80">
-            {badges.map(b => b.charAt(0)).join('')}
-          </span>
-        )}
-      </div>
-    </Link>
+    <div 
+      ref={chipRef}
+      className="relative inline-block"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <Link href={`/docs/reference/builtins/${builtin.slug}`} className="group">
+        <div
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all hover:scale-105 hover:shadow-md cursor-pointer border border-transparent hover:border-white/20"
+          style={{ 
+            backgroundColor: categoryColor,
+            color: 'white'
+          }}
+        >
+          <span>{builtin.name}</span>
+          {badges.length > 0 && (
+            <span className="text-xs opacity-80">
+              {badges.map(b => b.charAt(0)).join('')}
+            </span>
+          )}
+        </div>
+      </Link>
+
+      {/* Hover Tooltip */}
+      {showTooltip && (
+        <div
+          ref={tooltipRef}
+          className={`absolute z-50 pointer-events-none transition-opacity duration-150 ${
+            tooltipPosition === 'top' ? 'bottom-full left-1/2 -translate-x-1/2 mb-2' :
+            tooltipPosition === 'bottom' ? 'top-full left-1/2 -translate-x-1/2 mt-2' :
+            tooltipPosition === 'left' ? 'right-full top-1/2 -translate-y-1/2 mr-2' :
+            'left-full top-1/2 -translate-y-1/2 ml-2'
+          }`}
+          style={{
+            maxWidth: '320px',
+            minWidth: '280px',
+            opacity: showTooltip ? 1 : 0,
+          }}
+        >
+          <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-4 text-sm relative" style={{ backgroundColor: '#111827' }}>
+            {/* Function Name */}
+            <div className="font-semibold text-base mb-2 text-white">
+              {builtin.name}
+            </div>
+            
+            {/* First Paragraph Description */}
+            <div className="text-gray-300 leading-relaxed whitespace-pre-wrap">
+              {firstParagraph}
+            </div>
+
+            {/* Arrow - positioned based on tooltip position */}
+            {tooltipPosition === 'top' && (
+              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px w-0 h-0 border-t-[8px] border-t-gray-900 border-x-[8px] border-x-transparent" />
+            )}
+            {tooltipPosition === 'bottom' && (
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 -mb-px w-0 h-0 border-b-[8px] border-b-gray-900 border-x-[8px] border-x-transparent" />
+            )}
+            {tooltipPosition === 'left' && (
+              <div className="absolute left-full top-1/2 -translate-y-1/2 -ml-px w-0 h-0 border-l-[8px] border-l-gray-900 border-y-[8px] border-y-transparent" />
+            )}
+            {tooltipPosition === 'right' && (
+              <div className="absolute right-full top-1/2 -translate-y-1/2 -mr-px w-0 h-0 border-r-[8px] border-r-gray-900 border-y-[8px] border-y-transparent" />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -17,10 +17,10 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
 
 function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isElementsPage = pathname === '/docs/elements-of-matlab';
+  const isElementsPage = pathname === '/docs/matlab-function-reference';
   
   if (isElementsPage) {
-    // For elements-of-matlab page, render full-width without sidebar
+    // For matlab-function-reference page, render full-width without sidebar
     return <div>{children}</div>;
   }
   
