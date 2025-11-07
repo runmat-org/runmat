@@ -259,6 +259,10 @@ struct Parser {
 }
 
 impl Parser {
+    fn skip_newlines(&mut self) {
+        while self.consume(&Token::Newline) {}
+    }
+
     fn is_simple_assignment_ahead(&self) -> bool {
         // Heuristic: at statement start, if we see Ident ... '=' before a terminator, treat as assignment
         self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
@@ -451,9 +455,12 @@ impl Parser {
     fn can_start_command_form(&self) -> bool {
         // At entry, peek_token() is Some(Ident) for callee
         let mut i = 1;
-        while matches!(self.peek_token_at(i), Some(Token::Newline | Token::Ellipsis)) {
+        while matches!(
+            self.peek_token_at(i),
+            Some(Token::Newline | Token::Ellipsis)
+        ) {
             i += 1;
-        }        
+        }
         // At least one simple arg must follow
         if !matches!(
             self.peek_token_at(i),
@@ -1075,16 +1082,24 @@ impl Parser {
     }
 
     fn parse_matrix(&mut self) -> Result<Expr, String> {
+        self.skip_newlines();
         let mut rows = Vec::new();
         if self.peek_token() == Some(&Token::RBracket) {
             return Ok(Expr::Tensor(rows));
         }
         loop {
+            self.skip_newlines();
+            if self.peek_token() == Some(&Token::RBracket) {
+                break;
+            }
             let mut row = Vec::new();
             // First element in the row
             row.push(self.parse_expr()?);
             // Accept either comma-separated or whitespace-separated elements until ';' or ']'
             loop {
+                if self.consume(&Token::Newline) {
+                    continue;
+                }
                 if self.consume(&Token::Comma) {
                     row.push(self.parse_expr()?);
                     continue;
@@ -1123,11 +1138,13 @@ impl Parser {
             }
             rows.push(row);
             if self.consume(&Token::Semicolon) {
+                self.skip_newlines();
                 continue;
             } else {
                 break;
             }
         }
+        self.skip_newlines();
         Ok(Expr::Tensor(rows))
     }
 
@@ -1315,10 +1332,15 @@ impl Parser {
 
     fn parse_cell(&mut self) -> Result<Expr, String> {
         let mut rows = Vec::new();
+        self.skip_newlines();
         if self.peek_token() == Some(&Token::RBrace) {
             return Ok(Expr::Cell(rows));
         }
         loop {
+            self.skip_newlines();
+            if self.peek_token() == Some(&Token::RBrace) {
+                break;
+            }
             let mut row = Vec::new();
             row.push(self.parse_expr()?);
             while self.consume(&Token::Comma) {
@@ -1326,11 +1348,13 @@ impl Parser {
             }
             rows.push(row);
             if self.consume(&Token::Semicolon) {
+                self.skip_newlines();
                 continue;
             } else {
                 break;
             }
         }
+        self.skip_newlines();
         Ok(Expr::Cell(rows))
     }
 
@@ -1342,7 +1366,7 @@ impl Parser {
         loop {
             if self.consume(&Token::Newline) || self.consume(&Token::Semicolon) {
                 continue;
-            }            
+            }
             if self.consume(&Token::Case) {
                 let val = self.parse_expr()?;
                 let body =
@@ -1352,7 +1376,7 @@ impl Parser {
                 let body = self.parse_block(|t| matches!(t, Token::End))?;
                 otherwise = Some(body);
             } else if self.consume(&Token::Comma) {
-                continue;                
+                continue;
             } else {
                 break;
             }

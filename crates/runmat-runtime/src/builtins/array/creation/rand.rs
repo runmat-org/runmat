@@ -346,10 +346,9 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
             NumericDType::F32 => rand_single(shape),
             NumericDType::F64 => rand_double(shape),
         },
-        Value::Num(_)
-        | Value::Int(_)
-        | Value::Bool(_)
-        | Value::LogicalArray(_) => rand_double(shape),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => {
+            rand_double(shape)
+        }
         Value::CharArray(_) | Value::Cell(_) => rand_double(shape),
         other => Err(format!("rand: unsupported prototype {other:?}")),
     }
@@ -460,7 +459,7 @@ mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
-    
+
     #[test]
     fn rand_single_matrix_has_f32_dtype() {
         let _guard = random::test_lock().lock().unwrap();

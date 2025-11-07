@@ -171,7 +171,7 @@ pub struct AutoOffloadReport {
     pub cache_path: Option<String>,
     pub calibrate_duration_ms: Option<u128>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub calibration: Option<AutoOffloadCalibrationSummary>,    
+    pub calibration: Option<AutoOffloadCalibrationSummary>,
     pub decisions: Vec<AutoOffloadDecisionEntry>,
 }
 
@@ -210,7 +210,7 @@ struct AutoOffloadState {
     cache_path: Option<String>,
     calibrate_duration_ms: Option<u128>,
     previous_thresholds: Option<ThresholdConfig>,
-    calibration_delta: Option<ThresholdDelta>,    
+    calibration_delta: Option<ThresholdDelta>,
 }
 
 #[derive(Clone)]
@@ -487,10 +487,7 @@ pub fn apply_auto_offload_calibration_from_file(
         {
             warn!(
                 "Calibration provider mismatch: sample='{} ({})' device='{} ({})'",
-                prov.name,
-                prov.vendor,
-                device_info.name,
-                device_info.vendor
+                prov.name, prov.vendor, device_info.name, device_info.vendor
             );
         }
         if sample.provider_conflict {

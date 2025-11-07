@@ -153,8 +153,8 @@ fn build_matrix_operand_view(
             transpose: true,
         })
     } else {
-        let lda = u32::try_from(rows)
-            .map_err(|_| anyhow!("leading dimension exceeds GPU limits"))?;
+        let lda =
+            u32::try_from(rows).map_err(|_| anyhow!("leading dimension exceeds GPU limits"))?;
         Ok(MatrixOperandView {
             rows,
             cols,
@@ -5465,8 +5465,7 @@ impl WgpuProvider {
             let base_rows = info.base_rows;
             let base_cols = info.base_cols;
             let shape = vec![base_rows, base_cols];
-            let handle =
-                self.register_existing_buffer(entry.buffer.clone(), shape, len);
+            let handle = self.register_existing_buffer(entry.buffer.clone(), shape, len);
             runmat_accelerate_api::clear_handle_transpose(&handle);
             return Ok(handle);
         }
@@ -5579,10 +5578,8 @@ impl WgpuProvider {
             return Err(anyhow!("matmul: only 2D tensors supported"));
         }
 
-        let view_a = build_matrix_operand_view(a, &entry_a)
-            .map_err(|e| anyhow!("matmul: {e}"))?;
-        let view_b = build_matrix_operand_view(b, &entry_b)
-            .map_err(|e| anyhow!("matmul: {e}"))?;
+        let view_a = build_matrix_operand_view(a, &entry_a).map_err(|e| anyhow!("matmul: {e}"))?;
+        let view_b = build_matrix_operand_view(b, &entry_b).map_err(|e| anyhow!("matmul: {e}"))?;
 
         if view_a.cols != view_b.rows {
             return Err(anyhow!("matmul: inner dimensions must match"));
@@ -10875,10 +10872,10 @@ impl AccelProvider for WgpuProvider {
         if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 {
             return Err(anyhow!("matmul_epilogue: only 2D tensors supported"));
         }
-        let view_a = build_matrix_operand_view(a, &entry_a)
-            .map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
-        let view_b = build_matrix_operand_view(b, &entry_b)
-            .map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
+        let view_a =
+            build_matrix_operand_view(a, &entry_a).map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
+        let view_b =
+            build_matrix_operand_view(b, &entry_b).map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
 
         if view_a.cols != view_b.rows {
             return Err(anyhow!("matmul_epilogue: inner dimensions must match"));
@@ -12367,7 +12364,8 @@ impl AccelProvider for WgpuProvider {
             let base_cols = info.base_cols;
             if base_rows * base_cols != out.len() {
                 return Err(anyhow!(
-                    "download: transpose metadata mismatch for buffer {}", h.buffer_id
+                    "download: transpose metadata mismatch for buffer {}",
+                    h.buffer_id
                 ));
             }
             if shape.len() == 2 {

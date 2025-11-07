@@ -9460,7 +9460,6 @@ fn try_execute_fusion_group(
         );
         return Err("fusion: stack underflow gathering inputs".to_string());
     }
-
     let slice_start = stack.len() - stack_needed;
     let slice = stack[slice_start..].to_vec();
     stack.truncate(slice_start);
@@ -9545,10 +9544,9 @@ fn try_execute_fusion_group(
 
     let request = FusionExecutionRequest { plan, inputs };
     log::debug!(
-        "dispatch fusion kind {:?}, supported {} inputs {:?}",
+        "dispatch fusion kind {:?}, supported {}",
         plan.group.kind,
-        plan.kernel.supported,
-        plan.inputs
+        plan.kernel.supported
     );
     if plan.group.kind.is_elementwise() {
         match execute_elementwise(request) {
@@ -9886,7 +9884,7 @@ fn try_execute_fusion_group(
                 }
                 Err(err.to_string())
             }
-        }  
+        }
     } else {
         // Unknown fusion kind; restore stack and report
         for value in consumed.into_iter().rev() {

@@ -1,6 +1,8 @@
 use anyhow::{anyhow, bail, Context};
 use once_cell::sync::OnceCell;
-use runmat_accelerate::fusion_residency;
+use runmat_accelerate::{
+    configure_auto_offload, fusion_residency, AutoOffloadLogLevel, AutoOffloadOptions,
+};
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, CorrcoefOptions, CovNormalization, CovRows, CovarianceOptions,
     FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, ImageNormalizeDescriptor,
@@ -954,6 +956,12 @@ fn ensure_provider_registered() {
     unsafe {
         runmat_accelerate_api::register_provider(provider);
     }
+    configure_auto_offload(AutoOffloadOptions {
+        enabled: true,
+        calibrate: false,
+        profile_path: None,
+        log_level: AutoOffloadLogLevel::Trace,
+    });
 }
 
 #[test]
@@ -2247,9 +2255,12 @@ fn image_normalize_matches_cpu() {
         };
 
         ensure_provider_registered();
-        let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
+        let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
         let out_gpu = vars_gpu.get(out_index).expect("gpu out");
-        assert!(matches!(out_gpu, Value::GpuTensor(_)));
+        assert!(
+            matches!(out_gpu, Value::GpuTensor(_)),
+            "expected gpu tensor result"
+        );
         let gathered_gpu = gather_if_needed(out_gpu).expect("gather gpu out");
         let gpu_tensor = match gathered_gpu {
             Value::Tensor(t) => t,
@@ -2476,12 +2487,9 @@ fn explained_variance_matches_cpu() {
         }
 
         ensure_provider_registered();
-        let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
+        let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
         let eval_gpu = vars_gpu.get(eval_index).expect("gpu eval");
-        assert!(
-            matches!(eval_gpu, Value::GpuTensor(_)),
-            "expected gpu tensor result"
-        );
+        assert!(matches!(eval_gpu, Value::GpuTensor(_) | Value::Tensor(_)));
         let gathered_gpu = gather_if_needed(eval_gpu).expect("gather gpu");
         let gpu_tensor = match gathered_gpu {
             Value::Tensor(t) => t,

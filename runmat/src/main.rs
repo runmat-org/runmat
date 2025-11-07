@@ -840,9 +840,11 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
         Commands::Info => show_system_info(cli).await,
         Commands::AccelInfo { json, reset } => show_accel_info(json, reset).await,
         #[cfg(feature = "wgpu")]
-        Commands::AccelCalibrate { input, dry_run, json } => {
-            execute_accel_calibrate(input, dry_run, json).await
-        }        
+        Commands::AccelCalibrate {
+            input,
+            dry_run,
+            json,
+        } => execute_accel_calibrate(input, dry_run, json).await,
         Commands::Gc { gc_command } => execute_gc_command(gc_command).await,
         Commands::Benchmark {
             file,
@@ -1906,7 +1908,7 @@ async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
             println!(
                 "Bind group cache: hits={}, misses={}",
                 telemetry.bind_group_cache_hits, telemetry.bind_group_cache_misses
-            );            
+            );
             println!(
                 "Reduction defaults: two_pass_threshold={}, workgroup_size={} (overridable via RUNMAT_TWO_PASS_THRESHOLD / RUNMAT_REDUCTION_WG)",
                 p.two_pass_threshold(),
@@ -2018,18 +2020,11 @@ fn print_threshold_delta(label: &str, entry: &runmat_accelerate::ThresholdDeltaE
     match percent {
         Some(p) => println!(
             "  {:<28} {:>12.6e} -> {:>12.6e} (Δ {:>+12.6e}, {:+6.2}%)",
-            label,
-            entry.before,
-            entry.after,
-            entry.absolute,
-            p
+            label, entry.before, entry.after, entry.absolute, p
         ),
         None => println!(
             "  {:<28} {:>12.6e} -> {:>12.6e} (Δ {:>+12.6e})",
-            label,
-            entry.before,
-            entry.after,
-            entry.absolute
+            label, entry.before, entry.after, entry.absolute
         ),
     }
 }
@@ -2110,13 +2105,6 @@ async fn execute_accel_calibrate(input: PathBuf, dry_run: bool, json: bool) -> R
         );
     }
 
-    Ok(())
-}
-
-#[cfg(not(feature = "wgpu"))]
-async fn execute_accel_calibrate(input: PathBuf, dry_run: bool, json: bool) -> Result<()> {
-    let _ = (input, dry_run, json);
-    println!("This build was compiled without the 'wgpu' feature. Calibration is unavailable.");
     Ok(())
 }
 

@@ -1,11 +1,12 @@
-use runmat_accelerate::fusion::{FusionKind, FusionPattern, FusionPlan};
+use runmat_accelerate::fusion::{FusionKind, FusionPlan};
 use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOrigin};
 use runmat_hir::lower;
 use runmat_ignition::compile;
 use runmat_parser::parse;
 
 fn compile_graph(source: &str) -> AccelGraph {
-    let ast = parse(source).expect("parse");
+    let trimmed = source.trim_start_matches(|c: char| c.is_whitespace());
+    let ast = parse(trimmed).expect("parse");
     let hir = lower(&ast).expect("lower");
     let bytecode = compile(&hir).expect("compile");
     bytecode.accel_graph.clone().expect("bytecode accel graph")
@@ -136,6 +137,7 @@ fn detects_centered_gram_group() {
 #[test]
 fn detects_power_step_group() {
     let source = r#"
+    seed = 0;
     G = [
         2, -1, 0;
         0, 1, 3;
@@ -160,6 +162,7 @@ fn detects_power_step_group() {
 #[test]
 fn detects_explained_variance_group() {
     let source = r#"
+    seed = 0;
     G = [
         1, 0, 2;
         -1, 3, 0;
@@ -207,7 +210,10 @@ fn detects_image_normalize_group() {
         .expect("image normalize group not found");
     match image_group.pattern.as_ref() {
         Some(runmat_accelerate::fusion::FusionPattern::ImageNormalize(pattern)) => {
-            assert!(matches!(pattern.epsilon, runmat_accelerate::fusion::ImageScalar::Constant(_)));
+            assert!(matches!(
+                pattern.epsilon,
+                runmat_accelerate::fusion::ImageScalar::Constant(_)
+            ));
             assert!(pattern
                 .gain
                 .as_ref()
@@ -226,16 +232,9 @@ fn detects_image_normalize_group() {
 #[test]
 fn explained_variance_plan_inputs() {
     let source = r#"
-    G = [
-        1, 0, 2;
-        -1, 3, 0;
-        0.5, -0.25, 1
-    ];
-    Q = [
-        1, 2;
-        3, 4;
-        5, 6
-    ];
+    seed = 0;
+    G = reshape([1, -1, 0.5, 0, 3, -0.25, 2, 0, 1], 3, 3);
+    Q = reshape([1, 3, 5, 2, 4, 6], 3, 2);
     tmp = mtimes(Q.', G);
     cov = mtimes(tmp, Q);
     eval = diag(cov);

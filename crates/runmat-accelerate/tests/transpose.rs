@@ -58,14 +58,17 @@ fn transpose_roundtrip_matches_cpu() {
     let expected_t = cpu_transpose(&data, rows, cols);
     for (idx, (&got, &want)) in host_t.data.iter().zip(expected_t.iter()).enumerate() {
         let diff = (got - want).abs();
-        assert!(diff <= 1e-9, "transpose mismatch at {idx}: got={got} want={want} diff={diff}");
+        assert!(
+            diff <= 1e-9,
+            "transpose mismatch at {idx}: got={got} want={want} diff={diff}"
+        );
     }
 
     let transposed_back = p.transpose(&transposed).expect("double transpose");
-    assert!(
-        runmat_accelerate_api::handle_transpose_info(&transposed_back).is_none()
-    );
-    let host_tt = p.download(&transposed_back).expect("download double transpose");
+    assert!(runmat_accelerate_api::handle_transpose_info(&transposed_back).is_none());
+    let host_tt = p
+        .download(&transposed_back)
+        .expect("download double transpose");
     assert_eq!(host_tt.shape, vec![rows, cols]);
     for (idx, (&got, &want)) in host_tt.data.iter().zip(data.iter()).enumerate() {
         let diff = (got - want).abs();
@@ -134,4 +137,3 @@ fn matmul_with_transposed_operand_matches_cpu() {
         );
     }
 }
-

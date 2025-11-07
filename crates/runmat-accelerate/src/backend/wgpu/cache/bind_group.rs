@@ -118,10 +118,7 @@ impl BindGroupCache {
         for entry in entries {
             match &entry.resource {
                 wgpu::BindingResource::Buffer(buffer_binding) => {
-                    let buffer_ptr = buffer_binding
-                        .buffer
-                        .global_id()
-                        .inner() as usize;
+                    let buffer_ptr = buffer_binding.buffer.global_id().inner() as usize;
                     let size = buffer_binding.size.map(|v| v.get());
                     bindings.push(BindingKey {
                         binding: entry.binding,

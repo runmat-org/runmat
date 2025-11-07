@@ -99,11 +99,7 @@ pub fn handle_logical_hits(buffer_id: u64) -> Option<u64> {
         .and_then(|guard| guard.get(&buffer_id).copied())
 }
 
-pub fn record_handle_transpose(
-    handle: &GpuTensorHandle,
-    base_rows: usize,
-    base_cols: usize,
-) {
+pub fn record_handle_transpose(handle: &GpuTensorHandle, base_rows: usize, base_cols: usize) {
     if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
         guard.insert(
             handle.buffer_id,
