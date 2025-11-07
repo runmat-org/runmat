@@ -2082,7 +2082,7 @@ impl WgpuProvider {
             buffer_id: id,
         };
         runmat_accelerate_api::set_handle_logical(&handle, false);
-        runmat_accelerate_api::set_handle_transposed(&handle, false);
+        runmat_accelerate_api::clear_handle_transpose(&handle);
         handle
     }
 

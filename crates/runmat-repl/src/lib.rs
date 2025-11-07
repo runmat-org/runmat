@@ -7,7 +7,7 @@ use runmat_lexer::{tokenize, tokenize_detailed, Token as LexToken};
 use runmat_parser::parse;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use runmat_turbine::TurbineEngine;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -26,6 +26,8 @@ pub struct ReplEngine {
     variable_array: Vec<Value>,
     /// Mapping from variable names to VarId indices
     variable_names: HashMap<String, usize>,
+    /// Persistent workspace values keyed by variable name
+    workspace_values: HashMap<String, Value>,
     /// User-defined functions context for REPL sessions
     function_definitions: HashMap<String, runmat_hir::HirStmt>,
     /// Loaded snapshot for standard library preloading
@@ -171,6 +173,7 @@ impl ReplEngine {
             variables: HashMap::new(),
             variable_array: Vec::new(),
             variable_names: HashMap::new(),
+            workspace_values: HashMap::new(),
             function_definitions: HashMap::new(),
             snapshot,
         })
@@ -206,6 +209,7 @@ impl ReplEngine {
     pub fn execute(&mut self, input: &str) -> Result<ExecutionResult> {
         let start_time = Instant::now();
         self.stats.total_executions += 1;
+        let debug_trace = std::env::var("RUNMAT_DEBUG_REPL").is_ok();
 
         if self.verbose {
             debug!("Executing: {}", input.trim());
@@ -225,13 +229,35 @@ impl ReplEngine {
             &self.function_definitions,
         )
         .map_err(|e| anyhow::anyhow!("Failed to lower to HIR: {}", e))?;
-        let (hir, updated_vars, updated_functions) = (
+        let (hir, updated_vars, updated_functions, var_names_map) = (
             lowering_result.hir,
             lowering_result.variables,
             lowering_result.functions,
+            lowering_result.var_names,
         );
+        let max_var_id = updated_vars.values().copied().max().unwrap_or(0);
+        if debug_trace {
+            println!("updated_vars: {:?}", updated_vars);
+        }
+        if debug_trace {
+            println!("workspace_values_before: {:?}", self.workspace_values);
+        }
+        let id_to_name: HashMap<usize, String> = var_names_map
+            .iter()
+            .map(|(var_id, name)| (var_id.0, name.clone()))
+            .collect();
+        let mut assigned_this_execution: HashSet<String> = HashSet::new();
+        let assigned_snapshot: HashSet<String> = updated_vars
+            .keys()
+            .filter(|name| self.workspace_values.contains_key(name.as_str()))
+            .cloned()
+            .collect();
+        let prev_assigned_snapshot = assigned_snapshot.clone();
+        if debug_trace {
+            println!("assigned_snapshot: {:?}", assigned_snapshot);
+        }
         let _pending_workspace_guard =
-            runmat_ignition::push_pending_workspace(updated_vars.clone());
+            runmat_ignition::push_pending_workspace(updated_vars.clone(), assigned_snapshot);
         if self.verbose {
             debug!("HIR generated successfully");
         }
@@ -248,7 +274,7 @@ impl ReplEngine {
         }
 
         // Prepare variable array with existing values before execution
-        self.prepare_variable_array_for_execution(&bytecode, &updated_vars);
+        self.prepare_variable_array_for_execution(&bytecode, &updated_vars, debug_trace);
 
         if self.verbose {
             debug!(
@@ -351,6 +377,9 @@ impl ReplEngine {
                             if let Some(runmat_hir::HirStmt::Assign(var_id, _, _)) =
                                 hir.body.first()
                             {
+                                if let Some(name) = id_to_name.get(&var_id.0) {
+                                    assigned_this_execution.insert(name.clone());
+                                }
                                 if var_id.0 < self.variable_array.len() {
                                     Some(self.variable_array[var_id.0].clone())
                                 } else {
@@ -414,11 +443,11 @@ impl ReplEngine {
                 execution_bytecode.instructions.pop(); // Remove the Pop instruction
 
                 // Add StoreVar instruction to store the result in a temporary variable
-                let temp_var_id = execution_bytecode.var_count;
+                let temp_var_id = std::cmp::max(execution_bytecode.var_count, max_var_id + 1);
                 execution_bytecode
                     .instructions
                     .push(runmat_ignition::Instr::StoreVar(temp_var_id));
-                execution_bytecode.var_count += 1; // Expand variable count for temp variable
+                execution_bytecode.var_count = temp_var_id + 1; // Expand variable count for temp variable
 
                 // Ensure our variable array can hold the temporary variable
                 if self.variable_array.len() <= temp_var_id {
@@ -452,19 +481,28 @@ impl ReplEngine {
                                     var_id.0, ends_with_semicolon
                                 );
                             }
+                            if let Some(name) = id_to_name.get(&var_id.0) {
+                                assigned_this_execution.insert(name.clone());
+                            }
                             // For assignments, capture the assigned value for both display and type info
                             if var_id.0 < self.variable_array.len() {
                                 let assignment_value = self.variable_array[var_id.0].clone();
                                 if !is_semicolon_suppressed {
                                     result_value = Some(assignment_value);
                                     if self.verbose {
-                                        debug!("Setting assignment result_value: {result_value:?}");
+                                        debug!("Interpreter assignment result: {result_value:?}");
                                     }
                                 } else {
                                     suppressed_value = Some(assignment_value);
                                     if self.verbose {
-                                        debug!("Assignment suppressed, captured for type info: {suppressed_value:?}");
+                                        debug!("Interpreter assignment suppressed due to semicolon, captured for type info");
                                     }
+                                }
+                            }
+                        } else {
+                            if !is_expression_stmt && !results.is_empty() {
+                                if !is_semicolon_suppressed {
+                                    result_value = Some(results[0].clone());
                                 }
                             }
                         }
@@ -522,10 +560,66 @@ impl ReplEngine {
 
         // Update variable names mapping and function definitions if execution was successful
         if error.is_none() {
-            if let Some(mutated) = runmat_ignition::take_updated_workspace_names() {
-                self.variable_names = mutated;
+            if let Some((mutated_names, assigned)) = runmat_ignition::take_updated_workspace_state()
+            {
+                if debug_trace {
+                    println!("mutated_names: {:?}", mutated_names);
+                    println!("assigned_returned: {:?}", assigned);
+                }
+                self.variable_names = mutated_names.clone();
+                let mut new_assigned: HashSet<String> = assigned
+                    .difference(&prev_assigned_snapshot)
+                    .cloned()
+                    .collect();
+                new_assigned.extend(assigned_this_execution.iter().cloned());
+                for (name, var_id) in &mutated_names {
+                    if *var_id >= self.variable_array.len() {
+                        continue;
+                    }
+                    let new_value = &self.variable_array[*var_id];
+                    let changed = match self.workspace_values.get(name) {
+                        Some(old_value) => old_value != new_value,
+                        None => true,
+                    };
+                    if changed {
+                        new_assigned.insert(name.clone());
+                    }
+                }
+                if debug_trace {
+                    println!("new_assigned: {:?}", new_assigned);
+                }
+                for name in new_assigned {
+                    let var_id = mutated_names.get(&name).copied().or_else(|| {
+                        id_to_name
+                            .iter()
+                            .find_map(|(vid, n)| if n == &name { Some(*vid) } else { None })
+                    });
+                    if let Some(var_id) = var_id {
+                        if var_id < self.variable_array.len() {
+                            self.workspace_values
+                                .insert(name.clone(), self.variable_array[var_id].clone());
+                            if debug_trace {
+                                println!(
+                                    "workspace_update: {} -> {:?}",
+                                    name, self.variable_array[var_id]
+                                );
+                            }
+                        }
+                    }
+                }
             } else {
-                self.variable_names = updated_vars;
+                for name in &assigned_this_execution {
+                    if let Some(var_id) =
+                        id_to_name
+                            .iter()
+                            .find_map(|(vid, n)| if n == name { Some(*vid) } else { None })
+                    {
+                        if var_id < self.variable_array.len() {
+                            self.workspace_values
+                                .insert(name.clone(), self.variable_array[var_id].clone());
+                        }
+                    }
+                }
             }
             self.function_definitions = updated_functions;
         }
@@ -574,6 +668,7 @@ impl ReplEngine {
         self.variables.clear();
         self.variable_array.clear();
         self.variable_names.clear();
+        self.workspace_values.clear();
     }
 
     /// Get a copy of current variables
@@ -615,17 +710,38 @@ impl ReplEngine {
         &mut self,
         bytecode: &runmat_ignition::Bytecode,
         updated_var_mapping: &HashMap<String, usize>,
+        debug_trace: bool,
     ) {
         // Create a new variable array of the correct size
-        let mut new_variable_array = vec![Value::Num(0.0); bytecode.var_count];
+        let max_var_id = updated_var_mapping.values().copied().max().unwrap_or(0);
+        let required_len = std::cmp::max(bytecode.var_count, max_var_id + 1);
+        let mut new_variable_array = vec![Value::Num(0.0); required_len];
+        if debug_trace {
+            println!(
+                "prepare: bytecode.var_count={} required_len={} max_var_id={}",
+                bytecode.var_count, required_len, max_var_id
+            );
+        }
 
         // Populate with existing values based on the variable mapping
         for (var_name, &new_var_id) in updated_var_mapping {
-            if let Some(&old_var_id) = self.variable_names.get(var_name) {
-                // If we had this variable before, copy its value to the new position
-                if old_var_id < self.variable_array.len() && new_var_id < new_variable_array.len() {
-                    new_variable_array[new_var_id] = self.variable_array[old_var_id].clone();
+            if new_var_id < new_variable_array.len() {
+                if let Some(value) = self.workspace_values.get(var_name) {
+                    if debug_trace {
+                        println!(
+                            "prepare: setting {} (var_id={}) -> {:?}",
+                            var_name, new_var_id, value
+                        );
+                    }
+                    new_variable_array[new_var_id] = value.clone();
                 }
+            } else if debug_trace {
+                println!(
+                    "prepare: skipping {} (var_id={}) because len={}",
+                    var_name,
+                    new_var_id,
+                    new_variable_array.len()
+                );
             }
         }
 

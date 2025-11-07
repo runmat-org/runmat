@@ -22,7 +22,7 @@ use runmat_runtime::{
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::sync::Once;
 
@@ -120,14 +120,15 @@ thread_local! {
 
 struct WorkspaceState {
     names: HashMap<String, usize>,
+    assigned: HashSet<String>,
     data_ptr: *const Value,
     len: usize,
 }
 
 thread_local! {
     static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = RefCell::new(None);
-    static PENDING_WORKSPACE: RefCell<Option<HashMap<String, usize>>> = RefCell::new(None);
-    static LAST_WORKSPACE_NAMES: RefCell<Option<HashMap<String, usize>>> = RefCell::new(None);
+    static PENDING_WORKSPACE: RefCell<Option<(HashMap<String, usize>, HashSet<String>)>> = RefCell::new(None);
+    static LAST_WORKSPACE_STATE: RefCell<Option<(HashMap<String, usize>, HashSet<String>)>> = RefCell::new(None);
 }
 
 struct WorkspaceStateGuard;
@@ -137,18 +138,23 @@ impl Drop for WorkspaceStateGuard {
         WORKSPACE_STATE.with(|state| {
             let mut state_mut = state.borrow_mut();
             if let Some(ws) = state_mut.take() {
-                LAST_WORKSPACE_NAMES.with(|slot| {
-                    *slot.borrow_mut() = Some(ws.names);
+                LAST_WORKSPACE_STATE.with(|slot| {
+                    *slot.borrow_mut() = Some((ws.names, ws.assigned));
                 });
             }
         });
     }
 }
 
-fn set_workspace_state(names: HashMap<String, usize>, vars: &Vec<Value>) -> WorkspaceStateGuard {
+fn set_workspace_state(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+    vars: &Vec<Value>,
+) -> WorkspaceStateGuard {
     WORKSPACE_STATE.with(|state| {
         *state.borrow_mut() = Some(WorkspaceState {
             names,
+            assigned,
             data_ptr: vars.as_ptr(),
             len: vars.len(),
         });
@@ -170,6 +176,9 @@ fn workspace_lookup(name: &str) -> Option<Value> {
         let state_ref = state.borrow();
         let ws = state_ref.as_ref()?;
         let idx = ws.names.get(name)?;
+        if !ws.assigned.contains(name) {
+            return None;
+        }
         if *idx >= ws.len {
             return None;
         }
@@ -188,6 +197,9 @@ fn workspace_snapshot() -> Vec<(String, Value)> {
                 .iter()
                 .filter_map(|(name, idx)| {
                     if *idx >= ws.len {
+                        return None;
+                    }
+                    if !ws.assigned.contains(name) {
                         return None;
                     }
                     unsafe {
@@ -237,6 +249,7 @@ fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> Re
                 vars[idx] = value;
                 ws.data_ptr = vars.as_ptr();
                 ws.len = vars.len();
+                ws.assigned.insert(name.to_string());
             }
             None => {
                 result = Err("load: workspace state unavailable".to_string());
@@ -278,15 +291,18 @@ impl Drop for PendingWorkspaceGuard {
     }
 }
 
-pub fn push_pending_workspace(names: HashMap<String, usize>) -> PendingWorkspaceGuard {
+pub fn push_pending_workspace(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+) -> PendingWorkspaceGuard {
     PENDING_WORKSPACE.with(|slot| {
-        *slot.borrow_mut() = Some(names);
+        *slot.borrow_mut() = Some((names, assigned));
     });
     PendingWorkspaceGuard
 }
 
-pub fn take_updated_workspace_names() -> Option<HashMap<String, usize>> {
-    LAST_WORKSPACE_NAMES.with(|slot| slot.borrow_mut().take())
+pub fn take_updated_workspace_state() -> Option<(HashMap<String, usize>, HashSet<String>)> {
+    LAST_WORKSPACE_STATE.with(|slot| slot.borrow_mut().take())
 }
 
 thread_local! {
@@ -320,8 +336,14 @@ pub fn interpret_with_vars(
     if vars.len() < bytecode.var_count {
         vars.resize(bytecode.var_count, Value::Num(0.0));
     }
-    let pending_names = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
-    let _workspace_guard = pending_names.map(|names| set_workspace_state(names, &vars));
+    let pending_state = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
+    let _workspace_guard = pending_state.map(|(names, assigned)| {
+        let filtered_assigned: HashSet<String> = assigned
+            .into_iter()
+            .filter(|name| names.contains_key(name))
+            .collect();
+        set_workspace_state(names, filtered_assigned, &vars)
+    });
     refresh_workspace_state(&vars);
     let mut pc: usize = 0;
     let mut context = ExecutionContext {

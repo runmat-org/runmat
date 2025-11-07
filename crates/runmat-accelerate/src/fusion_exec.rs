@@ -63,8 +63,7 @@ fn scalar_from_value(value: &Value) -> Result<f64> {
             }
         }
         Value::GpuTensor(_) => {
-            let gathered = gather_if_needed(value)
-                .map_err(|e| anyhow!("image normalize: {e}"))?;
+            let gathered = gather_if_needed(value).map_err(|e| anyhow!("image normalize: {e}"))?;
             scalar_from_value(&gathered)
         }
         _ => Err(anyhow!(
@@ -436,6 +435,21 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
     let (mut q_handle, q_owned) = ensure_gpu_tensor(provider, q_value)?;
     let (g_handle, g_owned) = ensure_gpu_tensor(provider, g_value)?;
 
+    let debug_explained = std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok();
+    if debug_explained {
+        println!(
+            "[explained] initial Q shape {:?}, G shape {:?}",
+            q_handle.shape, g_handle.shape
+        );
+        if let Ok(info) = provider.download(&q_handle) {
+            println!(
+                "[explained] Q (sample) len={} first=[{:?}]",
+                info.data.len(),
+                info.data.get(0..4)
+            );
+        }
+    }
+
     let q_shape = q_handle.shape.clone();
     if q_shape.len() < 2 {
         return Err(anyhow!("explained variance: Q must be 2-D"));
@@ -459,11 +473,16 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
     if tmp_shape.len() < 2 {
         return Err(anyhow!("explained variance: intermediate must be 2-D"));
     }
-    if tmp_shape[0] != q_cols {        
+    if tmp_shape[0] != q_cols {
         return Err(anyhow!(
             "explained variance: expected intermediate rows {}, got {}",
-            q_cols, tmp_shape[0]
+            q_cols,
+            tmp_shape[0]
         ));
+    }
+
+    if debug_explained {
+        println!("[explained] after Q*G tmp shape {:?}", tmp.shape);
     }
 
     // Interpreter's transpose retains the original data layout. Mimic that by
@@ -475,10 +494,21 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
 
     tmp = provider.matmul(&q_transposed_view, &g_handle)?;
 
+    if debug_explained {
+        println!(
+            "[explained] after reshape(matmul) tmp shape {:?}",
+            tmp.shape
+        );
+    }
+
     // Restore Q's original shape before the second multiplication.
     q_handle = provider.reshape(&q_handle, &q_shape)?;
 
     let product = provider.matmul(&tmp, &q_handle)?;
+
+    if debug_explained {
+        println!("[explained] product shape {:?}", product.shape);
+    }
 
     let diag = provider.diag_extract(&product, 0)?;
     let diag = match diag.shape.as_slice() {
@@ -487,7 +517,7 @@ pub fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result
         _ => diag,
     };
 
-    if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+    if debug_explained {
         if let Ok(host) = provider.download(&tmp) {
             println!("tmp runtime shape {:?} data {:?}", host.shape, host.data);
         }

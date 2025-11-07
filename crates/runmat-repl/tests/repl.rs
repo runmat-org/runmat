@@ -11,7 +11,7 @@ fn tokenize_simple_input() {
 #[test]
 fn handles_whitespace_and_comments() {
     let result = format_tokens("foo % comment\n+");
-    assert_eq!(result, "Ident Plus");
+    assert_eq!(result, "Ident Newline Plus");
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 use log::trace;
 use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
@@ -244,8 +244,9 @@ fn convert_value_to_logical(value: Value) -> Result<Value, String> {
         Value::Tensor(tensor) => logical_from_tensor(tensor),
         Value::ComplexTensor(tensor) => logical_from_complex_tensor(tensor),
         Value::CharArray(chars) => logical_from_char_array(chars),
+        Value::StringArray(strings) => logical_from_string_array(strings),
         Value::GpuTensor(handle) => logical_from_gpu(handle),
-        Value::String(_) | Value::StringArray(_) => Err(conversion_error("string")),
+        Value::String(_) => Err(conversion_error("string")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -270,6 +271,16 @@ fn logical_from_complex_tensor(tensor: ComplexTensor) -> Result<Value, String> {
 fn logical_from_char_array(chars: CharArray) -> Result<Value, String> {
     let buffer = LogicalBuffer::from_char_array(&chars);
     logical_buffer_to_host(buffer)
+}
+
+fn logical_from_string_array(strings: StringArray) -> Result<Value, String> {
+    let bits: Vec<u8> = strings
+        .data
+        .iter()
+        .map(|s| if s.is_empty() { 0 } else { 1 })
+        .collect();
+    let shape = canonical_shape(&strings.shape, bits.len());
+    logical_buffer_to_host(LogicalBuffer { bits, shape })
 }
 
 fn logical_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
