@@ -11,7 +11,7 @@ struct Params {
     row_offset: u32,
     chunk_rows: u32,
     flags: u32,
-    _pad: u32,
+    offset_out: u32,
 };
 
 const SYRK_FLAG_ACCUMULATE: u32 = 1u;
@@ -78,8 +78,8 @@ fn main(
     }
 
     let partial = acc;
-    let upper_index = global_row + global_col * params.ldc;
-    let lower_index = global_col + global_row * params.ldc;
+    let upper_index = params.offset_out + global_row + global_col * params.ldc;
+    let lower_index = params.offset_out + global_col + global_row * params.ldc;
 
     var upper_prev: f64 = 0.0;
     var lower_prev: f64 = 0.0;
@@ -119,7 +119,7 @@ struct Params {
     row_offset: u32,
     chunk_rows: u32,
     flags: u32,
-    _pad: u32,
+    offset_out: u32,
 };
 
 const SYRK_FLAG_ACCUMULATE: u32 = 1u;
@@ -186,8 +186,8 @@ fn main(
     }
 
     let partial = acc;
-    let upper_index = global_row + global_col * params.ldc;
-    let lower_index = global_col + global_row * params.ldc;
+    let upper_index = params.offset_out + global_row + global_col * params.ldc;
+    let lower_index = params.offset_out + global_col + global_row * params.ldc;
 
     var upper_prev: f32 = 0.0;
     var lower_prev: f32 = 0.0;

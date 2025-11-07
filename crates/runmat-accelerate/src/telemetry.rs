@@ -65,7 +65,13 @@ impl AccelTelemetry {
         self.download_bytes.store(0, Ordering::Relaxed);
     }
 
-    pub fn snapshot(&self, cache_hits: u64, cache_misses: u64) -> ProviderTelemetry {
+    pub fn snapshot(
+        &self,
+        fusion_cache_hits: u64,
+        fusion_cache_misses: u64,
+        bind_group_cache_hits: u64,
+        bind_group_cache_misses: u64,
+    ) -> ProviderTelemetry {
         ProviderTelemetry {
             fused_elementwise: ProviderDispatchStats {
                 count: self.fused_elementwise_count.load(Ordering::Relaxed),
@@ -81,8 +87,10 @@ impl AccelTelemetry {
             },
             upload_bytes: self.upload_bytes.load(Ordering::Relaxed),
             download_bytes: self.download_bytes.load(Ordering::Relaxed),
-            fusion_cache_hits: cache_hits,
-            fusion_cache_misses: cache_misses,
+            fusion_cache_hits,
+            fusion_cache_misses,
+            bind_group_cache_hits,
+            bind_group_cache_misses,
         }
     }
 }

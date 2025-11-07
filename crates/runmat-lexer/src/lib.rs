@@ -577,7 +577,8 @@ fn ellipsis_emit_and_skip_to_eol(lex: &mut Lexer<Token>) -> Filter<()> {
 
 fn newline_skip(lex: &mut Lexer<Token>) -> Filter<()> {
     lex.extras.line_start = true;
-    Filter::Skip
+    lex.extras.last_was_value = false;
+    Filter::Emit(())
 }
 
 fn section_marker(lex: &mut Lexer<Token>) -> Filter<()> {

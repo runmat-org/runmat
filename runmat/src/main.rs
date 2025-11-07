@@ -1904,6 +1904,10 @@ async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
                 telemetry.fusion_cache_hits, telemetry.fusion_cache_misses
             );
             println!(
+                "Bind group cache: hits={}, misses={}",
+                telemetry.bind_group_cache_hits, telemetry.bind_group_cache_misses
+            );            
+            println!(
                 "Reduction defaults: two_pass_threshold={}, workgroup_size={} (overridable via RUNMAT_TWO_PASS_THRESHOLD / RUNMAT_REDUCTION_WG)",
                 p.two_pass_threshold(),
                 p.default_reduction_workgroup_size()

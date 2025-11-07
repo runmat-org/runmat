@@ -451,6 +451,9 @@ impl Parser {
     fn can_start_command_form(&self) -> bool {
         // At entry, peek_token() is Some(Ident) for callee
         let mut i = 1;
+        while matches!(self.peek_token_at(i), Some(Token::Newline | Token::Ellipsis)) {
+            i += 1;
+        }        
         // At least one simple arg must follow
         if !matches!(
             self.peek_token_at(i),
@@ -459,11 +462,16 @@ impl Parser {
             return false;
         }
         // Consume all contiguous simple args
-        while matches!(
-            self.peek_token_at(i),
-            Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)
-        ) {
-            i += 1;
+        loop {
+            match self.peek_token_at(i) {
+                Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End) => {
+                    i += 1;
+                }
+                Some(Token::Newline | Token::Ellipsis) => {
+                    i += 1;
+                }
+                _ => break,
+            }
         }
         // If the next token begins indexing/member or other expression syntax, do not use command-form
         match self.peek_token_at(i) {
@@ -484,6 +492,12 @@ impl Parser {
     fn parse_command_args(&mut self) -> Vec<Expr> {
         let mut args = Vec::new();
         loop {
+            if self.consume(&Token::Newline) {
+                continue;
+            }
+            if self.consume(&Token::Ellipsis) {
+                continue;
+            }
             match self.peek_token() {
                 Some(Token::Ident) => {
                     let ident = self.next().unwrap().lexeme;
@@ -1326,6 +1340,9 @@ impl Parser {
         let mut cases = Vec::new();
         let mut otherwise: Option<Vec<Stmt>> = None;
         loop {
+            if self.consume(&Token::Newline) || self.consume(&Token::Semicolon) {
+                continue;
+            }            
             if self.consume(&Token::Case) {
                 let val = self.parse_expr()?;
                 let body =
@@ -1334,6 +1351,8 @@ impl Parser {
             } else if self.consume(&Token::Otherwise) {
                 let body = self.parse_block(|t| matches!(t, Token::End))?;
                 otherwise = Some(body);
+            } else if self.consume(&Token::Comma) {
+                continue;                
             } else {
                 break;
             }
@@ -1407,7 +1426,10 @@ impl Parser {
         let mut members: Vec<ClassMember> = Vec::new();
         loop {
             // Skip layout separators between member blocks
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             match self.peek_token() {
@@ -1491,7 +1513,10 @@ impl Parser {
             if matches!(tok, Token::End) {
                 break;
             }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             if let Some(Token::Ident) = self.peek_token() {
@@ -1510,7 +1535,10 @@ impl Parser {
             if matches!(tok, Token::End) {
                 break;
             }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             if let Some(Token::Ident) = self.peek_token() {

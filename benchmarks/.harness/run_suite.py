@@ -17,7 +17,7 @@ except ImportError:
     sys.path.append(str(Path(__file__).parent))
     from utils import ensure_output_path, which  # type: ignore
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 def _prebuild_runmat() -> None:
     bin_path = ROOT / "target" / "release" / "runmat"
     if bin_path.exists():

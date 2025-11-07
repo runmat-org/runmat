@@ -141,6 +141,17 @@ pub(crate) fn generate_uniform(len: usize, label: &str) -> Result<Vec<f64>, Stri
     Ok(out)
 }
 
+pub(crate) fn generate_uniform_single(len: usize, label: &str) -> Result<Vec<f64>, String> {
+    generate_uniform(len, label).map(|data| {
+        data.into_iter()
+            .map(|v| {
+                let value = v as f32;
+                value as f64
+            })
+            .collect()
+    })
+}
+
 pub(crate) fn generate_complex(len: usize, label: &str) -> Result<Vec<(f64, f64)>, String> {
     let mut guard = rng_state()
         .lock()

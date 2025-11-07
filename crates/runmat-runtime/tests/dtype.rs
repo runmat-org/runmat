@@ -126,6 +126,17 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+        
+        let direct_eval = runmat_runtime::builtins::acceleration::gpu::gather::evaluate(&[gpu.clone()])
+            .expect("gather eval")
+            .into_first();
+        match direct_eval {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, host.shape);
+                assert_eq!(t.dtype, expected_dtype);
+            }
+            other => panic!("expected tensor from gather::evaluate, got {other:?}"),
+        }
 
         let builtin_gathered =
             runmat_runtime::call_builtin("gather", &[gpu.clone()]).expect("gather builtin");

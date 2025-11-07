@@ -1,7 +1,7 @@
 //! MATLAB-compatible `rand` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random;
@@ -56,7 +56,7 @@ device residency.
 - `rand(A)` or `rand(___, 'like', A)` matches the shape and residency of `A`,
   including GPU tensors when an acceleration provider is active.
 - `rand(___, 'double')` leaves the output as double precision (default). `'single'`
-  is reserved for future support and currently errors.
+  returns single-precision results that mirror MATLAB's behaviour.
 
 ## `rand` Function GPU Execution Behaviour
 When the prototype lives on the GPU, RunMat first asks the active acceleration
@@ -342,8 +342,11 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
     match proto {
         Value::GpuTensor(handle) => rand_like_gpu(handle, shape),
         Value::ComplexTensor(_) | Value::Complex(_, _) => rand_complex(shape),
-        Value::Tensor(_)
-        | Value::Num(_)
+        Value::Tensor(t) => match t.dtype {
+            NumericDType::F32 => rand_single(shape),
+            NumericDType::F64 => rand_double(shape),
+        },
+        Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)
         | Value::LogicalArray(_) => rand_double(shape),
@@ -353,8 +356,11 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
 }
 
 fn rand_single(shape: &[usize]) -> Result<Value, String> {
-    let _ = shape; // silence unused warning when feature flags remove paths
-    Err("rand: single precision generation is not yet supported".to_string())
+    let len = tensor::element_count(shape);
+    let data = random::generate_uniform_single(len, "rand")?;
+    let tensor = Tensor::new_with_dtype(data, shape.to_vec(), NumericDType::F32)
+        .map_err(|e| format!("rand: {e}"))?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 fn rand_complex(shape: &[usize]) -> Result<Value, String> {
@@ -449,6 +455,31 @@ mod tests {
                 let expected = random::expected_uniform_sequence(4);
                 for (observed, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((*observed - exp).abs() < 1e-12);
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+    
+    #[test]
+    fn rand_single_matrix_has_f32_dtype() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset_rng_clean();
+        let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("single")];
+        let result = rand_builtin(args).expect("rand single");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.dtype, NumericDType::F32);
+                let expected = random::expected_uniform_sequence(4)
+                    .into_iter()
+                    .map(|v| {
+                        let val = v as f32;
+                        val as f64
+                    })
+                    .collect::<Vec<f64>>();
+                for (observed, exp) in t.data.iter().zip(expected.iter()) {
+                    assert!((*observed - *exp).abs() < 1e-7);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),

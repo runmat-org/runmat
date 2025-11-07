@@ -27,4 +27,10 @@
 - 2025-11-05 09:50: Reintroduced dtype gather fixes with conversion on F32 precision, refreshed `crates/runmat-runtime/tests/dtype.rs`, and reran `cargo test -p runmat-runtime dtype`.
 - 2025-11-05 10:00: Restored RNG sanity suite (`crates/runmat-runtime/tests/rng.rs`) and verified via `cargo test -p runmat-runtime rng`.
 - 2025-11-05 10:45: After GPU merge fallout, reverted `rand()` default path to host tensors so RNG builtins match MATLAB semantics; re-ran `cargo test -p runmat-runtime rand` (green) to confirm `rand/randn/randi/randperm` suites no longer panic.
-
+- 2025-11-06 10:12: Located benchmark harness scripts under the hidden `benchmarks/.harness/` directory and reviewed CLI usage for `run_bench.py`/`run_suite.py`.
+- 2025-11-06 10:32: Added `offset_out` support back into `SyrkParams`/WGSL, rebuilt `runmat` with WGPU features, and cleared stale pipeline caches; harness smoke now reaches RunMat execution (parser error remains to triage).
+- 2025-11-06 09:20: Re-ran `cargo test -p runmat-runtime dtype -- --test-threads=1` with `RUNMAT_ACCELERATE_PROVIDER=wgpu`; observed regression (`gpu_array_single_roundtrip_preserves_dtype` now returns F64 after gather, expected F32).
+- 2025-11-06 09:28: Confirmed broader GPU surface still executes (`cargo test -p runmat-runtime gpu -- --test-threads=1` passes except for the dtype regression above).
+- 2025-11-06 09:35: Verified benchmark harness directory remains absent (`benchmarks/.harness/*` missing via glob search).
+- 2025-11-06 09:55: Instrumented dtype test path to compare `gather_if_needed`, `gather::evaluate`, and dispatcher `call_builtin('gather')`; confirmed gather builtin now preserves F32 metadata under `RUNMAT_ACCELERATE_PROVIDER=wgpu`.
+- 2025-11-06 10:05: Restored tests without debug prints; `cargo test -p runmat-runtime dtype -- --test-threads=1` and `cargo test -p runmat-runtime gpu -- --test-threads=1` passing with WGPU provider enabled.

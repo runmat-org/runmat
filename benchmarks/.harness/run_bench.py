@@ -16,10 +16,10 @@ except ImportError:
 
 
 # Resolve repo root and cases dir robustly regardless of how this script is invoked.
-# This file lives at: <repo>/benchmarks/benchmarks/.harness/run_bench.py
-# So the repo root is three parents up.
-ROOT = Path(__file__).resolve().parents[3]
-CASES_DIR = ROOT / "benchmarks" / "benchmarks"
+# This file lives at: <repo>/benchmarks/.harness/run_bench.py
+# So the repo root is two parents up.
+ROOT = Path(__file__).resolve().parents[2]
+CASES_DIR = ROOT / "benchmarks"
 
 
 def detect_runmat_command() -> List[str]:

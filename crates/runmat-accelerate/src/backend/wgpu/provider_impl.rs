@@ -2082,7 +2082,7 @@ impl WgpuProvider {
             buffer_id: id,
         };
         runmat_accelerate_api::set_handle_logical(&handle, false);
-        runmat_accelerate_api::clear_handle_transpose(&handle);
+        runmat_accelerate_api::set_handle_transposed(&handle, false);
         handle
     }
 
@@ -5760,7 +5760,12 @@ impl WgpuProvider {
             });
         let tile = crate::backend::wgpu::config::effective_matmul_tile();
         let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
-        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m_u32, tile);
+        let groups_y = if use_vec4 {
+            let rows_vec = (m as u32) / 4;
+            crate::backend::wgpu::dispatch::common::dispatch_size_dim(rows_vec, tile)
+        } else {
+            crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile)
+        };
         crate::backend::wgpu::dispatch::matmul::run(
             self.device_ref(),
             self.queue_ref(),
