@@ -134,6 +134,15 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
     total_matmul_count = 0
     total_matmul_ms = 0.0
 
+    calib_elem_time = 0.0
+    calib_elem_units = 0.0
+    calib_red_time = 0.0
+    calib_red_units = 0.0
+    calib_matmul_time = 0.0
+    calib_matmul_units = 0.0
+    calibration_runs = 0
+    calibration_provider: Optional[Dict[str, Any]] = None    
+
     auto_thresholds: Optional[Dict[str, Any]] = None
     auto_base_source: Optional[str] = None
     auto_env_override = False
@@ -171,8 +180,11 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         total_matmul_count += mm_count
         total_matmul_ms += mm_ms
 
+        median_raw = entry.get("median_ms")
+        median_ms = float(median_raw) if isinstance(median_raw, (int, float)) else 0.0
+
         point_entry: Dict[str, Any] = {
-            "median_ms": entry.get("median_ms"),
+            "median_ms": median_raw,
             "upload_bytes": upload_bytes,
             "download_bytes": download_bytes,
             "fused_elementwise": {"count": fe_count, "wall_ms": fe_ms},
@@ -198,6 +210,7 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
             if decisions:
                 reason_counts: Dict[str, int] = defaultdict(int)
                 disposition_counts: Dict[str, int] = defaultdict(int)
+                cpu_decisions: List[Dict[str, Any]] = []
                 for d in decisions:
                     reason = d.get("reason")
                     if reason:
@@ -207,11 +220,60 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
                     if disposition:
                         auto_decision_counts[str(disposition)] += 1
                         disposition_counts[str(disposition)] += 1
+                    if str(disposition).lower() == "cpu":
+                        cpu_decisions.append(d)
                 point_entry["auto_offload"] = {
                     "decisions_total": len(decisions),
                     "by_reason": dict(reason_counts),
                     "by_decision": dict(disposition_counts),
                 }
+
+                if cpu_decisions:
+                    cat_units = {"elementwise": 0.0, "reduction": 0.0, "matmul": 0.0}
+                    for d in cpu_decisions:
+                        op = str(d.get("operation") or "").lower()
+                        if op in ("elementwise", "unary", "transpose"):
+                            elems = d.get("elements")
+                            if elems is not None:
+                                try:
+                                    cat_units["elementwise"] += float(elems)
+                                except (TypeError, ValueError):
+                                    pass
+                        elif op == "reduction":
+                            elems = d.get("elements")
+                            if elems is not None:
+                                try:
+                                    cat_units["reduction"] += float(elems)
+                                except (TypeError, ValueError):
+                                    pass
+                        elif op == "matmul":
+                            flops = d.get("flops")
+                            if flops is not None:
+                                try:
+                                    cat_units["matmul"] += float(flops)
+                                except (TypeError, ValueError):
+                                    pass
+
+                    total_units = sum(cat_units.values())
+                    if total_units > 0.0:
+                        cpu_time_ms = max(0.0, median_ms - (fe_ms + fr_ms + mm_ms))
+                        if cpu_time_ms > 0.0:
+                            calibration_runs += 1
+                            if calibration_provider is None and device_info is not None:
+                                calibration_provider = dict(device_info)
+                            for cat, units in cat_units.items():
+                                if units <= 0.0:
+                                    continue
+                                share = cpu_time_ms * (units / total_units)
+                                if cat == "elementwise":
+                                    calib_elem_time += share
+                                    calib_elem_units += units
+                                elif cat == "reduction":
+                                    calib_red_time += share
+                                    calib_red_units += units
+                                elif cat == "matmul":
+                                    calib_matmul_time += share
+                                    calib_matmul_units += units
 
         per_point.append(point_entry)
 
@@ -251,6 +313,24 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
             "decision_counts_by_reason": dict(auto_reason_counts),
             "decision_counts_by_disposition": dict(auto_decision_counts),
         }
+
+    if calibration_runs:
+        calib_payload: Dict[str, Any] = {
+            "runs": calibration_runs,
+            "cpu_time_ms": {
+                "elementwise": calib_elem_time,
+                "reduction": calib_red_time,
+                "matmul": calib_matmul_time,
+            },
+            "units": {
+                "elementwise": calib_elem_units,
+                "reduction": calib_red_units,
+                "matmul_flops": calib_matmul_units,
+            },
+        }
+        if calibration_provider is not None:
+            calib_payload["provider"] = calibration_provider
+        summary["auto_offload_calibration"] = calib_payload
 
     return summary
 
@@ -324,6 +404,34 @@ def _run_bench(case: str, iterations: int, timeout: int, out_path: Path, variant
     except Exception:
         return json.loads(out_path.read_text())
 
+def _accumulate_calibration(target: Dict[str, Any], sample: Dict[str, Any]) -> None:
+    runs = int(sample.get("runs") or 0)
+    if runs <= 0:
+        return
+    target["runs"] = target.get("runs", 0) + runs
+
+    times = sample.get("cpu_time_ms") or {}
+    units = sample.get("units") or {}
+
+    target.setdefault("cpu_time_ms", {"elementwise": 0.0, "reduction": 0.0, "matmul": 0.0})
+    target.setdefault("units", {"elementwise": 0.0, "reduction": 0.0, "matmul_flops": 0.0})
+
+    target["cpu_time_ms"]["elementwise"] += float(times.get("elementwise") or 0.0)
+    target["cpu_time_ms"]["reduction"] += float(times.get("reduction") or 0.0)
+    target["cpu_time_ms"]["matmul"] += float(times.get("matmul") or 0.0)
+
+    target["units"]["elementwise"] += float(units.get("elementwise") or 0.0)
+    target["units"]["reduction"] += float(units.get("reduction") or 0.0)
+    target["units"]["matmul_flops"] += float(units.get("matmul_flops") or 0.0)
+
+    provider = sample.get("provider")
+    if provider:
+        existing = target.get("provider")
+        if existing is None:
+            target["provider"] = provider
+        elif existing != provider:
+            target["provider_conflict"] = True
+            target["provider"] = None
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Run full benchmark suite with parity checks")
@@ -346,6 +454,13 @@ def main() -> None:
             "started_at": datetime.utcnow().isoformat() + "Z",
         },
         "cases": [],
+    }
+
+    suite_calibration: Dict[str, Any] = {
+        "runs": 0,
+        "cpu_time_ms": {"elementwise": 0.0, "reduction": 0.0, "matmul": 0.0},
+        "units": {"elementwise": 0.0, "reduction": 0.0, "matmul_flops": 0.0},
+        "provider": None,
     }
 
     for case in cfg.get("cases", []):
@@ -471,11 +586,27 @@ def main() -> None:
         summary_payload = _case_summary(case_result, scale_key)
         if summary_payload:
             case_entry["summary"] = summary_payload
+            telemetry_summary = summary_payload.get("telemetry") or {}
+            calibration_sample = telemetry_summary.get("auto_offload_calibration")
+            if calibration_sample:
+                _accumulate_calibration(suite_calibration, calibration_sample)            
         results["cases"].append(case_entry)
 
     out = Path(args.output)
     ensure_output_path(out)
     results["suite"]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+    if suite_calibration.get("runs", 0) > 0:
+        suite_calib_payload: Dict[str, Any] = {
+            "runs": suite_calibration["runs"],
+            "cpu_time_ms": suite_calibration["cpu_time_ms"],
+            "units": suite_calibration["units"],
+        }
+        provider_info = suite_calibration.get("provider")
+        if provider_info:
+            suite_calib_payload["provider"] = provider_info
+        if suite_calibration.get("provider_conflict"):
+            suite_calib_payload["provider_conflict"] = True
+        results["suite"]["auto_offload_calibration"] = suite_calib_payload    
     out.write_text(json.dumps(results, indent=2))
     print(json.dumps({"WROTE": str(out)}, indent=2))
 

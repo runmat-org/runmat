@@ -1,168 +1,98 @@
-## Team B Shift Handoff
+## Team B Handoff — Runtime, JIT, Fusion Planner & Auto-Offload
 
-Welcome to the next Team B crew. This document recaps what we inherited (see `TEAM_B_START.md`), what we accomplished (`TEAM_B_PROGRESS.md`), where the shared roadmap sits (`NEXT_PLAN.md`), and what remains most important for you to pick up. It is intentionally detailed—treat it as both a briefing and a ready-reference while you get your bearings.
-
----
-
-### 1. Context & Mandate Refresh
-
-Team B owns the fusion planner, runtime execution paths, auto-offload policy, telemetry plumbing, and integration glue so RunMat consistently chooses the fastest execution route with minimal overhead. We interface most heavily with:
-
-- **Team A (GPU kernels/provider)** for new fused kernels, precision handling, residency expectations (`crates/runmat-accelerate/…`).
-- **Team C (language/runtime semantics)** for parser/VM correctness, RNG semantics, dtype propagation.
-- **Team D (telemetry, caches, harness/CI)** for benchmark reporting, cache persistence, and gating.
-
-Our start-of-shift brief (`TEAM_B_START.md`) emphasized three immediate deliverables:
-1. Fusion planner MVP for PCA (centered Gram, power-step normalization, explained variance).
-2. Auto-offload policy improvements (persisted calibration, small-batch guard, decision logging).
-3. Telemetry aggregation + plotting integration for suite-level reporting.
+Welcome, next crew! Below is the state of Team B as of this handoff. It captures what we shipped, what’s still hot, and how to get moving quickly without stepping on other teams.
 
 ---
 
-### 2. Summary of Work Completed This Shift
+### 1. Mission Refresher
 
-Use `TEAM_B_PROGRESS.md` for the line-by-line log. Highlights since takeover:
+Team B owns the runtime planner layer: fusion detection/execution, auto-offload policy, JIT warmup and telemetry/reporting glue. The goal remains: ensure RunMat always picks the fastest path with clear instrumentation and reproducibility.
 
-1. **Fusion Planner & Execution**
-   - Implemented planner detection and execution paths for `CenteredGram`, `PowerStepNormalize`, and `ExplainedVariance` patterns.
-   - Added `FusionPattern` metadata to carry operands/parameters through planning and execution, keeping constants off the execution stack.
-   - Wired the VM (`crates/runmat-ignition/src/vm.rs`) to dispatch the new fusion kinds and restored stack entries on fallback to avoid underflow.
-   - Added diverse graph fixtures in `crates/runmat-accelerate/tests/fusion_patterns.rs`, replacing the narrow PCA-only sample.
-   - Integration tests in `crates/runmat-ignition/tests/fusion_gpu.rs` now cover CPU↔GPU parity for the new patterns; explained variance matches interpreter behavior by mimicking MATLAB’s column-major transpose quirk.
-
-2. **Runtime Semantics / Constants**
-   - Global constants (`NaN`, `Inf`, etc.) are now registered through `runmat-builtins`, allowing fusion tests that rely on omit-nan paths to compile and run without ad-hoc definitions.
-
-3. **WGPU Provider Stabilization**
-   - Warmup: Disk cache metadata tracks numeric precision; warmup skips incompatible shaders (fixes M2 Max `entry point 'main'` panic).
-   - RNG: Replaced shader-based RNG with host-side generation using the runtime’s 64-bit LCG (`next_uniform_state`). Uniform, normal, integer, and permutation paths now:
-     - Generate samples on the host under the provider mutex.
-     - Update shared RNG state so interpreter and provider stay in lock-step.
-     - Upload results in the provider’s precision (F32/F64). Residency is preserved by uploading into GPU buffers before returning handles.
-   - Tests: `rng_wgpu_uniform_matches_cpu` and dependent RNG suites now pass on Apple M2 Max.
-
-4. **Testing Infrastructure**
-   - `pause` builtin: Added a test-mode short circuit so unit tests no longer hang waiting for user input.
-   - Full `cargo test --features wgpu -- --test-threads=1` runs cleanly **except** for the known BLAS/LAPACK fixture gap (`blas_matmul`, `solve` builtins missing). This matches pre-existing status; see “Open Issues” below.
-
-5. **Documentation & Progress Tracking**
-   - Updated `TEAM_B_PROGRESS.md` with detailed milestones to preserve context for this handoff.
+Key repos/components we touch:
+- `crates/runmat-accelerate/src/fusion.rs`, `fusion_exec.rs` — fusion detection + executor plumbing.
+- `crates/runmat-accelerate/src/native_auto.rs` — auto-offload policy, calibration, telemetry.
+- `benchmarks/.harness/run_suite.py` — benchmark aggregator/telemetry summariser.
+- `runmat/src/main.rs` — CLI entry points exposing provider info/calibration.
 
 ---
 
-### 3. Current State Snapshot
+### 2. What We Accomplished This Shift
 
-- **Tests**
-  - `cargo test --features wgpu -- --test-threads=1` passes aside from `crates/runmat-runtime/tests/blas_lapack.rs::{test_builtin_blas_functions, test_builtin_lapack_functions}`. Those fail due to unimplemented builtins (`blas_matmul`, `solve`). All other suites—including fusion, RNG, telemetry, parser, VM—are green.
-  - Quick smoke for RNG changes: `cargo test -p runmat-runtime builtins::stats::random::rng::tests::rng_wgpu_uniform_matches_cpu --features wgpu -- --test-threads=1`.
+**Fusion / Execution**
+- Added `FusionKind::ImageNormalize` detection, metadata (`ImageNormalizePattern`, `ImageScalar`) and executor hook that drives Team A’s fused WGSL kernel. No provider edits required.
+- Updated fusion planner fixtures/unit tests and added `image_normalize_matches_cpu` integration test using a seeded sample + test provider implementation of the pipeline.
 
-- **Performance Targets**
-  - No new benchmarks were run this shift; Team D’s harness remains the source of truth. Telemetry captures upload/download bytes, kernel timings, and fusion hits but still feeds into individual JSONs—suite aggregation isn’t implemented yet.
+**Auto-Offload Policy & Calibration**
+- Extended suite telemetry (`_summarize_runmat_telemetry`) to emit `auto_offload_calibration` summaries capturing CPU time, unit counts, provider info, etc.
+- Added runtime ingestion: `apply_auto_offload_calibration_from_file()` reads suite JSON, recomputes CPU cost coefficients, persists optional cache updates, and stores before/after deltas.
+- Surfaced the history through `AutoOffloadReport` (previous thresholds + delta) and exposed the new data via `runmat accel-info`.
+- Added CLI command `runmat accel-calibrate --input <suite_results.json> [--dry-run] [--json]` to apply/preview calibrations standalone.
 
-- **Runtime Behavior**
-  - Fusion planner automatically recognizes the PCA pipeline; the VM dispatches fused kernels without manual replays.
-  - RNG semantics are single-source: the shared 64-bit LCG drives both host and provider paths, preserving determinism under `rng(seed)`.
-
----
-
-### 4. Open Issues & Recommended Next Steps
-
-The backlog below is sorted by how directly it impacts Team B’s charter.
-
-1. **Auto-Offload Policy (Top Priority)**
-   - Persist calibration per device (Metal vs. CUDA vs. fallback). Current guard avoids `usize::MAX`, but calibration is recomputed every run.
-   - Implement the small-batch guard to keep trivial workloads on CPU. Use telemetry to set a heuristic and record decisions.
-   - Log decisions and thresholds into results JSON so the suite and UI can explain when/why a workload stayed on CPU.
-
-2. **Telemetry Aggregation & Plotting**
-   - Telemetry plumbing is in place (`crates/runmat-accelerate/src/telemetry.rs`, provider instrumentation, CLI hooks), but there’s no suite-level aggregator.
-   - Next steps: define JSON schema (maybe piggyback on Team D’s harness), compute speedup curves/AUC, and integrate plotting.
-
-3. **Fusion Planner Extensions**
-   - Add detection for MRB/Welford patterns (pushed to later milestones). We have infrastructure to carry metadata; reuse it.
-   - Ensure constants/var bindings are preserved when planner is fed graphs from more complex scripts (Team C’s parser fixes may surface new shapes).
-
-4. **BLAS/LAPACK Builtin Coverage (Shared with Team C)**
-   - Tests in `crates/runmat-runtime/tests/blas_lapack.rs` expect `blas_matmul` and `solve` builtins. Those are missing; the tests currently fail during full suite runs.
-   - Agree with Team C whether to implement these builtins (likely wrappers around existing runtime/accelerate paths) or adjust expectations.
-
-5. **Integration with Team A**
-   - SYRK kernel + diag epilogue (Team A) will enable faster centered Gram. Once ready, update planner to route to the new epilogue instead of the current generic path.
-   - When Team A exposes fused MRB kernels, add corresponding `FusionKind` and `FusionPattern` entries.
-
-6. **Documentation & CI**
-   - Fold RNG behavior into developer docs (note the deterministic host-side generation and state sync).
-   - Work with Team D to add CI gating for RNG parity (quick test) and fusion pattern detection to catch regressions.
+**Documentation / Tracking**
+- Updated `TEAM_B_PROGRESS.md` with details of the fusion and calibration workstreams for future reference.
 
 ---
 
-### 5. How to Resume: Practical Checklist
+### 3. Current State & Validation
 
-1. **Environment**
-   - `rustup` nightly toolchain pinned in repo rust-toolchain file.
-   - Apple M2 Max requires `RUSTFLAGS="-C target-cpu=native"` for best numbers when benchmarking.
+**Tests run**
+- `cargo test -p runmat-accelerate --test fusion_patterns`
+- `cargo test -p runmat-ignition --test fusion_gpu`
 
-2. **Validation** (run in order after pulling latest)
-   ```bash
-   cargo fmt
-   cargo clippy --workspace --all-targets --features wgpu
-   cargo test --features wgpu -- --test-threads=1  # expect BLAS/LAPACK failure until builtins land
-   ```
-   - Optional quick checks: `cargo test -p runmat-runtime builtins::array::creation::rand --features wgpu`, `cargo test -p runmat-accelerate tests::fusion_patterns`.
+**CLI smoke**
+- `runmat accel-info` (with and without `--json`) now shows the calibration summary.
+- `runmat accel-calibrate --dry-run --json --input <suite_results.json>` previews coefficient updates; omit `--dry-run` to persist the cache.
 
-3. **Benchmark Prep**
-   - Team D’s harness lives under `benchmarks/.harness`. After implementing auto-offload updates, re-run `python run_suite.py --device auto` to gather new telemetry.
+No outstanding lint/clippy errors introduced by this shift.
 
-4. **Coding Guidance**
-   - Use `FusionPattern` metadata for any new planner rule; avoid pushing constants onto the execution stack.
-   - When touching RNG or telemetry, update both host/runtime and provider sides to keep behavior consistent.
-   - For auto-offload logging, coordinate with `runmat/src/main.rs` so CLI users can inspect decisions.
+---
+
+### 4. Next Priorities (Team B backlogged items)
+
+1. **Harness / Telemetry Enhancements (next-in-queue)**
+   - Extend `_summarize_runmat_telemetry` to capture new provider counters once Team A lands them (e.g. image-normalize hits, vec4 branch usage, logical transpose). The groundwork for calibration aggregation is already in place—reuse the same pattern.
+   - Emit fused-path flags in the per-case summaries so plotting/reporting can highlight where fusion kicked in.
+   - Coordinate with Team D to ensure the new summary schema is compatible with their plotting scripts; update `plot_suite.py` and downstream dashboards once counters land.
+
+2. **Auto-Offload Policy Iteration**
+   - With calibrations now ingestible, schedule PCA/4k suite sweeps on each tier device (M2 Max, workstation GPU) and commit updated thresholds to cache + repo.
+   - Verify CLI output against expectations (before/after + delta) and ensure we document the calibration workflow for others.
+
+3. **Fusion Planner Roadmap**
+   - Coordinate with Team A regarding upcoming fused kernels (vec4-friendly matmul epilogues, logical-transpose). Once APIs land, add planner detection + executor wiring similar to the ImageNormalize flow.
+
+---
+
+### 5. How to Resume
+
+**Environment**
+- Standard `rustup` toolchain pinned via `rust-toolchain.toml`.
+- GPU validation done on Apple M2 Max with WGPU enabled; use `RUSTFLAGS="-C target-cpu=native"` for local perf tests.
+
+**Kick-off Checklist**
+1. Pull latest + run `cargo fmt`, `cargo test -p runmat-accelerate --test fusion_patterns`, `cargo test -p runmat-ignition --test fusion_gpu` to confirm baseline.
+2. Run `runmat accel-info --json` to ensure the calibration summary appears; optionally try `runmat accel-calibrate --dry-run --input <suite_results.json>` with an existing suite output to watch the preview.
+3. For harness telemetry work, execute `python benchmarks/.harness/run_suite.py --suite benchmarks/.harness/suite.yaml --output benchmarks/results/suite_results.json` (expect long runs) and inspect `results/` for the aggregated JSON.
+
+**Key Files to Watch**
+- `benchmarks/.harness/run_suite.py` — new calibration summaries recorded in `auto_offload_calibration` sections.
+- `crates/runmat-accelerate/src/native_auto.rs` — calibration ingestion logic & where future policy changes live.
+- `runmat/src/main.rs` — CLI wiring for `accel-calibrate`; update this as you expose new runtime insights.
 
 ---
 
 ### 6. Coordination Notes
 
-- **Team A**
-  - Awaiting kernels: SYRK, MRB/Welford, diag epilogue. Once landed, expect interface changes in `AccelProvider` (new hooks). Keep planner ready to consume `FusionPattern::CenteredGram { normalization }` metadata.
-
-- **Team C**
-  - RNG semantics are now aligned; ensure future parser/VM changes preserve Value IDs to keep planner variable binding intact.
-  - BLAS/LAPACK builtin expectations need coordination (test suite currently fails).
-
-- **Team D**
-  - Telemetry aggregator remains outstanding; align on schema before emitting data. The CLI currently dumps raw telemetry snapshots.
+- **Team A**: ImageNormalize kernel already wired; upcoming vec4/logical-transpose counters should surface through provider telemetry. Stay aligned on counter naming so harness changes consume the right keys.
+- **Team D**: Calibration summary structure is ready for ingestion. Loop them in once you add fused-path counters so dashboards can reflect the new data.
+- **Team C**: No new parser/VM changes required; they’re aware of deterministic seeding usage in the fusion tests.
 
 ---
 
-### 7. Risks & Mitigations
+### 7. Open Questions / Heads-Up
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Auto-offload changes regress performance on small workloads | Suite speedups drop; CI could catch late | Implement decision logging & guard rails; test both CPU/GPU paths for representative sizes before landing |
-| Fusion planner mis-detects patterns when constants/vars change | Incorrect fusion or execution failure | Extend unit fixtures with more varied graphs (Team C to supply), keep `FusionGroupPlan::const_values` handling tight |
-| RNG changes introduce performance regression for very large tensors | Additional host→device copies | Monitor telemetry upload bytes; consider chunked generation if runtime shows hot spots |
-| BLAS/LAPACK builtins absent | Current test failure blocks full CI once enforced | Align with Teams A/C on implementing wrappers or deferring tests |
+- Calibration JSON schema is new—if you change field names in `_summarize_runmat_telemetry`, update both the runtime parser and CLI formatting.
+- Cached thresholds are stored under `~/.cache/runmat/auto_offload/`. Keep an eye on version bumps (`CALIBRATION_VERSION`) to avoid stale loads.
+- Consider capturing GPU-side telemetry (vec4, logical transpose) as part of the same suite summary to minimize schema churn.
 
----
-
-### 8. Reference Index
-
-- `TEAM_B_START.md` — initial mandate, goals, outstanding items.
-- `TEAM_B_PROGRESS.md` — chronological log of actions.
-- `NEXT_PLAN.md` — cross-team roadmap, milestone definitions, KPIs.
-- Key source directories:
-  - Planner/execution: `crates/runmat-accelerate/src/fusion.rs`, `fusion_exec.rs`.
-  - VM integration: `crates/runmat-ignition/src/vm.rs`.
-  - RNG + provider: `crates/runmat-runtime/src/builtins/common/random.rs`, `crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs`.
-  - Tests: `crates/runmat-accelerate/tests/fusion_patterns.rs`, `crates/runmat-ignition/tests/fusion_gpu.rs`, RNG tests under `crates/runmat-runtime/src/builtins/array/creation/`.
-
----
-
-### 9. Closing Thoughts
-
-You’re inheriting a runtime that now auto-fuses the PCA pipeline, keeps RNG parity across CPU/GPU, and has the telemetry scaffolding ready for aggregation. The next phase is more strategic: align auto-offload heuristics with real telemetry, wire suite-level reporting, and continue widening fusion coverage as Team A delivers kernels. If you need a quick mental model: **planner detects → plan metadata carries constants cleanly → VM dispatches → provider executes with residency preserved**. Keep that pipeline tight and we’ll stay ahead of NumPy/Torch.
-
-Good luck, and feel free to reach out if anything in this hand-off needs clarification.
-
-— Team B (Previous Shift)
-
+Good luck! Ping if anything is unclear—we tried to leave the house tidy, but there’s plenty of fun left. 🙌

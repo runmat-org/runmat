@@ -9886,7 +9886,7 @@ fn try_execute_fusion_group(
                 }
                 Err(err.to_string())
             }
-        }        
+        }  
     } else {
         // Unknown fusion kind; restore stack and report
         for value in consumed.into_iter().rev() {

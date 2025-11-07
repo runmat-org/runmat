@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 
-use crate::fusion::{FusionGroupPlan, FusionKind, FusionPattern};
+use crate::fusion::{FusionGroupPlan, FusionKind, FusionPattern, ImageScalar};
 use crate::fusion_residency;
 use crate::graph;
 use crate::graph::{ShapeInfo, ValueId};
@@ -9,6 +9,7 @@ use runmat_accelerate_api::{
     ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision,
 };
 use runmat_builtins::Value;
+use runmat_runtime::gather_if_needed;
 
 struct PreparedInput {
     handle: GpuTensorHandle,
@@ -43,6 +44,59 @@ fn value_to_f64(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         _ => None,
+    }
+}
+
+fn scalar_from_value(value: &Value) -> Result<f64> {
+    if let Some(v) = value_to_f64(value) {
+        return Ok(v);
+    }
+    match value {
+        Value::Tensor(t) => {
+            if t.data.len() == 1 {
+                Ok(t.data[0])
+            } else {
+                Err(anyhow!(
+                    "image normalize: expected scalar tensor, got {} elements",
+                    t.data.len()
+                ))
+            }
+        }
+        Value::GpuTensor(_) => {
+            let gathered = gather_if_needed(value)
+                .map_err(|e| anyhow!("image normalize: {e}"))?;
+            scalar_from_value(&gathered)
+        }
+        _ => Err(anyhow!(
+            "image normalize: expected numeric scalar value, got {:?}",
+            value
+        )),
+    }
+}
+
+fn resolve_image_scalar_value(
+    scalar: &ImageScalar,
+    plan: &FusionGroupPlan,
+    request: &FusionExecutionRequest<'_>,
+) -> Result<f64> {
+    match scalar {
+        ImageScalar::Constant(v) => Ok(*v),
+        ImageScalar::Value(vid) => {
+            if let Some(value) = plan.const_values.get(vid) {
+                return scalar_from_value(value);
+            }
+            if let Some(idx) = plan.inputs.iter().position(|id| *id == *vid) {
+                let runtime_value = request
+                    .inputs
+                    .get(idx)
+                    .ok_or_else(|| anyhow!("image normalize: runtime scalar missing"))?;
+                return scalar_from_value(runtime_value);
+            }
+            Err(anyhow!(
+                "image normalize: scalar input {:?} not materialized in plan",
+                vid
+            ))
+        }
     }
 }
 
@@ -464,47 +518,64 @@ pub fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Va
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let (input_vid, epsilon, gain, bias, gamma) = match request.plan.pattern.as_ref() {
-        Some(FusionPattern::ImageNormalize {
-            input,
-            epsilon,
-            gain,
-            bias,
-            gamma,
-        }) => (*input, *epsilon, *gain, *bias, *gamma),
+    let pattern = match request.plan.pattern.as_ref() {
+        Some(FusionPattern::ImageNormalize(p)) => p,
         _ => return Err(anyhow!("image normalize: missing pattern metadata")),
     };
 
-    let input_index = request
-        .plan
-        .inputs
-        .iter()
-        .position(|vid| *vid == input_vid)
-        .ok_or_else(|| anyhow!("image normalize: input not found"))?;
+    let find_value = |vid: ValueId| -> Result<&Value> {
+        if let Some(pos) = request.plan.inputs.iter().position(|id| *id == vid) {
+            request
+                .inputs
+                .get(pos)
+                .ok_or_else(|| anyhow!("image normalize: runtime value missing"))
+        } else {
+            request
+                .plan
+                .const_values
+                .get(&vid)
+                .ok_or_else(|| anyhow!("image normalize: value {vid:?} not materialized"))
+        }
+    };
 
-    let input_value = request
-        .inputs
-        .get(input_index)
-        .ok_or_else(|| anyhow!("image normalize: runtime input missing"))?;
-
-    let (input_handle, owned_input) = ensure_gpu_tensor(provider, input_value)?;
-    if input_handle.shape.len() != 3 {
-        return Err(anyhow!("image normalize: expected 3-D tensor input"));
+    let input_value = find_value(pattern.input)?;
+    let (input_handle, input_owned) = ensure_gpu_tensor(provider, input_value)?;
+    let shape = input_handle.shape.clone();
+    if shape.len() != 3 {
+        return Err(anyhow!(
+            "image normalize: expected 3-D input tensor, got shape {:?}",
+            shape
+        ));
     }
+    let batch = shape[0];
+    let height = shape[1];
+    let width = shape[2];
+
+    let epsilon = resolve_image_scalar_value(&pattern.epsilon, request.plan, &request)?;
+    let gain = match &pattern.gain {
+        Some(s) => Some(resolve_image_scalar_value(s, request.plan, &request)?),
+        None => None,
+    };
+    let bias = match &pattern.bias {
+        Some(s) => Some(resolve_image_scalar_value(s, request.plan, &request)?),
+        None => None,
+    };
+    let gamma = resolve_image_scalar_value(&pattern.gamma, request.plan, &request)?;
+
     let desc = ImageNormalizeDescriptor {
-        batch: input_handle.shape[0],
-        height: input_handle.shape[1],
-        width: input_handle.shape[2],
+        batch,
+        height,
+        width,
         epsilon,
         gain,
         bias,
-        gamma,
+        gamma: Some(gamma),
     };
 
     let output = provider.image_normalize(&input_handle, &desc)?;
 
-    if let Some(temp) = owned_input {
-        let _ = provider.free(&temp);
+    if let Some(temp) = input_owned {
+        provider.free(&temp).ok();
     }
 
     fusion_residency::mark(&output);

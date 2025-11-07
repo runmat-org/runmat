@@ -260,7 +260,18 @@ enum Commands {
         #[arg(long)]
         reset: bool,
     },
-
+    /// Apply auto-offload calibration from suite telemetry results
+    #[cfg(feature = "wgpu")]
+    AccelCalibrate {
+        /// Path to suite results JSON produced by the benchmark harness
+        input: PathBuf,
+        /// Preview updates without persisting the calibration cache
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit calibration outcome as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Garbage collection utilities
     Gc {
         #[command(subcommand)]
@@ -828,6 +839,10 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
         }
         Commands::Info => show_system_info(cli).await,
         Commands::AccelInfo { json, reset } => show_accel_info(json, reset).await,
+        #[cfg(feature = "wgpu")]
+        Commands::AccelCalibrate { input, dry_run, json } => {
+            execute_accel_calibrate(input, dry_run, json).await
+        }        
         Commands::Gc { gc_command } => execute_gc_command(gc_command).await,
         Commands::Benchmark {
             file,
@@ -1990,6 +2005,114 @@ async fn show_accel_info(json: bool, _reset: bool) -> Result<()> {
         println!("==========================");
         println!("This build was compiled without the 'wgpu' feature. No GPU provider available.");
     }
+    Ok(())
+}
+
+#[cfg(feature = "wgpu")]
+fn print_threshold_delta(label: &str, entry: &runmat_accelerate::ThresholdDeltaEntry) {
+    let percent = entry.ratio.map(|r| (r - 1.0) * 100.0);
+    match percent {
+        Some(p) => println!(
+            "  {:<28} {:>12.6e} -> {:>12.6e} (Δ {:>+12.6e}, {:+6.2}%)",
+            label,
+            entry.before,
+            entry.after,
+            entry.absolute,
+            p
+        ),
+        None => println!(
+            "  {:<28} {:>12.6e} -> {:>12.6e} (Δ {:>+12.6e})",
+            label,
+            entry.before,
+            entry.after,
+            entry.absolute
+        ),
+    }
+}
+
+#[cfg(feature = "wgpu")]
+async fn execute_accel_calibrate(input: PathBuf, dry_run: bool, json: bool) -> Result<()> {
+    let commit = !dry_run;
+    let outcome = runmat_accelerate::apply_auto_offload_calibration_from_file(&input, commit)
+        .with_context(|| format!("failed to apply calibration from {}", input.display()))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&outcome)?);
+        return Ok(());
+    }
+
+    println!("Auto-offload calibration");
+    println!("========================");
+    println!("Input: {}", input.display());
+    if let Some(provider) = &outcome.provider {
+        println!(
+            "Provider: {} ({}) device_id={}",
+            provider.name,
+            provider.backend.clone().unwrap_or_default(),
+            provider.device_id
+        );
+    }
+    println!("Runs considered: {}", outcome.runs);
+    println!("Mode: {}", if commit { "commit" } else { "dry-run" });
+
+    if let Some(delta) = &outcome.delta {
+        println!("\nUpdated coefficients (seconds per unit):");
+        let mut printed = false;
+        if let Some(entry) = &delta.cpu_elem_per_elem {
+            print_threshold_delta("cpu_elem_per_elem", entry);
+            printed = true;
+        }
+        if let Some(entry) = &delta.cpu_reduction_per_elem {
+            print_threshold_delta("cpu_reduction_per_elem", entry);
+            printed = true;
+        }
+        if let Some(entry) = &delta.cpu_matmul_per_flop {
+            print_threshold_delta("cpu_matmul_per_flop", entry);
+            printed = true;
+        }
+        if !printed {
+            println!("  (no coefficient changes)");
+        }
+    } else {
+        println!("\nCalibration sample did not yield coefficient adjustments.");
+    }
+
+    println!("\nThreshold snapshots:");
+    println!(
+        "  unary={} -> {}",
+        outcome.before.unary_min_elems, outcome.after.unary_min_elems
+    );
+    println!(
+        "  binary={} -> {}",
+        outcome.before.binary_min_elems, outcome.after.binary_min_elems
+    );
+    println!(
+        "  reduction={} -> {}",
+        outcome.before.reduction_min_elems, outcome.after.reduction_min_elems
+    );
+    println!(
+        "  matmul_flops={} -> {}",
+        outcome.before.matmul_min_flops, outcome.after.matmul_min_flops
+    );
+
+    if commit {
+        if let Some(path) = &outcome.persisted_to {
+            println!("\nPersisted calibration cache: {path}");
+        }
+        println!("Restart RunMat sessions to load the updated thresholds.");
+    } else {
+        println!(
+            "\nDry-run: thresholds were not persisted. Re-run without --dry-run to commit changes."
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(not(feature = "wgpu"))]
+async fn execute_accel_calibrate(input: PathBuf, dry_run: bool, json: bool) -> Result<()> {
+    let _ = (input, dry_run, json);
+    println!("This build was compiled without the 'wgpu' feature. Calibration is unavailable.");
     Ok(())
 }
 

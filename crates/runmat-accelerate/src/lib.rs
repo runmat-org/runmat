@@ -24,10 +24,11 @@ pub mod telemetry;
 pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
-    auto_offload_report, is_sink, prepare_builtin_args, promote_binary, promote_reduction_args,
-    promote_unary, reset_auto_offload_log, AutoOffloadDecisionEntry, AutoOffloadDisposition,
-    AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason, ReductionOp, ThresholdBase,
-    ThresholdSnapshot, UnaryOp,
+    apply_auto_offload_calibration_from_file, auto_offload_report, is_sink, prepare_builtin_args,
+    promote_binary, promote_reduction_args, promote_unary, reset_auto_offload_log,
+    AutoOffloadCalibrationOutcome, AutoOffloadCalibrationSummary, AutoOffloadDecisionEntry,
+    AutoOffloadDisposition, AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason,
+    ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
 };
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;

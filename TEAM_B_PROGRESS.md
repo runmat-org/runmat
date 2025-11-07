@@ -34,4 +34,12 @@
 - Introduced runtime decision logging with structured records (reason, estimates, fusion context, batch dimension) and surfaced reports via `runmat accel-info` (JSON + text); CLI `--reset` clears both provider telemetry and decision history.
 - Implemented small-batch guard heuristics (rank-aware trailing-dimension check) plus richer evaluation pipelines for unary/elementwise/matmul/reduction decisions that capture profile-model vs. threshold reasoning and feed the decision log.
 - Added benchmark-suite aggregation: `run_suite.py` now computes per-case summaries, including AUC/mean speedups vs. NumPy and consolidated RunMat telemetry (kernel counts/times, transfer bytes, auto-offload thresholds/decision histograms) keyed by sweep parameter, exporting them under `case.summary` for plotting/CI consumers.
-
+- Reviewed Team A’s latest plan (SYRK/small-k/vec4/logical transpose/ImageNormalize wiring) to avoid overlap and scope Team B follow-through.
+- Sketched fusion planner approach for 4k ImageNormalize: add DAG detector and `FusionPattern::ImageNormalize`, extend `fusion_exec.rs` to invoke the provider hook, and stage PCA/4k graph fixtures plus GPU parity tests without touching WGSL/provider files.
+- Defined auto-offload calibration uplift plan: capture decision logs + provider telemetry from PCA/4k suite sweeps, fit updated CPU cost coefficients, persist refreshed thresholds to cache, and surface deltas through `AutoOffloadReport` for transparent policy changes.
+- Outlined harness/telemetry updates that consume new provider counters (ImageNormalize hits, vec4 path usage, logical-transpose strides) by extending `_summarize_runmat_telemetry`, emitting fused-path flags in case summaries, and enriching plots without editing Team A’s kernels.
+- Landed `FusionKind::ImageNormalize` detection, pattern metadata (`ImageScalar`), and executor support; the planner now recognizes the 4k pipeline DAG and lowers it straight to `provider.image_normalize` without touching WGSL sources.
+- Added scalar resolution helpers (constant tracing through `single`, negation, etc.) so gain/bias/epsilon/gamma are captured as numeric descriptors even when expressed via builtin casts.
+- Updated VM dispatch to route `FusionKind::ImageNormalize` groups, keeping stack restoration semantics aligned with existing fusion paths.
+- Expanded unit coverage: `detects_image_normalize_group` now builds a fusion plan, verifies the extracted pattern, and ensures scalar operands materialize as constants.
+- Extended the fusion test provider with a CPU implementation of `image_normalize` (mean/variance, gain/bias, clamp, pow) and seeded RNG usage; the new `image_normalize_matches_cpu` integration test confirms GPU/CPU parity on deterministic data.

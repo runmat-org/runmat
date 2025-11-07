@@ -3,8 +3,8 @@ use once_cell::sync::OnceCell;
 use runmat_accelerate::fusion_residency;
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, CorrcoefOptions, CovNormalization, CovRows, CovarianceOptions,
-    FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, PagefunRequest,
-    PowerStepEpilogue, ProviderCondNorm, ProviderConvMode, ProviderEigResult,
+    FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, ImageNormalizeDescriptor,
+    PagefunRequest, PowerStepEpilogue, ProviderCondNorm, ProviderConvMode, ProviderEigResult,
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderNormOrder, ProviderPinvOptions,
     ProviderPrecision, UniqueOptions, UniqueResult,
 };
@@ -161,6 +161,69 @@ impl AccelProvider for TestProvider {
             }
         }
         Ok(self.push(cov, vec![cols, cols]))
+    }
+
+    fn image_normalize(
+        &self,
+        input: &GpuTensorHandle,
+        desc: &ImageNormalizeDescriptor,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let (data, shape) = self.pull(input)?;
+        if shape.len() != 3 {
+            bail!("test provider: image_normalize expects 3-D tensor");
+        }
+        let batch = shape[0];
+        let height = shape[1];
+        let width = shape[2];
+        if batch != desc.batch || height != desc.height || width != desc.width {
+            bail!(
+                "test provider: image_normalize descriptor mismatch tensor {:?} vs {:?}",
+                shape,
+                (desc.batch, desc.height, desc.width)
+            );
+        }
+        let plane = height * width;
+        if plane == 0 {
+            return Ok(self.push(Vec::new(), shape));
+        }
+
+        let mut out = data.clone();
+        for b in 0..batch {
+            let mut sum = 0.0f64;
+            for idx in 0..plane {
+                let offset = b + batch * idx;
+                sum += data[offset];
+            }
+            let mean = sum / plane as f64;
+
+            let mut sq_sum = 0.0f64;
+            for idx in 0..plane {
+                let offset = b + batch * idx;
+                let diff = data[offset] - mean;
+                sq_sum += diff * diff;
+            }
+            let variance = sq_sum / plane as f64;
+            let sigma = (variance + desc.epsilon).sqrt();
+            let inv_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+
+            for idx in 0..plane {
+                let offset = b + batch * idx;
+                let mut value = (data[offset] - mean) * inv_sigma;
+                if let Some(g) = desc.gain {
+                    value *= g;
+                }
+                if let Some(bias) = desc.bias {
+                    value += bias;
+                }
+                value = value.max(0.0);
+                if let Some(gamma) = desc.gamma {
+                    value = value.powf(gamma);
+                }
+                out[offset] = value;
+            }
+        }
+
+        Ok(self.push(out, shape))
     }
 
     fn matmul_power_step(
@@ -2129,6 +2192,77 @@ fn power_step_normalization_matches_cpu() {
             assert!(
                 diff <= tol,
                 "power-step mismatch: lhs={lhs}, rhs={rhs}, diff={diff}"
+            );
+        }
+    });
+}
+
+#[test]
+fn image_normalize_matches_cpu() {
+    gc_test_context(|| {
+        use runmat_accelerate::FusionKind;
+        let source = r#"
+        B = 4; H = 8; W = 12;
+        gain = single(1.0123);
+        bias = single(-0.02);
+        gamma = single(1.8);
+        eps0 = single(1e-6);
+        rng(0);
+        imgs = single(rand(B, H, W));
+        mu = mean(mean(imgs, 2), 3);
+        sigma = sqrt(mean(mean((imgs - mu).^2, 2), 3) + eps0);
+        out = ((imgs - mu) ./ sigma) * gain + bias;
+        out = max(out, single(0));
+        out = out .^ gamma;
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir).expect("compile");
+
+        if let Some(graph) = &bytecode.accel_graph {
+            let groups = graph.detect_fusion_groups();
+            assert!(groups
+                .iter()
+                .any(|group| matches!(group.kind, FusionKind::ImageNormalize)));
+        }
+
+        let out_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .last()
+            .expect("store index for out");
+
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let vars_cpu = interpret_function(&bytecode, vars.clone()).expect("cpu interpret");
+        let out_cpu = vars_cpu.get(out_index).expect("cpu out");
+        let gathered_cpu = gather_if_needed(out_cpu).expect("gather cpu out");
+        let cpu_tensor = match gathered_cpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor out (cpu), got {other:?}"),
+        };
+
+        ensure_provider_registered();
+        let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
+        let out_gpu = vars_gpu.get(out_index).expect("gpu out");
+        assert!(matches!(out_gpu, Value::GpuTensor(_)));
+        let gathered_gpu = gather_if_needed(out_gpu).expect("gather gpu out");
+        let gpu_tensor = match gathered_gpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor out (gpu), got {other:?}"),
+        };
+
+        assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
+        let tol = 5e-4;
+        for (lhs, rhs) in cpu_tensor.data.iter().zip(gpu_tensor.data.iter()) {
+            let diff = (lhs - rhs).abs();
+            assert!(
+                diff <= tol,
+                "image normalize mismatch: lhs={lhs}, rhs={rhs}, diff={diff}"
             );
         }
     });
