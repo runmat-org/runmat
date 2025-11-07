@@ -1164,7 +1164,72 @@ async fn execute_script_with_args(
         }
     }
 
+    #[cfg(feature = "wgpu")]
+    dump_provider_telemetry_if_requested();
+
     Ok(())
+}
+
+#[cfg(feature = "wgpu")]
+fn dump_provider_telemetry_if_requested() {
+    use std::fs;
+
+    let path = match std::env::var("RUNMAT_TELEMETRY_OUT") {
+        Ok(p) if !p.trim().is_empty() => p,
+        _ => return,
+    };
+
+    let provider = match runmat_accelerate_api::provider() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let info = provider.device_info_struct();
+    let telemetry = provider.telemetry_snapshot();
+
+    let mut payload = serde_json::Map::new();
+    match serde_json::to_value(&info) {
+        Ok(value) => {
+            payload.insert("device".to_string(), value);
+        }
+        Err(err) => log::warn!("Failed to serialize device info for telemetry dump: {err}"),
+    }
+    match serde_json::to_value(&telemetry) {
+        Ok(value) => {
+            payload.insert("telemetry".to_string(), value);
+        }
+        Err(err) => log::warn!("Failed to serialize telemetry snapshot: {err}"),
+    }
+    if let Some(report) = runmat_accelerate::auto_offload_report() {
+        match serde_json::to_value(&report) {
+            Ok(value) => {
+                payload.insert("auto_offload".to_string(), value);
+            }
+            Err(err) => log::warn!("Failed to serialize auto-offload report: {err}"),
+        }
+    }
+
+    let json_payload = serde_json::Value::Object(payload);
+    if let Err(err) = fs::write(
+        &path,
+        serde_json::to_string_pretty(&json_payload).unwrap_or_default(),
+    ) {
+        log::warn!("Failed to write telemetry snapshot to {path}: {err}");
+    }
+
+    let reset_flag = std::env::var("RUNMAT_TELEMETRY_RESET")
+        .map(|v| {
+            matches!(
+                v.as_str(),
+                "1" | "true" | "TRUE" | "True" | "yes" | "YES" | "Yes" | "on" | "ON"
+            )
+        })
+        .unwrap_or(false);
+
+    if reset_flag {
+        provider.reset_telemetry();
+        runmat_accelerate::reset_auto_offload_log();
+    }
 }
 
 async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {

@@ -649,7 +649,6 @@ struct Params {
     _pad1: u32,
     _pad2: u32,
 };
-
 @group(0) @binding(0) var<storage, read> input0: Tensor;
 @group(0) @binding(1) var<storage, read> input1: Tensor;
 @group(0) @binding(2) var<storage, read_write> output: Tensor;
@@ -795,11 +794,9 @@ struct Params {
     _pad1: u32,
     _pad2: u32,
 };
-
 @group(0) @binding(0) var<storage, read> input0: Tensor;
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
-
 fn isNan(x: f32) -> bool { return x != x; }
 
 @compute @workgroup_size(@WG@)
@@ -1300,7 +1297,6 @@ fn diag_rows_cols(shape: &[usize]) -> (usize, usize) {
 fn diag_is_vector_like(rows: usize, cols: usize, dims: usize) -> bool {
     rows == 1 || cols == 1 || dims <= 1
 }
-
 fn diag_ensure_shape(shape: &[usize]) -> Result<()> {
     if shape.len() > 2 && shape.iter().skip(2).any(|&d| d != 1) {
         Err(anyhow!("diag: input must be 2-D"))
@@ -1582,7 +1578,6 @@ fn uniform_sequence_f64(state: &mut u64, len: usize) -> Vec<f64> {
     }
     out
 }
-
 fn normal_sequence_f64(state: &mut u64, len: usize) -> Vec<f64> {
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
@@ -1600,7 +1595,6 @@ fn normal_sequence_f64(state: &mut u64, len: usize) -> Vec<f64> {
     }
     out
 }
-
 fn integer_sequence_f64(
     state: &mut u64,
     len: usize,
@@ -2559,7 +2553,6 @@ impl WgpuProvider {
         }
         Ok(self.register_existing_buffer(output_buffer, output_shape.to_vec(), len))
     }
-
     pub(crate) fn fused_reduction_exec(
         &self,
         shader: &str,
@@ -3529,7 +3522,6 @@ impl WgpuProvider {
         );
         Ok(self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols))
     }
-
     pub(crate) fn permute_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -4169,7 +4161,6 @@ impl WgpuProvider {
         };
         <Self as AccelProvider>::upload(self, &view)
     }
-
     pub(crate) fn flip_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -4751,7 +4742,6 @@ impl WgpuProvider {
 
         result
     }
-
     pub(crate) fn diff_once_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -5244,7 +5234,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, normalized_shape, total_len))
     }
-
     pub(crate) fn kron_exec(
         &self,
         left: &GpuTensorHandle,
@@ -5612,6 +5601,8 @@ impl WgpuProvider {
         let use_vec4 = can_vec4 && k < K_CHUNK_SWITCH;
         let enable_chunk = !view_a.transpose && !view_b.transpose && k >= K_CHUNK_SWITCH;
 
+        let start = std::time::Instant::now();
+
         if enable_chunk {
             self.prepare_matmul_pipeline();
             self.device_ref().poll(wgpu::Maintain::Poll);
@@ -5690,7 +5681,9 @@ impl WgpuProvider {
                 };
                 k_off += k_sub;
             }
-            return Ok(acc.expect("matmul chunking produced no output"));
+            let handle = acc.expect("matmul chunking produced no output");
+            self.telemetry.record_matmul_duration(start.elapsed());
+            return Ok(handle);
         }
 
         // Default single-dispatch path
@@ -5771,7 +5764,9 @@ impl WgpuProvider {
             groups_x,
             groups_y,
         );
-        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
+        let handle = self.register_existing_buffer(out_buffer, out_shape, len);
+        self.telemetry.record_matmul_duration(start.elapsed());
+        Ok(handle)
     }
 
     pub(crate) fn pagefun_exec(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
@@ -5870,6 +5865,8 @@ impl WgpuProvider {
 
         self.prepare_matmul_pipeline();
         self.device_ref().poll(wgpu::Maintain::Poll);
+
+        let start = std::time::Instant::now();
 
         let mut multi_index = vec![0usize; rank];
         for page_idx in 0..page_volume {
@@ -5979,6 +5976,8 @@ impl WgpuProvider {
                 groups_y,
             );
         }
+
+        self.telemetry.record_matmul_duration(start.elapsed());
 
         Ok(self.register_existing_buffer(out_buffer, request.output_shape.clone(), total_len))
     }
@@ -6309,7 +6308,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, normalized, total_len))
     }
-
     pub(crate) fn cumsum_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -6896,7 +6894,6 @@ impl WgpuProvider {
         let indices = self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
         Ok(ProviderCummaxResult { values, indices })
     }
-
     pub(crate) fn fill_exec(&self, shape: &[usize], value: f64) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("fill: tensor size exceeds GPU limits"))?;
@@ -8404,6 +8401,7 @@ impl WgpuProvider {
         if len > (u32::MAX as usize) {
             return Err(anyhow!("tensor too large for GPU buffer"));
         }
+        let start = std::time::Instant::now();
         {
             let mut enc =
                 self.device_ref()
@@ -8478,7 +8476,10 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        Ok(self.register_existing_buffer(out_buffer, entry_a.shape, len))
+        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
+        Ok(handle)
     }
     fn binary_op_broadcast_exec(
         &self,
@@ -8587,6 +8588,7 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
+        let start = std::time::Instant::now();
         while offset < len {
             let remaining = len - offset;
             let chunk_len = remaining.min(chunk_capacity);
@@ -8624,7 +8626,10 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
+        let handle = self.register_existing_buffer(out_buffer, out_shape, len);
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
+        Ok(handle)
     }
 
     pub(crate) fn dot_exec(
@@ -8706,7 +8711,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_EQ_SHADER_F64,
                 NumericPrecision::F32 => ELEM_EQ_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8731,12 +8736,11 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_NE_SHADER_F64,
                 NumericPrecision::F32 => ELEM_NE_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
     }
-
     pub(crate) fn elem_lt_exec(
         &self,
         a: &GpuTensorHandle,
@@ -8756,7 +8760,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_LT_SHADER_F64,
                 NumericPrecision::F32 => ELEM_LT_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8781,7 +8785,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_LE_SHADER_F64,
                 NumericPrecision::F32 => ELEM_LE_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8806,7 +8810,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_GT_SHADER_F64,
                 NumericPrecision::F32 => ELEM_GT_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8831,7 +8835,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_GE_SHADER_F64,
                 NumericPrecision::F32 => ELEM_GE_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8856,7 +8860,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_AND_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_AND_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8881,7 +8885,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_OR_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_OR_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8905,7 +8909,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_XOR_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_XOR_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8922,7 +8926,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_NOT_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_NOT_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)?
+            self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8939,7 +8943,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_ISFINITE_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_ISFINITE_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)?
+            self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8956,7 +8960,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_ISNAN_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_ISNAN_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)?
+            self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8973,7 +8977,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_ISINF_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_ISINF_SHADER_F32,
             };
-            self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)?
+            self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -8992,6 +8996,7 @@ impl WgpuProvider {
         if len > (u32::MAX as usize) {
             return Err(anyhow!("tensor too large for GPU buffer"));
         }
+        let start = std::time::Instant::now();
         {
             let mut enc =
                 self.device_ref()
@@ -9061,7 +9066,10 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        Ok(self.register_existing_buffer(out_buffer, entry_a.shape, len))
+        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
+        Ok(handle)
     }
 
     pub(crate) fn scalar_op_exec(
@@ -9082,6 +9090,7 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
+        let start = std::time::Instant::now();
         while offset < len {
             let remaining = len - offset;
             let chunk_len = remaining.min(chunk_capacity);
@@ -9148,7 +9157,10 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        Ok(self.register_existing_buffer(out_buffer, entry_a.shape, len))
+        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
+        Ok(handle)
     }
 
     pub(crate) fn reduce_global_exec(
@@ -9306,7 +9318,6 @@ impl WgpuProvider {
         );
         Ok(self.register_existing_buffer(out_buffer, out_shape, out_len))
     }
-
     pub(crate) fn reduce_dim_minmax_exec(
         &self,
         a: &GpuTensorHandle,
@@ -9859,7 +9870,6 @@ impl WgpuProvider {
         let result = self.upload(&view)?;
         Ok(result)
     }
-
     pub(crate) fn find_exec(
         &self,
         a: &GpuTensorHandle,
@@ -10500,7 +10510,6 @@ impl AccelProvider for WgpuProvider {
             },
         })
     }
-
     fn sort_rows(
         &self,
         a: &GpuTensorHandle,
@@ -11606,7 +11615,6 @@ impl AccelProvider for WgpuProvider {
     fn reduce_mean_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
         self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Mean)
     }
-
     fn reduce_any_dim(
         &self,
         a: &GpuTensorHandle,
@@ -11767,7 +11775,6 @@ impl AccelProvider for WgpuProvider {
         let _ = self.free(&sum_handle);
         Ok(out)
     }
-
     fn reduce_std(
         &self,
         a: &GpuTensorHandle,
@@ -12079,7 +12086,7 @@ impl AccelProvider for WgpuProvider {
             NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F64,
             NumericPrecision::F32 => crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F32,
         };
-        self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)
+        self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)
     }
 
     fn not_nan_mask(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -12093,7 +12100,7 @@ impl AccelProvider for WgpuProvider {
             NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NOT_NAN_MASK_SHADER_F64,
             NumericPrecision::F32 => crate::backend::wgpu::shaders::nan::NOT_NAN_MASK_SHADER_F32,
         };
-        self.fused_elementwise_exec(shader, &[a.clone()], &entry.shape, len)
+        self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)
     }
 
     fn fused_reduction(
@@ -12387,7 +12394,6 @@ impl AccelProvider for WgpuProvider {
 
         Ok(HostTensorOwned { data: out, shape })
     }
-
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         // Remove from handle table and return buffer to pool for reuse
         log::trace!("wgpu free id={}", h.buffer_id);

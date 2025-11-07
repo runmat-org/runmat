@@ -133,6 +133,10 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
     total_fused_red_ms = 0.0
     total_matmul_count = 0
     total_matmul_ms = 0.0
+    total_fusion_hits = 0
+    total_fusion_misses = 0
+    total_bind_hits = 0
+    total_bind_misses = 0
 
     calib_elem_time = 0.0
     calib_elem_units = 0.0
@@ -163,6 +167,10 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         matmul = telemetry.get("matmul") or {}
         upload_bytes = int(telemetry.get("upload_bytes") or 0)
         download_bytes = int(telemetry.get("download_bytes") or 0)
+        fusion_hits = int(telemetry.get("fusion_cache_hits") or 0)
+        fusion_misses = int(telemetry.get("fusion_cache_misses") or 0)
+        bind_hits = int(telemetry.get("bind_group_cache_hits") or 0)
+        bind_misses = int(telemetry.get("bind_group_cache_misses") or 0)
 
         fe_count = int(fused_elem.get("count") or 0)
         fe_ms = _ns_to_ms(fused_elem.get("total_wall_time_ns"))
@@ -179,6 +187,10 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         total_fused_red_ms += fr_ms
         total_matmul_count += mm_count
         total_matmul_ms += mm_ms
+        total_fusion_hits += fusion_hits
+        total_fusion_misses += fusion_misses
+        total_bind_hits += bind_hits
+        total_bind_misses += bind_misses
 
         median_raw = entry.get("median_ms")
         median_ms = float(median_raw) if isinstance(median_raw, (int, float)) else 0.0
@@ -190,6 +202,8 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
             "fused_elementwise": {"count": fe_count, "wall_ms": fe_ms},
             "fused_reduction": {"count": fr_count, "wall_ms": fr_ms},
             "matmul": {"count": mm_count, "wall_ms": mm_ms},
+            "fusion_cache": {"hits": fusion_hits, "misses": fusion_misses},
+            "bind_group_cache": {"hits": bind_hits, "misses": bind_misses},
         }
         param_key = x_param or "n"
         param_val = entry.get(param_key)
@@ -297,6 +311,14 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
             "matmul": {
                 "count": total_matmul_count,
                 "wall_ms": total_matmul_ms,
+            },
+            "fusion_cache": {
+                "hits": total_fusion_hits,
+                "misses": total_fusion_misses,
+            },
+            "bind_group_cache": {
+                "hits": total_bind_hits,
+                "misses": total_bind_misses,
             },
         },
     }

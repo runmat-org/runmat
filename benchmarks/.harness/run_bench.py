@@ -147,6 +147,23 @@ def _collect_runmat_telemetry(cmd: List[str], reset: bool = False) -> Optional[D
             return None
 
 
+def _load_runmat_telemetry_file(path: Optional[Path]) -> Optional[Dict]:
+    if path is None:
+        return None
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+    if not text.strip():
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
 def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[Dict[str, str]] = None) -> Dict:
     env = default_env()
     if env_overrides:
@@ -173,7 +190,17 @@ def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[
     last_stdout = ""
     last_stderr = ""
     telemetry_payload: Optional[Dict] = None
+    telemetry_path: Optional[Path] = None
     if impl.get("name") == "runmat":
+        tmp_dir = ROOT / "target" / "bench_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        telemetry_path = tmp_dir / "provider_telemetry.json"
+        try:
+            telemetry_path.unlink()
+        except FileNotFoundError:
+            pass
+        env["RUNMAT_TELEMETRY_OUT"] = str(telemetry_path)
+        env["RUNMAT_TELEMETRY_RESET"] = "1"
         _collect_runmat_telemetry(impl["cmd"], reset=True)
     for _ in range(iterations):
         cmd = list(impl["cmd"])
@@ -204,7 +231,9 @@ def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[
     if dev:
         result["device"] = dev
     if impl.get("name") == "runmat":
-        telemetry_payload = _collect_runmat_telemetry(impl["cmd"], reset=False)
+        telemetry_payload = _load_runmat_telemetry_file(telemetry_path)
+        if telemetry_payload is None:
+            telemetry_payload = _collect_runmat_telemetry(impl["cmd"], reset=False)
         if telemetry_payload is not None:
             result["provider_telemetry"] = telemetry_payload
     return result

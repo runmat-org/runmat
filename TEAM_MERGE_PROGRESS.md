@@ -13,4 +13,6 @@
 - 2025-11-07 02:25 UTC — Identified PCA failure root-cause: `exist('n','var')` pre-creates workspace entries (value 0) so harness guard never overwrote defaults. Reworked ignition workspace tracking to distinguish assigned variables (new `assigned` set, propagated via `push_pending_workspace`/`take_updated_workspace_state`) so `exist` respects uninitialized slots.
 - 2025-11-07 02:58 UTC — Repaired REPL semicolon regression: expression results now store in dedicated temp slots and workspace tracking handles control-flow assignments, restoring `semicolon_suppression` suite to green.
 - 2025-11-07 03:12 UTC — PCA harness (`target/release/runmat benchmarks/pca/runmat.m`) now completes via WGPU provider with sane explained variance output (`RESULT_ok`) confirming workspace fix resolves prior out-of-bounds.
+- 2025-11-07 03:28 UTC — WGPU provider now records matmul/fused-elementwise dispatch telemetry; added regression test and harness summaries (fusion+bind group cache totals) to surface the counters.
+- 2025-11-07 03:45 UTC — `RUNMAT_TELEMETRY_OUT` piping implemented; harness consumes JSON snapshots with non-zero upload/matmul/fused counters for PCA & 4k runs (bind-group/fusion cache totals included).
 
