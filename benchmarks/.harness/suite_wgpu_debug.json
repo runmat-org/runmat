@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "global": {
+    "iterations": 1,
+    "device_policy": {
+      "runmat": "wgpu"
+    },
+    "timeout_s": 300
+  },
+  "cases": [
+    {
+      "id": "pca",
+      "label": "Principal Component Analysis (WGPU Debug)",
+      "entries": {
+        "runmat": "pca/runmat.m"
+      },
+      "include_impl": ["runmat"],
+      "params": {
+        "defaults": {
+          "n": 10000,
+          "d": 256,
+          "k": 8,
+          "iters": 5
+        },
+        "scale": {
+          "key": "n",
+          "values": [5000, 10000]
+        }
+      },
+      "env_map": {
+        "n": "PCA_N",
+        "d": "PCA_D",
+        "k": "PCA_K",
+        "iters": "PCA_ITERS"
+      },
+      "parity": {},
+      "harness": {
+        "warmup": 0,
+        "timeout_s": 300
+      }
+    },
+    {
+      "id": "4k-image-processing",
+      "label": "Image Processing (WGPU Debug)",
+      "entries": {
+        "runmat": "4k-image-processing/runmat.m"
+      },
+      "include_impl": ["runmat"],
+      "params": {
+        "defaults": {
+          "B": 4,
+          "H": 1080,
+          "W": 1920
+        },
+        "scale": {
+          "key": "B",
+          "values": [2, 4]
+        }
+      },
+      "env_map": {
+        "B": "IMG_B",
+        "H": "IMG_H",
+        "W": "IMG_W"
+      },
+      "parity": {},
+      "harness": {
+        "warmup": 0,
+        "timeout_s": 180
+      }
+    },
+    {
+      "id": "monte-carlo-analysis",
+      "label": "Monte Carlo Analysis (WGPU Debug)",
+      "entries": {
+        "runmat": "monte-carlo-analysis/runmat.m"
+      },
+      "include_impl": ["runmat"],
+      "params": {
+        "defaults": {
+          "M": 200000,
+          "T": 512
+        },
+        "scale": {
+          "key": "M",
+          "values": [100000, 200000]
+        }
+      },
+      "env_map": {
+        "M": "MC_M",
+        "T": "MC_T"
+      },
+      "parity": {},
+      "harness": {
+        "warmup": 0,
+        "timeout_s": 240
+      }
+    },
+    {
+      "id": "batched-nlms",
+      "label": "Batched NLMS (WGPU Debug)",
+      "entries": {
+        "runmat": "batched-nlms/runmat.m"
+      },
+      "include_impl": ["runmat"],
+      "params": {
+        "defaults": {
+          "p": 64,
+          "C": 512,
+          "T": 100
+        },
+        "scale": {
+          "key": "C",
+          "values": [256, 512]
+        }
+      },
+      "env_map": {
+        "p": "NLMS_P",
+        "C": "NLMS_C",
+        "T": "NLMS_T"
+      },
+      "parity": {},
+      "harness": {
+        "warmup": 0,
+        "timeout_s": 240
+      }
+    },
+    {
+      "id": "batched-iir-smoothing",
+      "label": "Batched IIR Smoothing (WGPU Debug)",
+      "entries": {
+        "runmat": "batched-iir-smoothing/runmat.m"
+      },
+      "include_impl": ["runmat"],
+      "params": {
+        "defaults": {
+          "M": 200000,
+          "T": 1024
+        },
+        "scale": {
+          "key": "M",
+          "values": [100000, 200000]
+        }
+      },
+      "env_map": {
+        "M": "IIR_M",
+        "T": "IIR_T"
+      },
+      "parity": {},
+      "harness": {
+        "warmup": 0,
+        "timeout_s": 240
+      }
+    }
+  ]
+}
+
+
+
+

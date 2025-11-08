@@ -127,7 +127,11 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
     if len == 0 {
         return Err(anyhow!("fusion: zero-length execution not supported"));
     }
-    let constant_shape = request.plan.constant_shape(len);
+    let scalar_shape: Vec<usize> = if output_shape.is_empty() {
+        vec![1]
+    } else {
+        vec![1; output_shape.len()]
+    };
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
     for value in &request.inputs {
@@ -148,11 +152,11 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 });
             }
             Value::Num(n) => {
-                temp_scalars.push(vec![*n; len]);
+                temp_scalars.push(vec![*n]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
                     data,
-                    shape: &constant_shape,
+                    shape: &scalar_shape,
                 };
                 let handle = provider.upload(&view)?;
                 prepared.push(PreparedInput {
@@ -161,11 +165,11 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 });
             }
             Value::Int(i) => {
-                temp_scalars.push(vec![i.to_f64(); len]);
+                temp_scalars.push(vec![i.to_f64()]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
                     data,
-                    shape: &constant_shape,
+                    shape: &scalar_shape,
                 };
                 let handle = provider.upload(&view)?;
                 prepared.push(PreparedInput {
@@ -227,7 +231,14 @@ pub fn execute_reduction(
     if len == 0 {
         return Err(anyhow!("fusion: zero-length execution not supported"));
     }
-    let constant_shape = request.plan.constant_shape(len);
+    let scalar_shape: Vec<usize> = {
+        let constant_shape = request.plan.constant_shape(len);
+        if constant_shape.is_empty() {
+            vec![1]
+        } else {
+            vec![1; constant_shape.len()]
+        }
+    };
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
     for value in &request.inputs {
@@ -248,11 +259,11 @@ pub fn execute_reduction(
                 });
             }
             Value::Num(n) => {
-                temp_scalars.push(vec![*n; len]);
+                temp_scalars.push(vec![*n]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
                     data,
-                    shape: &constant_shape,
+                    shape: &scalar_shape,
                 };
                 let handle = provider.upload(&view)?;
                 prepared.push(PreparedInput {
@@ -261,11 +272,11 @@ pub fn execute_reduction(
                 });
             }
             Value::Int(i) => {
-                temp_scalars.push(vec![i.to_f64(); len]);
+                temp_scalars.push(vec![i.to_f64()]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
                     data,
-                    shape: &constant_shape,
+                    shape: &scalar_shape,
                 };
                 let handle = provider.upload(&view)?;
                 prepared.push(PreparedInput {
