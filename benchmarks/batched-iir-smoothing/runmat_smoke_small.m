@@ -1,11 +1,11 @@
 seed_default = 0;
-if ~exist('seed', 'var'), seed = seed_default; end
+if ~exist('seed','var'), seed = seed_default; end
 rng(seed);
 
-if ~exist('M', 'var'), M = 1024; end
-if ~exist('T', 'var'), T = 32; end
-if ~exist('alpha', 'var'), alpha = single(0.98); else, alpha = single(alpha); end
-if ~exist('beta', 'var'), beta = single(0.02); else, beta = single(beta); end
+if ~exist('M','var'), M = 1024; end
+if ~exist('T','var'), T = 32; end
+if ~exist('alpha','var'), alpha = single(0.98); else, alpha = single(alpha); end
+if ~exist('beta','var'), beta = single(0.02); else, beta = single(beta); end
 
 fprintf('CONFIG seed=%d M=%d T=%d alpha=%g beta=%g\n', seed, M, T, double(alpha), double(beta));
 
