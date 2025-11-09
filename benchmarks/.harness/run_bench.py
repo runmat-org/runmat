@@ -33,7 +33,7 @@ def detect_runmat_command() -> List[str]:
     # No implicit build here to avoid counting build time in runs
     raise SystemExit(
         "runmat binary not found. Please prebuild with:\n"
-        "  cargo build -p runmat --release -F runmat-accelerate/wgpu -F runmat-runtime/wgpu\n"
+        "  cargo build -p runmat --release --features wgpu\n"
         "or install runmat in PATH."
     )
 

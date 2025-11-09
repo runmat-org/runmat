@@ -26,8 +26,13 @@ def _prebuild_runmat() -> None:
     if os.environ.get("SKIP_PREBUILD_RUNMAT"):
         return
     cmd = [
-        "cargo", "build", "-p", "runmat", "--release",
-        "-F", "runmat-accelerate/wgpu", "-F", "runmat-runtime/wgpu",
+        "cargo",
+        "build",
+        "-p",
+        "runmat",
+        "--release",
+        "--features",
+        "wgpu",
     ]
     proc = subprocess.run(cmd, cwd=str(ROOT), text=True)
     if proc.returncode != 0 or not bin_path.exists():
@@ -138,6 +143,10 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
     total_bind_hits = 0
     total_bind_misses = 0
 
+    telemetry_error_counts: Dict[str, int] = defaultdict(int)
+    missing_device_runs = 0
+    missing_telemetry_runs = 0
+
     calib_elem_time = 0.0
     calib_elem_units = 0.0
     calib_red_time = 0.0
@@ -158,10 +167,19 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         telemetry_payload = entry.get("provider_telemetry") or {}
         if not telemetry_payload:
             continue
-        if device_info is None and telemetry_payload.get("device"):
-            device_info = telemetry_payload.get("device")
 
-        telemetry = telemetry_payload.get("telemetry") or {}
+        device_entry = telemetry_payload.get("device")
+        if device_entry:
+            if device_info is None:
+                device_info = device_entry
+        else:
+            missing_device_runs += 1
+
+        error_msg = telemetry_payload.get("error")
+        telemetry_raw = telemetry_payload.get("telemetry")
+        if telemetry_raw is None:
+            missing_telemetry_runs += 1
+        telemetry = telemetry_raw or {}
         fused_elem = telemetry.get("fused_elementwise") or {}
         fused_red = telemetry.get("fused_reduction") or {}
         matmul = telemetry.get("matmul") or {}
@@ -195,6 +213,7 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         median_raw = entry.get("median_ms")
         median_ms = float(median_raw) if isinstance(median_raw, (int, float)) else 0.0
 
+        status = "ok"
         point_entry: Dict[str, Any] = {
             "median_ms": median_raw,
             "upload_bytes": upload_bytes,
@@ -205,6 +224,15 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
             "fusion_cache": {"hits": fusion_hits, "misses": fusion_misses},
             "bind_group_cache": {"hits": bind_hits, "misses": bind_misses},
         }
+        if error_msg:
+            msg = str(error_msg)
+            telemetry_error_counts[msg] += 1
+            status = "error"
+            point_entry["error"] = msg
+        elif telemetry_raw is None:
+            status = "missing"
+        point_entry["status"] = status
+
         param_key = x_param or "n"
         param_val = entry.get(param_key)
         if param_val is not None:
@@ -353,6 +381,23 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         if calibration_provider is not None:
             calib_payload["provider"] = calibration_provider
         summary["auto_offload_calibration"] = calib_payload
+
+    warnings: List[str] = []
+    if telemetry_error_counts:
+        issues = ", ".join(
+            f"{msg} (runs={count})" for msg, count in telemetry_error_counts.items()
+        )
+        warnings.append(f"provider telemetry errors detected: {issues}")
+    if missing_telemetry_runs and not telemetry_error_counts:
+        warnings.append(
+            f"provider telemetry payload missing in {missing_telemetry_runs} run(s)"
+        )
+    if device_info is None and missing_device_runs:
+        warnings.append(
+            "no GPU device information recorded; verify WGPU-enabled build is in use"
+        )
+    if warnings:
+        summary["warnings"] = warnings
 
     return summary
 
