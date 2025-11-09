@@ -121,7 +121,7 @@ impl BindGroupCache {
         for entry in entries {
             match &entry.resource {
                 wgpu::BindingResource::Buffer(buffer_binding) => {
-                    let buffer_ptr = buffer_binding.buffer.global_id().inner() as usize;
+                    let buffer_ptr = buffer_binding.buffer as *const wgpu::Buffer as usize;
                     let size = buffer_binding.size.map(|v| v.get());
                     log::debug!(
                         "bind_group_cache key binding={} ptr={:#x} offset={} size={:?}",
@@ -137,7 +137,12 @@ impl BindGroupCache {
                         size,
                     });
                 }
-                _ => {
+                other => {
+                    log::debug!(
+                        "bind_group_cache unsupported resource at binding {}: {:?}",
+                        entry.binding,
+                        other
+                    );
                     return None;
                 }
             }

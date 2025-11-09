@@ -50,16 +50,19 @@ impl BufferResidency {
         len: usize,
         element_size: usize,
         label: &str,
-    ) -> Arc<wgpu::Buffer> {
+    ) -> (Arc<wgpu::Buffer>, bool) {
         if len == 0 {
-            return Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
-                size: element_size.max(1) as u64,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            return (
+                Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: element_size.max(1) as u64,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })),
+                false,
+            );
         }
 
         let key = ResidencyKey::new(usage, len);
@@ -72,7 +75,7 @@ impl BufferResidency {
                         len,
                         Arc::as_ptr(&buffer)
                     );
-                    return buffer;
+                    return (buffer, true);
                 }
             }
         }
@@ -92,7 +95,7 @@ impl BufferResidency {
             len,
             Arc::as_ptr(&buffer)
         );
-        buffer
+        (buffer, false)
     }
 
     pub fn release(&self, usage: BufferUsageClass, len: usize, buffer: Arc<wgpu::Buffer>) {

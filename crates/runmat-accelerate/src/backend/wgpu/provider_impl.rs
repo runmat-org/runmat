@@ -1605,14 +1605,6 @@ impl WgpuProvider {
     ) -> Result<Arc<wgpu::Buffer>> {
         // Centralised guard + warning for oversized allocations
         let size_bytes = (len as u64) * self.element_size as u64;
-        if size_bytes >= (256u64 << 20) {
-            log::warn!(
-                "{}: large GPU allocation ({} bytes) len={} elems",
-                label,
-                size_bytes,
-                len
-            );
-        }
         if size_bytes > (self.adapter_limits.max_buffer_size as u64) {
             return Err(anyhow!(
                 "{}: requested {} bytes exceeds device max {}",
@@ -1621,7 +1613,16 @@ impl WgpuProvider {
                 self.adapter_limits.max_buffer_size
             ));
         }
-        Ok(self.create_storage_buffer_for_usage(usage, len, label))
+        let (buffer, reused) = self.create_storage_buffer_for_usage(usage, len, label);
+        if !reused && size_bytes >= (256u64 << 20) {
+            log::warn!(
+                "{}: large GPU allocation ({} bytes) len={} elems",
+                label,
+                size_bytes,
+                len
+            );
+        }
+        Ok(buffer)
     }
 
     fn create_storage_buffer_checked(&self, len: usize, label: &str) -> Result<Arc<wgpu::Buffer>> {
@@ -2097,13 +2098,14 @@ impl WgpuProvider {
         usage: BufferUsageClass,
         len: usize,
         label: &str,
-    ) -> Arc<wgpu::Buffer> {
+    ) -> (Arc<wgpu::Buffer>, bool) {
         self.buffer_residency
             .acquire(self.device_ref(), usage, len, self.element_size, label)
     }
 
     fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
         self.create_storage_buffer_for_usage(BufferUsageClass::Generic, len, label)
+            .0
     }
 
     fn uniform_buffer<T: Pod>(&self, data: &T, label: &str) -> wgpu::Buffer {
@@ -2308,7 +2310,7 @@ impl WgpuProvider {
             .iter()
             .map(|h| self.get_entry(h))
             .collect::<Result<Vec<_>>>()?;
-        let output_buffer = self.create_storage_buffer_for_usage(
+        let (output_buffer, _) = self.create_storage_buffer_for_usage(
             BufferUsageClass::FusionOut,
             len,
             "runmat-fusion-output",
@@ -5580,7 +5582,7 @@ impl WgpuProvider {
         let out_shape = vec![m, n];
         let len = m * n;
         if len == 0 {
-            let out_buffer = self.create_storage_buffer_for_usage(
+            let (out_buffer, _) = self.create_storage_buffer_for_usage(
                 BufferUsageClass::MatmulOut,
                 0,
                 "runmat-matmul-out",
