@@ -82,13 +82,16 @@ impl BindGroupCache {
                     .and_then(|map| map.get(&key).cloned())
                 {
                     self.hits.fetch_add(1, Ordering::Relaxed);
+                    log::debug!("bind_group_cache hit layout_ptr={:#x}", key.layout_ptr);
                     return existing;
                 }
                 let bind_group = create();
+                let layout_ptr = key.layout_ptr;
                 if let Ok(mut map) = self.inner.lock() {
                     map.insert(key, bind_group.clone());
                 }
                 self.misses.fetch_add(1, Ordering::Relaxed);
+                log::debug!("bind_group_cache miss layout_ptr={:#x}", layout_ptr);
                 bind_group
             }
             None => {
@@ -120,6 +123,13 @@ impl BindGroupCache {
                 wgpu::BindingResource::Buffer(buffer_binding) => {
                     let buffer_ptr = buffer_binding.buffer.global_id().inner() as usize;
                     let size = buffer_binding.size.map(|v| v.get());
+                    log::debug!(
+                        "bind_group_cache key binding={} ptr={:#x} offset={} size={:?}",
+                        entry.binding,
+                        buffer_ptr,
+                        buffer_binding.offset,
+                        size
+                    );
                     bindings.push(BindingKey {
                         binding: entry.binding,
                         buffer_ptr,

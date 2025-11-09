@@ -61,6 +61,7 @@ use crate::backend::wgpu::params::{
     SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
+use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::resources::{KernelResourceRegistry, UniformBufferKey};
 use crate::backend::wgpu::types::NumericPrecision;
 use crate::host_lu::{lu_factor_host, LuHostFactors};
@@ -89,7 +90,7 @@ pub struct WgpuProvider {
     adapter_info: wgpu::AdapterInfo,
     adapter_limits: wgpu::Limits,
     buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
-    buffer_pool: Mutex<HashMap<usize, Vec<Arc<wgpu::Buffer>>>>, // reuse storage buffers by element count
+    buffer_residency: BufferResidency,
     next_id: AtomicU64,
     pipelines: WgpuPipelines,
     device_id: u32,
@@ -115,6 +116,7 @@ struct BufferEntry {
     len: usize,
     shape: Vec<usize>,
     precision: NumericPrecision,
+    usage: BufferUsageClass,
 }
 
 #[derive(Clone, Copy)]
@@ -1593,9 +1595,14 @@ fn rng_state() -> &'static Mutex<u64> {
     RNG.get_or_init(|| Mutex::new(RNG_DEFAULT_SEED))
 }
 impl WgpuProvider {
-    const BUFFER_POOL_MAX_PER_SIZE: usize = 8;
+    const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
 
-    fn create_storage_buffer_checked(&self, len: usize, label: &str) -> Result<Arc<wgpu::Buffer>> {
+    fn create_storage_buffer_checked_with_usage(
+        &self,
+        len: usize,
+        label: &str,
+        usage: BufferUsageClass,
+    ) -> Result<Arc<wgpu::Buffer>> {
         // Centralised guard + warning for oversized allocations
         let size_bytes = (len as u64) * self.element_size as u64;
         if size_bytes >= (256u64 << 20) {
@@ -1614,7 +1621,11 @@ impl WgpuProvider {
                 self.adapter_limits.max_buffer_size
             ));
         }
-        Ok(self.create_storage_buffer(len, label))
+        Ok(self.create_storage_buffer_for_usage(usage, len, label))
+    }
+
+    fn create_storage_buffer_checked(&self, len: usize, label: &str) -> Result<Arc<wgpu::Buffer>> {
+        self.create_storage_buffer_checked_with_usage(len, label, BufferUsageClass::Generic)
     }
     pub fn device_id(&self) -> u32 {
         self.device_id
@@ -1962,7 +1973,7 @@ impl WgpuProvider {
             adapter_info,
             adapter_limits: limits.clone(),
             buffers: Mutex::new(HashMap::new()),
-            buffer_pool: Mutex::new(HashMap::new()),
+            buffer_residency: BufferResidency::new(Self::BUFFER_RESIDENCY_MAX_PER_KEY),
             next_id: AtomicU64::new(1),
             pipelines,
             device_id,
@@ -1988,6 +1999,16 @@ impl WgpuProvider {
         shape: Vec<usize>,
         len: usize,
     ) -> GpuTensorHandle {
+        self.register_existing_buffer_with_usage(buffer, shape, len, BufferUsageClass::Generic)
+    }
+
+    fn register_existing_buffer_with_usage(
+        &self,
+        buffer: Arc<wgpu::Buffer>,
+        shape: Vec<usize>,
+        len: usize,
+        usage: BufferUsageClass,
+    ) -> GpuTensorHandle {
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1996,6 +2017,7 @@ impl WgpuProvider {
             len,
             shape: shape.clone(),
             precision: self.precision,
+            usage,
         };
         self.buffers
             .lock()
@@ -2010,6 +2032,14 @@ impl WgpuProvider {
         runmat_accelerate_api::set_handle_logical(&handle, false);
         runmat_accelerate_api::clear_handle_transpose(&handle);
         handle
+    }
+
+    fn mark_buffer_usage(&self, handle: &GpuTensorHandle, usage: BufferUsageClass) {
+        if let Ok(mut guard) = self.buffers.lock() {
+            if let Some(entry) = guard.get_mut(&handle.buffer_id) {
+                entry.usage = usage;
+            }
+        }
     }
 
     fn trim_polynomial_handle(
@@ -2062,25 +2092,18 @@ impl WgpuProvider {
         Ok(new_handle)
     }
 
+    fn create_storage_buffer_for_usage(
+        &self,
+        usage: BufferUsageClass,
+        len: usize,
+        label: &str,
+    ) -> Arc<wgpu::Buffer> {
+        self.buffer_residency
+            .acquire(self.device_ref(), usage, len, self.element_size, label)
+    }
+
     fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
-        if len > 0 {
-            if let Ok(mut pool) = self.buffer_pool.lock() {
-                if let Some(list) = pool.get_mut(&len) {
-                    if let Some(buf) = list.pop() {
-                        return buf;
-                    }
-                }
-            }
-        }
-        let size_bytes = (len.max(1) as u64) * self.element_size as u64;
-        Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: size_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }))
+        self.create_storage_buffer_for_usage(BufferUsageClass::Generic, len, label)
     }
 
     fn uniform_buffer<T: Pod>(&self, data: &T, label: &str) -> wgpu::Buffer {
@@ -2159,6 +2182,7 @@ impl WgpuProvider {
                 len: entry.len,
                 shape: entry.shape.clone(),
                 precision: entry.precision,
+                usage: entry.usage,
             })
             .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
     }
@@ -2284,7 +2308,11 @@ impl WgpuProvider {
             .iter()
             .map(|h| self.get_entry(h))
             .collect::<Result<Vec<_>>>()?;
-        let output_buffer = self.create_storage_buffer(len, "runmat-fusion-output");
+        let output_buffer = self.create_storage_buffer_for_usage(
+            BufferUsageClass::FusionOut,
+            len,
+            "runmat-fusion-output",
+        );
         let bind_group_layout = self.cached_fusion_bind_group_layout(inputs.len());
         let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
             self.device_ref(),
@@ -2483,7 +2511,12 @@ impl WgpuProvider {
 
             offset_elems += chunk_len;
         }
-        Ok(self.register_existing_buffer(output_buffer, output_shape.to_vec(), len))
+        Ok(self.register_existing_buffer_with_usage(
+            output_buffer,
+            output_shape.to_vec(),
+            len,
+            BufferUsageClass::FusionOut,
+        ))
     }
     pub(crate) fn fused_reduction_exec(
         &self,
@@ -3137,7 +3170,12 @@ impl WgpuProvider {
             return Err(err);
         }
 
-        Ok(self.register_existing_buffer(output_buffer, output_shape.to_vec(), len))
+        Ok(self.register_existing_buffer_with_usage(
+            output_buffer,
+            output_shape.to_vec(),
+            len,
+            BufferUsageClass::FusionOut,
+        ))
     }
 
     pub(crate) fn ind2sub_exec(
@@ -5409,9 +5447,18 @@ impl WgpuProvider {
             .checked_mul(cols)
             .ok_or_else(|| anyhow!("syrk: output size overflow"))?;
 
-        let out_buffer = self.create_storage_buffer_checked(len, "runmat-syrk-out")?;
+        let out_buffer = self.create_storage_buffer_checked_with_usage(
+            len,
+            "runmat-syrk-out",
+            BufferUsageClass::SyrkOut,
+        )?;
         if len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+            return Ok(self.register_existing_buffer_with_usage(
+                out_buffer,
+                out_shape,
+                0,
+                BufferUsageClass::SyrkOut,
+            ));
         }
 
         let rows_u32 =
@@ -5425,11 +5472,12 @@ impl WgpuProvider {
         let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(cols_u32, tile);
         let groups_y = groups_x;
 
+        const SYRK_ROW_CHUNK: usize = 32768;
         let mut offset = 0usize;
         let mut first_chunk = true;
         while offset < rows {
             let remaining = rows - offset;
-            let chunk_rows = remaining;
+            let chunk_rows = remaining.min(SYRK_ROW_CHUNK.max(1));
             let chunk_rows_u32 = u32::try_from(chunk_rows)
                 .map_err(|_| anyhow!("syrk: chunk rows exceed GPU limits"))?;
             let row_offset_u32 = u32::try_from(offset)
@@ -5499,7 +5547,12 @@ impl WgpuProvider {
             first_chunk = false;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
+        Ok(self.register_existing_buffer_with_usage(
+            out_buffer,
+            out_shape,
+            len,
+            BufferUsageClass::SyrkOut,
+        ))
     }
 
     pub(crate) fn matmul_exec(
@@ -5527,8 +5580,17 @@ impl WgpuProvider {
         let out_shape = vec![m, n];
         let len = m * n;
         if len == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-matmul-out");
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+            let out_buffer = self.create_storage_buffer_for_usage(
+                BufferUsageClass::MatmulOut,
+                0,
+                "runmat-matmul-out",
+            );
+            return Ok(self.register_existing_buffer_with_usage(
+                out_buffer,
+                out_shape,
+                0,
+                BufferUsageClass::MatmulOut,
+            ));
         }
 
         let m_u32 = u32::try_from(m).map_err(|_| anyhow!("matmul: m exceeds GPU limits"))?;
@@ -5557,11 +5619,15 @@ impl WgpuProvider {
             // Accumulator handle across chunks
             let mut acc: Option<GpuTensorHandle> = None;
             let mut k_off: usize = 0;
+            let partial_storage = self.create_storage_buffer_checked_with_usage(
+                len,
+                "runmat-matmul-partial",
+                BufferUsageClass::MatmulPartial,
+            )?;
             while k_off < k {
                 let k_sub = std::cmp::min(K_CHUNK, k - k_off);
                 // Create partial output buffer and bind group
-                let partial_buffer =
-                    self.create_storage_buffer_checked(len, "runmat-matmul-partial")?;
+                let partial_buffer = partial_storage.clone();
                 let offset_a_elems = k_off
                     .checked_mul(view_a.rows)
                     .ok_or_else(|| anyhow!("matmul: offset overflow"))?;
@@ -5633,20 +5699,35 @@ impl WgpuProvider {
                     groups_y,
                 );
                 // Wrap partial buffer into handle
-                let partial = self.register_existing_buffer(partial_buffer, out_shape.clone(), len);
+                let partial = self.register_existing_buffer_with_usage(
+                    partial_buffer,
+                    out_shape.clone(),
+                    len,
+                    BufferUsageClass::MatmulPartial,
+                );
                 acc = match acc {
                     None => Some(partial),
-                    Some(prev) => Some(self.elem_add(&prev, &partial)?),
+                    Some(prev) => {
+                        let sum = self.elem_add(&prev, &partial)?;
+                        self.free(&prev).ok();
+                        self.free(&partial).ok();
+                        Some(sum)
+                    }
                 };
                 k_off += k_sub;
             }
             let handle = acc.expect("matmul chunking produced no output");
+            self.mark_buffer_usage(&handle, BufferUsageClass::MatmulOut);
             self.telemetry.record_matmul_duration(start.elapsed());
             return Ok(handle);
         }
 
         // Default single-dispatch path
-        let out_buffer = self.create_storage_buffer_checked(len, "runmat-matmul-out")?;
+        let out_buffer = self.create_storage_buffer_checked_with_usage(
+            len,
+            "runmat-matmul-out",
+            BufferUsageClass::MatmulOut,
+        )?;
         if use_vec4 {
             self.prepare_matmul_vec4_pipeline();
         } else {
@@ -5736,7 +5817,12 @@ impl WgpuProvider {
             groups_x,
             groups_y,
         );
-        let handle = self.register_existing_buffer(out_buffer, out_shape, len);
+        let handle = self.register_existing_buffer_with_usage(
+            out_buffer,
+            out_shape,
+            len,
+            BufferUsageClass::MatmulOut,
+        );
         self.telemetry.record_matmul_duration(start.elapsed());
         Ok(handle)
     }
@@ -11363,8 +11449,11 @@ impl AccelProvider for WgpuProvider {
                     gamma: desc.gamma.unwrap_or(1.0) as f32,
                 };
 
-                let out_buffer =
-                    self.create_storage_buffer_checked(entry.len, "runmat-image-normalize-out")?;
+                let out_buffer = self.create_storage_buffer_checked_with_usage(
+                    entry.len,
+                    "runmat-image-normalize-out",
+                    BufferUsageClass::FusionOut,
+                )?;
                 let uniform_buf = self.kernel_resources.uniform_buffer(
                     self.device_ref(),
                     UniformBufferKey::ImageNormalizeUniforms,
@@ -11408,7 +11497,12 @@ impl AccelProvider for WgpuProvider {
                     batches_u32,
                 );
 
-                Ok(self.register_existing_buffer(out_buffer, entry.shape.clone(), entry.len))
+                Ok(self.register_existing_buffer_with_usage(
+                    out_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                    BufferUsageClass::FusionOut,
+                ))
             }
         }
     }
@@ -12560,20 +12654,11 @@ impl AccelProvider for WgpuProvider {
         if let Some(entry) = guard.remove(&h.buffer_id) {
             if entry.len > 0 {
                 if Arc::strong_count(&entry.buffer) == 1 {
-                    let mut pool = self.buffer_pool.lock().expect("buffer pool mutex poisoned");
-                    let list = pool.entry(entry.len).or_default();
-                    if list.len() < Self::BUFFER_POOL_MAX_PER_SIZE {
-                        list.push(entry.buffer.clone());
-                    } else {
-                        // Drop buffer instead of pooling to cap memory footprint
-                        log::trace!(
-                            "buffer_pool: dropping buffer (len={} elems) due to pool cap",
-                            entry.len
-                        );
-                    }
+                    self.buffer_residency
+                        .release(entry.usage, entry.len, entry.buffer.clone());
                 } else {
                     log::trace!(
-                        "buffer_pool: not pooling buffer id={} len={} due to outstanding views",
+                        "buffer_residency: not pooling buffer id={} len={} due to outstanding views",
                         h.buffer_id,
                         entry.len
                     );

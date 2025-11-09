@@ -81,3 +81,29 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     assert_eq!(reset.fused_elementwise.count, 0);
     assert_eq!(reset.matmul.count, 0);
 }
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn telemetry_records_bind_group_cache_hits_for_chunked_matmul() {
+    let provider = register_provider();
+    provider.reset_telemetry();
+
+    let m = 32usize;
+    let n = 32usize;
+    let k = 131_072usize; // ensure chunked path (K_CHUNK_SWITCH = 65536)
+
+    let a = provider.zeros(&[m, k]).expect("zeros a");
+    let b = provider.zeros(&[k, n]).expect("zeros b");
+    let c = provider.matmul(&a, &b).expect("matmul");
+
+    let telemetry = provider.telemetry_snapshot();
+    assert!(
+        telemetry.bind_group_cache_hits > 0,
+        "expected bind group cache hits > 0 for chunked matmul, got {}",
+        telemetry.bind_group_cache_hits
+    );
+
+    let _ = provider.free(&a);
+    let _ = provider.free(&b);
+    let _ = provider.free(&c);
+}
