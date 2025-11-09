@@ -6088,34 +6088,38 @@ impl WgpuProvider {
             return self.fill_exec(&[cols, cols], f64::NAN);
         }
 
+        // Column means (1 x cols)
         let means = self.reduce_dim_sum_mean_exec(
             matrix,
             0,
             crate::backend::wgpu::types::DimReduceOp::Mean,
         )?;
-        let ones = self.fill_exec(&[rows, 1], 1.0)?;
-        let means_full = self.matmul_exec(&ones, &means)?;
-        let _ = self.free(&ones);
-        let centered = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Sub,
-            matrix,
-            &means_full,
-        )?;
-        let _ = self.free(&means);
-        let _ = self.free(&means_full);
-        let centered_t = self.transpose_exec(&centered)?;
-        let covariance = self.matmul_exec(&centered_t, &centered)?;
-        let _ = self.free(&centered);
-        let _ = self.free(&centered_t);
 
-        let inv_cov = self.fill_exec(&covariance.shape, 1.0 / denom)?;
-        let covariance_scaled = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Mul,
-            &covariance,
-            &inv_cov,
+        // Gram matrix without centering: (cols x rows) * (rows x cols) = (cols x cols)
+        let matrix_t = self.transpose_exec(matrix)?;
+        let gram = self.matmul_exec(&matrix_t, matrix)?;
+        let _ = self.free(&matrix_t);
+
+        // Outer product μ μᵀ scaled by row count
+        let means_t = self.transpose_exec(&means)?;
+        let means_outer = self.matmul_exec(&means_t, &means)?;
+        let _ = self.free(&means_t);
+        let means_outer_scaled = self.scalar_mul(&means_outer, rows as f64)?;
+        let _ = self.free(&means_outer);
+        let _ = self.free(&means);
+
+        // Centered Gram: G - n μ μᵀ
+        let centered_gram = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Sub,
+            &gram,
+            &means_outer_scaled,
         )?;
-        let _ = self.free(&covariance);
-        let _ = self.free(&inv_cov);
+        let _ = self.free(&gram);
+        let _ = self.free(&means_outer_scaled);
+
+        // Apply normalization
+        let covariance_scaled = self.scalar_mul(&centered_gram, 1.0 / denom)?;
+        let _ = self.free(&centered_gram);
 
         let mut host_cov = self.download(&covariance_scaled)?;
         let rows_out = host_cov.shape.get(0).copied().unwrap_or(cols);

@@ -627,6 +627,8 @@ impl FusionGroupPlan {
         // For reduction groups, externalize only real tensor dependencies; keep constants separate
         if plan.group.kind.is_reduction() {
             if let Some(data_vid) = plan.reduction_data {
+                let original_inputs = plan.inputs.clone();
+                let original_stack_pattern = plan.stack_pattern.clone();
                 // Record constant ValueIds for codegen
                 // Build dependency map from op outputs to inputs
                 let mut prod: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
@@ -652,13 +654,26 @@ impl FusionGroupPlan {
                         }
                     }
                 }
-                let original_inputs = plan.inputs.clone();
                 let mut deps: Vec<ValueId> = Vec::new();
                 let mut visited: HashSet<ValueId> = HashSet::new();
                 let mut stack: Vec<ValueId> = vec![data_vid];
                 while let Some(cur) = stack.pop() {
                     if !visited.insert(cur) {
                         continue;
+                    }
+                    if graph.var_binding(cur).is_some() {
+                        if !deps.contains(&cur) {
+                            deps.push(cur);
+                        }
+                        continue;
+                    }
+                    if let Some(info) = graph.value(cur) {
+                        if matches!(info.origin, ValueOrigin::Variable { .. }) {
+                            if !deps.contains(&cur) {
+                                deps.push(cur);
+                            }
+                            continue;
+                        }
                     }
                     if original_inputs.contains(&cur) {
                         if !deps.contains(&cur) {
@@ -673,7 +688,48 @@ impl FusionGroupPlan {
                     }
                 }
                 plan.inputs = deps;
-                plan.stack_pattern.clear();
+
+                // Rebuild stack pattern based on the dependencies that were previously sourced
+                // from the execution stack.
+                let mut new_stack_pattern: Vec<usize> = Vec::new();
+                for (new_idx, vid) in plan.inputs.iter().enumerate() {
+                    if let Some(old_idx) = original_inputs.iter().position(|v| v == vid) {
+                        if original_stack_pattern.contains(&old_idx) {
+                            new_stack_pattern.push(new_idx);
+                        }
+                    }
+                }
+
+                // Rebuild constants map using the new input ordering.
+                let mut new_constants: HashMap<usize, Value> = HashMap::new();
+                for (idx, vid) in plan.inputs.iter().enumerate() {
+                    if let Some(value) = plan.const_values.get(vid) {
+                        new_constants.insert(idx, value.clone());
+                    } else if let Some(info) = graph.value(*vid) {
+                        if let Some(cv) = info.constant.clone() {
+                            new_constants.insert(idx, cv);
+                        }
+                    }
+                }
+                plan.constants = new_constants;
+
+                if new_stack_pattern.is_empty() {
+                    for (idx, vid) in plan.inputs.iter().enumerate() {
+                        if plan.constants.contains_key(&idx) {
+                            continue;
+                        }
+                        if let Some(info) = graph.value(*vid) {
+                            if matches!(
+                                info.origin,
+                                ValueOrigin::Variable { .. } | ValueOrigin::Constant
+                            ) {
+                                continue;
+                            }
+                        }
+                        new_stack_pattern.push(idx);
+                    }
+                }
+                plan.stack_pattern = new_stack_pattern;
             }
         }
 
@@ -686,6 +742,32 @@ impl FusionGroupPlan {
             true
         };
         plan.kernel.supported = plan.kernel.supported && supported;
+
+        if matches!(plan.group.kind, FusionKind::CenteredGram) && plan.stack_pattern.is_empty() {
+            let mut centered_stack_idxs: Vec<usize> = Vec::new();
+            for (idx, vid) in plan.inputs.iter().enumerate() {
+                if plan.constants.contains_key(&idx) {
+                    continue;
+                }
+                if let Some(info) = graph.value(*vid) {
+                    if matches!(info.origin, ValueOrigin::NodeOutput { .. }) {
+                        centered_stack_idxs.push(idx);
+                        continue;
+                    }
+                    if matches!(info.origin, ValueOrigin::Variable { .. }) {
+                        continue;
+                    }
+                }
+                centered_stack_idxs.push(idx);
+            }
+            if centered_stack_idxs.is_empty() && !plan.inputs.is_empty() {
+                centered_stack_idxs.push(0);
+            }
+            plan.stack_pattern = centered_stack_idxs;
+        }
+
+        // If the plan requires any unsupported operations, mark kernel as unsupported
+
         plan
     }
 
