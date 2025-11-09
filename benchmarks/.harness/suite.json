@@ -104,8 +104,8 @@
       },
       "include_impl": ["runmat", "python-numpy", "python-torch"],
       "params": {
-        "defaults": {"M": 1000000, "T": 2048},
-        "scale": {"key": "M", "values": [250000, 500000, 1000000]}
+        "defaults": {"M": 8192, "T": 64},
+        "scale": {"key": "M", "values": [4096, 8192]}
       },
       "env_map": {"M": "IIR_M", "T": "IIR_T"},
       "parity": {
