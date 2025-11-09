@@ -61,6 +61,7 @@ use crate::backend::wgpu::params::{
     SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
+use crate::backend::wgpu::resources::{KernelResourceRegistry, UniformBufferKey};
 use crate::backend::wgpu::types::NumericPrecision;
 use crate::host_lu::{lu_factor_host, LuHostFactors};
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
@@ -97,6 +98,7 @@ pub struct WgpuProvider {
     fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
     bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
     bind_group_cache: BindGroupCache,
+    kernel_resources: KernelResourceRegistry,
     metrics: crate::backend::wgpu::metrics::WgpuMetrics,
     telemetry: AccelTelemetry,
     reduction_two_pass_threshold: usize,
@@ -1969,6 +1971,7 @@ impl WgpuProvider {
             fused_pipeline_cache: Mutex::new(HashMap::new()),
             bind_group_layout_cache: Mutex::new(HashMap::new()),
             bind_group_cache: BindGroupCache::new(),
+            kernel_resources: KernelResourceRegistry::new(),
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::new(),
             telemetry: AccelTelemetry::new(),
             reduction_two_pass_threshold: two_pass_threshold,
@@ -5447,33 +5450,47 @@ impl WgpuProvider {
                 flags,
                 offset_out: 0,
             };
-            let params_buffer = self.uniform_buffer(&params, "runmat-syrk-params");
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                self.device_ref(),
+                UniformBufferKey::SyrkParams,
+                std::mem::size_of::<crate::backend::wgpu::params::SyrkParams>() as u64,
+                "runmat-syrk-params",
+            );
+            self.queue
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            let bind_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: entry.buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ];
+            let layout = &self.pipelines.syrk.layout;
             let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-syrk-bind"),
-                    layout: &self.pipelines.syrk.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
+                .bind_group_cache
+                .get_or_create(layout, &bind_entries, || {
+                    Arc::new(
+                        self.device_ref()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-syrk-bind"),
+                                layout,
+                                entries: &bind_entries,
+                            }),
+                    )
                 });
 
             crate::backend::wgpu::dispatch::syrk::run(
                 self.device_ref(),
                 self.queue_ref(),
                 &self.pipelines.syrk.pipeline,
-                &bind_group,
+                bind_group.as_ref(),
                 groups_x,
                 groups_y,
             );
@@ -5564,31 +5581,44 @@ impl WgpuProvider {
                     offset_out: 0,
                     flags: 0,
                 };
-                let params_buffer = self.uniform_buffer(&params, "runmat-matmul-params");
-                let bg = self
-                    .device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-matmul-bind"),
-                        layout: &self.pipelines.matmul.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry_a.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: entry_b.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: partial_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
+                let params_buffer = self.kernel_resources.uniform_buffer(
+                    self.device_ref(),
+                    UniformBufferKey::MatmulParams,
+                    std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
+                    "runmat-matmul-params",
+                );
+                self.queue
+                    .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+                let bind_entries = [
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry_a.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: entry_b.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: partial_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ];
+                let layout = &self.pipelines.matmul.layout;
+                let bg =
+                    self.bind_group_cache
+                        .get_or_create(layout, &bind_entries, || {
+                            Arc::new(self.device_ref().create_bind_group(
+                                &wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-matmul-bind"),
+                                    layout,
+                                    entries: &bind_entries,
+                                },
+                            ))
+                        });
                 let tile = crate::backend::wgpu::config::effective_matmul_tile();
                 let groups_x =
                     crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
@@ -5598,7 +5628,7 @@ impl WgpuProvider {
                     self.device_ref(),
                     self.queue_ref(),
                     &self.pipelines.matmul.pipeline,
-                    &bg,
+                    bg.as_ref(),
                     groups_x,
                     groups_y,
                 );
@@ -5642,7 +5672,14 @@ impl WgpuProvider {
             offset_out: 0,
             flags,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-matmul-params");
+        let params_buffer = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            UniformBufferKey::MatmulParams,
+            std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
+            "runmat-matmul-params",
+        );
+        self.queue
+            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
         let layout = if use_vec4 {
             &self.pipelines.matmul_vec4.layout
         } else {
@@ -5653,29 +5690,35 @@ impl WgpuProvider {
         } else {
             &self.pipelines.matmul.pipeline
         };
+        let bind_entries = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: entry_a.buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: entry_b.buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: out_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buffer.as_entire_binding(),
+            },
+        ];
         let bg = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-matmul-bind"),
-                layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry_a.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: entry_b.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
+            .bind_group_cache
+            .get_or_create(layout, &bind_entries, || {
+                Arc::new(
+                    self.device_ref()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-matmul-bind"),
+                            layout,
+                            entries: &bind_entries,
+                        }),
+                )
             });
         let tile = crate::backend::wgpu::config::effective_matmul_tile();
         let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
@@ -5689,7 +5732,7 @@ impl WgpuProvider {
             self.device_ref(),
             self.queue_ref(),
             pipeline,
-            &bg,
+            bg.as_ref(),
             groups_x,
             groups_y,
         );
@@ -11322,32 +11365,46 @@ impl AccelProvider for WgpuProvider {
 
                 let out_buffer =
                     self.create_storage_buffer_checked(entry.len, "runmat-image-normalize-out")?;
-                let uniform_buf = self.uniform_buffer(&uniforms, "runmat-image-normalize-uniform");
-
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-image-normalize-bind"),
-                    layout: &self.pipelines.image_normalize.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: uniform_buf.as_entire_binding(),
-                        },
-                    ],
-                });
+                let uniform_buf = self.kernel_resources.uniform_buffer(
+                    self.device_ref(),
+                    UniformBufferKey::ImageNormalizeUniforms,
+                    std::mem::size_of::<ImageNormalizeUniforms>() as u64,
+                    "runmat-image-normalize-uniform",
+                );
+                self.queue
+                    .write_buffer(uniform_buf.as_ref(), 0, bytes_of(&uniforms));
+                let bind_entries = [
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform_buf.as_entire_binding(),
+                    },
+                ];
+                let layout = &self.pipelines.image_normalize.layout;
+                let bind_group =
+                    self.bind_group_cache
+                        .get_or_create(layout, &bind_entries, || {
+                            Arc::new(self.device_ref().create_bind_group(
+                                &wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-image-normalize-bind"),
+                                    layout,
+                                    entries: &bind_entries,
+                                },
+                            ))
+                        });
 
                 crate::backend::wgpu::dispatch::image_normalize::run(
                     self.device_ref(),
                     self.queue_ref(),
                     &self.pipelines.image_normalize,
-                    &bind_group,
+                    bind_group.as_ref(),
                     batches_u32,
                 );
 

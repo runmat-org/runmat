@@ -8,6 +8,7 @@ pub mod params;
 pub mod pipelines;
 pub mod provider;
 pub mod provider_impl;
+pub mod resources;
 pub mod shaders;
 pub mod types;
 pub mod warmup;
