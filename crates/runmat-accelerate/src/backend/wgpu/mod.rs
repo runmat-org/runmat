@@ -13,3 +13,6 @@ pub mod resources;
 pub mod shaders;
 pub mod types;
 pub mod warmup;
+
+#[cfg(test)]
+mod tests;

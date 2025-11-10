@@ -15,10 +15,10 @@ use runmat_accelerate_api::{
     ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult,
     ProviderMeshgridResult, ProviderNanMode, ProviderNormOrder, ProviderPinvOptions,
     ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision,
-    ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
-    ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult, SetdiffOptions, SetdiffResult,
-    SortComparison, SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult,
-    UniqueOptions, UniqueResult,
+    ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult,
+    ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
+    SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult, SortRowsColumnSpec,
+    UnionOptions, UnionResult, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -72,6 +72,37 @@ use crate::telemetry::AccelTelemetry;
 pub struct WgpuProviderOptions {
     pub power_preference: wgpu::PowerPreference,
     pub force_fallback_adapter: bool,
+}
+
+pub(crate) fn invert_upper_triangular(data: &[f64], n: usize) -> Result<Vec<f64>> {
+    let mut inv = vec![0.0f64; n * n];
+    let idx = |row: usize, col: usize| -> usize { row + col * n };
+    for j in 0..n {
+        let diag = data[idx(j, j)];
+        if diag.abs() <= f64::EPSILON {
+            return Err(anyhow!(
+                "qr_power_iter: singular diagonal encountered while inverting R"
+            ));
+        }
+        inv[idx(j, j)] = 1.0 / diag;
+        if j == 0 {
+            continue;
+        }
+        for i in (0..j).rev() {
+            let mut sum = 0.0;
+            for k in (i + 1)..=j {
+                sum += data[idx(i, k)] * inv[idx(k, j)];
+            }
+            let diag_ii = data[idx(i, i)];
+            if diag_ii.abs() <= f64::EPSILON {
+                return Err(anyhow!(
+                    "qr_power_iter: singular diagonal encountered while inverting R"
+                ));
+            }
+            inv[idx(i, j)] = -sum / diag_ii;
+        }
+    }
+    Ok(inv)
 }
 
 impl Default for WgpuProviderOptions {
@@ -645,7 +676,6 @@ const LOGICAL_OR_SHADER_F64: &str = r#"
 struct Tensor {
     data: array<f64>,
 };
-
 struct Params {
     len: u32,
     _pad0: u32,
@@ -1223,7 +1253,7 @@ fn filter_state_shape(mut base: Vec<usize>, dim_idx: usize, state_len: usize) ->
     base
 }
 
-fn host_tensor_from_value(label: &str, value: Value) -> Result<Tensor> {
+pub(crate) fn host_tensor_from_value(label: &str, value: Value) -> Result<Tensor> {
     match value {
         Value::Tensor(tensor) => Ok(tensor),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| anyhow!("{label}: {e}")),
@@ -1445,11 +1475,9 @@ fn stride_after_for(shape: &[usize], dim: usize) -> usize {
         .copied()
         .fold(1usize, |acc, extent| acc.saturating_mul(extent.max(1)))
 }
-
 fn dimension_length_zero_based(shape: &[usize], dim: usize) -> usize {
     shape.get(dim).copied().unwrap_or(1)
 }
-
 fn compare_values_for_sort(
     a: f64,
     b: f64,
@@ -2033,6 +2061,25 @@ impl WgpuProvider {
         runmat_accelerate_api::set_handle_logical(&handle, false);
         runmat_accelerate_api::clear_handle_transpose(&handle);
         handle
+    }
+
+    fn remember_matmul_sources(
+        &self,
+        product: &GpuTensorHandle,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+    ) {
+        if lhs.device_id != self.device_id || rhs.device_id != self.device_id {
+            return;
+        }
+        log::debug!(
+            "remember_matmul_sources: product={} lhs={} rhs={}",
+            product.buffer_id,
+            lhs.buffer_id,
+            rhs.buffer_id
+        );
+        self.kernel_resources
+            .remember_matmul_sources(product, lhs, rhs);
     }
 
     fn mark_buffer_usage(&self, handle: &GpuTensorHandle, usage: BufferUsageClass) {
@@ -5562,6 +5609,15 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        self.matmul_exec_with_usage(a, b, BufferUsageClass::MatmulOut)
+    }
+
+    fn matmul_exec_with_usage(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        out_usage: BufferUsageClass,
+    ) -> Result<GpuTensorHandle> {
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 {
@@ -5582,17 +5638,11 @@ impl WgpuProvider {
         let out_shape = vec![m, n];
         let len = m * n;
         if len == 0 {
-            let (out_buffer, _) = self.create_storage_buffer_for_usage(
-                BufferUsageClass::MatmulOut,
-                0,
-                "runmat-matmul-out",
+            let (out_buffer, _) =
+                self.create_storage_buffer_for_usage(out_usage, 0, "runmat-matmul-out");
+            return Ok(
+                self.register_existing_buffer_with_usage(out_buffer, out_shape, 0, out_usage)
             );
-            return Ok(self.register_existing_buffer_with_usage(
-                out_buffer,
-                out_shape,
-                0,
-                BufferUsageClass::MatmulOut,
-            ));
         }
 
         let m_u32 = u32::try_from(m).map_err(|_| anyhow!("matmul: m exceeds GPU limits"))?;
@@ -5719,17 +5769,15 @@ impl WgpuProvider {
                 k_off += k_sub;
             }
             let handle = acc.expect("matmul chunking produced no output");
-            self.mark_buffer_usage(&handle, BufferUsageClass::MatmulOut);
+            self.remember_matmul_sources(&handle, a, b);
+            self.mark_buffer_usage(&handle, out_usage);
             self.telemetry.record_matmul_duration(start.elapsed());
             return Ok(handle);
         }
 
         // Default single-dispatch path
-        let out_buffer = self.create_storage_buffer_checked_with_usage(
-            len,
-            "runmat-matmul-out",
-            BufferUsageClass::MatmulOut,
-        )?;
+        let out_buffer =
+            self.create_storage_buffer_checked_with_usage(len, "runmat-matmul-out", out_usage)?;
         if use_vec4 {
             self.prepare_matmul_vec4_pipeline();
         } else {
@@ -5819,12 +5867,9 @@ impl WgpuProvider {
             groups_x,
             groups_y,
         );
-        let handle = self.register_existing_buffer_with_usage(
-            out_buffer,
-            out_shape,
-            len,
-            BufferUsageClass::MatmulOut,
-        );
+        let handle =
+            self.register_existing_buffer_with_usage(out_buffer, out_shape, len, out_usage);
+        self.remember_matmul_sources(&handle, a, b);
         self.telemetry.record_matmul_duration(start.elapsed());
         Ok(handle)
     }
@@ -6106,9 +6151,9 @@ impl WgpuProvider {
         let means_t = self.transpose_exec(&means)?;
         let means_outer = self.matmul_exec(&means_t, &means)?;
         let _ = self.free(&means_t);
+        let _ = self.free(&means);
         let means_outer_scaled = self.scalar_mul(&means_outer, rows as f64)?;
         let _ = self.free(&means_outer);
-        let _ = self.free(&means);
 
         // Centered Gram: G - n μ μᵀ
         let centered_gram = self.binary_op_exec(
@@ -7738,7 +7783,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
     }
-
     pub(crate) fn random_integer_range_exec(
         &self,
         lower: i64,
@@ -8532,7 +8576,6 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, vec![size, size], total))
     }
-
     pub(crate) fn diag_extract_exec(
         &self,
         matrix: &GpuTensorHandle,
@@ -9308,7 +9351,6 @@ impl WgpuProvider {
             .record_fused_elementwise_duration(start.elapsed());
         Ok(handle)
     }
-
     pub(crate) fn scalar_op_exec(
         &self,
         op: crate::backend::wgpu::types::ScalarOpCode,
@@ -10892,7 +10934,6 @@ impl AccelProvider for WgpuProvider {
         eval.into_numeric_unique_result()
             .map_err(|e| anyhow!("unique: {e}"))
     }
-
     fn ismember(
         &self,
         a: &GpuTensorHandle,
@@ -11097,6 +11138,132 @@ impl AccelProvider for WgpuProvider {
             perm_matrix,
             perm_vector,
         })
+    }
+
+    fn take_matmul_sources(
+        &self,
+        product: &GpuTensorHandle,
+    ) -> Option<(GpuTensorHandle, GpuTensorHandle)> {
+        let res = self.kernel_resources.take_matmul_sources(product);
+        log::debug!(
+            "take_matmul_sources: product={} found={}",
+            product.buffer_id,
+            res.is_some()
+        );
+        res
+    }
+
+    fn qr_power_iter(
+        &self,
+        product: &GpuTensorHandle,
+        q_handle: &GpuTensorHandle,
+        options: &ProviderQrOptions,
+    ) -> Result<Option<ProviderQrPowerIterResult>> {
+        if !options.economy {
+            return Ok(None);
+        }
+
+        let product_entry = self.get_entry(product)?;
+        if product_entry.shape.len() != 2 {
+            return Ok(None);
+        }
+        let rows = product_entry.shape[0];
+        let cols = product_entry.shape[1];
+        if rows == 0 || cols == 0 {
+            return Ok(None);
+        }
+        let q_entry = self.get_entry(q_handle)?;
+        if q_entry.shape != product_entry.shape {
+            return Ok(None);
+        }
+
+        let product_t = self.transpose_exec(product)?;
+        let gram = self.matmul_exec_with_usage(&product_t, product, BufferUsageClass::FusionOut)?;
+        let _ = self.free(&product_t);
+
+        let gram_host = self.download(&gram)?;
+        let _ = self.free(&gram);
+
+        let tensor = Tensor::new(gram_host.data.clone(), gram_host.shape.clone())
+            .map_err(|e| anyhow!("{e}"))?;
+        let chol_eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+            Value::Tensor(tensor),
+            &[],
+        )
+        .map_err(|e| anyhow!("qr_power_iter: {e}"))?;
+        if chol_eval.flag_index() != 0 {
+            return Ok(None);
+        }
+
+        let r_tensor = host_tensor_from_value("qr_power_iter", chol_eval.factor())
+            .map_err(|e| anyhow!("{e}"))?;
+        let k = cols;
+        let r_data = r_tensor.data.clone();
+
+        let r_inv = invert_upper_triangular(&r_data, k).map_err(|e| anyhow!("{e}"))?;
+
+        let r_handle = self.upload(&HostTensorView {
+            data: &r_data,
+            shape: &r_tensor.shape,
+        })?;
+        let r_inv_handle = self.upload(&HostTensorView {
+            data: &r_inv,
+            shape: &r_tensor.shape,
+        })?;
+
+        let q_temp =
+            self.matmul_exec_with_usage(product, &r_inv_handle, BufferUsageClass::FusionOut)?;
+        let _ = self.free(&r_inv_handle);
+
+        let q_temp_entry = self.get_entry(&q_temp)?;
+        let mut reused = false;
+        if Arc::strong_count(&q_entry.buffer) <= 2 && q_entry.len == q_temp_entry.len {
+            let bytes = (q_entry.len as u64) * self.element_size as u64;
+            if bytes > 0 {
+                let mut encoder =
+                    self.device_ref()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-qr-power-copy"),
+                        });
+                encoder.copy_buffer_to_buffer(
+                    q_temp_entry.buffer.as_ref(),
+                    0,
+                    q_entry.buffer.as_ref(),
+                    0,
+                    bytes,
+                );
+                self.submit(encoder);
+            }
+            let _ = self.free(&q_temp);
+            self.mark_buffer_usage(q_handle, BufferUsageClass::FusionOut);
+            reused = true;
+        }
+
+        let q_result = if reused { q_handle.clone() } else { q_temp };
+
+        let mut perm_matrix = vec![0.0f64; k * k];
+        for i in 0..k {
+            perm_matrix[i + i * k] = 1.0;
+        }
+        let perm_vector: Vec<f64> = (1..=k).map(|v| v as f64).collect();
+
+        let perm_matrix_handle = self.upload(&HostTensorView {
+            data: &perm_matrix,
+            shape: &r_tensor.shape,
+        })?;
+        let perm_vector_handle = self.upload(&HostTensorView {
+            data: &perm_vector,
+            shape: &[k, 1],
+        })?;
+
+        let _ = self.free(product);
+
+        Ok(Some(ProviderQrPowerIterResult {
+            q: q_result,
+            r: r_handle,
+            perm_matrix: perm_matrix_handle,
+            perm_vector: perm_vector_handle,
+        }))
     }
     fn matmul(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.matmul_exec(a, b)
@@ -11518,6 +11685,7 @@ impl AccelProvider for WgpuProvider {
         rhs: &GpuTensorHandle,
         epilogue: &runmat_accelerate_api::PowerStepEpilogue,
     ) -> Result<GpuTensorHandle> {
+        let rhs_entry = self.get_entry(rhs)?;
         let product = self.matmul_exec(lhs, rhs)?;
         let squared = self.binary_op_exec(
             crate::backend::wgpu::types::BinaryOpCode::Mul,
@@ -11550,7 +11718,52 @@ impl AccelProvider for WgpuProvider {
         )?;
         let _ = self.free(&product);
         let _ = self.free(&norms);
-        Ok(normalized)
+
+        let mut reused = false;
+        let rhs_shape_match = rhs_entry.shape == normalized.shape;
+        let rhs_transposed = runmat_accelerate_api::handle_transpose_info(rhs).is_some();
+        let rhs_ref_count = Arc::strong_count(&rhs_entry.buffer);
+        if rhs_shape_match && !rhs_transposed && rhs_entry.len > 0 && rhs_ref_count <= 2 {
+            if let Ok(normalized_entry) = self.get_entry(&normalized) {
+                let bytes = (rhs_entry.len as u64) * self.element_size as u64;
+                if bytes > 0 {
+                    let mut encoder =
+                        self.device_ref()
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("runmat-power-step-copy"),
+                            });
+                    encoder.copy_buffer_to_buffer(
+                        normalized_entry.buffer.as_ref(),
+                        0,
+                        rhs_entry.buffer.as_ref(),
+                        0,
+                        bytes,
+                    );
+                    self.submit(encoder);
+                }
+                let _ = self.free(&normalized);
+                self.mark_buffer_usage(rhs, BufferUsageClass::FusionOut);
+                log::debug!(
+                    "matmul_power_step: reused rhs buffer {} for normalized output (len={})",
+                    rhs.buffer_id,
+                    rhs_entry.len
+                );
+                reused = true;
+            }
+        }
+
+        if reused {
+            Ok(rhs.clone())
+        } else {
+            log::debug!(
+                "matmul_power_step: fallback reuse (shape_match={} transpose={} len={} ref_count={})",
+                rhs_shape_match,
+                rhs_transposed,
+                rhs_entry.len,
+                rhs_ref_count
+            );
+            Ok(normalized)
+        }
     }
     fn covariance(
         &self,
@@ -12263,7 +12476,6 @@ impl AccelProvider for WgpuProvider {
         let host = self.download(matrix)?;
         symrcm_host_real_data(&host.shape, &host.data).map_err(|e| anyhow!(e))
     }
-
     fn read_scalar(&self, h: &GpuTensorHandle, linear_index: usize) -> Result<f64> {
         let entry = self.get_entry(h)?;
         let elem_size = match entry.precision {
@@ -12671,6 +12883,7 @@ impl AccelProvider for WgpuProvider {
                 }
             }
         }
+        self.kernel_resources.clear_matmul_source(h.buffer_id);
         runmat_accelerate_api::clear_handle_logical(h);
         runmat_accelerate_api::clear_handle_transpose(h);
         Ok(())

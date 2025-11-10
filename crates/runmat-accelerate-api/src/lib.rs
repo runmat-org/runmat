@@ -232,6 +232,14 @@ pub struct ProviderQrResult {
     pub perm_vector: GpuTensorHandle,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderQrPowerIterResult {
+    pub q: GpuTensorHandle,
+    pub r: GpuTensorHandle,
+    pub perm_matrix: GpuTensorHandle,
+    pub perm_vector: GpuTensorHandle,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ProviderLinsolveOptions {
     pub lower: bool,
@@ -1442,6 +1450,20 @@ pub trait AccelProvider: Send + Sync {
         _options: ProviderQrOptions,
     ) -> anyhow::Result<ProviderQrResult> {
         Err(anyhow::anyhow!("qr not supported by provider"))
+    }
+    fn take_matmul_sources(
+        &self,
+        _product: &GpuTensorHandle,
+    ) -> Option<(GpuTensorHandle, GpuTensorHandle)> {
+        None
+    }
+    fn qr_power_iter(
+        &self,
+        _product: &GpuTensorHandle,
+        _q_handle: &GpuTensorHandle,
+        _options: &ProviderQrOptions,
+    ) -> anyhow::Result<Option<ProviderQrPowerIterResult>> {
+        Ok(None)
     }
     fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("transpose not supported by provider"))

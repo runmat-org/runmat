@@ -49,6 +49,33 @@ fn stats_centered_gram_pattern() {
 }
 
 #[test]
+#[ignore]
+fn debug_qr_power_iter_graph() {
+    let source = r#"
+    rows = 16;
+    cols = 4;
+    G = rand(rows, rows);
+    Q = rand(rows, cols);
+    [Q, R_unused] = qr(G * Q, 'econ');
+    "#;
+    let graph = compile_graph(source);
+    println!("nodes: {}", graph.nodes.len());
+    for node in &graph.nodes {
+        println!(
+            "node {} {:?} inputs={:?} outputs={:?}",
+            node.id, node.label, node.inputs, node.outputs
+        );
+    }
+    for value in &graph.values {
+        println!(
+            "value {} origin={:?} shape={:?} const={:?}",
+            value.id, value.origin, value.shape, value.constant
+        );
+    }
+    panic!("debug");
+}
+
+#[test]
 fn signal_power_spectrum_pattern() {
     let source = r#"
     t = 32;

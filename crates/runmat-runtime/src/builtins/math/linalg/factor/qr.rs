@@ -288,6 +288,26 @@ fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> Result<Option<
             PivotMode::Vector => runmat_accelerate_api::ProviderQrPivot::Vector,
         },
     };
+    if let Some((_lhs, rhs)) = provider.take_matmul_sources(handle) {
+        match provider.qr_power_iter(handle, &rhs, &provider_options) {
+            Ok(Some(result)) => {
+                return Ok(Some(QrEval {
+                    q: Value::GpuTensor(result.q),
+                    r: Value::GpuTensor(result.r),
+                    perm_matrix: Value::GpuTensor(result.perm_matrix),
+                    perm_vector: Value::GpuTensor(result.perm_vector),
+                    mode: options.mode,
+                    pivot_mode: options.pivot,
+                }));
+            }
+            Ok(None) => {
+                // fall through to standard qr
+            }
+            Err(err) => {
+                log::debug!("qr_power_iter fallback: {}", err);
+            }
+        }
+    }
     match provider.qr(handle, provider_options) {
         Ok(result) => Ok(Some(QrEval {
             q: Value::GpuTensor(result.q),
