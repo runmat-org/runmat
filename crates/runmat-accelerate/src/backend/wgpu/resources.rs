@@ -11,11 +11,24 @@ pub enum UniformBufferKey {
     CenteredGramParamsF32,
     CenteredGramParamsF64,
     QrPowerIterParams,
+    LenOpParams,
+    BinaryBroadcastParams,
+    ScalarParamsF32,
+    ScalarParamsF64,
 }
 
 pub struct KernelResourceRegistry {
     uniform_buffers: Mutex<HashMap<UniformBufferKey, Arc<wgpu::Buffer>>>,
     matmul_sources: Mutex<HashMap<u64, (GpuTensorHandle, GpuTensorHandle)>>,
+    scratch_buffers: Mutex<HashMap<(ScratchBufferKind, u64), Arc<wgpu::Buffer>>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ScratchBufferKind {
+    QrGram,
+    QrR,
+    QrRInv,
+    SyrkOut,
 }
 
 impl KernelResourceRegistry {
@@ -23,6 +36,7 @@ impl KernelResourceRegistry {
         Self {
             uniform_buffers: Mutex::new(HashMap::new()),
             matmul_sources: Mutex::new(HashMap::new()),
+            scratch_buffers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -54,6 +68,39 @@ impl KernelResourceRegistry {
             .uniform_buffers
             .lock()
             .expect("uniform buffer registry poisoned");
+        guard.entry(key).or_insert_with(|| buffer.clone());
+        buffer
+    }
+
+    pub fn scratch_storage_buffer(
+        &self,
+        device: &wgpu::Device,
+        kind: ScratchBufferKind,
+        size: u64,
+        label: &'static str,
+    ) -> Arc<wgpu::Buffer> {
+        let key = (kind, size);
+        if let Some(existing) = self
+            .scratch_buffers
+            .lock()
+            .expect("scratch buffer registry poisoned")
+            .get(&key)
+            .cloned()
+        {
+            return existing;
+        }
+        let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        let mut guard = self
+            .scratch_buffers
+            .lock()
+            .expect("scratch buffer registry poisoned");
         guard.entry(key).or_insert_with(|| buffer.clone());
         buffer
     }

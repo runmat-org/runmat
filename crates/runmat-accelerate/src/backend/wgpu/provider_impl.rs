@@ -58,7 +58,7 @@ use crate::backend::wgpu::cache::{
 };
 use crate::backend::wgpu::config::{DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD};
 use crate::backend::wgpu::params::{
-    BandwidthParams, CenteredGramParamsF32, CenteredGramParamsF64, Conv1dParams, CummaxParams,
+    BandwidthParams, Conv1dParams, CummaxParams,
     CumminParams, CumprodParams, CumsumParams, DiffParams, FilterParams, ImageNormalizeUniforms,
     QrPowerIterParams, SymmetryParamsF32, SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS,
     IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE,
@@ -5518,11 +5518,15 @@ impl WgpuProvider {
             .checked_mul(cols)
             .ok_or_else(|| anyhow!("syrk: output size overflow"))?;
 
-        let out_buffer = self.create_storage_buffer_checked_with_usage(
-            len,
-            "runmat-syrk-out",
-            BufferUsageClass::SyrkOut,
-        )?;
+        let out_bytes = (len as u64) * (self.element_size as u64);
+        let out_buffer = self
+            .kernel_resources
+            .scratch_storage_buffer(
+                self.device_ref(),
+                crate::backend::wgpu::resources::ScratchBufferKind::SyrkOut,
+                out_bytes,
+                "runmat-syrk-out-scratch",
+            );
         if len == 0 {
             return Ok(self.register_existing_buffer_with_usage(
                 out_buffer,
@@ -5578,18 +5582,18 @@ impl WgpuProvider {
             self.queue
                 .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
             let bind_entries = [
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: entry.buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: out_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_entire_binding(),
-                },
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
             ];
             let layout = &self.pipelines.syrk.layout;
             let bind_group = self
@@ -5768,22 +5772,22 @@ impl WgpuProvider {
                 self.queue
                     .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
                 let bind_entries = [
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry_a.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: entry_b.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: partial_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry_a.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: entry_b.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: partial_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
                 ];
                 let layout = &self.pipelines.matmul.layout;
                 let bg =
@@ -5796,7 +5800,7 @@ impl WgpuProvider {
                                     entries: &bind_entries,
                                 },
                             ))
-                        });
+                    });
                 let tile = crate::backend::wgpu::config::effective_matmul_tile();
                 let groups_x =
                     crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
@@ -5882,22 +5886,22 @@ impl WgpuProvider {
             &self.pipelines.matmul.pipeline
         };
         let bind_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: entry_a.buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: entry_b.buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: out_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: params_buffer.as_entire_binding(),
-            },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry_a.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: entry_b.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
         ];
         let bg = if out_usage == BufferUsageClass::MatmulOut {
             Arc::new(
@@ -6185,137 +6189,58 @@ impl WgpuProvider {
         cols: usize,
         denom: f64,
     ) -> Result<GpuTensorHandle> {
+        let rows_f64 = rows as f64;
         let means_entry = self.get_entry(means)?;
-        let rows_u32 =
-            u32::try_from(rows).map_err(|_| anyhow!("centered_gram: rows exceed GPU limits"))?;
-        let cols_u32 =
-            u32::try_from(cols).map_err(|_| anyhow!("centered_gram: cols exceed GPU limits"))?;
-        let lda =
-            u32::try_from(rows).map_err(|_| anyhow!("centered_gram: lda exceed GPU limits"))?;
-        let ldc =
-            u32::try_from(cols).map_err(|_| anyhow!("centered_gram: ldc exceed GPU limits"))?;
-        let len_out = cols
-            .checked_mul(cols)
-            .ok_or_else(|| anyhow!("centered_gram: output size overflow"))?;
+        let mut means_used = means.clone();
+        let mut casted_means = false;
+        if means_entry.precision != matrix_entry.precision {
+            means_used = self.cast_tensor_precision(means, matrix_entry.precision)?;
+            casted_means = true;
+        }
 
-        let out_buffer = self.create_storage_buffer_checked_with_usage(
-            len_out,
-            "runmat-centered-gram-out",
+        // Compute X^T * X using the SYRK pipeline (no explicit transpose required).
+        let xtx = self.syrk_exec(matrix)?;
+
+        // Form n * μ μᵀ without materialising a centered copy of X.
+        let means_scaled = self.scalar_mul(&means_used, rows_f64)?;
+        let means_col = self
+            .reshape(&means_scaled, &[cols, 1])
+            .map_err(|e| anyhow!("centered_gram: reshape means col failed: {e}"))?;
+        let means_row_scaled = self
+            .reshape(&means_scaled, &[1, cols])
+            .map_err(|e| anyhow!("centered_gram: reshape means row failed: {e}"))?;
+
+        let outer_scaled = self.matmul_exec_with_usage(
+            &means_col,
+            &means_row_scaled,
             BufferUsageClass::FusionOut,
         )?;
+        let outer = self.scalar_mul(&outer_scaled, 1.0 / rows_f64)?;
 
-        let params_buffer = match matrix_entry.precision {
-            NumericPrecision::F64 => {
-                let mut denom_vec = [0.0f64; 2];
-                denom_vec[0] = 1.0 / denom;
-                let params = CenteredGramParamsF64 {
-                    rows: rows_u32,
-                    cols: cols_u32,
-                    lda,
-                    ldc,
-                    offset_matrix: 0,
-                    offset_means: 0,
-                    offset_out: 0,
-                    _pad0: 0,
-                    denom: denom_vec,
-                    _pad1: [0.0; 2],
-                    _pad2: [0.0; 2],
-                };
-                let buffer = self.kernel_resources.uniform_buffer(
-                    self.device_ref(),
-                    UniformBufferKey::CenteredGramParamsF64,
-                    std::mem::size_of::<CenteredGramParamsF64>() as u64,
-                    "runmat-centered-gram-params-f64",
-                );
-                self.queue
-                    .write_buffer(buffer.as_ref(), 0, bytes_of(&params));
-                buffer
-            }
-            NumericPrecision::F32 => {
-                let mut denom_vec = [0.0f32; 4];
-                denom_vec[0] = (1.0 / denom) as f32;
-                let params = CenteredGramParamsF32 {
-                    rows: rows_u32,
-                    cols: cols_u32,
-                    lda,
-                    ldc,
-                    offset_matrix: 0,
-                    offset_means: 0,
-                    offset_out: 0,
-                    _pad0: 0,
-                    denom: denom_vec,
-                    _pad1: [0.0; 4],
-                    _pad2: [0.0; 4],
-                };
-                let buffer = self.kernel_resources.uniform_buffer(
-                    self.device_ref(),
-                    UniformBufferKey::CenteredGramParamsF32,
-                    std::mem::size_of::<CenteredGramParamsF32>() as u64,
-                    "runmat-centered-gram-params-f32",
-                );
-                self.queue
-                    .write_buffer(buffer.as_ref(), 0, bytes_of(&params));
-                buffer
-            }
-        };
+        let _ = self.free(&means_col);
+        let _ = self.free(&means_row_scaled);
+        let _ = self.free(&outer_scaled);
 
-        let bind_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: matrix_entry.buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: means_entry.buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: out_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: params_buffer.as_entire_binding(),
-            },
-        ];
-        let layout = &self.pipelines.centered_gram.layout;
-        let bind_group = self
-            .bind_group_cache
-            .get_or_create(layout, &bind_entries, || {
-                Arc::new(
-                    self.device_ref()
-                        .create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("runmat-centered-gram-bind"),
-                            layout,
-                            entries: &bind_entries,
-                        }),
-                )
-            });
+        let centered = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Sub,
+            &xtx,
+            &outer,
+        )?;
 
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        let tile = crate::backend::wgpu::config::effective_matmul_tile();
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size_dim(cols_u32, tile);
-        crate::backend::wgpu::dispatch::centered_gram::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.centered_gram.pipeline,
-            bind_group.as_ref(),
-            groups,
-            groups,
-        );
+        let _ = self.free(&xtx);
+        let _ = self.free(&outer);
+        let _ = self.free(&means_scaled);
 
-        let handle = self.register_existing_buffer_with_usage(
-            out_buffer,
-            vec![cols, cols],
-            len_out,
-            BufferUsageClass::FusionOut,
-        );
+        let handle = self.scalar_mul(&centered, 1.0 / denom)?;
+        let _ = self.free(&centered);
+
         self.mark_buffer_usage(&handle, BufferUsageClass::FusionOut);
 
         if std::env::var("RUNMAT_DEBUG_CENTERED_GRAM").is_ok() {
             if let Err(err) = self.debug_centered_gram(
                 matrix,
                 matrix_entry.precision,
-                means,
+                &means_used,
                 &handle,
                 rows,
                 cols,
@@ -6323,6 +6248,10 @@ impl WgpuProvider {
             ) {
                 log::warn!("centered_gram debug instrumentation failed: {err}");
             }
+        }
+
+        if casted_means {
+            let _ = self.free(&means_used);
         }
 
         Ok(handle)
@@ -6393,6 +6322,14 @@ impl WgpuProvider {
 
                 let gpu_val = output_gpu.data[i + j * cols];
                 let abs_err = (gpu_val - sum).abs();
+                if i == j && std::env::var("RUNMAT_DEBUG_CENTERED_GRAM_TRACE").is_ok() {
+                    log::info!(
+                        "centered_gram diag sample col={} gpu={:.6e} ref={:.6e}",
+                        i,
+                        gpu_val,
+                        sum
+                    );
+                }
                 if abs_err > max_abs_err {
                     max_abs_err = abs_err;
                     max_abs_idx = (i, j);
@@ -9286,7 +9223,14 @@ impl WgpuProvider {
                 offset: offset as u32,
                 total: len as u32,
             };
-            let params_buffer = self.uniform_buffer(&params, "runmat-binary-params");
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                self.device_ref(),
+                UniformBufferKey::LenOpParams,
+                std::mem::size_of::<crate::backend::wgpu::params::LenOpParams>() as u64,
+                "runmat-binary-params",
+            );
+            self.queue
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
             let bind_group = self
                 .device_ref()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -9400,12 +9344,12 @@ impl WgpuProvider {
         let out_buffer = self.create_storage_buffer(len, "runmat-binary-bcast-out");
         // Prepare params buffer and bind group once; update params per chunk
         let params_size = std::mem::size_of::<BinaryBroadcastParams>() as u64;
-        let params_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-binary-bcast-params"),
-            size: params_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let params_buffer = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            UniformBufferKey::BinaryBroadcastParams,
+            params_size,
+            "runmat-binary-bcast-params",
+        );
         let bind_group_layout = &self.pipelines.binary_broadcast.layout;
         let bind_group = self
             .device_ref()
@@ -9478,6 +9422,30 @@ impl WgpuProvider {
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(handle)
+    }
+
+    fn cast_tensor_precision(
+        &self,
+        tensor: &GpuTensorHandle,
+        target: NumericPrecision,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(tensor)?;
+        if entry.precision == target {
+            return Ok(tensor.clone());
+        }
+
+        let mut host = self.download(tensor)?;
+        if matches!(target, NumericPrecision::F32) {
+            for value in host.data.iter_mut() {
+                *value = (*value as f32) as f64;
+            }
+        }
+
+        let view = HostTensorView {
+            data: host.data.as_slice(),
+            shape: host.shape.as_slice(),
+        };
+        self.upload(&view)
     }
 
     pub(crate) fn dot_exec(
@@ -9880,7 +9848,14 @@ impl WgpuProvider {
                 offset: offset as u32,
                 total: len as u32,
             };
-            let params_buffer = self.uniform_buffer(&params, "runmat-unary-params");
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                self.device_ref(),
+                UniformBufferKey::LenOpParams,
+                std::mem::size_of::<crate::backend::wgpu::params::LenOpParams>() as u64,
+                "runmat-unary-params",
+            );
+            self.queue
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
             let bind_group = self
                 .device_ref()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -9955,7 +9930,16 @@ impl WgpuProvider {
                         _pad_tail3: 0.0,
                         _pad_tail4: 0.0,
                     };
-                    self.uniform_buffer(&params, "runmat-scalar-params")
+                    let buf = self.kernel_resources.uniform_buffer(
+                        self.device_ref(),
+                        UniformBufferKey::ScalarParamsF64,
+                        std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF64>()
+                            as u64,
+                        "runmat-scalar-params-f64",
+                    );
+                    self.queue
+                        .write_buffer(buf.as_ref(), 0, bytes_of(&params));
+                    buf
                 }
                 _ => {
                     let params = crate::backend::wgpu::params::ScalarParamsF32 {
@@ -9968,7 +9952,16 @@ impl WgpuProvider {
                         _pad_tail: [0.0; 4],
                         _pad_tail2: [0.0; 4],
                     };
-                    self.uniform_buffer(&params, "runmat-scalar-params")
+                    let buf = self.kernel_resources.uniform_buffer(
+                        self.device_ref(),
+                        UniformBufferKey::ScalarParamsF32,
+                        std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF32>()
+                            as u64,
+                        "runmat-scalar-params-f32",
+                    );
+                    self.queue
+                        .write_buffer(buf.as_ref(), 0, bytes_of(&params));
+                    buf
                 }
             };
             let bind_group = self
@@ -12063,18 +12056,50 @@ impl AccelProvider for WgpuProvider {
         }
         let _ = self.free(&product_t);
         let gram_entry = self.get_entry(&gram_handle)?;
+        let gram_len = cols * cols;
+        let gram_bytes = (gram_len as u64) * (self.element_size as u64);
+        let gram_scratch = self
+            .kernel_resources
+            .scratch_storage_buffer(
+                self.device_ref(),
+                crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
+                gram_bytes,
+                "runmat-qr-gram-scratch",
+            );
+        if gram_bytes > 0 {
+            let mut encoder = self
+                .device_ref()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-qr-gram-copy"),
+                });
+            encoder.copy_buffer_to_buffer(
+                gram_entry.buffer.as_ref(),
+                0,
+                gram_scratch.as_ref(),
+                0,
+                gram_bytes,
+            );
+            self.submit(encoder);
+        }
 
         let len_out = cols * cols;
-        let r_buffer = self.create_storage_buffer_checked_with_usage(
-            len_out,
-            "runmat-qr-r",
-            BufferUsageClass::FusionOut,
-        )?;
-        let r_inv_buffer = self.create_storage_buffer_checked_with_usage(
-            len_out,
-            "runmat-qr-r-inv",
-            BufferUsageClass::FusionOut,
-        )?;
+        let r_bytes = (len_out as u64) * (self.element_size as u64);
+        let r_buffer = self
+            .kernel_resources
+            .scratch_storage_buffer(
+                self.device_ref(),
+                crate::backend::wgpu::resources::ScratchBufferKind::QrR,
+                r_bytes,
+                "runmat-qr-r-scratch",
+            );
+        let r_inv_buffer = self
+            .kernel_resources
+            .scratch_storage_buffer(
+                self.device_ref(),
+                crate::backend::wgpu::resources::ScratchBufferKind::QrRInv,
+                r_bytes,
+                "runmat-qr-rinv-scratch",
+            );
 
         let params = QrPowerIterParams {
             cols: cols as u32,
@@ -12094,7 +12119,7 @@ impl AccelProvider for WgpuProvider {
         let bind_entries = [
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: gram_entry.buffer.as_ref().as_entire_binding(),
+                resource: gram_scratch.as_ref().as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -12606,18 +12631,18 @@ impl AccelProvider for WgpuProvider {
                 self.queue
                     .write_buffer(uniform_buf.as_ref(), 0, bytes_of(&uniforms));
                 let bind_entries = [
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: uniform_buf.as_entire_binding(),
-                    },
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: uniform_buf.as_entire_binding(),
+                        },
                 ];
                 let layout = &self.pipelines.image_normalize.layout;
                 let bind_group =
@@ -12630,7 +12655,7 @@ impl AccelProvider for WgpuProvider {
                                     entries: &bind_entries,
                                 },
                             ))
-                        });
+                });
 
                 crate::backend::wgpu::dispatch::image_normalize::run(
                     self.device_ref(),
@@ -12732,7 +12757,7 @@ impl AccelProvider for WgpuProvider {
                 rhs_entry.len,
                 rhs_ref_count
             );
-            Ok(normalized)
+        Ok(normalized)
         }
     }
     fn covariance(
@@ -13838,8 +13863,8 @@ impl AccelProvider for WgpuProvider {
                     self.bind_group_cache.invalidate_buffer(buffer_ptr);
                     self.buffer_residency
                         .release(entry.usage, entry.len, entry.buffer.clone());
-                } else {
-                    log::trace!(
+                    } else {
+                        log::trace!(
                         "buffer_residency: not pooling buffer id={} len={} due to outstanding views",
                         h.buffer_id,
                         entry.len
