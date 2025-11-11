@@ -16,7 +16,16 @@ if ~exist('bias','var'), bias = bias_default; else bias = single(bias); end
 if ~exist('gamma','var'), gamma = gamma_default; else gamma = single(gamma); end
 if ~exist('eps0','var'), eps0 = eps0_default; else eps0 = single(eps0); end
 
-imgs = rand(B, H, W, 'single');
+% Deterministic, pseudo-random field (LCG-based)
+bid = reshape(single(0:B-1), [B 1 1]);
+yid = reshape(single(0:H-1), [1 H 1]);
+xid = reshape(single(0:W-1), [1 1 W]);
+strideHW = single(H * W);
+strideW = single(W);
+seed32 = single(seed);
+idx = bid .* strideHW + yid .* strideW + xid + seed32;
+state = mod(single(1664525) .* idx + single(1013904223), single(4294967296.0));
+imgs = state ./ single(4294967296.0);
 
 % Use nested means to ensure exact MATLAB semantics for dims [2 3]
 mu = mean(mean(imgs, 2), 3);

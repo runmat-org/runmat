@@ -29,5 +29,5 @@ for t = 1:T
 end
 
 payoff = max(S - K, 0);
-price  = mean(payoff) * exp(-mu * T * dt);
+price  = mean(payoff, 'all') * exp(-mu * T * dt);
 fprintf('RESULT_ok PRICE=%.6f\n', double(price));

@@ -11,7 +11,16 @@ def main() -> None:
     W = int(os.environ.get("IMG_W", W))
     gain, bias, gamma, eps0 = np.float32(1.0123), np.float32(-0.02), np.float32(1.8), np.float32(1e-6)
 
-    imgs = np.random.rand(B, H, W).astype(np.float32)
+    # Deterministic pseudo-random field (LCG-based)
+    bid = np.arange(B, dtype=np.uint32)[:, None, None]
+    yid = np.arange(H, dtype=np.uint32)[None, :, None]
+    xid = np.arange(W, dtype=np.uint32)[None, None, :]
+    strideHW = np.uint32(H * W)
+    strideW = np.uint32(W)
+    seed32 = np.uint32(0)
+    idx = bid * strideHW + yid * strideW + xid + seed32
+    state = (np.uint32(1664525) * idx + np.uint32(1013904223)).astype(np.uint32)
+    imgs = (state.astype(np.float32) / np.float32(2.0**32))
     mu = imgs.mean(axis=(1, 2), keepdims=True)
     sigma = np.sqrt(((imgs - mu) ** 2).mean(axis=(1, 2), keepdims=True) + eps0)
 

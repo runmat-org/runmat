@@ -893,7 +893,7 @@ impl FusionGroupPlan {
             return None;
         }
         // Minimal column-major reduction kernel template (single workgroup per slice).
-        // Assumes first input is the tensor to reduce; ignores additional inputs for now.
+        // Supports folding simple producer expressions over multiple inputs (e.g., sum(A.*B, dim)).
         if self.inputs.is_empty() {
             return None;
         }
@@ -927,6 +927,10 @@ impl FusionGroupPlan {
         let ext_input = self.inputs[0];
         let mut exprs: HashMap<ValueId, String> = HashMap::new();
         exprs.insert(ext_input, "v".to_string());
+        // Map additional external inputs to v1, v2, ...
+        for (idx, &vid) in self.inputs.iter().enumerate().skip(1) {
+            exprs.insert(vid, format!("v{idx}"));
+        }
         for (vid, val) in &self.const_values {
             let lit = match val {
                 Value::Num(n) => {
@@ -984,14 +988,20 @@ impl FusionGroupPlan {
         let mut shader = String::new();
         shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>, }};\n"));
         shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
+        // Bind all input tensors dynamically, followed by output and params
+        for (idx, _) in self.inputs.iter().enumerate() {
+            shader.push_str(&format!(
+                "@group(0) @binding({}) var<storage, read> input{}: Tensor;\n",
+                idx, idx
+            ));
+        }
         shader.push_str(&format!(
-            "@group(0) @binding(0) var<storage, read> input0: Tensor;\n"
+            "@group(0) @binding({}) var<storage, read_write> output: Tensor;\n",
+            self.inputs.len()
         ));
         shader.push_str(&format!(
-            "@group(0) @binding(1) var<storage, read_write> output: Tensor;\n"
-        ));
-        shader.push_str(&format!(
-            "@group(0) @binding(2) var<uniform> params: MParams;\n\n"
+            "@group(0) @binding({}) var<uniform> params: MParams;\n\n",
+            self.inputs.len() + 1
         ));
         // Use a small fixed workgroup tile size to avoid driver stalls on some backends
         shader.push_str(&format!(
@@ -1044,11 +1054,28 @@ impl FusionGroupPlan {
             }
             // helpers are declared at module scope
             shader.push_str("  var saw_nan: bool = false;\n  var r = lid.x;\n");
-            shader.push_str(&format!(
-                "  while (r < params.nrows) {{\n    let v = input0.data[ (col * params.ld) + r ];\n    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n    r += @WG@u;\n  }}\n",
-                scalar = scalar_ty,
-                val = val_expr
-            ));
+            // Load row-wise values from each input and fold into expression
+            {
+                // Build the per-iteration loads
+                let mut loop_body = String::new();
+                // input0 as 'v'
+                loop_body.push_str("    let v = input0.data[ (col * params.nrows) + r ];\n");
+                // additional inputs as v1, v2, ...
+                for (idx, _) in self.inputs.iter().enumerate().skip(1) {
+                    loop_body.push_str(&format!(
+                        "    let v{idx} = input{idx}.data[ (col * params.nrows) + r ];\n"
+                    ));
+                }
+                // compute val and accumulate
+                loop_body.push_str(&format!(
+                    "    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n",
+                    scalar = scalar_ty,
+                    val = val_expr
+                ));
+                shader.push_str("  while (r < params.nrows) {\n");
+                shader.push_str(&loop_body);
+                shader.push_str("    r += @WG@u;\n  }\n");
+            }
             if scalar_ty == "f64" {
                 shader.push_str(
                     "  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n",
@@ -1071,7 +1098,7 @@ impl FusionGroupPlan {
             shader.push_str(
                 "fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {\n",
             );
-            shader.push_str("  let row = wid.x;\n  if (row >= params.nrows) { return; }\n");
+            shader.push_str("  let row = wid.x;\n  // For axis=1, number of output slices equals rows (params.ncols)\n  if (row >= params.ncols) { return; }\n");
             shader.push_str(&format!(
                 "  var acc: {scalar_ty} = {}0.0;\n",
                 if scalar_ty == "f64" { "f64(" } else { "" }
@@ -1081,11 +1108,26 @@ impl FusionGroupPlan {
             }
             // helpers are declared at module scope
             shader.push_str("  var saw_nan: bool = false;\n  var c = lid.x;\n");
-            shader.push_str(&format!(
-                "  while (c < params.ncols) {{\n    let v = input0.data[ row + (c * params.ld) ];\n    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n    c += @WG@u;\n  }}\n",
-                scalar = scalar_ty,
-                val = val_expr
-            ));
+            {
+                let mut loop_body = String::new();
+                // input0 as 'v' — stride equals number of rows (params.ncols carries rows when axis=1)
+                loop_body.push_str("    let v = input0.data[ row + (c * params.ncols) ];\n");
+                // additional inputs as v1, v2, ...
+                for (idx, _) in self.inputs.iter().enumerate().skip(1) {
+                    loop_body.push_str(&format!(
+                        "    let v{idx} = input{idx}.data[ row + (c * params.ncols) ];\n"
+                    ));
+                }
+                loop_body.push_str(&format!(
+                    "    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n",
+                    scalar = scalar_ty,
+                    val = val_expr
+                ));
+                // Iterate over reduce_len, which arrives as params.nrows when axis=1
+                shader.push_str("  while (c < params.nrows) {\n");
+                shader.push_str(&loop_body);
+                shader.push_str("    c += @WG@u;\n  }\n");
+            }
             if scalar_ty == "f64" {
                 shader.push_str(
                     "  if (!OMITNAN && saw_nan) { acc = bitcast<f64>(0x7ff8000000000000u); }\n",
