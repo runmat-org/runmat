@@ -68,7 +68,7 @@ export default function BlogPage() {
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
             RunMat Blog
           </h1>
-          <p className="mt-6 text-xl text-muted-foreground">
+          <p className="mt-6 text-base text-muted-foreground sm:text-lg break-words">
             Stories, insights, and updates from the RunMat development team
           </p>
         </div>
@@ -85,10 +85,10 @@ export default function BlogPage() {
                       </Badge>
                     ))}
                   </div>
-                  <CardTitle className="text-2xl leading-tight sm:text-3xl">
+                  <CardTitle className="text-2xl leading-tight sm:text-3xl break-words">
                     {post.title}
                   </CardTitle>
-                  <CardDescription className="text-lg leading-relaxed">
+                  <CardDescription className="text-base sm:text-lg leading-relaxed break-words">
                     {post.description}
                   </CardDescription>
                 </CardHeader>

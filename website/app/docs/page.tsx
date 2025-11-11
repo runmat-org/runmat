@@ -22,7 +22,7 @@ export default function DocsPage() {
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
             RunMat Documentation
           </h1>
-          <p className="mt-6 text-xl text-muted-foreground">
+          <p className="mt-6 text-base text-muted-foreground sm:text-lg">
             Complete guides and API reference to get you started with RunMat
           </p>
         </div>
@@ -211,7 +211,7 @@ export default function DocsPage() {
 
         {/* Quick Links */}
         <div className="mt-16 rounded-lg border bg-muted/50 p-6">
-          <h2 className="mb-4 text-xl font-semibold">Quick Links</h2>
+          <h2 className="mb-4 text-3xl font-semibold sm:text-4xl md:text-5xl">Quick Links</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Button variant="outline" size="default" asChild>
               <Link href="/download">Download RunMat</Link>

@@ -40,7 +40,7 @@ export const docsTree: DocsNode[] = [
   {
     title: "Using RunMat",
     children: [
-      { title: "Builtin Function Reference", externalHref: "/docs/reference/builtins" },
+      { title: "Builtin Function Reference", externalHref: "/docs/matlab-function-reference" },
       {
         title: "Package Manager",
         slug: ["package-manager"],

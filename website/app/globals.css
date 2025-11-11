@@ -64,6 +64,28 @@
     word-wrap: break-word;
     overflow-wrap: break-word;
   }
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+  .blog-content img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+  .blog-content {
+    overflow-x: hidden;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  .blog-content * {
+    max-width: 100%;
+  }
+  .blog-content pre,
+  .blog-content code {
+    max-width: 100%;
+    overflow-x: auto;
+  }
   .container {
     width: 100%;
     margin-left: auto;
@@ -106,7 +128,9 @@
     overflow-x: auto;
     max-width: 100%;
   }
-  pre code.hljs {
+  pre code.hljs,
+  pre code:not([class]),
+  pre code[class*="language-"] {
     display: block;
     overflow-x: auto;
     padding: 1rem;
@@ -120,9 +144,12 @@
     white-space: pre;
     word-wrap: normal;
     word-break: normal;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   }
   @media (max-width: 640px) {
-    pre code.hljs {
+    pre code.hljs,
+    pre code:not([class]),
+    pre code[class*="language-"] {
       font-size: 0.75rem;
       padding: 0.75rem;
       overflow-x: auto;
@@ -143,9 +170,29 @@
   }
 
   /* Give code blocks breathing room */
-  pre:has(code.hljs) {
+  pre:has(code.hljs),
+  pre:has(code[class*="language-"]),
+  pre:has(code:not([class])) {
     margin-top: 1rem;
     margin-bottom: 1.5rem;
+  }
+  
+  /* Ensure all code blocks inside pre get proper styling */
+  pre > code {
+    display: block;
+    overflow-x: auto;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    border: 1px solid hsl(var(--border));
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    white-space: pre;
+    word-wrap: normal;
+    word-break: normal;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   }
 
   /* Inline code styling */

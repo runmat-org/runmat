@@ -136,7 +136,7 @@ export default function ElementsOfMatlabGrid({ builtins }: { builtins: Builtin[]
   return (
     <div>
       {/* Search bar and view toggle */}
-      <div className="mb-6 flex items-center gap-3">
+      <div className="mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
         <input
           type="text"
           value={searchQuery}
@@ -144,9 +144,9 @@ export default function ElementsOfMatlabGrid({ builtins }: { builtins: Builtin[]
           placeholder="Search tiles (e.g., size, colon, table, plot)"
           className="flex-1 text-sm rounded-md border border-border bg-muted/40 pr-3 pl-3 py-2.5 h-10 focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary placeholder:text-muted-foreground/80 shadow-sm"
         />
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">View:</span>
-          <div className="flex items-center gap-1 border border-border rounded-md p-1 bg-muted/40">
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-sm text-muted-foreground whitespace-nowrap">View:</span>
+          <div className="flex items-center gap-1 border border-border rounded-md p-1 bg-muted/40 shrink-0">
             <button
               onClick={() => setViewMode('grid')}
               className={`h-8 px-3 text-sm font-medium rounded-md transition-all inline-flex items-center justify-center gap-1.5 ${
@@ -240,10 +240,11 @@ function GridView({
         const isExpanded = expandedCategories.has(group.category);
         const itemsToShow = isExpanded ? group.allItems : group.items;
         const showViewAll = !isExpanded && group.totalCount > 13;
+        const showCollapse = isExpanded && group.totalCount > 13;
         
         return (
           <div key={group.category}>
-            <h2 className="text-xl font-semibold mb-6 text-foreground">{formatCategoryName(group.category)}</h2>
+            <h2 className="text-2xl font-semibold mb-6 text-foreground sm:text-3xl">{formatCategoryName(group.category)}</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3">
               {itemsToShow.map((builtin) => (
                 <ElementTile key={builtin.slug} builtin={builtin} />
@@ -254,6 +255,13 @@ function GridView({
                   category={group.category} 
                   subcategories={group.subcategories}
                   totalCount={group.totalCount}
+                  onClick={() => onToggleExpand(group.category)}
+                />
+              )}
+              {/* "Collapse" tile - only show when expanded */}
+              {showCollapse && (
+                <CollapseTile 
+                  category={group.category}
                   onClick={() => onToggleExpand(group.category)}
                 />
               )}
@@ -276,7 +284,7 @@ function ListView({ groupedBuiltins }: { groupedBuiltins: GroupedBuiltins[] }) {
       {groupedBuiltins.map((group) => (
         <div key={group.category}>
           <div className="flex items-center gap-3 mb-4">
-            <h2 className="text-lg font-semibold text-foreground">{formatCategoryName(group.category)}</h2>
+            <h2 className="text-2xl font-semibold text-foreground sm:text-3xl">{formatCategoryName(group.category)}</h2>
             <div 
               className="h-1 flex-1 rounded"
               style={{ backgroundColor: getCategoryColor(group.category) }}
@@ -524,7 +532,7 @@ function TagsView({ builtins, searchQuery, fuse }: { builtins: Builtin[], search
       {groupedBuiltins.map((group) => (
         <div key={group.category}>
           <div className="flex items-center gap-3 mb-3">
-            <h2 className="text-lg font-semibold text-foreground">{formatCategoryName(group.category)}</h2>
+            <h2 className="text-2xl font-semibold text-foreground sm:text-3xl">{formatCategoryName(group.category)}</h2>
             <div 
               className="h-1 flex-1 rounded"
               style={{ backgroundColor: getCategoryColor(group.category) }}
@@ -694,10 +702,10 @@ function ListTile({ builtin }: { builtin: Builtin }) {
           style={{ backgroundColor: categoryColor }}
         />
         <div className="flex-1 min-w-0">
-          <div className="text-lg font-semibold text-foreground group-hover:text-primary transition-colors mb-1">
+          <div className="text-base font-semibold text-foreground group-hover:text-primary transition-colors mb-1">
             {builtin.name}
           </div>
-          <div className="text-lg text-muted-foreground line-clamp-1">
+          <div className="text-sm text-muted-foreground line-clamp-1">
             {builtin.summary || 'No description available'}
           </div>
         </div>
@@ -706,14 +714,14 @@ function ListTile({ builtin }: { builtin: Builtin }) {
             <Badge
               key={badge}
               variant="secondary"
-              className="text-lg px-3 py-1 font-semibold"
+              className="px-3 py-1 font-semibold"
             >
               {badge}
             </Badge>
           ))}
           <Badge
             variant="secondary"
-            className="text-lg px-3 py-1 font-semibold"
+            className="px-3 py-1 font-semibold"
           >
             Fusion Y/N
           </Badge>
@@ -753,6 +761,48 @@ function ViewAllTile({
         {/* Summary */}
         <div className="text-sm text-white/90 line-clamp-2 flex-1">
           See all {formatCategoryName(category).toLowerCase()} functions
+        </div>
+
+        {/* Feature badges - always show for consistent height */}
+        <div className="flex items-center gap-1.5 flex-wrap mt-auto pt-1.5 border-t border-white/20 min-h-[20px]">
+          <Badge
+            variant="secondary"
+            className="text-xs px-1.5 py-0.5 h-4 font-medium bg-white/20 text-white border-white/30"
+          >
+            Fusion Y/N
+          </Badge>
+        </div>
+      </Card>
+    </button>
+  );
+}
+
+function CollapseTile({ 
+  category,
+  onClick 
+}: { 
+  category: DisplayCategory;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="block h-full w-full text-left"
+      aria-label={`Collapse ${formatCategoryName(category)} to show fewer functions`}
+    >
+      <Card 
+        className="group hover:opacity-90 transition-opacity cursor-pointer h-full flex flex-col gap-2 py-2.5 px-3 border-0 shadow-sm border-dashed border-2 rounded-lg"
+        style={{ backgroundColor: '#1f2937', borderColor: 'rgba(255, 255, 255, 0.3)', minHeight: '139px' }}
+      >
+        {/* Title */}
+        <div className="font-semibold text-base leading-tight text-white flex items-center gap-1.5">
+          <span>Show Less</span>
+          <span className="text-white/80">←</span>
+        </div>
+        
+        {/* Summary */}
+        <div className="text-sm text-white/90 line-clamp-2 flex-1">
+          Collapse {formatCategoryName(category).toLowerCase()} functions
         </div>
 
         {/* Feature badges - always show for consistent height */}

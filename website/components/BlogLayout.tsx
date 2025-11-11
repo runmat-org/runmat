@@ -12,6 +12,7 @@ interface BlogLayoutProps {
   author: string;
   tags: string[];
   rightAside?: React.ReactNode;
+  backLink?: { href: string; text: string };
 }
 
 export function BlogLayout({
@@ -22,24 +23,25 @@ export function BlogLayout({
   readTime,
   author,
   tags,
-  rightAside
+  rightAside,
+  backLink = { href: '/blog', text: 'Back to Blog' }
 }: BlogLayoutProps) {
   return (
     <div className="min-h-screen bg-background">
       <div className="container px-4 py-8 md:px-6 md:py-16">
         {rightAside ? (
           <div className="mx-auto lg:max-w-7xl grid gap-8 lg:grid-cols-[minmax(0,1fr)_260px]">
-            <div>
-              {/* Back to Blog */}
-              <Button variant="ghost" size="sm" className="mb-8" asChild>
-                <Link href="/blog">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back to Blog
+            <div className="min-w-0">
+              {/* Back Link */}
+              <Button variant="ghost" size="sm" className="mb-8 break-words" asChild>
+                <Link href={backLink.href}>
+                  <ArrowLeft className="mr-2 h-4 w-4 shrink-0" />
+                  <span className="break-words">{backLink.text}</span>
                 </Link>
               </Button>
 
               {/* Article Header */}
-              <header className="mb-12 max-w-4xl">
+              <header className="mb-12 max-w-4xl break-words">
                 <div className="mb-4 flex flex-wrap gap-2">
                   {tags.map((tag) => (
                     <Badge key={tag} variant="secondary">
@@ -48,11 +50,11 @@ export function BlogLayout({
                   ))}
                 </div>
                 
-                <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+                <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl break-words">
                   {title}
                 </h1>
                 
-                <p className="mb-6 text-xl text-muted-foreground leading-relaxed">
+                <p className="mb-6 text-base sm:text-xl text-muted-foreground leading-relaxed break-words">
                   {description}
                 </p>
                 
@@ -73,8 +75,8 @@ export function BlogLayout({
               </header>
 
               {/* Article Content */}
-              <article className="max-w-4xl">
-                <div className="blog-content w-full">
+              <article className="max-w-4xl min-w-0">
+                <div className="blog-content w-full overflow-x-hidden">
                   {children}
                 </div>
               </article>
@@ -82,17 +84,17 @@ export function BlogLayout({
             {rightAside}
           </div>
         ) : (
-          <div className="mx-auto max-w-4xl">
-            {/* Back to Blog */}
-            <Button variant="ghost" size="sm" className="mb-8" asChild>
-              <Link href="/blog">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Blog
+          <div className="mx-auto max-w-4xl min-w-0">
+            {/* Back Link */}
+            <Button variant="ghost" size="sm" className="mb-8 break-words" asChild>
+              <Link href={backLink.href}>
+                <ArrowLeft className="mr-2 h-4 w-4 shrink-0" />
+                <span className="break-words">{backLink.text}</span>
               </Link>
             </Button>
 
             {/* Article Header */}
-            <header className="mb-12">
+            <header className="mb-12 break-words">
               <div className="mb-4 flex flex-wrap gap-2">
                 {tags.map((tag) => (
                   <Badge key={tag} variant="secondary">
@@ -101,11 +103,11 @@ export function BlogLayout({
                 ))}
               </div>
               
-              <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+              <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl break-words">
                 {title}
               </h1>
               
-              <p className="mb-6 text-xl text-muted-foreground leading-relaxed">
+              <p className="mb-6 text-base sm:text-xl text-muted-foreground leading-relaxed break-words">
                 {description}
               </p>
               
@@ -126,8 +128,8 @@ export function BlogLayout({
             </header>
 
             {/* Article Content */}
-            <article className="max-w-none">
-              <div className="blog-content w-full">
+            <article className="max-w-none min-w-0">
+              <div className="blog-content w-full overflow-x-hidden">
                 {children}
               </div>
             </article>

@@ -32,13 +32,13 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
 
   const defaultComponents: MarkdownRendererComponents = {
     h1: ({ children, ...props }: { children: React.ReactNode }) => (
-      <h1 className="text-4xl font-bold mt-12 mb-6 text-foreground first:mt-0 break-words" {...props}>{children}</h1>
+      <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mt-12 mb-6 text-foreground first:mt-0 break-words" {...props}>{children}</h1>
     ),
     h2: ({ children, ...props }: { children: React.ReactNode }) => {
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h2 id={id} className="group scroll-mt-24 text-3xl font-semibold mt-10 mb-5 text-foreground break-words" {...props}>
+        <h2 id={id} className="group scroll-mt-24 text-3xl sm:text-4xl md:text-5xl font-semibold mt-10 mb-5 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h2>
@@ -48,7 +48,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h3 id={id} className="group scroll-mt-24 text-2xl font-semibold mt-8 mb-4 text-foreground break-words" {...props}>
+        <h3 id={id} className="group scroll-mt-24 text-2xl sm:text-3xl font-semibold mt-8 mb-4 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h3>
@@ -58,7 +58,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h4 id={id} className="group scroll-mt-24 text-xl font-semibold mt-6 mb-3 text-foreground break-words" {...props}>
+        <h4 id={id} className="group scroll-mt-24 text-xl sm:text-2xl font-semibold mt-6 mb-3 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h4>
@@ -68,7 +68,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h5 id={id} className="group scroll-mt-24 text-lg font-semibold mt-5 mb-2 text-foreground break-words" {...props}>
+        <h5 id={id} className="group scroll-mt-24 text-lg sm:text-xl font-semibold mt-5 mb-2 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h5>
@@ -78,7 +78,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h6 id={id} className="group scroll-mt-24 text-base font-semibold mt-4 mb-2 text-foreground break-words" {...props}>
+        <h6 id={id} className="group scroll-mt-24 text-base sm:text-lg font-semibold mt-4 mb-2 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h6>
@@ -107,7 +107,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       <li className="text-muted-foreground leading-relaxed pl-2 break-words" {...props}>{children}</li>
     ),
     blockquote: ({ children, ...props }: { children: React.ReactNode }) => (
-      <blockquote className="my-6 pl-6 border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20 py-4 pr-4 rounded-r-lg break-words" {...props}>
+      <blockquote className="my-6 pl-4 sm:pl-6 border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20 py-4 pr-4 rounded-r-lg break-words overflow-x-hidden" {...props}>
         <div className="text-muted-foreground italic break-words">{children}</div>
       </blockquote>
     ),
@@ -120,7 +120,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       </a>
     ),
     table: ({ children, ...props }: { children: React.ReactNode }) => (
-      <div className="my-8 -mx-4 sm:mx-0 overflow-x-auto">
+      <div className="my-8 -mx-4 sm:mx-0 overflow-x-auto max-w-full">
         <table className="w-full min-w-full sm:min-w-[500px] border-collapse border border-border rounded-lg table-mobile-wrap" {...props}>{children}</table>
       </div>
     ),
@@ -139,6 +139,30 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     td: ({ children, ...props }: { children: React.ReactNode }) => (
       <td className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-muted-foreground" {...props}>{children}</td>
     ),
+    pre: ({ children, ...props }: { children?: React.ReactNode }) => {
+      // Check if this is a code block (has code child with hljs or language- class, or any code child)
+      const hasCodeBlock = React.Children.toArray(children).some(child => {
+        if (React.isValidElement(child)) {
+          const childType = typeof child.type === 'string' ? child.type : null;
+          if (childType === 'code') {
+            const childProps = child.props as { className?: string };
+            return childProps?.className?.includes('hljs') || 
+                   childProps?.className?.includes('language-') ||
+                   true; // Any code element inside pre should be styled
+          }
+        }
+        return false;
+      });
+      
+      if (hasCodeBlock) {
+        return (
+          <pre className="my-6 overflow-x-auto max-w-full -mx-4 sm:mx-0 px-4 sm:px-0" {...props}>
+            {children}
+          </pre>
+        );
+      }
+      return <pre className="overflow-x-auto max-w-full break-words" {...props}>{children}</pre>;
+    },
     code: ({ children, className, ...props }: { children?: React.ReactNode; className?: string }) => {
       // Render Mermaid even if the renderer bypassed <pre> wrapper
       if (className && /language-mermaid/.test(className)) {
@@ -148,9 +172,35 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
           </div>
         );
       }
-      // Otherwise fall back to default rendering (allows rehype-highlight SSR output to style)
+      // Check if this is inside a pre block (has hljs class from rehype-highlight or language- class)
+      // Also check if parent is pre by looking at context
+      const isCodeBlock = className?.includes('hljs') || className?.includes('language-');
+      
+      // If we're inside a pre (which we can't directly check), ensure we have proper styling
+      // We'll add hljs class if we have a language class or if className is undefined (code block without language)
+      if (isCodeBlock || !className) {
+        // Ensure hljs class is present for styling
+        let finalClassName = className || 'hljs';
+        if (className?.includes('language-') && !className.includes('hljs')) {
+          finalClassName = `hljs ${className}`;
+        } else if (!className) {
+          // Code block without language identifier - add hljs for styling
+          finalClassName = 'hljs';
+        }
+        return <code className={finalClassName} {...props}>{children}</code>;
+      }
+      // Inline code styling
       return <code className={className} {...props}>{children}</code>;
     },
+    img: ({ src, alt, ...props }: { src?: string; alt?: string } & Record<string, unknown>) => (
+      <img 
+        src={src} 
+        alt={alt} 
+        className="my-6 max-w-full h-auto rounded-lg" 
+        loading="lazy"
+        {...props} 
+      />
+    ),
     MermaidDiagram: (props: { chart?: string } & Record<string, unknown>) => (
       <div className="my-12 flex justify-center">
         <div className="max-w-full overflow-x-auto">
@@ -184,9 +234,9 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         out = out.replace(/([A-Za-z0-9_]+)<([A-Za-z0-9_]+)>/g, '`$1<$2>`');
         // Wrap brace groups in backticks to avoid MDX expression evaluation
         out = out.replace(/\{([^{}\n]+)\}/g, '`{$1}`');
-        // Protect literal HTML-like tags that appear in prose (e.g., <main>) from being parsed as JSX/HTML by MDX.
+        // Protect literal HTML-like tags that appear in prose (e.g., <main>, <insert>) from being parsed as JSX/HTML by MDX.
         // We only target a small allowlist of known tokens used in docs to avoid interfering with intentional MDX components.
-        out = out.replace(/<\/?(main|anonymous)>/gi, (m) => '`' + m + '`');
+        out = out.replace(/<\/?(main|anonymous|insert)(\s[^>]*)?>/gi, (m) => '`' + m + '`');
         segments[s] = out;
       }
       lines[i] = segments.join('');
