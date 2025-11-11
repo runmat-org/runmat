@@ -88,13 +88,13 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
   }
 
   return (
-    <div className={`w-full flex justify-center ${className ?? ''}`}>
+    <div className={`w-full ${className ?? ''}`}>
       {isLoading && (
         <div className="flex items-center justify-center p-8">
           <div className="animate-pulse text-gray-500 dark:text-gray-400">Loading diagram...</div>
         </div>
       )}
-      <div ref={ref} className={`${isLoading ? 'hidden' : ''} max-w-full overflow-x-auto`} />
+      <div ref={ref} className={`${isLoading ? 'hidden' : ''} w-full mermaid`} />
     </div>
   );
 }

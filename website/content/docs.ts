@@ -90,6 +90,9 @@ export const docsTree: DocsNode[] = [
   {
     title: "Accelerate (GPU)",
     children: [
+      { title: "How Accelerate Works", slug: ["accelerate", "how-it-works"], file: "docs/HOW_RUNMAT_ACCELERATE_WORKS.md", seo: { description: "How RunMat Accelerate works: GPU acceleration architecture, planner, and execution.", keywords: ["GPU", "accelerate", "how it works", "planner", "execution"] } },
+      { title: "How GPU Data Residency Works", slug: ["accelerate", "gpu-residency"], file: "docs/INTRODUCTION_TO_RUNMAT_GPU.md", seo: { description: "How RunMat manages GPU data residency: keeping arrays on device, minimizing transfers.", keywords: ["GPU", "residency", "data residency", "device memory"] } },
+      { title: "How Fusion Works", slug: ["accelerate", "fusion"], file: "docs/HOW_RUNMAT_FUSION_WORKS.md", seo: { description: "Deep dive into RunMat fusion: detecting fusible sub-graphs, generating GPU kernels, and execution.", keywords: ["fusion", "GPU kernels", "elementwise", "reduction", "WGSL"] } },
       { title: "Accelerate Design", slug: ["accelerate", "overview"], file: "crates/runmat-accelerate/README.md", seo: { description: "RunMat GPU acceleration architecture: gpuArray/gather, planner, and backend design.", keywords: ["GPU", "accelerate", "gpuArray", "gather", "wgpu", "CUDA", "ROCm"] } },
       { title: "Accelerate API", slug: ["accelerate", "api"], file: "crates/runmat-accelerate-api/README.md", seo: { description: "Provider API between RunMat runtime and GPU backends (upload, download, free, device info).", keywords: ["GPU API", "provider", "acceleration"] } },
     ],

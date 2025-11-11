@@ -34,7 +34,8 @@ Let's see RunMat in action with a common problem: processing high-resolution ima
 This pipeline mirrors common image preprocessing (remote sensing, medical, photography): per-image z-score normalization, radiometric gain/bias correction, gamma correction, and a simple quality check using MSE. We use 16 single-precision 4K tiles to avoid I/O effects and to stress the pattern GPUs handle well: long elementwise chains with light reductions. In RunMat, the MATLAB-style code remains as written, while Accelerate fuses elementwise steps and keeps arrays on the device, reducing kernel launches and transfers. 
 
 
-`rng(0); B \= 16; H \= 2160; W \= 3840;  
+``` Matlab
+rng(0); B \= 16; H \= 2160; W \= 3840;  
 gain \= single(1.0123); bias \= single(\-0.02);  
 gamma \= single(1.8); eps0 \= single(1e-6);  
 imgs \= rand(B, H, W, 'single');  
@@ -43,10 +44,51 @@ sigma \= sqrt(mean((imgs \- mu).^2, \[2 3\]) \+ eps0);
 out \= ((imgs \- mu) ./ sigma) \* gain \+ bias;  
 out \= out .^ gamma;  
 mse \= mean((out \- imgs).^2, 'all');  
-fprintf('Done. MSE=%.6e\\n', mse);`
+fprintf('Done. MSE=%.6e\\n', mse);
+```
 
+```mermaid
+%%{init: {'theme':'dark','flowchart': {'curve':'linear'}}}%%
+flowchart TD
+  A["Your .m code"] --> B["Typed Graph (IR)"]
+  B --> C["Planner (per step)"]
+  B --> D["Profiler → Device Map"]
+  D -. "size thresholds + transfer costs (refined at runtime)" .-> C
 
-![][image1]
+  subgraph CPU["CPU"]
+    CJ["Ignition ➜ JIT (small arrays)<br/>Profiles hot loops; V8-style"]
+    CB["CPU BLAS<br/>(Big CPU math or FP64)"]
+  end
+
+  subgraph GPU["GPU Fusion Engine (via WGPU)"]
+    GF["Fuse back-to-back math into a bigger step<br/>(avoid re-scans)"]
+    GR["Keep data resident on GPU until CPU needs it"]
+  end
+
+  classDef cpu fill:#e6e6e6,stroke:#999,color:#000
+  classDef gpu fill:#e7f5e6,stroke:#7ab97a,color:#073b0b
+  classDef mgr fill:#ffb000,stroke:#b37400,color:#2a1a00
+
+  RM["Residency manager"]:::mgr
+  C -. "partition / choose target / co-locate" .-> RM
+
+  C -- "FP64 or big CPU-optimal" --> CB:::cpu
+  C -- "small arrays" --> CJ:::cpu
+  C -- "big or fuse-friendly" --> GF:::gpu
+
+  RM <--> GF
+  RM -. "avoid ping-pong" .- CJ
+  RM -. "avoid ping-pong" .- CB
+
+  GF --> GR:::gpu
+  R(("Results"))
+  GF --> R
+  GR --> R
+  CB --> R
+  CJ --> R
+	
+```
+
 
 ### What RunMat does automatically:
 

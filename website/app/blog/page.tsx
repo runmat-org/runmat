@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import Image from "next/image";
 import { Calendar, Clock, User } from "lucide-react";
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
@@ -26,6 +27,8 @@ interface BlogPost {
   readTime: string;
   author: string;
   tags: string[];
+  image?: string;
+  imageAlt?: string;
 }
 
 function getAllBlogPosts(): BlogPost[] {
@@ -46,7 +49,9 @@ function getAllBlogPosts(): BlogPost[] {
         date: frontmatter.date || new Date().toISOString(),
         readTime: frontmatter.readTime || '5 min read',
         author: frontmatter.author || 'RunMat Team',
-        tags: frontmatter.tags || []
+        tags: frontmatter.tags || [],
+        image: frontmatter.image,
+        imageAlt: frontmatter.imageAlt
       };
     });
     
@@ -77,44 +82,59 @@ export default function BlogPage() {
           {blogPosts.map((post) => (
             <Link key={post.slug} href={`/blog/${post.slug}`} className="block">
               <Card className="group overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer">
-                <CardHeader>
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {post.tags.map((tag) => (
-                      <Badge key={tag} variant="secondary" className="text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
+                <div className="flex flex-col md:flex-row">
+                  <div className="flex-1 p-6">
+                    <CardHeader className="p-0">
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {post.tags.map((tag) => (
+                          <Badge key={tag} variant="secondary" className="text-xs">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                      <CardTitle className="text-2xl leading-tight sm:text-3xl break-words">
+                        {post.title}
+                      </CardTitle>
+                      <CardDescription className="text-base sm:text-lg leading-relaxed break-words">
+                        {post.description}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-0 pt-6">
+                      <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground mb-4">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4" />
+                          {new Date(post.date).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                          })}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-4 w-4" />
+                          {post.readTime}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4" />
+                          {post.author}
+                        </div>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Read Article →
+                      </div>
+                    </CardContent>
                   </div>
-                  <CardTitle className="text-2xl leading-tight sm:text-3xl break-words">
-                    {post.title}
-                  </CardTitle>
-                  <CardDescription className="text-base sm:text-lg leading-relaxed break-words">
-                    {post.description}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground mb-4">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4" />
-                      {new Date(post.date).toLocaleDateString('en-US', { 
-                        year: 'numeric', 
-                        month: 'long', 
-                        day: 'numeric' 
-                      })}
+                  {post.image && (
+                    <div className="relative w-full md:w-64 lg:w-80 h-48 md:h-48 lg:h-56 flex-shrink-0 overflow-hidden">
+                      <Image
+                        src={post.image}
+                        alt={post.imageAlt || post.title}
+                        fill
+                        className="object-contain transition-transform duration-300 group-hover:scale-105"
+                        sizes="(max-width: 768px) 100vw, (max-width: 1024px) 256px, 320px"
+                      />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      {post.readTime}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      {post.author}
-                    </div>
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    Read Article →
-                  </div>
-                </CardContent>
+                  )}
+                </div>
               </Card>
             </Link>
           ))}

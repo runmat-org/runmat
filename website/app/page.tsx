@@ -365,21 +365,21 @@ export default function HomePage() {
             <p className="text-center text-muted-foreground mt-8 mb-0">Want more detail?</p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap">
               <Link 
-                href="/docs/how-it-works" 
+                href="/docs/accelerate/how-it-works" 
                 className="underline"
               >
                 How accelerate works
               </Link>
               <span className="hidden sm:inline text-blue-500">•</span>
               <Link 
-                href="/docs/how-it-works" 
+                href="/docs/accelerate/fusion" 
                 className="underline"
               >
                 How fusion works
               </Link>
               <span className="hidden sm:inline text-blue-500">•</span>
               <Link 
-                href="/docs/how-it-works" 
+                href="/docs/accelerate/gpu-residency" 
                 className="underline"
               >
                 How GPU data residency works

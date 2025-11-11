@@ -167,7 +167,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       // Render Mermaid even if the renderer bypassed <pre> wrapper
       if (className && /language-mermaid/.test(className)) {
         return (
-          <div className="my-8">
+          <div className="my-8 w-full">
             <MermaidDiagram chart={String(children ?? '')} />
           </div>
         );

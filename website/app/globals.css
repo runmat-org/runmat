@@ -157,8 +157,18 @@
     }
   }
 
-  /* Mermaid embeds: ensure max width and centered visuals */
-  .mermaid svg { max-width: 100%; height: auto; }
+  /* Mermaid embeds: ensure full width visuals */
+  .mermaid {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+  .mermaid svg { 
+    width: 100% !important; 
+    height: auto !important; 
+    max-width: 100%;
+    display: block;
+  }
   .mermaid .node rect, .mermaid .node path {
     filter: drop-shadow(0 2px 6px rgba(0,0,0,0.15));
     rx: 6px;
