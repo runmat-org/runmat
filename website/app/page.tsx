@@ -127,7 +127,6 @@ export default function HomePage() {
           </div>
 
           <div className="mx-auto max-w-7xl flex flex-col items-center justify-center">
-            {/* @ts-ignore - TypeScript parser has issues with large SVG strings in dangerouslySetInnerHTML */}
             <a href="https://github.com/runmat-org/runmat/tree/main/benchmarks/4k-image-processing" target="_blank" rel="noopener noreferrer" className="cursor-pointer block">
               <div className="max-w-5xl mx-auto" dangerouslySetInnerHTML={{ __html: `<svg width="560" height="480" viewBox="0 0 560 480" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M16 0.5H544C552.56 0.5 559.5 7.43959 559.5 16V464C559.5 472.56 552.56 479.5 544 479.5H16C7.43959 479.5 0.5 472.56 0.5 464V16L0.504883 15.5996C0.717254 7.22425 7.57346 0.5 16 0.5Z" fill="#0B0A09"/>
