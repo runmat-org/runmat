@@ -125,6 +125,85 @@ fn fused_sum_mul_dim0_matches_manual() {
 }
 
 #[test]
+fn fused_mean_mul_dim0_matches_manual() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        WgpuProviderOptions::default(),
+    )
+    .expect("wgpu");
+    let rows = 5usize;
+    let cols = 4usize;
+
+    let mut xh = vec![0.0f64; rows * cols];
+    let mut wh = vec![0.0f64; rows * cols];
+    for c in 0..cols {
+        for r in 0..rows {
+            xh[r + c * rows] = (r as f64) + 1.0;
+            wh[r + c * rows] = (c as f64) + 1.0;
+        }
+    }
+    let x = upload_matrix(&provider, rows, cols, &xh);
+    let w = upload_matrix(&provider, rows, cols, &wh);
+
+    let vid_x: ValueId = 0;
+    let vid_w: ValueId = 1;
+    let vid_mul: ValueId = 2;
+
+    let group = FusionGroup {
+        id: 0,
+        kind: FusionKind::Reduction,
+        nodes: vec![],
+        shape: ShapeInfo::Tensor(vec![Some(cols)]),
+        span: InstrSpan { start: 0, end: 0 },
+        pattern: None,
+    };
+    let operations = vec![FusionOp::Primitive {
+        op: runmat_accelerate::graph::PrimitiveOp::ElemMul,
+        inputs: vec![vid_x, vid_w],
+        output: Some(vid_mul),
+    }];
+    let mut constants: HashMap<usize, Value> = HashMap::new();
+    constants.insert(0, Value::Num(1.0)); // dim=1 => reduce rows
+    let plan = FusionGroupPlan {
+        index: 0,
+        group,
+        operations,
+        inputs: vec![vid_x, vid_w],
+        stack_pattern: vec![],
+        constants,
+        const_values: HashMap::new(),
+        output: None,
+        kernel: FusionKernelSpec {
+            kind: FusionKind::Reduction,
+            supported: true,
+        },
+        reduction_data: Some(vid_mul),
+        reduction_mode: Some(ReductionMode::Mean),
+        pattern: None,
+    };
+    let request = FusionExecutionRequest {
+        plan: &plan,
+        inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
+    };
+    let result = execute_reduction(request, rows, cols, 0).expect("execute fused reduction");
+    let out_handle = match result {
+        Value::GpuTensor(h) => h,
+        _ => panic!("expected GPU tensor"),
+    };
+    let out = provider.download(&out_handle).expect("download");
+    assert_eq!(out.shape, vec![cols]);
+    for c in 0..cols {
+        let mut acc = 0.0f64;
+        for r in 0..rows {
+            acc += xh[r + c * rows] * wh[r + c * rows];
+        }
+        let mean = acc / (rows as f64);
+        let got = out.data[c];
+        assert!((got - mean).abs() < 1e-6, "dim0 mean col={c} got={got} exp={mean}");
+    }
+}
+
+#[test]
 fn fused_sum_mul_dim1_matches_manual() {
     let _guard = TEST_MUTEX.lock().unwrap();
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(

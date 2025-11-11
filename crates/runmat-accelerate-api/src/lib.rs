@@ -730,6 +730,15 @@ pub struct ProviderTelemetry {
     pub fusion_cache_misses: u64,
     pub bind_group_cache_hits: u64,
     pub bind_group_cache_misses: u64,
+    /// Optional per-layout bind group cache counters (layout tags and their hit/miss counts)
+    pub bind_group_cache_by_layout: Option<Vec<BindGroupLayoutTelemetry>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BindGroupLayoutTelemetry {
+    pub tag: String,
+    pub hits: u64,
+    pub misses: u64,
 }
 
 /// Device/provider interface that backends implement and register into the runtime layer
@@ -1827,6 +1836,7 @@ pub trait AccelProvider: Send + Sync {
             fusion_cache_misses: misses,
             bind_group_cache_hits: 0,
             bind_group_cache_misses: 0,
+            bind_group_cache_by_layout: None,
         }
     }
 

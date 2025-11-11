@@ -15,6 +15,9 @@ pub enum UniformBufferKey {
     BinaryBroadcastParams,
     ScalarParamsF32,
     ScalarParamsF64,
+    ReductionParams,
+    ReductionPass1Params,
+    ReductionPass2Params,
 }
 
 pub struct KernelResourceRegistry {
@@ -29,6 +32,8 @@ pub enum ScratchBufferKind {
     QrR,
     QrRInv,
     SyrkOut,
+    ReductionOut,
+    ReductionPartials,
 }
 
 impl KernelResourceRegistry {

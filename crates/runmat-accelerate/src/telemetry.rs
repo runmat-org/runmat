@@ -71,6 +71,7 @@ impl AccelTelemetry {
         fusion_cache_misses: u64,
         bind_group_cache_hits: u64,
         bind_group_cache_misses: u64,
+        bind_group_cache_by_layout: Option<Vec<runmat_accelerate_api::BindGroupLayoutTelemetry>>,
     ) -> ProviderTelemetry {
         ProviderTelemetry {
             fused_elementwise: ProviderDispatchStats {
@@ -91,6 +92,7 @@ impl AccelTelemetry {
             fusion_cache_misses,
             bind_group_cache_hits,
             bind_group_cache_misses,
+            bind_group_cache_by_layout,
         }
     }
 }

@@ -895,7 +895,10 @@ impl NativeAutoOffload {
         let cpu_secs = cpu_estimate(self.thresholds.cpu_elem_per_elem, elements);
 
         if let Some(active) = fusion.as_ref() {
-            if active.kind.is_elementwise() && active.supported {
+            // If an elementwise chain is actively fused OR this elementwise op
+            // participates in a fused reduction group, force GPU to keep the
+            // whole chain resident and avoid host round-trips.
+            if (active.kind.is_elementwise() || active.kind.is_reduction()) && active.supported {
                 return DecisionEvaluation {
                     recommend_gpu: true,
                     reason: DecisionReason::FusionOverride,

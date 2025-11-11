@@ -135,6 +135,7 @@ pub struct WgpuProvider {
     element_size: usize,
     fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
     bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
+    bind_group_layout_tags: Mutex<HashMap<usize, String>>,
     bind_group_cache: BindGroupCache,
     kernel_resources: KernelResourceRegistry,
     metrics: crate::backend::wgpu::metrics::WgpuMetrics,
@@ -1705,6 +1706,10 @@ impl WgpuProvider {
             }
         }
         let layout = Arc::new(build(self.device_ref()));
+        let ptr = layout.as_ref() as *const wgpu::BindGroupLayout as usize;
+        if let Ok(mut tags) = self.bind_group_layout_tags.lock() {
+            tags.entry(ptr).or_insert_with(|| key.to_string());
+        }
         if let Ok(mut cache) = self.bind_group_layout_cache.lock() {
             cache.insert(key.to_string(), layout.clone());
         }
@@ -1720,6 +1725,10 @@ impl WgpuProvider {
         let layout =
             crate::backend::wgpu::bindings::build_bgl_for_layout_tag(self.device_ref(), tag)?;
         let layout = Arc::new(layout);
+        let ptr = layout.as_ref() as *const wgpu::BindGroupLayout as usize;
+        if let Ok(mut tags) = self.bind_group_layout_tags.lock() {
+            tags.entry(ptr).or_insert_with(|| tag.to_string());
+        }
         if let Ok(mut cache) = self.bind_group_layout_cache.lock() {
             cache.insert(tag.to_string(), layout.clone());
         }
@@ -2023,6 +2032,7 @@ impl WgpuProvider {
             element_size,
             fused_pipeline_cache: Mutex::new(HashMap::new()),
             bind_group_layout_cache: Mutex::new(HashMap::new()),
+            bind_group_layout_tags: Mutex::new(HashMap::new()),
             bind_group_cache: BindGroupCache::new(),
             kernel_resources: KernelResourceRegistry::new(),
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::new(),
@@ -2662,7 +2672,13 @@ impl WgpuProvider {
                     });
             self.submit(flush_enc);
             let out_len = num_slices.max(1);
-            let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
+            let out_bytes = (out_len * self.element_size) as u64;
+            let out_buffer = self.kernel_resources.scratch_storage_buffer(
+                self.device_ref(),
+                crate::backend::wgpu::resources::ScratchBufferKind::ReductionOut,
+                out_bytes,
+                "runmat-reduction-out-scratch",
+            );
             #[repr(C)]
             #[derive(Clone, Copy, Pod, Zeroable)]
             struct Params {
@@ -2682,7 +2698,14 @@ impl WgpuProvider {
                 ld: reduce_len as u32,
                 flags,
             };
-            let params_buffer = Arc::new(self.uniform_buffer(&params, "runmat-reduction-params"));
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                self.device_ref(),
+                crate::backend::wgpu::resources::UniformBufferKey::ReductionParams,
+                std::mem::size_of::<Params>() as u64,
+                "runmat-reduction-params",
+            );
+            self.queue
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
             // Build entries dynamically: N inputs, 1 output, 1 params
             let mut entries_vec: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(inputs.len() + 2);
             let mut input_bufs: Vec<Arc<wgpu::Buffer>> = Vec::with_capacity(inputs.len());
@@ -2816,8 +2839,21 @@ impl WgpuProvider {
         );
         self.device_ref().poll(wgpu::Maintain::Poll);
         let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
-        let partials_buffer = self.create_storage_buffer(partials_len, "runmat-reduction-partials");
-        let out_buffer = self.create_storage_buffer(num_slices.max(1), "runmat-reduction-out");
+        let partials_bytes = (partials_len * self.element_size) as u64;
+        let partials_buffer = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::ReductionPartials,
+            partials_bytes,
+            "runmat-reduction-partials-scratch",
+        );
+        let out_len = num_slices.max(1);
+        let out_bytes = (out_len * self.element_size) as u64;
+        let out_buffer = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::ReductionOut,
+            out_bytes,
+            "runmat-reduction-out-scratch",
+        );
         #[repr(C)]
         #[derive(Clone, Copy, Pod, Zeroable)]
         struct P1 {
@@ -2846,8 +2882,22 @@ impl WgpuProvider {
             chunks,
             flags,
         };
-        let p1_buf = Arc::new(self.uniform_buffer(&p1u, "runmat-reduction-p1-params"));
-        let p2_buf = Arc::new(self.uniform_buffer(&p2u, "runmat-reduction-p2-params"));
+        let p1_buf = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::UniformBufferKey::ReductionPass1Params,
+            std::mem::size_of::<P1>() as u64,
+            "runmat-reduction-p1-params",
+        );
+        let p2_buf = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::UniformBufferKey::ReductionPass2Params,
+            std::mem::size_of::<P2>() as u64,
+            "runmat-reduction-p2-params",
+        );
+        self.queue
+            .write_buffer(p1_buf.as_ref(), 0, bytes_of(&p1u));
+        self.queue
+            .write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
         let entries_bg1 = vec![
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -13672,8 +13722,29 @@ impl AccelProvider for WgpuProvider {
     fn telemetry_snapshot(&self) -> runmat_accelerate_api::ProviderTelemetry {
         let (fusion_hits, fusion_misses) = self.metrics.counters();
         let (bind_hits, bind_misses) = self.bind_group_cache.counters();
-        self.telemetry
-            .snapshot(fusion_hits, fusion_misses, bind_hits, bind_misses)
+        // Build per-layout telemetry by resolving layout pointers to tags
+        let mut by_layout: Vec<runmat_accelerate_api::BindGroupLayoutTelemetry> = Vec::new();
+        let per = self.bind_group_cache.per_layout_counters();
+        if let Ok(tags) = self.bind_group_layout_tags.lock() {
+            for (ptr, (h, m)) in per {
+                let tag = tags
+                    .get(&ptr)
+                    .cloned()
+                    .unwrap_or_else(|| format!("layout_ptr_{:#x}", ptr));
+                by_layout.push(runmat_accelerate_api::BindGroupLayoutTelemetry {
+                    tag,
+                    hits: h,
+                    misses: m,
+                });
+            }
+        }
+        self.telemetry.snapshot(
+            fusion_hits,
+            fusion_misses,
+            bind_hits,
+            bind_misses,
+            Some(by_layout),
+        )
     }
 
     fn reset_telemetry(&self) {

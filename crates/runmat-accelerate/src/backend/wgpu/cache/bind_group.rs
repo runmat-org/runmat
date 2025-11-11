@@ -54,6 +54,7 @@ pub struct BindGroupCache {
     index: Mutex<HashMap<usize, HashSet<BindGroupKey>>>,
     hits: AtomicU64,
     misses: AtomicU64,
+    per_layout: Mutex<HashMap<usize, (u64, u64)>>,
 }
 
 impl BindGroupCache {
@@ -63,6 +64,7 @@ impl BindGroupCache {
             index: Mutex::new(HashMap::new()),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
+            per_layout: Mutex::new(HashMap::new()),
         }
     }
 
@@ -85,6 +87,10 @@ impl BindGroupCache {
                 {
                     self.hits.fetch_add(1, Ordering::Relaxed);
                     log::debug!("bind_group_cache hit layout_ptr={:#x}", key.layout_ptr);
+                    if let Ok(mut per) = self.per_layout.lock() {
+                        let entry = per.entry(key.layout_ptr).or_insert((0, 0));
+                        entry.0 = entry.0.saturating_add(1);
+                    }
                     return existing;
                 }
                 let bind_group = create();
@@ -103,6 +109,10 @@ impl BindGroupCache {
                 }
                 self.misses.fetch_add(1, Ordering::Relaxed);
                 log::debug!("bind_group_cache miss layout_ptr={:#x}", layout_ptr);
+                if let Ok(mut per) = self.per_layout.lock() {
+                    let entry = per.entry(layout_ptr).or_insert((0, 0));
+                    entry.1 = entry.1.saturating_add(1);
+                }
                 bind_group
             }
             None => {
@@ -122,6 +132,16 @@ impl BindGroupCache {
     pub fn reset_counters(&self) {
         self.hits.store(0, Ordering::Relaxed);
         self.misses.store(0, Ordering::Relaxed);
+        if let Ok(mut per) = self.per_layout.lock() {
+            per.clear();
+        }
+    }
+
+    pub fn per_layout_counters(&self) -> HashMap<usize, (u64, u64)> {
+        self.per_layout
+            .lock()
+            .map(|m| m.clone())
+            .unwrap_or_default()
     }
 
     pub fn invalidate_buffer(&self, buffer_ptr: usize) {
