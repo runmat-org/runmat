@@ -1,3 +1,4 @@
+pub mod centered_gram;
 pub mod circshift;
 pub mod common;
 pub mod conv;
@@ -14,6 +15,7 @@ pub mod ind2sub;
 pub mod kron;
 pub mod matmul;
 pub mod permute;
+pub mod qr_power_iter;
 pub mod reduction;
 pub mod repmat;
 pub mod scan;

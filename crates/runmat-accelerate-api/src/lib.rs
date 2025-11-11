@@ -1459,10 +1459,12 @@ pub trait AccelProvider: Send + Sync {
     }
     fn qr_power_iter(
         &self,
-        _product: &GpuTensorHandle,
-        _q_handle: &GpuTensorHandle,
-        _options: &ProviderQrOptions,
+        product: &GpuTensorHandle,
+        _product_lhs: Option<&GpuTensorHandle>,
+        q_handle: &GpuTensorHandle,
+        options: &ProviderQrOptions,
     ) -> anyhow::Result<Option<ProviderQrPowerIterResult>> {
+        let _ = (product, q_handle, options);
         Ok(None)
     }
     fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {

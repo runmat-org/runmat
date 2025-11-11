@@ -1,5 +1,5 @@
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -51,6 +51,7 @@ impl Hash for BindGroupKey {
 
 pub struct BindGroupCache {
     inner: Mutex<HashMap<BindGroupKey, Arc<wgpu::BindGroup>>>,
+    index: Mutex<HashMap<usize, HashSet<BindGroupKey>>>,
     hits: AtomicU64,
     misses: AtomicU64,
 }
@@ -59,6 +60,7 @@ impl BindGroupCache {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            index: Mutex::new(HashMap::new()),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
         }
@@ -87,8 +89,17 @@ impl BindGroupCache {
                 }
                 let bind_group = create();
                 let layout_ptr = key.layout_ptr;
+                let key_clone = key.clone();
                 if let Ok(mut map) = self.inner.lock() {
                     map.insert(key, bind_group.clone());
+                }
+                if let Ok(mut index) = self.index.lock() {
+                    for binding in &key_clone.bindings {
+                        index
+                            .entry(binding.buffer_ptr)
+                            .or_insert_with(HashSet::new)
+                            .insert(key_clone.clone());
+                    }
                 }
                 self.misses.fetch_add(1, Ordering::Relaxed);
                 log::debug!("bind_group_cache miss layout_ptr={:#x}", layout_ptr);
@@ -111,6 +122,45 @@ impl BindGroupCache {
     pub fn reset_counters(&self) {
         self.hits.store(0, Ordering::Relaxed);
         self.misses.store(0, Ordering::Relaxed);
+    }
+
+    pub fn invalidate_buffer(&self, buffer_ptr: usize) {
+        let removed_keys = {
+            let mut keys_to_remove: Vec<BindGroupKey> = Vec::new();
+            if let Ok(mut index) = self.index.lock() {
+                if let Some(keys_set) = index.remove(&buffer_ptr) {
+                    keys_to_remove.extend(keys_set.into_iter());
+                    let mut empty_ptrs: HashSet<usize> = HashSet::new();
+                    for key in &keys_to_remove {
+                        for binding in &key.bindings {
+                            if binding.buffer_ptr == buffer_ptr {
+                                continue;
+                            }
+                            if let Some(set) = index.get_mut(&binding.buffer_ptr) {
+                                set.remove(key);
+                                if set.is_empty() {
+                                    empty_ptrs.insert(binding.buffer_ptr);
+                                }
+                            }
+                        }
+                    }
+                    for ptr in empty_ptrs {
+                        index.remove(&ptr);
+                    }
+                } else {
+                    return;
+                }
+            } else {
+                return;
+            }
+            keys_to_remove
+        };
+
+        if let Ok(mut map) = self.inner.lock() {
+            for key in removed_keys {
+                map.remove(&key);
+            }
+        }
     }
 
     fn make_key(

@@ -374,6 +374,38 @@ pub const MATMUL_EPILOGUE_FLAG_CLAMP_MAX: u32 = 1 << 5;
 pub const MATMUL_EPILOGUE_FLAG_POW: u32 = 1 << 6;
 pub const MATMUL_EPILOGUE_FLAG_DIAG_WRITE: u32 = 1 << 7;
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CenteredGramParamsF64 {
+    pub rows: u32,
+    pub cols: u32,
+    pub lda: u32,
+    pub ldc: u32,
+    pub offset_matrix: u32,
+    pub offset_means: u32,
+    pub offset_out: u32,
+    pub _pad0: u32,
+    pub denom: [f64; 2],
+    pub _pad1: [f64; 2],
+    pub _pad2: [f64; 2],
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CenteredGramParamsF32 {
+    pub rows: u32,
+    pub cols: u32,
+    pub lda: u32,
+    pub ldc: u32,
+    pub offset_matrix: u32,
+    pub offset_means: u32,
+    pub offset_out: u32,
+    pub _pad0: u32,
+    pub denom: [f32; 4],
+    pub _pad1: [f32; 4],
+    pub _pad2: [f32; 4],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ImageNormalizeUniforms {
@@ -670,4 +702,12 @@ pub struct ReduceNdParams {
     pub reduce_sizes: [AlignedU32; BCAST_MAX_RANK],
     pub kept_strides: [AlignedU32; BCAST_MAX_RANK],
     pub reduce_strides: [AlignedU32; BCAST_MAX_RANK],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct QrPowerIterParams {
+    pub cols: u32,
+    pub stride: u32,
+    pub _pad0: [u32; 2],
 }

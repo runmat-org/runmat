@@ -198,6 +198,7 @@ fn main(
     let offset_out_vec = params.offset_out / 4u;
 
     var acc = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    var comp = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     let tiles_k = (params.k + tile - 1u) / tile;
 
     for (var t: u32 = 0u; t < tiles_k; t = t + 1u) {
@@ -224,7 +225,11 @@ fn main(
         for (var p: u32 = 0u; p < tile; p = p + 1u) {
             let a_block = tileA[lid.y][p];
             let b_block = tileB[p][lid.x];
-            acc = acc + a_block * b_block;
+            let prod = a_block * b_block;
+            let y = prod - comp;
+            let t = acc + y;
+            comp = (t - acc) - y;
+            acc = t;
         }
 
         workgroupBarrier();

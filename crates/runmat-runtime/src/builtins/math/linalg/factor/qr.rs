@@ -288,8 +288,16 @@ fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> Result<Option<
             PivotMode::Vector => runmat_accelerate_api::ProviderQrPivot::Vector,
         },
     };
-    if let Some((_lhs, rhs)) = provider.take_matmul_sources(handle) {
-        match provider.qr_power_iter(handle, &rhs, &provider_options) {
+    if std::env::var("RUNMAT_DEBUG_QR").is_ok() {
+        log::debug!(
+            "qr evaluate_gpu: handle={} mode={:?} pivot={:?}",
+            handle.buffer_id,
+            options.mode,
+            options.pivot
+        );
+    }
+    if let Some((lhs, rhs)) = provider.take_matmul_sources(handle) {
+        match provider.qr_power_iter(handle, Some(&lhs), &rhs, &provider_options) {
             Ok(Some(result)) => {
                 return Ok(Some(QrEval {
                     q: Value::GpuTensor(result.q),

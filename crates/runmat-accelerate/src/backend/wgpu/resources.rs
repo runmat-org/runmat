@@ -8,6 +8,9 @@ pub enum UniformBufferKey {
     MatmulParams,
     SyrkParams,
     ImageNormalizeUniforms,
+    CenteredGramParamsF32,
+    CenteredGramParamsF64,
+    QrPowerIterParams,
 }
 
 pub struct KernelResourceRegistry {

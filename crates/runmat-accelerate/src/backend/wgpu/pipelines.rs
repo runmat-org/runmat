@@ -41,8 +41,18 @@ const MATMUL_SMALLK_SHADER_F64: &str =
     crate::backend::wgpu::shaders::matmul_smallk::MATMUL_SMALLK_SHADER_F64;
 const MATMUL_SMALLK_SHADER_F32: &str =
     crate::backend::wgpu::shaders::matmul_smallk::MATMUL_SMALLK_SHADER_F32;
+const MATMUL_TALL_SKINNY_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::matmul_tall_skinny::MATMUL_TALL_SKINNY_F64;
+const MATMUL_TALL_SKINNY_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::matmul_tall_skinny::MATMUL_TALL_SKINNY_F32;
 const SYRK_SHADER_F64: &str = crate::backend::wgpu::shaders::syrk::SYRK_SHADER_F64;
 const SYRK_SHADER_F32: &str = crate::backend::wgpu::shaders::syrk::SYRK_SHADER_F32;
+const CENTERED_GRAM_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::centered_gram::CENTERED_GRAM_SHADER_F64;
+const CENTERED_GRAM_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::centered_gram::CENTERED_GRAM_SHADER_F32;
+const QR_POWER_ITER_CHOL_SHADER: &str =
+    crate::backend::wgpu::shaders::qr_power_iter::QR_POWER_ITER_CHOL_SHADER;
 const CONV1D_SHADER_F64: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F64;
 const CONV1D_SHADER_F32: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F32;
 const REDUCE_GLOBAL_SHADER_F64: &str =
@@ -146,7 +156,10 @@ pub struct WgpuPipelines {
     pub matmul: PipelineBundle,
     pub matmul_vec4: PipelineBundle,
     pub matmul_smallk: PipelineBundle,
+    pub matmul_tall_skinny: PipelineBundle,
     pub matmul_epilogue: PipelineBundle,
+    pub centered_gram: PipelineBundle,
+    pub qr_power_iter: PipelineBundle,
     pub syrk: PipelineBundle,
     pub reduce_global: PipelineBundle,
     pub reduce_dim_sum_mean: PipelineBundle,
@@ -541,6 +554,23 @@ impl WgpuPipelines {
             },
         );
 
+        let matmul_tall_skinny = create_pipeline(
+            device,
+            "runmat-matmul-tall-skinny-layout",
+            "runmat-matmul-tall-skinny-shader",
+            "runmat-matmul-tall-skinny-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => MATMUL_TALL_SKINNY_SHADER_F64,
+                NumericPrecision::F32 => MATMUL_TALL_SKINNY_SHADER_F32,
+            },
+        );
+
         let matmul_epilogue = create_pipeline(
             device,
             "runmat-matmul-epilogue-layout",
@@ -559,6 +589,37 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => MATMUL_EPILOGUE_SHADER_F64,
                 NumericPrecision::F32 => MATMUL_EPILOGUE_SHADER_F32,
             },
+        );
+
+        let centered_gram = create_pipeline(
+            device,
+            "runmat-centered-gram-layout",
+            "runmat-centered-gram-shader",
+            "runmat-centered-gram-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => CENTERED_GRAM_SHADER_F64,
+                NumericPrecision::F32 => CENTERED_GRAM_SHADER_F32,
+            },
+        );
+
+        let qr_power_iter = create_pipeline(
+            device,
+            "runmat-qr-power-layout",
+            "runmat-qr-power-shader",
+            "runmat-qr-power-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            QR_POWER_ITER_CHOL_SHADER,
         );
 
         let syrk = create_pipeline(
@@ -945,7 +1006,10 @@ impl WgpuPipelines {
             matmul,
             matmul_vec4,
             matmul_smallk,
+            matmul_tall_skinny,
             matmul_epilogue,
+            centered_gram,
+            qr_power_iter,
             syrk,
             reduce_global,
             reduce_dim_sum_mean,

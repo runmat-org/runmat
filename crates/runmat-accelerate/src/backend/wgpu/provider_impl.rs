@@ -4,6 +4,7 @@ use log::{info, warn};
 use num_complex::Complex;
 use once_cell::sync::OnceCell;
 use pollster::block_on;
+use rand::seq::SliceRandom;
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows,
     CovNormalization, CovRows, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
@@ -44,10 +45,12 @@ use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
 use runmat_runtime::builtins::math::reduction::compute_median_inplace;
 use rustfft::FftPlanner;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, Mutex};
+use std::{fs, path::Path};
 use wgpu::util::DeviceExt;
 
 use crate::backend::wgpu::cache::{
@@ -55,15 +58,17 @@ use crate::backend::wgpu::cache::{
 };
 use crate::backend::wgpu::config::{DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD};
 use crate::backend::wgpu::params::{
-    BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
-    DiffParams, FilterParams, ImageNormalizeUniforms, SymmetryParamsF32, SymmetryParamsF64,
-    SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA,
-    SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
+    BandwidthParams, CenteredGramParamsF32, CenteredGramParamsF64, Conv1dParams, CummaxParams,
+    CumminParams, CumprodParams, CumsumParams, DiffParams, FilterParams, ImageNormalizeUniforms,
+    QrPowerIterParams, SymmetryParamsF32, SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS,
+    IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE,
+    SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::resources::{KernelResourceRegistry, UniformBufferKey};
 use crate::backend::wgpu::types::NumericPrecision;
+use crate::fusion::{active_fusion, active_group_plan_clone};
 use crate::host_lu::{lu_factor_host, LuHostFactors};
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use crate::telemetry::AccelTelemetry;
@@ -74,6 +79,7 @@ pub struct WgpuProviderOptions {
     pub force_fallback_adapter: bool,
 }
 
+#[allow(dead_code)]
 pub(crate) fn invert_upper_triangular(data: &[f64], n: usize) -> Result<Vec<f64>> {
     let mut inv = vec![0.0f64; n * n];
     let idx = |row: usize, col: usize| -> usize { row + col * n };
@@ -641,7 +647,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     output.data[idx] = select(f64(0.0), f64(1.0), cond);
 }
 "#;
-
 const LOGICAL_OR_SHADER_F32: &str = r#"
 struct Tensor {
     data: array<f32>,
@@ -792,7 +797,6 @@ const LOGICAL_NOT_SHADER_F64: &str = r#"
 struct Tensor {
     data: array<f64>,
 };
-
 struct Params {
     len: u32,
     _pad0: u32,
@@ -1286,7 +1290,6 @@ fn diag_offset_abs(offset: isize) -> usize {
         magnitude as usize
     }
 }
-
 fn diag_matrix_size_checked(len: usize, offset: isize) -> Result<(usize, usize)> {
     let shift = diag_offset_abs(offset);
     let size = len
@@ -1584,7 +1587,6 @@ fn sort_host_tensor(
 
     Ok((sorted, indices))
 }
-
 const RNG_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
 const RNG_MULTIPLIER: u64 = 6364136223846793005;
@@ -1642,6 +1644,17 @@ impl WgpuProvider {
             ));
         }
         let (buffer, reused) = self.create_storage_buffer_for_usage(usage, len, label);
+        if reused {
+            if std::env::var("RUNMAT_DEBUG_RESIDENCY").is_ok() {
+                eprintln!(
+                    "[residency_debug] reused buffer label={} usage={:?} len={} ptr={:p}",
+                    label,
+                    usage,
+                    len,
+                    buffer.as_ref()
+                );
+            }
+        }
         if !reused && size_bytes >= (256u64 << 20) {
             log::warn!(
                 "{}: large GPU allocation ({} bytes) len={} elems",
@@ -2073,10 +2086,11 @@ impl WgpuProvider {
             return;
         }
         log::debug!(
-            "remember_matmul_sources: product={} lhs={} rhs={}",
+            "remember_matmul_sources: product={} lhs={} rhs={} active_fusion={:?}",
             product.buffer_id,
             lhs.buffer_id,
-            rhs.buffer_id
+            rhs.buffer_id,
+            active_fusion()
         );
         self.kernel_resources
             .remember_matmul_sources(product, lhs, rhs);
@@ -2214,7 +2228,6 @@ impl WgpuProvider {
         self.queue.submit(Some(encoder.finish()));
         self.device.poll(wgpu::Maintain::Wait);
     }
-
     fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         if handle.device_id != self.device_id {
             return Err(anyhow!(
@@ -3899,7 +3912,9 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
+        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len);
+
+        Ok(handle)
     }
 
     pub(crate) fn tril_exec(
@@ -4026,7 +4041,9 @@ impl WgpuProvider {
             offset_idx += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
+        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len);
+
+        Ok(handle)
     }
 
     fn tril_exec_fallback(
@@ -4164,7 +4181,9 @@ impl WgpuProvider {
             offset_idx += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
+        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len);
+
+        Ok(handle)
     }
 
     fn triu_exec_fallback(
@@ -4356,9 +4375,10 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
-    }
+        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len);
 
+        Ok(handle)
+    }
     pub(crate) fn conv1d_exec(
         &self,
         signal: &GpuTensorHandle,
@@ -4440,7 +4460,9 @@ impl WgpuProvider {
             workgroups,
         );
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, output_len))
+        let handle = self.register_existing_buffer(out_buffer, out_shape, output_len);
+
+        Ok(handle)
     }
     pub(crate) fn iir_filter_exec(
         &self,
@@ -5611,7 +5633,6 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         self.matmul_exec_with_usage(a, b, BufferUsageClass::MatmulOut)
     }
-
     fn matmul_exec_with_usage(
         &self,
         a: &GpuTensorHandle,
@@ -5634,6 +5655,36 @@ impl WgpuProvider {
         let m = view_a.rows;
         let n = view_b.cols;
         let k = view_a.cols;
+
+        let debug_matmul = std::env::var("RUNMAT_DEBUG_MATMUL").is_ok();
+        let debug_matmul_dump = std::env::var("RUNMAT_DEBUG_MATMUL_DUMP").is_ok();
+        if debug_matmul {
+            eprintln!(
+                "[matmul_debug] ptr_a={:p} ptr_b={:p}",
+                entry_a.buffer.as_ref(),
+                entry_b.buffer.as_ref()
+            );
+            eprintln!(
+                "[matmul_debug] m={} n={} k={} lda={} ldb={} transpose_a={} transpose_b={}",
+                m, n, k, view_a.lda, view_b.lda, view_a.transpose, view_b.transpose
+            );
+            if debug_matmul_dump {
+                if let Ok(lhs_host) = self.download(a) {
+                    let max_a = lhs_host
+                        .data
+                        .iter()
+                        .fold(0.0f64, |acc, value| acc.max(value.abs()));
+                    eprintln!("[matmul_debug] lhs max_abs={:.6e}", max_a);
+                }
+                if let Ok(rhs_host) = self.download(b) {
+                    let max_b = rhs_host
+                        .data
+                        .iter()
+                        .fold(0.0f64, |acc, value| acc.max(value.abs()));
+                    eprintln!("[matmul_debug] rhs max_abs={:.6e}", max_b);
+                }
+            }
+        }
 
         let out_shape = vec![m, n];
         let len = m * n;
@@ -5658,8 +5709,17 @@ impl WgpuProvider {
             && m % 4 == 0
             && m >= 4
             && n > 0;
-        let use_vec4 = can_vec4 && k < K_CHUNK_SWITCH;
+        let disable_vec4 = std::env::var("RUNMAT_DISABLE_VEC4")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"))
+            .unwrap_or(false);
+        let use_vec4 = can_vec4 && k < K_CHUNK_SWITCH && !disable_vec4;
         let enable_chunk = !view_a.transpose && !view_b.transpose && k >= K_CHUNK_SWITCH;
+        if debug_matmul {
+            eprintln!(
+                "[matmul_debug] can_vec4={} use_vec4={} enable_chunk={} usage={:?}",
+                can_vec4, use_vec4, enable_chunk, out_usage
+            );
+        }
 
         let start = std::time::Instant::now();
 
@@ -5839,18 +5899,28 @@ impl WgpuProvider {
                 resource: params_buffer.as_entire_binding(),
             },
         ];
-        let bg = self
-            .bind_group_cache
-            .get_or_create(layout, &bind_entries, || {
-                Arc::new(
-                    self.device_ref()
-                        .create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("runmat-matmul-bind"),
-                            layout,
-                            entries: &bind_entries,
-                        }),
-                )
-            });
+        let bg = if out_usage == BufferUsageClass::MatmulOut {
+            Arc::new(
+                self.device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-matmul-bind"),
+                        layout,
+                        entries: &bind_entries,
+                    }),
+            )
+        } else {
+            self.bind_group_cache
+                .get_or_create(layout, &bind_entries, || {
+                    Arc::new(
+                        self.device_ref()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-matmul-bind"),
+                                layout,
+                                entries: &bind_entries,
+                            }),
+                    )
+                })
+        };
         let tile = crate::backend::wgpu::config::effective_matmul_tile();
         let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
         let groups_y = if use_vec4 {
@@ -5867,13 +5937,30 @@ impl WgpuProvider {
             groups_x,
             groups_y,
         );
+        let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer;
         let handle =
             self.register_existing_buffer_with_usage(out_buffer, out_shape, len, out_usage);
+        if debug_matmul {
+            eprintln!("[matmul_debug] out_ptr={:p} len={}", out_ptr, len);
+            if debug_matmul_dump {
+                if let Ok(out_host) = self.download(&handle) {
+                    let max_out = out_host
+                        .data
+                        .iter()
+                        .fold(0.0f64, |acc, value| acc.max(value.abs()));
+                    let sample_len = out_host.data.len().min(8);
+                    eprintln!("[matmul_debug] out max_abs={:.6e}", max_out);
+                    eprintln!(
+                        "[matmul_debug] out sample {:?}",
+                        &out_host.data[0..sample_len]
+                    );
+                }
+            }
+        }
         self.remember_matmul_sources(&handle, a, b);
         self.telemetry.record_matmul_duration(start.elapsed());
         Ok(handle)
     }
-
     pub(crate) fn pagefun_exec(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
         match request.op {
             PagefunOp::Mtimes => self.pagefun_mtimes_exec(request),
@@ -6084,7 +6171,534 @@ impl WgpuProvider {
 
         self.telemetry.record_matmul_duration(start.elapsed());
 
-        Ok(self.register_existing_buffer(out_buffer, request.output_shape.clone(), total_len))
+        let handle =
+            self.register_existing_buffer(out_buffer, request.output_shape.clone(), total_len);
+
+        Ok(handle)
+    }
+    fn centered_gram_exec_kernel(
+        &self,
+        matrix: &GpuTensorHandle,
+        matrix_entry: &BufferEntry,
+        means: &GpuTensorHandle,
+        rows: usize,
+        cols: usize,
+        denom: f64,
+    ) -> Result<GpuTensorHandle> {
+        let means_entry = self.get_entry(means)?;
+        let rows_u32 =
+            u32::try_from(rows).map_err(|_| anyhow!("centered_gram: rows exceed GPU limits"))?;
+        let cols_u32 =
+            u32::try_from(cols).map_err(|_| anyhow!("centered_gram: cols exceed GPU limits"))?;
+        let lda =
+            u32::try_from(rows).map_err(|_| anyhow!("centered_gram: lda exceed GPU limits"))?;
+        let ldc =
+            u32::try_from(cols).map_err(|_| anyhow!("centered_gram: ldc exceed GPU limits"))?;
+        let len_out = cols
+            .checked_mul(cols)
+            .ok_or_else(|| anyhow!("centered_gram: output size overflow"))?;
+
+        let out_buffer = self.create_storage_buffer_checked_with_usage(
+            len_out,
+            "runmat-centered-gram-out",
+            BufferUsageClass::FusionOut,
+        )?;
+
+        let params_buffer = match matrix_entry.precision {
+            NumericPrecision::F64 => {
+                let mut denom_vec = [0.0f64; 2];
+                denom_vec[0] = 1.0 / denom;
+                let params = CenteredGramParamsF64 {
+                    rows: rows_u32,
+                    cols: cols_u32,
+                    lda,
+                    ldc,
+                    offset_matrix: 0,
+                    offset_means: 0,
+                    offset_out: 0,
+                    _pad0: 0,
+                    denom: denom_vec,
+                    _pad1: [0.0; 2],
+                    _pad2: [0.0; 2],
+                };
+                let buffer = self.kernel_resources.uniform_buffer(
+                    self.device_ref(),
+                    UniformBufferKey::CenteredGramParamsF64,
+                    std::mem::size_of::<CenteredGramParamsF64>() as u64,
+                    "runmat-centered-gram-params-f64",
+                );
+                self.queue
+                    .write_buffer(buffer.as_ref(), 0, bytes_of(&params));
+                buffer
+            }
+            NumericPrecision::F32 => {
+                let mut denom_vec = [0.0f32; 4];
+                denom_vec[0] = (1.0 / denom) as f32;
+                let params = CenteredGramParamsF32 {
+                    rows: rows_u32,
+                    cols: cols_u32,
+                    lda,
+                    ldc,
+                    offset_matrix: 0,
+                    offset_means: 0,
+                    offset_out: 0,
+                    _pad0: 0,
+                    denom: denom_vec,
+                    _pad1: [0.0; 4],
+                    _pad2: [0.0; 4],
+                };
+                let buffer = self.kernel_resources.uniform_buffer(
+                    self.device_ref(),
+                    UniformBufferKey::CenteredGramParamsF32,
+                    std::mem::size_of::<CenteredGramParamsF32>() as u64,
+                    "runmat-centered-gram-params-f32",
+                );
+                self.queue
+                    .write_buffer(buffer.as_ref(), 0, bytes_of(&params));
+                buffer
+            }
+        };
+
+        let bind_entries = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: matrix_entry.buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: means_entry.buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: out_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buffer.as_entire_binding(),
+            },
+        ];
+        let layout = &self.pipelines.centered_gram.layout;
+        let bind_group = self
+            .bind_group_cache
+            .get_or_create(layout, &bind_entries, || {
+                Arc::new(
+                    self.device_ref()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-centered-gram-bind"),
+                            layout,
+                            entries: &bind_entries,
+                        }),
+                )
+            });
+
+        self.device_ref().poll(wgpu::Maintain::Poll);
+        let tile = crate::backend::wgpu::config::effective_matmul_tile();
+        let groups = crate::backend::wgpu::dispatch::common::dispatch_size_dim(cols_u32, tile);
+        crate::backend::wgpu::dispatch::centered_gram::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.centered_gram.pipeline,
+            bind_group.as_ref(),
+            groups,
+            groups,
+        );
+
+        let handle = self.register_existing_buffer_with_usage(
+            out_buffer,
+            vec![cols, cols],
+            len_out,
+            BufferUsageClass::FusionOut,
+        );
+        self.mark_buffer_usage(&handle, BufferUsageClass::FusionOut);
+
+        if std::env::var("RUNMAT_DEBUG_CENTERED_GRAM").is_ok() {
+            if let Err(err) = self.debug_centered_gram(
+                matrix,
+                matrix_entry.precision,
+                means,
+                &handle,
+                rows,
+                cols,
+                denom,
+            ) {
+                log::warn!("centered_gram debug instrumentation failed: {err}");
+            }
+        }
+
+        Ok(handle)
+    }
+    fn debug_centered_gram(
+        &self,
+        matrix: &GpuTensorHandle,
+        precision: NumericPrecision,
+        means: &GpuTensorHandle,
+        output: &GpuTensorHandle,
+        rows: usize,
+        cols: usize,
+        denom: f64,
+    ) -> Result<()> {
+        let matrix_host = self.download(matrix)?;
+        let means_gpu = self.download(means)?;
+        let output_gpu = self.download(output)?;
+        if matrix_host.data.len() != rows * cols {
+            return Err(anyhow!(
+                "centered_gram debug: matrix download length mismatch ({} vs {})",
+                matrix_host.data.len(),
+                rows * cols
+            ));
+        }
+
+        let mut mean_ref = vec![0.0f64; cols];
+        for col in 0..cols {
+            let mut sum = 0.0f64;
+            let base = col * rows;
+            for row in 0..rows {
+                sum += matrix_host.data[base + row];
+            }
+            mean_ref[col] = sum / (rows as f64);
+        }
+
+        let mut max_mean_diff = 0.0f64;
+        for col in 0..cols.min(means_gpu.data.len()) {
+            let diff = (mean_ref[col] - means_gpu.data[col]).abs();
+            if diff > max_mean_diff {
+                max_mean_diff = diff;
+            }
+        }
+
+        let mut rng = rand::thread_rng();
+        let mut indices: Vec<usize> = (0..cols).collect();
+        indices.shuffle(&mut rng);
+        indices.truncate(cols.min(32));
+        indices.sort_unstable();
+
+        let mut max_abs_err = 0.0f64;
+        let mut max_abs_idx = (0usize, 0usize);
+        let mut max_rel_err = 0.0f64;
+        let mut max_rel_idx = (0usize, 0usize);
+        let mut max_diag_neg = 0.0f64;
+        let mut max_diag_idx = 0usize;
+
+        for &j in &indices {
+            for &i in &indices {
+                let mut sum = 0.0f64;
+                let base_i = i * rows;
+                let base_j = j * rows;
+                for row in 0..rows {
+                    let centered_i = matrix_host.data[base_i + row] - mean_ref[i];
+                    let centered_j = matrix_host.data[base_j + row] - mean_ref[j];
+                    sum += centered_i * centered_j;
+                }
+                sum /= denom;
+
+                let gpu_val = output_gpu.data[i + j * cols];
+                let abs_err = (gpu_val - sum).abs();
+                if abs_err > max_abs_err {
+                    max_abs_err = abs_err;
+                    max_abs_idx = (i, j);
+                }
+                if sum.abs() > 0.0 {
+                    let rel_err = abs_err / sum.abs();
+                    if rel_err > max_rel_err {
+                        max_rel_err = rel_err;
+                        max_rel_idx = (i, j);
+                    }
+                }
+                if i == j && gpu_val < 0.0 {
+                    let neg = gpu_val.abs();
+                    if neg > max_diag_neg {
+                        max_diag_neg = neg;
+                        max_diag_idx = i;
+                    }
+                }
+            }
+        }
+
+        let sample_preview: Vec<usize> = indices.iter().copied().take(16).collect();
+        let rows_out = output_gpu.shape.get(0).copied().unwrap_or(cols);
+        let diag_len = cols.min(rows_out);
+        let mut trace = 0.0f64;
+        for d in 0..diag_len {
+            let idx = d + d * rows_out;
+            if let Some(val) = output_gpu.data.get(idx) {
+                trace += *val;
+            }
+        }
+        log::info!(
+            "centered_gram debug [{}]: rows={} cols={} sample_cols={} trace={:.6e} max_mean_diff={:.3e} max_abs_err={:.3e} at ({}, {}) max_rel_err={:.3e} at ({}, {}) max_diag_neg={:.3e} at ({}) samples={:?}",
+            match precision {
+                NumericPrecision::F32 => "f32",
+                NumericPrecision::F64 => "f64",
+            },
+            rows,
+            cols,
+            indices.len(),
+            trace,
+            max_mean_diff,
+            max_abs_err,
+            max_abs_idx.0,
+            max_abs_idx.1,
+            max_rel_err,
+            max_rel_idx.0,
+            max_rel_idx.1,
+            max_diag_neg,
+            max_diag_idx,
+            sample_preview
+        );
+
+        Ok(())
+    }
+    fn debug_qr_power_iter(
+        &self,
+        product: &GpuTensorHandle,
+        product_entry: &BufferEntry,
+        pre_product_max: Option<f64>,
+        pre_q_max: Option<f64>,
+        q_result: &GpuTensorHandle,
+        r_handle: &GpuTensorHandle,
+        r_inv_handle: &GpuTensorHandle,
+        gram_host: Option<&HostTensorOwned>,
+        rows: usize,
+        cols: usize,
+    ) -> Result<()> {
+        if rows == 0 || cols == 0 {
+            return Ok(());
+        }
+
+        let product_host = self.download(product)?;
+        let q_gpu_host = self.download(q_result)?;
+        let r_gpu_host = self.download(r_handle)?;
+        let r_inv_gpu_host = self.download(r_inv_handle)?;
+        let max_r_inv_abs = r_inv_gpu_host
+            .data
+            .iter()
+            .fold(0.0f64, |acc, v| acc.max(v.abs()));
+
+        if product_host.data.len() != rows * cols
+            || q_gpu_host.data.len() != rows * cols
+            || r_gpu_host.data.len() != cols * cols
+            || r_inv_gpu_host.data.len() != cols * cols
+        {
+            return Err(anyhow!(
+                "qr_power_iter debug: length mismatch (rows={}, cols={})",
+                rows,
+                cols
+            ));
+        }
+
+        let gram_cow: Cow<'_, HostTensorOwned> = if let Some(host) = gram_host {
+            Cow::Borrowed(host)
+        } else {
+            let product_t_tmp = self.transpose_exec(product)?;
+            let gram_tmp =
+                self.matmul_exec_with_usage(&product_t_tmp, product, BufferUsageClass::FusionOut)?;
+            let _ = self.free(&product_t_tmp);
+            let owned = self.download(&gram_tmp)?;
+            let _ = self.free(&gram_tmp);
+            Cow::Owned(owned)
+        };
+        let gram_view: &HostTensorOwned = &*gram_cow;
+
+        if gram_view.data.len() != cols * cols {
+            return Err(anyhow!(
+                "qr_power_iter debug: Gram data mismatch (cols={})",
+                cols
+            ));
+        }
+
+        let mut min_r_diag = f64::MAX;
+        let mut max_r_diag = f64::MIN;
+        for i in 0..cols {
+            let diag = r_gpu_host.data[i + i * cols];
+            min_r_diag = min_r_diag.min(diag);
+            max_r_diag = max_r_diag.max(diag);
+        }
+
+        let mut min_gram_diag = f64::MAX;
+        let mut max_gram_diag = f64::MIN;
+        for i in 0..cols {
+            let diag = gram_view.data[i + i * cols];
+            min_gram_diag = min_gram_diag.min(diag);
+            max_gram_diag = max_gram_diag.max(diag);
+        }
+
+        let mut q_ref = vec![0.0f64; rows * cols];
+        for col in 0..cols {
+            for row in 0..rows {
+                let mut sum = 0.0f64;
+                for k in 0..cols {
+                    sum += product_host.data[row + k * rows] * r_inv_gpu_host.data[k + col * cols];
+                }
+                q_ref[row + col * rows] = sum;
+            }
+        }
+
+        let mut max_q_diff = 0.0f64;
+        let mut max_q_diff_idx = 0usize;
+        let mut max_q_abs = 0.0f64;
+        let mut min_q_abs = f64::MAX;
+        let mut non_zero_q = false;
+        for idx in 0..(rows * cols).min(q_gpu_host.data.len()) {
+            let val = q_gpu_host.data[idx];
+            let diff = (val - q_ref[idx]).abs();
+            if diff > max_q_diff {
+                max_q_diff = diff;
+                max_q_diff_idx = idx;
+            }
+            let abs_val = val.abs();
+            if abs_val > max_q_abs {
+                max_q_abs = abs_val;
+            }
+            if abs_val < min_q_abs {
+                min_q_abs = abs_val;
+            }
+            if abs_val > 1.0e-12 {
+                non_zero_q = true;
+            }
+        }
+        if min_q_abs == f64::MAX {
+            min_q_abs = 0.0;
+        }
+
+        let mut max_qtq_diag = 0.0f64;
+        let mut max_qtq_diag_idx = 0usize;
+        let mut max_qtq_off = 0.0f64;
+        let mut max_qtq_off_idx = (0usize, 0usize);
+        let mut min_diag_val = f64::MAX;
+        let mut max_diag_val = f64::MIN;
+        for j in 0..cols {
+            for i in 0..cols {
+                let mut sum = 0.0f64;
+                for row in 0..rows {
+                    sum += q_gpu_host.data[row + i * rows] * q_gpu_host.data[row + j * rows];
+                }
+                if i == j {
+                    let err = (sum - 1.0).abs();
+                    if err > max_qtq_diag {
+                        max_qtq_diag = err;
+                        max_qtq_diag_idx = i;
+                    }
+                    if sum < min_diag_val {
+                        min_diag_val = sum;
+                    }
+                    if sum > max_diag_val {
+                        max_diag_val = sum;
+                    }
+                } else {
+                    let err = sum.abs();
+                    if err > max_qtq_off {
+                        max_qtq_off = err;
+                        max_qtq_off_idx = (i, j);
+                    }
+                }
+            }
+        }
+
+        let mut max_residual = 0.0f64;
+        let mut max_residual_idx = (0usize, 0usize);
+        for col in 0..cols {
+            for row in 0..rows {
+                let mut sum = 0.0f64;
+                for k in 0..cols {
+                    sum += q_gpu_host.data[row + k * rows] * r_gpu_host.data[k + col * cols];
+                }
+                let diff = (sum - product_host.data[row + col * rows]).abs();
+                if diff > max_residual {
+                    max_residual = diff;
+                    max_residual_idx = (row, col);
+                }
+            }
+        }
+
+        let mut gq_gpu = vec![0.0f64; rows * cols];
+        for col in 0..cols {
+            for row in 0..rows {
+                let mut sum = 0.0f64;
+                for l in 0..cols {
+                    sum += gram_view.data[l + col * cols] * q_gpu_host.data[row + l * rows];
+                }
+                gq_gpu[row + col * rows] = sum;
+            }
+        }
+        let mut gq_ref = vec![0.0f64; rows * cols];
+        for col in 0..cols {
+            for row in 0..rows {
+                let mut sum = 0.0f64;
+                for l in 0..cols {
+                    sum += gram_view.data[l + col * cols] * q_ref[row + l * rows];
+                }
+                gq_ref[row + col * rows] = sum;
+            }
+        }
+
+        let mut gpu_topk = 0.0f64;
+        let mut ref_topk = 0.0f64;
+        for col in 0..cols {
+            let mut diag_gpu = 0.0f64;
+            let mut diag_ref = 0.0f64;
+            for row in 0..rows {
+                diag_gpu += q_gpu_host.data[row + col * rows] * gq_gpu[row + col * rows];
+                diag_ref += q_ref[row + col * rows] * gq_ref[row + col * rows];
+            }
+            gpu_topk += diag_gpu;
+            ref_topk += diag_ref;
+        }
+        let topk_diff = gpu_topk - ref_topk;
+        let max_product_abs = product_host
+            .data
+            .iter()
+            .fold(0.0f64, |acc, v| acc.max(v.abs()));
+
+        log::info!(
+            "qr_power_iter debug: rows={} cols={} max_q_diff={:.3e} at idx={} max_q_abs={:.3e} min_q_abs={:.3e} non_zero_q={} max_qtq_diag_err={:.3e} at col={} max_qtq_off={:.3e} at ({}, {}) min_diag={:.3e} max_diag={:.3e} max_residual={:.3e} at ({}, {}) max_product_abs_pre={:?} max_product_abs={:.3e} max_q_abs_pre={:?} max_r_inv_abs={:.3e} min_r_diag={:.3e} max_r_diag={:.3e} min_gram_diag={:.3e} max_gram_diag={:.3e} gpu_topk={:.6e} ref_topk={:.6e} diff={:.3e}",
+            rows,
+            cols,
+            max_q_diff,
+            max_q_diff_idx,
+            max_q_abs,
+            min_q_abs,
+            non_zero_q,
+            max_qtq_diag,
+            max_qtq_diag_idx,
+            max_qtq_off,
+            max_qtq_off_idx.0,
+            max_qtq_off_idx.1,
+            min_diag_val,
+            max_diag_val,
+            max_residual,
+            max_residual_idx.0,
+            max_residual_idx.1,
+            pre_product_max,
+            max_product_abs,
+            pre_q_max,
+            max_r_inv_abs,
+            min_r_diag,
+            max_r_diag,
+            min_gram_diag,
+            max_gram_diag,
+            gpu_topk,
+            ref_topk,
+            topk_diff
+        );
+
+        if !non_zero_q || max_product_abs <= 1.0e-12 {
+            let active = active_fusion();
+            let plan = active_group_plan_clone();
+            log::warn!(
+                "qr_power_iter zero-data alert: product={} len={} non_zero_q={} max_product_abs_pre={:?} max_product_abs={:.3e} max_q_abs_pre={:?} active={:?} plan_inputs={:?} stack_pattern={:?}",
+                product.buffer_id,
+                product_entry.len,
+                non_zero_q,
+                pre_product_max,
+                max_product_abs,
+                pre_q_max,
+                active,
+                plan.as_ref().map(|p| p.inputs.clone()),
+                plan.as_ref().map(|p| p.stack_pattern.clone())
+            );
+        }
+
+        Ok(())
     }
     pub(crate) fn covariance_exec(
         &self,
@@ -6135,60 +6749,15 @@ impl WgpuProvider {
             return self.fill_exec(&[cols, cols], f64::NAN);
         }
 
-        // Column means (1 x cols)
         let means = self.reduce_dim_sum_mean_exec(
             matrix,
             0,
             crate::backend::wgpu::types::DimReduceOp::Mean,
         )?;
-
-        // Gram matrix without centering: (cols x rows) * (rows x cols) = (cols x cols)
-        let matrix_t = self.transpose_exec(matrix)?;
-        let gram = self.matmul_exec(&matrix_t, matrix)?;
-        let _ = self.free(&matrix_t);
-
-        // Outer product μ μᵀ scaled by row count
-        let means_t = self.transpose_exec(&means)?;
-        let means_outer = self.matmul_exec(&means_t, &means)?;
-        let _ = self.free(&means_t);
+        let result = self.centered_gram_exec_kernel(matrix, &entry, &means, rows, cols, denom);
         let _ = self.free(&means);
-        let means_outer_scaled = self.scalar_mul(&means_outer, rows as f64)?;
-        let _ = self.free(&means_outer);
-
-        // Centered Gram: G - n μ μᵀ
-        let centered_gram = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Sub,
-            &gram,
-            &means_outer_scaled,
-        )?;
-        let _ = self.free(&gram);
-        let _ = self.free(&means_outer_scaled);
-
-        // Apply normalization
-        let covariance_scaled = self.scalar_mul(&centered_gram, 1.0 / denom)?;
-        let _ = self.free(&centered_gram);
-
-        let mut host_cov = self.download(&covariance_scaled)?;
-        let rows_out = host_cov.shape.get(0).copied().unwrap_or(cols);
-        let cols_out = host_cov.shape.get(1).copied().unwrap_or(rows_out);
-        let diag_len = rows_out.min(cols_out);
-        for i in 0..diag_len {
-            let idx = i + i * rows_out;
-            if let Some(value) = host_cov.data.get_mut(idx) {
-                if *value < 0.0 && *value > -1.0e-12 {
-                    *value = 0.0;
-                }
-            }
-        }
-        let view = HostTensorView {
-            data: &host_cov.data,
-            shape: &host_cov.shape,
-        };
-        let adjusted = self.upload(&view)?;
-        let _ = self.free(&covariance_scaled);
-        Ok(adjusted)
+        result
     }
-
     pub(crate) fn corrcoef_exec(
         &self,
         matrix: &GpuTensorHandle,
@@ -8212,7 +8781,6 @@ impl WgpuProvider {
         let out_shape = shape_for_orientation(orientation, output_len);
         Ok(self.register_existing_buffer(out_buffer, out_shape, output_len))
     }
-
     pub(crate) fn polyder_exec(&self, polynomial: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(polynomial)?;
         ensure!(
@@ -10973,7 +11541,6 @@ impl AccelProvider for WgpuProvider {
         eval.into_numeric_union_result()
             .map_err(|e| anyhow!("union: {e}"))
     }
-
     fn setdiff(
         &self,
         a: &GpuTensorHandle,
@@ -11146,9 +11713,10 @@ impl AccelProvider for WgpuProvider {
     ) -> Option<(GpuTensorHandle, GpuTensorHandle)> {
         let res = self.kernel_resources.take_matmul_sources(product);
         log::debug!(
-            "take_matmul_sources: product={} found={}",
+            "take_matmul_sources: product={} found={} active_fusion={:?}",
             product.buffer_id,
-            res.is_some()
+            res.is_some(),
+            active_fusion()
         );
         res
     }
@@ -11156,9 +11724,13 @@ impl AccelProvider for WgpuProvider {
     fn qr_power_iter(
         &self,
         product: &GpuTensorHandle,
+        product_lhs: Option<&GpuTensorHandle>,
         q_handle: &GpuTensorHandle,
         options: &ProviderQrOptions,
     ) -> Result<Option<ProviderQrPowerIterResult>> {
+        let debug_qr = std::env::var("RUNMAT_DEBUG_QR").is_ok();
+        const QR_MAX_COLS: usize = 64;
+
         if !options.economy {
             return Ok(None);
         }
@@ -11172,48 +11744,426 @@ impl AccelProvider for WgpuProvider {
         if rows == 0 || cols == 0 {
             return Ok(None);
         }
+        if cols > QR_MAX_COLS {
+            if debug_qr {
+                log::debug!(
+                    "qr_power_iter: column count {} exceeds device kernel limit {}; falling back",
+                    cols,
+                    QR_MAX_COLS
+                );
+            }
+            return Ok(None);
+        }
+        if self.precision() != ProviderPrecision::F32 {
+            if debug_qr {
+                log::debug!(
+                    "qr_power_iter: precision {:?} unsupported for device QR kernel; falling back",
+                    self.precision()
+                );
+            }
+            return Ok(None);
+        }
         let q_entry = self.get_entry(q_handle)?;
         if q_entry.shape != product_entry.shape {
             return Ok(None);
         }
+        let k = cols;
 
-        let product_t = self.transpose_exec(product)?;
-        let gram = self.matmul_exec_with_usage(&product_t, product, BufferUsageClass::FusionOut)?;
-        let _ = self.free(&product_t);
+        let mut pre_product_max = match self.download(product) {
+            Ok(host) => Some(
+                host.data
+                    .iter()
+                    .fold(0.0f64, |acc, value| acc.max(value.abs())),
+            ),
+            Err(err) => {
+                log::warn!("qr_power_iter pre-download failed: {err}");
+                None
+            }
+        };
 
-        let gram_host = self.download(&gram)?;
-        let _ = self.free(&gram);
+        let pre_q_max = match self.download(q_handle) {
+            Ok(host) => Some(
+                host.data
+                    .iter()
+                    .fold(0.0f64, |acc, value| acc.max(value.abs())),
+            ),
+            Err(err) => {
+                log::warn!("qr_power_iter q-handle pre-download failed: {err}");
+                None
+            }
+        };
 
-        let tensor = Tensor::new(gram_host.data.clone(), gram_host.shape.clone())
-            .map_err(|e| anyhow!("{e}"))?;
-        let chol_eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
-            Value::Tensor(tensor),
-            &[],
-        )
-        .map_err(|e| anyhow!("qr_power_iter: {e}"))?;
-        if chol_eval.flag_index() != 0 {
-            return Ok(None);
+        const PRODUCT_EPS: f64 = 1.0e-12;
+        const Q_EPS: f64 = 1.0e-6;
+        if pre_product_max.unwrap_or(0.0) <= PRODUCT_EPS && pre_q_max.unwrap_or(0.0) > Q_EPS {
+            let debug_zero_host = std::env::var("RUNMAT_DEBUG_QR_ZEROHOST").is_ok();
+            if debug_zero_host {
+                if let Some(lhs_handle) = product_lhs {
+                    match (self.download(lhs_handle), self.download(q_handle)) {
+                        (Ok(lhs_host), Ok(q_host)) => {
+                            let lhs_rows = lhs_host.shape.get(0).copied().unwrap_or(0);
+                            let lhs_cols = lhs_host.shape.get(1).copied().unwrap_or(0);
+                            let q_rows = q_host.shape.get(0).copied().unwrap_or(0);
+                            let q_cols = q_host.shape.get(1).copied().unwrap_or(0);
+                            if lhs_rows == q_rows
+                                && lhs_cols == q_rows
+                                && q_rows == rows
+                                && q_cols == cols
+                            {
+                                let mut max_host_product = 0.0f64;
+                                for col in 0..cols {
+                                    for row in 0..rows {
+                                        let mut sum = 0.0f64;
+                                        for k_idx in 0..lhs_cols {
+                                            let lhs_idx = row + k_idx * lhs_rows;
+                                            let q_idx = k_idx + col * q_rows;
+                                            sum += lhs_host.data[lhs_idx] * q_host.data[q_idx];
+                                        }
+                                        max_host_product = max_host_product.max(sum.abs());
+                                    }
+                                }
+                                log::info!(
+                                "qr_power_iter host check: rows={} cols={} host_max_product={:.6e}",
+                                rows,
+                                cols,
+                                max_host_product
+                            );
+                            } else {
+                                log::info!(
+                                "qr_power_iter host check skipped: lhs_shape={:?} q_shape={:?} rows={} cols={}",
+                                lhs_host.shape,
+                                q_host.shape,
+                                rows,
+                                cols
+                            );
+                            }
+                        }
+                        (lhs_res, q_res) => {
+                            log::info!(
+                                "qr_power_iter host check download failed: lhs={:?} q={:?} product_id={}",
+                                lhs_res.err(),
+                                q_res.err(),
+                                product.buffer_id
+                            );
+                        }
+                    }
+                } else {
+                    log::info!(
+                        "qr_power_iter host check skipped: product_lhs unavailable (product_id={})",
+                        product.buffer_id
+                    );
+                }
+            }
+            if let Some(lhs_handle) = product_lhs {
+                log::warn!(
+                    "qr_power_iter: detected zero matmul product (product_id={} max_product_abs_pre={:?} max_q_abs_pre={:?}); recomputing",
+                    product.buffer_id,
+                    pre_product_max,
+                    pre_q_max
+                );
+                if let Ok(lhs_entry) = self.get_entry(lhs_handle) {
+                    if let Ok(rhs_entry) = self.get_entry(q_handle) {
+                        let lhs_view = build_matrix_operand_view(lhs_handle, &lhs_entry).unwrap_or(
+                            MatrixOperandView {
+                                rows: 0,
+                                cols: 0,
+                                lda: 0,
+                                transpose: false,
+                            },
+                        );
+                        let rhs_view = build_matrix_operand_view(q_handle, &rhs_entry).unwrap_or(
+                            MatrixOperandView {
+                                rows: 0,
+                                cols: 0,
+                                lda: 0,
+                                transpose: false,
+                            },
+                        );
+                        log::info!(
+                            "qr_power_iter recompute operands: product_id={} lhs_shape={:?} rhs_shape={:?} lhs_view={{rows:{} cols:{} lda:{} transpose:{}}} rhs_view={{rows:{} cols:{} lda:{} transpose:{}}}",
+                            product.buffer_id,
+                            lhs_entry.shape,
+                            rhs_entry.shape,
+                            lhs_view.rows,
+                            lhs_view.cols,
+                            lhs_view.lda,
+                            lhs_view.transpose,
+                            rhs_view.rows,
+                            rhs_view.cols,
+                            rhs_view.lda,
+                            rhs_view.transpose
+                        );
+                        log::info!(
+                            "qr_power_iter recompute buffers: product_id={} lhs_ptr={:p} rhs_ptr={:p}",
+                            product.buffer_id,
+                            lhs_entry.buffer.as_ref(),
+                            rhs_entry.buffer.as_ref()
+                        );
+                    }
+                }
+                let recomputed =
+                    self.matmul_exec_with_usage(lhs_handle, q_handle, BufferUsageClass::FusionOut)?;
+                let mut recomputed_max: Option<f64> = None;
+                if debug_zero_host {
+                    match self.download(&recomputed) {
+                        Ok(host) => {
+                            let max_recomputed = host
+                                .data
+                                .iter()
+                                .fold(0.0f64, |acc, value| acc.max(value.abs()));
+                            log::info!(
+                                "qr_power_iter recompute check: product_id={} max_recomputed_abs={:.6e}",
+                                product.buffer_id,
+                                max_recomputed
+                            );
+                            recomputed_max = Some(max_recomputed);
+                        }
+                        Err(err) => {
+                            log::info!(
+                                "qr_power_iter recompute check failed: product_id={} err={}",
+                                product.buffer_id,
+                                err
+                            );
+                        }
+                    }
+                }
+                let recomputed_entry = self.get_entry(&recomputed)?;
+                log::info!(
+                    "qr_power_iter recompute start: product_id={} original_len={} recomputed_len={}",
+                    product.buffer_id,
+                    product_entry.len,
+                    recomputed_entry.len
+                );
+                let bytes = (recomputed_entry.len as u64) * self.element_size as u64;
+                log::info!(
+                    "qr_power_iter recompute copy detail: product_id={} product_ptr={:p} recomputed_ptr={:p}",
+                    product.buffer_id,
+                    product_entry.buffer.as_ref(),
+                    recomputed_entry.buffer.as_ref()
+                );
+                if bytes > 0 {
+                    let mut encoder =
+                        self.device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("runmat-qr-product-recompute"),
+                            });
+                    encoder.copy_buffer_to_buffer(
+                        recomputed_entry.buffer.as_ref(),
+                        0,
+                        product_entry.buffer.as_ref(),
+                        0,
+                        bytes,
+                    );
+                    self.submit(encoder);
+                }
+
+                let max_val = if let Some(val) = recomputed_max {
+                    val
+                } else {
+                    match self.download(product) {
+                        Ok(host) => host
+                            .data
+                            .iter()
+                            .fold(0.0f64, |acc, value| acc.max(value.abs())),
+                        Err(err) => {
+                            log::warn!("qr_power_iter recompute verification failed: {err}");
+                            0.0
+                        }
+                    }
+                };
+                log::info!(
+                    "qr_power_iter recompute copy: product_id={} bytes={} post_max={:.6e}",
+                    product.buffer_id,
+                    bytes,
+                    max_val
+                );
+                if max_val == 0.0 {
+                    let q_download = self.download(q_handle);
+                    if let Ok(lhs_dump) = self.download(lhs_handle) {
+                        if let Ok(ref q_dump) = q_download {
+                            let dump_dir = Path::new("target/matmul_zero");
+                            let _ = fs::create_dir_all(dump_dir);
+                            let lhs_path = dump_dir.join(format!(
+                                "lhs_{}_{}.bin",
+                                product.buffer_id,
+                                lhs_dump.data.len()
+                            ));
+                            let rhs_path = dump_dir.join(format!(
+                                "rhs_{}_{}.bin",
+                                product.buffer_id,
+                                q_dump.data.len()
+                            ));
+                            let _ = fs::write(&lhs_path, cast_slice(lhs_dump.data.as_slice()));
+                            let _ = fs::write(&rhs_path, cast_slice(q_dump.data.as_slice()));
+                            log::warn!(
+                                "qr_power_iter dump written: product_id={} lhs_path={} rhs_path={}",
+                                product.buffer_id,
+                                lhs_path.display(),
+                                rhs_path.display()
+                            );
+                        }
+                    }
+                    if let Ok(q_host) = q_download {
+                        let mut q_nan = 0usize;
+                        let mut q_inf = 0usize;
+                        let mut q_max = 0.0f64;
+                        for value in &q_host.data {
+                            if value.is_nan() {
+                                q_nan += 1;
+                            } else if !value.is_finite() {
+                                q_inf += 1;
+                            } else {
+                                q_max = q_max.max(value.abs());
+                            }
+                        }
+                        log::warn!(
+                            "qr_power_iter recompute diagnostics: product_id={} max_q_abs={:.6e} nan_count={} inf_count={}",
+                            product.buffer_id,
+                            q_max,
+                            q_nan,
+                            q_inf
+                        );
+                    }
+                }
+                pre_product_max = Some(max_val);
+
+                let _ = self.free(&recomputed);
+            } else {
+                log::warn!(
+                    "qr_power_iter: zero product detected for buffer {} without lhs handle; proceeding with existing data",
+                    product.buffer_id
+                );
+            }
         }
 
-        let r_tensor = host_tensor_from_value("qr_power_iter", chol_eval.factor())
-            .map_err(|e| anyhow!("{e}"))?;
-        let k = cols;
-        let r_data = r_tensor.data.clone();
+        let product_t = self.transpose_exec(product)?;
+        let gram_handle =
+            self.matmul_exec_with_usage(&product_t, product, BufferUsageClass::FusionOut)?;
+        if debug_qr {
+            match self.download(&gram_handle) {
+                Ok(host) => {
+                    let max_gram_val = host
+                        .data
+                        .iter()
+                        .fold(0.0f64, |acc, value| acc.max(value.abs()));
+                    log::info!(
+                        "qr_power_iter gram check: product={} max_gram_abs={:.6e}",
+                        product.buffer_id,
+                        max_gram_val
+                    );
+                }
+                Err(err) => {
+                    log::info!(
+                        "qr_power_iter gram download failed: product={} err={}",
+                        product.buffer_id,
+                        err
+                    );
+                }
+            }
+        }
+        let _ = self.free(&product_t);
+        let gram_entry = self.get_entry(&gram_handle)?;
 
-        let r_inv = invert_upper_triangular(&r_data, k).map_err(|e| anyhow!("{e}"))?;
+        let len_out = cols * cols;
+        let r_buffer = self.create_storage_buffer_checked_with_usage(
+            len_out,
+            "runmat-qr-r",
+            BufferUsageClass::FusionOut,
+        )?;
+        let r_inv_buffer = self.create_storage_buffer_checked_with_usage(
+            len_out,
+            "runmat-qr-r-inv",
+            BufferUsageClass::FusionOut,
+        )?;
 
-        let r_handle = self.upload(&HostTensorView {
-            data: &r_data,
-            shape: &r_tensor.shape,
-        })?;
-        let r_inv_handle = self.upload(&HostTensorView {
-            data: &r_inv,
-            shape: &r_tensor.shape,
-        })?;
+        let params = QrPowerIterParams {
+            cols: cols as u32,
+            stride: cols as u32,
+            _pad0: [0, 0],
+        };
+        let params_buffer = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            UniformBufferKey::QrPowerIterParams,
+            std::mem::size_of::<QrPowerIterParams>() as u64,
+            "runmat-qr-power-params",
+        );
+        self.queue
+            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+
+        let layout = &self.pipelines.qr_power_iter.layout;
+        let bind_entries = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: gram_entry.buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: r_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: r_inv_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buffer.as_entire_binding(),
+            },
+        ];
+        let bind_group = self
+            .bind_group_cache
+            .get_or_create(layout, &bind_entries, || {
+                Arc::new(
+                    self.device_ref()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-qr-power-bind"),
+                            layout,
+                            entries: &bind_entries,
+                        }),
+                )
+            });
+        crate::backend::wgpu::dispatch::qr_power_iter::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.qr_power_iter.pipeline,
+            bind_group.as_ref(),
+        );
+
+        let gram_debug = if debug_qr {
+            match self.download(&gram_handle) {
+                Ok(data) => Some(data),
+                Err(err) => {
+                    log::info!(
+                        "qr_power_iter gram debug download failed: product={} err={}",
+                        product.buffer_id,
+                        err
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let _ = self.free(&gram_handle);
+
+        let r_shape = vec![cols, cols];
+        let r_handle = self.register_existing_buffer_with_usage(
+            r_buffer.clone(),
+            r_shape.clone(),
+            len_out,
+            BufferUsageClass::FusionOut,
+        );
+        self.mark_buffer_usage(&r_handle, BufferUsageClass::FusionOut);
+
+        let r_inv_handle = self.register_existing_buffer_with_usage(
+            r_inv_buffer.clone(),
+            r_shape.clone(),
+            len_out,
+            BufferUsageClass::FusionOut,
+        );
+        self.mark_buffer_usage(&r_inv_handle, BufferUsageClass::FusionOut);
 
         let q_temp =
             self.matmul_exec_with_usage(product, &r_inv_handle, BufferUsageClass::FusionOut)?;
-        let _ = self.free(&r_inv_handle);
 
         let q_temp_entry = self.get_entry(&q_temp)?;
         let mut reused = false;
@@ -11238,8 +12188,26 @@ impl AccelProvider for WgpuProvider {
             self.mark_buffer_usage(q_handle, BufferUsageClass::FusionOut);
             reused = true;
         }
-
         let q_result = if reused { q_handle.clone() } else { q_temp };
+
+        if debug_qr {
+            if let Err(err) = self.debug_qr_power_iter(
+                product,
+                &product_entry,
+                pre_product_max,
+                pre_q_max,
+                &q_result,
+                &r_handle,
+                &r_inv_handle,
+                gram_debug.as_ref(),
+                rows,
+                cols,
+            ) {
+                log::warn!("qr_power_iter debug failed: {err}");
+            }
+        }
+
+        let _ = self.free(&r_inv_handle);
 
         let mut perm_matrix = vec![0.0f64; k * k];
         for i in 0..k {
@@ -11249,11 +12217,12 @@ impl AccelProvider for WgpuProvider {
 
         let perm_matrix_handle = self.upload(&HostTensorView {
             data: &perm_matrix,
-            shape: &r_tensor.shape,
+            shape: &r_shape,
         })?;
+        let perm_vector_shape = vec![k, 1];
         let perm_vector_handle = self.upload(&HostTensorView {
             data: &perm_vector,
-            shape: &[k, 1],
+            shape: &perm_vector_shape,
         })?;
 
         let _ = self.free(product);
@@ -11272,7 +12241,6 @@ impl AccelProvider for WgpuProvider {
     fn syrk(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.syrk_exec(a)
     }
-
     fn matmul_epilogue(
         &self,
         a: &GpuTensorHandle,
@@ -11305,10 +12273,6 @@ impl AccelProvider for WgpuProvider {
         }
 
         let start = std::time::Instant::now();
-
-        // Ensure pipelines exist
-        self.prepare_matmul_pipeline();
-        self.device_ref().poll(wgpu::Maintain::Poll);
 
         let m_u32 =
             u32::try_from(m).map_err(|_| anyhow!("matmul_epilogue: m exceeds GPU limits"))?;
@@ -11521,10 +12485,16 @@ impl AccelProvider for WgpuProvider {
             groups_x,
             groups_y,
         );
+        let handle = self.register_existing_buffer_with_usage(
+            out_buffer,
+            out_shape,
+            len,
+            BufferUsageClass::FusionOut,
+        );
 
         self.telemetry.record_matmul_duration(start.elapsed());
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, len))
+        Ok(handle)
     }
     fn pagefun(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
         self.pagefun_exec(request)
@@ -11835,7 +12805,6 @@ impl AccelProvider for WgpuProvider {
 
         result
     }
-
     fn corrcoef(
         &self,
         matrix: &GpuTensorHandle,
@@ -11843,7 +12812,6 @@ impl AccelProvider for WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         self.corrcoef_exec(matrix, options)
     }
-
     fn linsolve(
         &self,
         lhs: &GpuTensorHandle,
@@ -11875,7 +12843,6 @@ impl AccelProvider for WgpuProvider {
             reciprocal_condition: rcond,
         })
     }
-
     fn inv(
         &self,
         matrix: &GpuTensorHandle,
@@ -12071,7 +13038,6 @@ impl AccelProvider for WgpuProvider {
     fn reduce_sum_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
         self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
     }
-
     fn reduce_nnz_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
         self.reduce_dim_sum_mean_exec(
             a,
@@ -12079,11 +13045,9 @@ impl AccelProvider for WgpuProvider {
             crate::backend::wgpu::types::DimReduceOp::CountNonZero,
         )
     }
-
     fn reduce_prod_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
         self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Prod)
     }
-
     fn reduce_mean_dim(&self, a: &GpuTensorHandle, dim: usize) -> Result<GpuTensorHandle> {
         self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Mean)
     }
@@ -12559,7 +13523,6 @@ impl AccelProvider for WgpuProvider {
         };
         self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)
     }
-
     fn not_nan_mask(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
         let len = entry.len;
@@ -12673,7 +13636,6 @@ impl AccelProvider for WgpuProvider {
         let ms = start.elapsed().as_millis() as u64;
         self.metrics.set_last_warmup_millis(ms);
     }
-
     fn fused_cache_counters(&self) -> (u64, u64) {
         self.metrics.counters()
     }
@@ -12872,6 +13834,8 @@ impl AccelProvider for WgpuProvider {
         if let Some(entry) = guard.remove(&h.buffer_id) {
             if entry.len > 0 {
                 if Arc::strong_count(&entry.buffer) == 1 {
+                    let buffer_ptr = entry.buffer.as_ref() as *const wgpu::Buffer as usize;
+                    self.bind_group_cache.invalidate_buffer(buffer_ptr);
                     self.buffer_residency
                         .release(entry.usage, entry.len, entry.buffer.clone());
                 } else {
