@@ -5473,6 +5473,7 @@ dependencies = [
  "num-complex",
  "once_cell",
  "pollster",
+ "rand 0.8.5",
  "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-hir",
