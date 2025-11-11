@@ -101,6 +101,7 @@ pub enum AutoOffloadDisposition {
 #[serde(rename_all = "kebab-case")]
 pub enum DecisionReason {
     FusionOverride,
+    Residency,
     SmallBatchGuard,
     ProfileModel,
     Threshold,
@@ -894,6 +895,19 @@ impl NativeAutoOffload {
         let batch = batch_dimension_from_values(values);
         let cpu_secs = cpu_estimate(self.thresholds.cpu_elem_per_elem, elements);
 
+        // Chain-aware residency: if any input is already on GPU, keep the op on GPU
+        if values.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
+            return DecisionEvaluation {
+                recommend_gpu: true,
+                reason: DecisionReason::Residency,
+                cpu_secs,
+                gpu_secs: None,
+                threshold: Some(self.thresholds.binary_min_elems),
+                fusion_kind,
+                batch,
+            };
+        }
+
         if let Some(active) = fusion.as_ref() {
             // If an elementwise chain is actively fused OR this elementwise op
             // participates in a fused reduction group, force GPU to keep the
@@ -1015,6 +1029,18 @@ impl NativeAutoOffload {
     fn evaluate_unary(&self, elements: usize, op: UnaryOp, value: &Value) -> DecisionEvaluation {
         let fusion_kind = active_fusion().map(|f| f.kind.clone());
         let batch = batch_dimension_from_values(&[value]);
+        // Chain-aware residency for unary ops: if operand is already on GPU, keep it on GPU
+        if matches!(value, Value::GpuTensor(_)) {
+            return DecisionEvaluation {
+                recommend_gpu: true,
+                reason: DecisionReason::Residency,
+                cpu_secs: cpu_estimate(self.thresholds.cpu_elem_per_elem, elements),
+                gpu_secs: None,
+                threshold: Some(self.thresholds.unary_min_elems),
+                fusion_kind,
+                batch,
+            };
+        }
         if matches!(op, UnaryOp::Generic) && self.small_batch_guard(elements, batch) {
             return DecisionEvaluation {
                 recommend_gpu: false,

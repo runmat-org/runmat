@@ -657,6 +657,9 @@ impl FusionGroupPlan {
                 let mut deps: Vec<ValueId> = Vec::new();
                 let mut visited: HashSet<ValueId> = HashSet::new();
                 let mut stack: Vec<ValueId> = vec![data_vid];
+                // Track extra ops we discover outside the original group that are safe to inline
+                let mut extra_ops: Vec<FusionOp> = Vec::new();
+                let mut added_nodes: HashSet<ValueId> = HashSet::new();
                 while let Some(cur) = stack.pop() {
                     if !visited.insert(cur) {
                         continue;
@@ -685,7 +688,82 @@ impl FusionGroupPlan {
                         for p in parents {
                             stack.push(*p);
                         }
+                        continue;
                     }
+                    // If not produced by an op in this group, try to expand through safe producer nodes
+                    if let Some((_, node)) = node_from_value(graph, cur) {
+                        // Only consider simple arithmetic producers we know how to fold
+                        match &node.label {
+                            AccelNodeLabel::Primitive(PrimitiveOp::Mul)
+                            | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
+                            | AccelNodeLabel::Primitive(PrimitiveOp::Div)
+                            | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
+                            | AccelNodeLabel::Primitive(PrimitiveOp::ElemLeftDiv)
+                            | AccelNodeLabel::Primitive(PrimitiveOp::Add)
+                            | AccelNodeLabel::Primitive(PrimitiveOp::Sub) => {
+                                // Record op for codegen and traverse inputs
+                                if added_nodes.insert(cur) {
+                                    extra_ops.push(FusionOp::Primitive {
+                                        op: match node.label {
+                                            AccelNodeLabel::Primitive(op) => op,
+                                            _ => PrimitiveOp::UPlus,
+                                        },
+                                        inputs: node.inputs.clone(),
+                                        output: node.outputs.get(0).copied(),
+                                    });
+                                }
+                                for &p in &node.inputs {
+                                    stack.push(p);
+                                }
+                                continue;
+                            }
+                            AccelNodeLabel::Primitive(PrimitiveOp::ElemPow) => {
+                                // Only accept power with constant exponent (typically 2 for squares)
+                                if node.inputs.len() == 2 {
+                                    if let Some(exp) = value_constant_f64(graph, node.inputs[1]) {
+                                        if exp.is_finite() {
+                                            if added_nodes.insert(cur) {
+                                                extra_ops.push(FusionOp::Primitive {
+                                                    op: PrimitiveOp::ElemPow,
+                                                    inputs: node.inputs.clone(),
+                                                    output: node.outputs.get(0).copied(),
+                                                });
+                                            }
+                                            stack.push(node.inputs[0]);
+                                            // Treat exponent as constant dependency for codegen
+                                            stack.push(node.inputs[1]);
+                                            continue;
+                                        }
+                                    }
+                                }
+                                // Fallback: treat as leaf dependency
+                            }
+                            AccelNodeLabel::Builtin { name } => {
+                                // Allow simple casts to flow through (single/double)
+                                if name.eq_ignore_ascii_case("single")
+                                    || name.eq_ignore_ascii_case("double")
+                                {
+                                    if node.inputs.len() == 1 {
+                                        stack.push(node.inputs[0]);
+                                        continue;
+                                    }
+                                }
+                                // Unknown builtin: treat as leaf
+                            }
+                            _ => {
+                                // Unknown producer: treat as leaf
+                            }
+                        }
+                    }
+                }
+                // Prepend the newly discovered ops so they are available to codegen
+                // Keep original operations as well (the reduction op itself)
+                if !extra_ops.is_empty() {
+                    // Ensure a stable order: extra ops first
+                    let mut new_ops = Vec::with_capacity(extra_ops.len() + plan.operations.len());
+                    new_ops.extend(extra_ops.into_iter());
+                    new_ops.extend(plan.operations.drain(..));
+                    plan.operations = new_ops;
                 }
                 plan.inputs = deps;
 
