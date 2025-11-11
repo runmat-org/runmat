@@ -787,22 +787,14 @@ impl Parser {
                         return Err("expected ')' after arguments".into());
                     }
                 }
-                // Heuristic: Prefer function-call for identifiers when clear function hints exist
-                // even if a range appears among arguments (e.g., reshape(0:9, [2 5])).
-                let has_index_hint = args.iter().any(|a| self.expr_suggests_indexing(a));
-                let has_end_keyword = args.iter().any(|a| self.expr_contains_end(a));
-                let has_func_hint = matches!(expr, Expr::Ident(_))
-                    && !has_end_keyword
-                    && args
-                        .iter()
-                        .any(|a| matches!(a, Expr::Tensor(_) | Expr::Cell(_) | Expr::String(_)));
-                if has_index_hint && !has_func_hint {
-                    expr = Expr::Index(Box::new(expr), args);
+                // Binder-based disambiguation:
+                // If the callee is an identifier, defer call vs. index to HIR binding.
+                // Parse as a function call now; HIR will rewrite to Index if a variable shadows the function.
+                if let Expr::Ident(ref name) = expr {
+                    expr = Expr::FuncCall(name.clone(), args);
                 } else {
-                    match expr {
-                        Expr::Ident(ref name) => expr = Expr::FuncCall(name.clone(), args),
-                        _ => expr = Expr::Index(Box::new(expr), args),
-                    }
+                    // For non-ident bases (e.g., X(1), (A+B)(1)), this is indexing.
+                    expr = Expr::Index(Box::new(expr), args);
                 }
             } else if self.consume(&Token::LBracket) {
                 // Array indexing
@@ -879,63 +871,6 @@ impl Parser {
         self.parse_postfix_with_base(expr)
     }
 
-    fn expr_suggests_indexing(&self, e: &Expr) -> bool {
-        match e {
-            Expr::Colon | Expr::EndKeyword | Expr::Range(_, _, _) => true,
-            Expr::Binary(_, op, _) => matches!(
-                op,
-                BinOp::Colon
-                    | BinOp::Equal
-                    | BinOp::NotEqual
-                    | BinOp::Less
-                    | BinOp::LessEqual
-                    | BinOp::Greater
-                    | BinOp::GreaterEqual
-                    | BinOp::AndAnd
-                    | BinOp::OrOr
-                    | BinOp::BitAnd
-                    | BinOp::BitOr
-            ),
-            _ => false,
-        }
-    }
-
-    fn expr_contains_end(&self, e: &Expr) -> bool {
-        match e {
-            Expr::EndKeyword => true,
-            Expr::Binary(lhs, _, rhs) => self.expr_contains_end(lhs) || self.expr_contains_end(rhs),
-            Expr::Range(start, step, end) => {
-                self.expr_contains_end(start)
-                    || step.as_deref().map_or(false, |s| self.expr_contains_end(s))
-                    || self.expr_contains_end(end)
-            }
-            Expr::Tensor(rows) => rows
-                .iter()
-                .flatten()
-                .any(|expr| self.expr_contains_end(expr)),
-            Expr::Cell(rows) => rows
-                .iter()
-                .flatten()
-                .any(|expr| self.expr_contains_end(expr)),
-            Expr::Index(base, args) => {
-                self.expr_contains_end(base) || args.iter().any(|arg| self.expr_contains_end(arg))
-            }
-            Expr::MethodCall(base, _, args) => {
-                self.expr_contains_end(base) || args.iter().any(|arg| self.expr_contains_end(arg))
-            }
-            Expr::FuncCall(_, args) => args.iter().any(|arg| self.expr_contains_end(arg)),
-            Expr::Unary(_, expr) => self.expr_contains_end(expr),
-            Expr::Member(base, _) => self.expr_contains_end(base),
-            Expr::MemberDynamic(base, field) => {
-                self.expr_contains_end(base) || self.expr_contains_end(field)
-            }
-            Expr::IndexCell(base, args) => {
-                self.expr_contains_end(base) || args.iter().any(|arg| self.expr_contains_end(arg))
-            }
-            Expr::AnonFunc { body, .. } => self.expr_contains_end(body),
-            _ => false,
-        }
-    }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
         if self.consume(&Token::Plus) {

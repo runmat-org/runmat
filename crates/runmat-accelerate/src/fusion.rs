@@ -990,10 +990,10 @@ impl FusionGroupPlan {
         shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
         // Bind all input tensors dynamically, followed by output and params
         for (idx, _) in self.inputs.iter().enumerate() {
-            shader.push_str(&format!(
+        shader.push_str(&format!(
                 "@group(0) @binding({}) var<storage, read> input{}: Tensor;\n",
                 idx, idx
-            ));
+        ));
         }
         shader.push_str(&format!(
             "@group(0) @binding({}) var<storage, read_write> output: Tensor;\n",
@@ -1069,9 +1069,9 @@ impl FusionGroupPlan {
                 // compute val and accumulate
                 loop_body.push_str(&format!(
                     "    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n",
-                    scalar = scalar_ty,
-                    val = val_expr
-                ));
+                scalar = scalar_ty,
+                val = val_expr
+            ));
                 shader.push_str("  while (r < params.nrows) {\n");
                 shader.push_str(&loop_body);
                 shader.push_str("    r += @WG@u;\n  }\n");
@@ -1120,9 +1120,9 @@ impl FusionGroupPlan {
                 }
                 loop_body.push_str(&format!(
                     "    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n",
-                    scalar = scalar_ty,
-                    val = val_expr
-                ));
+                scalar = scalar_ty,
+                val = val_expr
+            ));
                 // Iterate over reduce_len, which arrives as params.nrows when axis=1
                 shader.push_str("  while (c < params.nrows) {\n");
                 shader.push_str(&loop_body);
