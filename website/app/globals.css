@@ -244,6 +244,8 @@
     display: inline-block;
     text-align: center;
     width: 100%;
+    padding-bottom: 0.1em;
+    line-height: 1.2;
   }
 
   /* Brand text styles to match the logo's magenta gradient */
