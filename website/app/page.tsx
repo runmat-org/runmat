@@ -45,7 +45,7 @@ export const metadata: Metadata = {
     },
   },
   openGraph: {
-    title: "RunMat - Blazing-Fast Runtime for Math",
+    title: "RunMat - The Blazing-Fast Runtime for Math",
     description:
       "RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device. MATLAB syntax. No kernel code, no rewrites.",
     url: "/",
@@ -54,9 +54,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "RunMat - Free, Modern MATLAB Runtime",
+    title: "RunMat - The Blazing-Fast Runtime for Math",
     description:
-      "RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device. MATLAB syntax. No kernel code, no rewrites.",
+      "RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device.MATLAB syntax. No kernel code, no rewrites.",
   },
 };
 
@@ -65,7 +65,7 @@ export default function HomePage() {
     <div className="flex flex-col min-h-screen">
       {/* SEO-optimized opening content */}
       <div className="sr-only">
-        <h1>RunMat - RunMat - Blazing-Fast Runtime for Math</h1>
+        <h1>RunMat - The Blazing-Fast Runtime for Math</h1>
         <p>
         RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device.
           MATLAB syntax. No kernel code, no rewrites.
@@ -80,7 +80,7 @@ export default function HomePage() {
             🚀 Open Source • MIT Licensed • Free Forever
           </Badge>
           <h1 className="font-heading text-3xl sm:text-5xl md:text-6xl lg:text-7xl text-center">
-              <span className="gradient-brand">RunMat - Blazing-Fast Runtime for Math</span>
+              <span className="gradient-brand">The Blazing-Fast Runtime for Math</span>
           </h1>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
              
