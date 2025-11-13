@@ -1,15 +1,20 @@
 #![cfg(feature = "wgpu")]
 
 use runmat_accelerate::backend::wgpu::provider_impl::{WgpuProvider, WgpuProviderOptions};
+use runmat_accelerate_api::AccelProvider;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_accelerate_api::HostTensorView;
-use runmat_accelerate_api::AccelProvider;
 
 // Guard tests to avoid provider state races
 static TEST_MUTEX: once_cell::sync::Lazy<std::sync::Mutex<()>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
 
-fn upload_matrix(provider: &WgpuProvider, rows: usize, cols: usize, data: &[f64]) -> GpuTensorHandle {
+fn upload_matrix(
+    provider: &WgpuProvider,
+    rows: usize,
+    cols: usize,
+    data: &[f64],
+) -> GpuTensorHandle {
     assert_eq!(data.len(), rows * cols);
     provider
         .upload(&HostTensorView {
@@ -133,5 +138,3 @@ fn fused_dot_per_column_matches_manual() {
         );
     }
 }
-
-

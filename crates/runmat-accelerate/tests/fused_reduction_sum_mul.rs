@@ -109,7 +109,11 @@ fn fused_sum_mul_dim0_matches_manual() {
         _ => panic!("expected GPU tensor"),
     };
     let out = provider.download(&out_handle).expect("download");
-    assert_eq!(out.shape, vec![cols], "output shape should be vector of cols");
+    assert_eq!(
+        out.shape,
+        vec![cols],
+        "output shape should be vector of cols"
+    );
 
     // Manual per-column dot
     for c in 0..cols {
@@ -201,7 +205,10 @@ fn fused_mean_mul_dim0_matches_manual() {
         }
         let mean = acc / (rows as f64);
         let got = out.data[c];
-        assert!((got - mean).abs() < 1e-6, "dim0 mean col={c} got={got} exp={mean}");
+        assert!(
+            (got - mean).abs() < 1e-6,
+            "dim0 mean col={c} got={got} exp={mean}"
+        );
     }
 }
 
@@ -281,7 +288,11 @@ fn fused_sum_mul_dim1_matches_manual() {
         _ => panic!("expected GPU tensor"),
     };
     let out = provider.download(&out_handle).expect("download");
-    assert_eq!(out.shape, vec![rows], "output shape should be vector of rows");
+    assert_eq!(
+        out.shape,
+        vec![rows],
+        "output shape should be vector of rows"
+    );
 
     // Manual per-row sum across columns of X.*W
     for r in 0..rows {
@@ -296,5 +307,3 @@ fn fused_sum_mul_dim1_matches_manual() {
         );
     }
 }
-
-

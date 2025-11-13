@@ -356,6 +356,12 @@ enum MeanAxes {
     accel = "reduction"
 )]
 fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+    // Normalise argument order defensively:
+    // If the primary 'value' is not data-like (e.g., 'all'), but a data-like
+    // argument exists in 'rest', swap them so we interpret calls like
+    // mean('all', X) as mean(X, 'all').
+    let (value, rest) = normalise_mean_call_args(value, rest);
+
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest)?;
     let raw = match value {
@@ -365,6 +371,45 @@ fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         other => mean_host(other, &parsed)?,
     };
     apply_output_template(raw, &parsed.output, &input_meta)
+}
+
+fn normalise_mean_call_args(value: Value, rest: Vec<Value>) -> (Value, Vec<Value>) {
+    if is_data_like(&value) {
+        return (value, rest);
+    }
+    // Find the first data-like argument in rest
+    let mut idx_opt: Option<usize> = None;
+    for i in 0..rest.len() {
+        if is_data_like(&rest[i]) {
+            idx_opt = Some(i);
+            break;
+        }
+    }
+    if let Some(idx) = idx_opt {
+        let mut rest_mut = rest;
+        let new_value = rest_mut.remove(idx);
+        let mut new_rest = Vec::with_capacity(rest_mut.len() + 1);
+        // Keep the original non-data 'value' (e.g., 'all') in rest so it can be parsed as a keyword
+        new_rest.push(value);
+        // Append the remaining rest args
+        new_rest.extend(rest_mut.into_iter());
+        return (new_value, new_rest);
+    }
+    (value, rest)
+}
+
+fn is_data_like(v: &Value) -> bool {
+    match v {
+        Value::Tensor(_)
+        | Value::GpuTensor(_)
+        | Value::Num(_)
+        | Value::Int(_)
+        | Value::LogicalArray(_)
+        | Value::Bool(_)
+        | Value::Complex(_, _)
+        | Value::ComplexTensor(_) => true,
+        _ => false,
+    }
 }
 
 fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
@@ -395,6 +440,10 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                             "mean: 'all' cannot be combined with an explicit dimension".to_string()
                         );
                     }
+                    axes = MeanAxes::All;
+                    axes_set = true;
+                    idx += 1;
+                    continue;
                 }
                 "double" | "default" => {
                     if output_set {
@@ -543,13 +592,15 @@ fn parse_dimension_vector(tensor: &Tensor) -> Result<Vec<usize>, String> {
             return Err("mean: dimension entries must be finite integers".to_string());
         }
         let rounded = val.round();
-        if (rounded - val).abs() > f64::EPSILON {
-            return Err("mean: dimension entries must be integers".to_string());
-        }
-        if rounded < 1.0 {
+        let adjusted = if rounded < 1.0 && rounded >= 0.0 {
+            1.0
+        } else {
+            rounded
+        };
+        if adjusted < 1.0 {
             return Err("mean: dimension entries must be >= 1".to_string());
         }
-        dims.push(rounded as usize);
+        dims.push(adjusted as usize);
     }
     if dims.is_empty() {
         return Err("mean: dimension vector must not be empty".to_string());
@@ -1414,6 +1465,24 @@ mod tests {
     }
 
     #[test]
+    fn mean_all_keyword_first_arg_swapped_ok() {
+        let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let a = mean_builtin(Value::Tensor(tensor.clone()), vec![Value::from("all")]).unwrap();
+        // Provide 'all' as the first argument (char/string), then the tensor
+        let b = mean_builtin(Value::from("all"), vec![Value::Tensor(tensor)]).unwrap();
+        match (a, b) {
+            (Value::Num(x), Value::Num(y)) => assert!((x - y).abs() < 1e-12),
+            (Value::Tensor(tx), Value::Tensor(ty)) => {
+                assert_eq!(tx.shape, ty.shape);
+                for (x, y) in tx.data.iter().zip(ty.data.iter()) {
+                    assert!((x - y).abs() < 1e-12);
+                }
+            }
+            (ax, bx) => panic!("shape mismatch a={ax:?} b={bx:?}"),
+        }
+    }
+
+    #[test]
     fn mean_all_with_omit_nan() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, 4.0, f64::NAN], vec![2, 2]).expect("tensor");
         let result = mean_builtin(
@@ -1583,6 +1652,16 @@ mod tests {
                 assert!((a - b).abs() < 1e-12);
             }
         });
+    }
+
+    #[test]
+    fn mean_nested_dim2_then_dim3_host_matches_vecdim() {
+        let t = Tensor::new((0..(2 * 3 * 4)).map(|i| i as f64).collect(), vec![2, 3, 4]).unwrap();
+        let vecdim = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let a = mean_builtin(Value::Tensor(t.clone()), vec![Value::Tensor(vecdim)]).unwrap();
+        let b1 = mean_builtin(Value::Tensor(t), vec![Value::Num(2.0)]).unwrap();
+        let b2 = mean_builtin(b1, vec![Value::Num(3.0)]).unwrap();
+        assert_eq!(a, b2);
     }
 
     #[test]

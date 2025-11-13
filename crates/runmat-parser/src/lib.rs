@@ -871,7 +871,6 @@ impl Parser {
         self.parse_postfix_with_base(expr)
     }
 
-
     fn parse_unary(&mut self) -> Result<Expr, String> {
         if self.consume(&Token::Plus) {
             Ok(Expr::Unary(UnOp::Plus, Box::new(self.parse_unary()?)))

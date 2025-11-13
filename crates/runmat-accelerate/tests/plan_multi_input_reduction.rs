@@ -2,7 +2,7 @@
 
 use runmat_accelerate::fusion::{detect_fusion_groups, FusionPlan};
 use runmat_accelerate::graph::{
-    AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, AccelGraphTag, InstrSpan, PrimitiveOp,
+    AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
 use runmat_builtins::Value;
@@ -163,5 +163,3 @@ fn plan_collects_two_parents_for_mul_before_sum_dim1() {
         "plan.inputs for sum(x.*w,1) should have two entries"
     );
 }
-
-

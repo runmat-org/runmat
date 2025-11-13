@@ -4,11 +4,12 @@ use crate::fusion::{FusionGroupPlan, FusionKind, FusionPattern, ImageScalar};
 use crate::fusion_residency;
 use crate::graph;
 use crate::graph::{ShapeInfo, ValueId};
+use crate::precision::ensure_provider_supports_dtype;
 use runmat_accelerate_api::{
     provider, AccelProvider, CovRows, CovarianceOptions, GpuTensorHandle, HostTensorView,
     ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision,
 };
-use runmat_builtins::Value;
+use runmat_builtins::{NumericDType, Value};
 use runmat_runtime::gather_if_needed;
 
 struct PreparedInput {
@@ -176,6 +177,11 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 owned: None,
             }),
             Value::Tensor(t) => {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, t.dtype) {
+                    return Err(anyhow!(
+                        "fusion: tensor input requires unsupported precision ({msg})"
+                    ));
+                }
                 let view = HostTensorView {
                     data: &t.data,
                     shape: &t.shape,
@@ -187,6 +193,11 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 });
             }
             Value::Num(n) => {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, NumericDType::F64) {
+                    return Err(anyhow!(
+                        "fusion: scalar input requires unsupported precision ({msg})"
+                    ));
+                }
                 temp_scalars.push(vec![*n]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
@@ -200,6 +211,11 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 });
             }
             Value::Int(i) => {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, NumericDType::F64) {
+                    return Err(anyhow!(
+                        "fusion: scalar input requires unsupported precision ({msg})"
+                    ));
+                }
                 temp_scalars.push(vec![i.to_f64()]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
@@ -286,6 +302,11 @@ pub fn execute_reduction(
                 owned: None,
             }),
             Value::Tensor(t) => {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, t.dtype) {
+                    return Err(anyhow!(
+                        "fusion: tensor input requires unsupported precision ({msg})"
+                    ));
+                }
                 let view = HostTensorView {
                     data: &t.data,
                     shape: &t.shape,
@@ -297,6 +318,11 @@ pub fn execute_reduction(
                 });
             }
             Value::Num(n) => {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, NumericDType::F64) {
+                    return Err(anyhow!(
+                        "fusion: scalar input requires unsupported precision ({msg})"
+                    ));
+                }
                 temp_scalars.push(vec![*n]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
@@ -310,6 +336,11 @@ pub fn execute_reduction(
                 });
             }
             Value::Int(i) => {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, NumericDType::F64) {
+                    return Err(anyhow!(
+                        "fusion: scalar input requires unsupported precision ({msg})"
+                    ));
+                }
                 temp_scalars.push(vec![i.to_f64()]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {

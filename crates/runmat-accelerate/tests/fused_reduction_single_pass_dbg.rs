@@ -1,7 +1,9 @@
 #![cfg(feature = "wgpu")]
 
 use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
-use runmat_accelerate::fusion::{FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp};
+use runmat_accelerate::fusion::{
+    FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
+};
 use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{
     InstrSpan, PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarKind,
@@ -154,5 +156,3 @@ fn fused_single_pass_sum_mul_no_alias() {
         _ => panic!("expected GPU tensor"),
     }
 }
-
-

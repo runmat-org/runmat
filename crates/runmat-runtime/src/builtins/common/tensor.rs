@@ -105,7 +105,8 @@ pub fn parse_dimension(value: &Value, name: &str) -> Result<usize, String> {
                 return Err(format!("{name}: dimension must be finite"));
             }
             let rounded = n.round();
-            if (rounded - n).abs() > f64::EPSILON {
+            // Allow small floating error tolerance when users pass float-typed dims
+            if (rounded - n).abs() > 1e-6 {
                 return Err(format!("{name}: dimension must be an integer"));
             }
             if rounded < 1.0 {

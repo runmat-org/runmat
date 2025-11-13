@@ -58,11 +58,10 @@ use crate::backend::wgpu::cache::{
 };
 use crate::backend::wgpu::config::{DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD};
 use crate::backend::wgpu::params::{
-    BandwidthParams, Conv1dParams, CummaxParams,
-    CumminParams, CumprodParams, CumsumParams, DiffParams, FilterParams, ImageNormalizeUniforms,
-    QrPowerIterParams, SymmetryParamsF32, SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS,
-    IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE,
-    SYRK_FLAG_FILL_BOTH,
+    BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
+    DiffParams, FilterParams, ImageNormalizeUniforms, QrPowerIterParams, SymmetryParamsF32,
+    SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN,
+    IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
@@ -2806,7 +2805,9 @@ impl WgpuProvider {
                         eprintln!("  output ptr={:p}", out_buffer.as_ref());
                         eprintln!(
                             "  context: reduce_len={} num_slices={} inputs={}",
-                            reduce_len, num_slices, inputs.len()
+                            reduce_len,
+                            num_slices,
+                            inputs.len()
                         );
                         break;
                     }
@@ -2840,36 +2841,36 @@ impl WgpuProvider {
                     .ok()
                     .unwrap_or_else(|| "/tmp/runmat_fused_dbg.log".to_string());
                 if let Ok(mut f) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&debug_path)
+                    .create(true)
+                    .append(true)
+                    .open(&debug_path)
                 {
-                        use std::io::Write;
+                    use std::io::Write;
+                    let _ = writeln!(
+                        f,
+                        "[fused-reduction] layout_tag={} reduce_len={} num_slices={} wg={}",
+                        layout_tag, reduce_len, num_slices, workgroup_size
+                    );
+                    for (i, buf) in input_bufs.iter().enumerate() {
                         let _ = writeln!(
                             f,
-                            "[fused-reduction] layout_tag={} reduce_len={} num_slices={} wg={}",
-                            layout_tag, reduce_len, num_slices, workgroup_size
+                            "[fused-reduction] binding={} role=read ptr={:p}",
+                            i,
+                            buf.0.as_ref()
                         );
-                        for (i, buf) in input_bufs.iter().enumerate() {
-                            let _ = writeln!(
-                                f,
-                                "[fused-reduction] binding={} role=read ptr={:p}",
-                                i,
-                                buf.0.as_ref()
-                            );
-                        }
-                        let _ = writeln!(
-                            f,
-                            "[fused-reduction] binding={} role=read_write ptr={:p}",
-                            inputs.len(),
-                            out_buffer.as_ref()
-                        );
-                        let _ = writeln!(
-                            f,
-                            "[fused-reduction] binding={} role=uniform ptr={:p}",
-                            inputs.len() + 1,
-                            params_buffer.as_ref()
-                        );
+                    }
+                    let _ = writeln!(
+                        f,
+                        "[fused-reduction] binding={} role=read_write ptr={:p}",
+                        inputs.len(),
+                        out_buffer.as_ref()
+                    );
+                    let _ = writeln!(
+                        f,
+                        "[fused-reduction] binding={} role=uniform ptr={:p}",
+                        inputs.len() + 1,
+                        params_buffer.as_ref()
+                    );
                 }
             }
             // Allow bypassing bind-group cache for fused reduction to rule out cache-induced aliasing
@@ -3017,11 +3018,11 @@ impl WgpuProvider {
                     | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
-            let mut enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-fused-p1-input-snapshot-copy"),
-                });
+            let mut enc =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-fused-p1-input-snapshot-copy"),
+                    });
             enc.copy_buffer_to_buffer(input_buf.as_ref(), 0, snap.as_ref(), 0, bytes);
             self.submit(enc);
             snap
@@ -3060,7 +3061,8 @@ impl WgpuProvider {
             let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
             if part_ptr == in_ptr {
                 // allocate unique partials
-                let unique = self.create_storage_buffer(partials_len, "runmat-reduction-partials-unique");
+                let unique =
+                    self.create_storage_buffer(partials_len, "runmat-reduction-partials-unique");
                 partials_buffer = unique;
                 part_ptr = partials_buffer.as_ref() as *const wgpu::Buffer as usize;
             }
@@ -3114,10 +3116,8 @@ impl WgpuProvider {
             std::mem::size_of::<P2>() as u64,
             "runmat-reduction-p2-params",
         );
-        self.queue
-            .write_buffer(p1_buf.as_ref(), 0, bytes_of(&p1u));
-        self.queue
-            .write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
+        self.queue.write_buffer(p1_buf.as_ref(), 0, bytes_of(&p1u));
+        self.queue.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
         let entries_bg1 = vec![
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -5819,14 +5819,12 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("syrk: output size overflow"))?;
 
         let out_bytes = (len as u64) * (self.element_size as u64);
-        let out_buffer = self
-            .kernel_resources
-            .scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::SyrkOut,
-                out_bytes,
-                "runmat-syrk-out-scratch",
-            );
+        let out_buffer = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::SyrkOut,
+            out_bytes,
+            "runmat-syrk-out-scratch",
+        );
         if len == 0 {
             return Ok(self.register_existing_buffer_with_usage(
                 out_buffer,
@@ -5882,18 +5880,18 @@ impl WgpuProvider {
             self.queue
                 .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
             let bind_entries = [
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: entry.buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buffer.as_entire_binding(),
+                },
             ];
             let layout = &self.pipelines.syrk.layout;
             let bind_group = self
@@ -6072,22 +6070,22 @@ impl WgpuProvider {
                 self.queue
                     .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
                 let bind_entries = [
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry_a.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: entry_b.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: partial_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: params_buffer.as_entire_binding(),
-                            },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry_a.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: entry_b.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: partial_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
                 ];
                 let layout = &self.pipelines.matmul.layout;
                 let bg =
@@ -6100,7 +6098,7 @@ impl WgpuProvider {
                                     entries: &bind_entries,
                                 },
                             ))
-                    });
+                        });
                 let tile = crate::backend::wgpu::config::effective_matmul_tile();
                 let groups_x =
                     crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
@@ -6186,22 +6184,22 @@ impl WgpuProvider {
             &self.pipelines.matmul.pipeline
         };
         let bind_entries = [
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry_a.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: entry_b.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: entry_a.buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: entry_b.buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: out_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buffer.as_entire_binding(),
+            },
         ];
         let bg = if out_usage == BufferUsageClass::MatmulOut {
             Arc::new(
@@ -6521,11 +6519,8 @@ impl WgpuProvider {
         let _ = self.free(&means_row_scaled);
         let _ = self.free(&outer_scaled);
 
-        let centered = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Sub,
-            &xtx,
-            &outer,
-        )?;
+        let centered =
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &xtx, &outer)?;
 
         let _ = self.free(&xtx);
         let _ = self.free(&outer);
@@ -8313,10 +8308,7 @@ impl WgpuProvider {
                     as f64
                     / 4294967296.0f64;
             }
-            return self.upload(&HostTensorView {
-                data: &out,
-                shape,
-            });
+            return self.upload(&HostTensorView { data: &out, shape });
         }
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-uniform-out")?;
         if total_len == 0 {
@@ -8422,10 +8414,7 @@ impl WgpuProvider {
                 }
                 i += 2;
             }
-            return self.upload(&HostTensorView {
-                data: &out,
-                shape,
-            });
+            return self.upload(&HostTensorView { data: &out, shape });
         }
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-normal-out")?;
         if total_len == 0 {
@@ -10363,12 +10352,10 @@ impl WgpuProvider {
                     let buf = self.kernel_resources.uniform_buffer(
                         self.device_ref(),
                         UniformBufferKey::ScalarParamsF64,
-                        std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF64>()
-                            as u64,
+                        std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF64>() as u64,
                         "runmat-scalar-params-f64",
                     );
-                    self.queue
-                        .write_buffer(buf.as_ref(), 0, bytes_of(&params));
+                    self.queue.write_buffer(buf.as_ref(), 0, bytes_of(&params));
                     buf
                 }
                 _ => {
@@ -10385,12 +10372,10 @@ impl WgpuProvider {
                     let buf = self.kernel_resources.uniform_buffer(
                         self.device_ref(),
                         UniformBufferKey::ScalarParamsF32,
-                        std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF32>()
-                            as u64,
+                        std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF32>() as u64,
                         "runmat-scalar-params-f32",
                     );
-                    self.queue
-                        .write_buffer(buf.as_ref(), 0, bytes_of(&params));
+                    self.queue.write_buffer(buf.as_ref(), 0, bytes_of(&params));
                     buf
                 }
             };
@@ -10451,13 +10436,26 @@ impl WgpuProvider {
             // Debug-only CPU fallback
             let host = self.download(a)?;
             let val = match op {
-                crate::backend::wgpu::types::GlobalReduceOp::Sum => host.data.iter().copied().sum::<f64>(),
-                crate::backend::wgpu::types::GlobalReduceOp::Prod => host.data.iter().copied().product::<f64>(),
-                crate::backend::wgpu::types::GlobalReduceOp::Min => host.data.iter().fold(f64::INFINITY, |m, &v| m.min(v)),
-                crate::backend::wgpu::types::GlobalReduceOp::Max => host.data.iter().fold(f64::NEG_INFINITY, |m, &v| m.max(v)),
-                crate::backend::wgpu::types::GlobalReduceOp::CountNonZero => host.data.iter().filter(|&&v| v != 0.0).count() as f64,
+                crate::backend::wgpu::types::GlobalReduceOp::Sum => {
+                    host.data.iter().copied().sum::<f64>()
+                }
+                crate::backend::wgpu::types::GlobalReduceOp::Prod => {
+                    host.data.iter().copied().product::<f64>()
+                }
+                crate::backend::wgpu::types::GlobalReduceOp::Min => {
+                    host.data.iter().fold(f64::INFINITY, |m, &v| m.min(v))
+                }
+                crate::backend::wgpu::types::GlobalReduceOp::Max => {
+                    host.data.iter().fold(f64::NEG_INFINITY, |m, &v| m.max(v))
+                }
+                crate::backend::wgpu::types::GlobalReduceOp::CountNonZero => {
+                    host.data.iter().filter(|&&v| v != 0.0).count() as f64
+                }
             };
-            let out = self.upload(&HostTensorView { data: &[val], shape: &[1, 1] })?;
+            let out = self.upload(&HostTensorView {
+                data: &[val],
+                shape: &[1, 1],
+            })?;
             return Ok(out);
         }
         if entry.len == 0 {
@@ -10486,11 +10484,11 @@ impl WgpuProvider {
                     | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
-            let mut enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-reduce-global-input-snapshot-copy"),
-                });
+            let mut enc =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-reduce-global-input-snapshot-copy"),
+                    });
             enc.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, snap.as_ref(), 0, size_bytes);
             self.submit(enc);
             snap
@@ -10525,13 +10523,7 @@ impl WgpuProvider {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("runmat-reduce-pass-input-snapshot-copy"),
                         });
-                enc.copy_buffer_to_buffer(
-                    current.as_ref(),
-                    0,
-                    snap.as_ref(),
-                    0,
-                    size_bytes,
-                );
+                enc.copy_buffer_to_buffer(current.as_ref(), 0, snap.as_ref(), 0, size_bytes);
                 self.submit(enc);
                 input_for_pass = snap;
             }
@@ -10736,11 +10728,11 @@ impl WgpuProvider {
                     | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
-            let mut enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-reduce-dim-input-snapshot-copy"),
-                });
+            let mut enc =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-reduce-dim-input-snapshot-copy"),
+                    });
             enc.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, snap.as_ref(), 0, size_bytes);
             self.submit(enc);
             snap
@@ -10749,7 +10741,9 @@ impl WgpuProvider {
         };
         let mut out_buffer = self.create_storage_buffer(out_len, "runmat-reduce-dim-out");
         // Prevent aliasing: output must not be identical to input buffer
-        if (out_buffer.as_ref() as *const wgpu::Buffer) == (entry.buffer.as_ref() as *const wgpu::Buffer) {
+        if (out_buffer.as_ref() as *const wgpu::Buffer)
+            == (entry.buffer.as_ref() as *const wgpu::Buffer)
+        {
             if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
                 log::debug!(
                     "reduce_dim_sum_mean_exec: alias detected; in_ptr={:p} out_ptr={:p} rows={} cols={} out_len={}",
@@ -10786,7 +10780,10 @@ impl WgpuProvider {
                 label: Some("runmat-reduce-dim-bind"),
                 layout: &self.pipelines.reduce_dim_sum_mean.layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: in_buf.as_ref().as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: in_buf.as_ref().as_entire_binding(),
+                    },
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: out_buffer.as_ref().as_entire_binding(),
@@ -10848,7 +10845,9 @@ impl WgpuProvider {
         let mut indices_buffer =
             self.create_storage_buffer(out_len, "runmat-reduce-dim-ext-indices");
         // Prevent aliasing either output with input buffer
-        if (values_buffer.as_ref() as *const wgpu::Buffer) == (entry.buffer.as_ref() as *const wgpu::Buffer) {
+        if (values_buffer.as_ref() as *const wgpu::Buffer)
+            == (entry.buffer.as_ref() as *const wgpu::Buffer)
+        {
             let size_bytes = (out_len * self.element_size) as u64;
             values_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-ext-values-unique"),
@@ -10859,7 +10858,9 @@ impl WgpuProvider {
                 mapped_at_creation: false,
             }));
         }
-        if (indices_buffer.as_ref() as *const wgpu::Buffer) == (entry.buffer.as_ref() as *const wgpu::Buffer) {
+        if (indices_buffer.as_ref() as *const wgpu::Buffer)
+            == (entry.buffer.as_ref() as *const wgpu::Buffer)
+        {
             let size_bytes = (out_len * self.element_size) as u64;
             indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-ext-indices-unique"),
@@ -12745,20 +12746,18 @@ impl AccelProvider for WgpuProvider {
         let gram_entry = self.get_entry(&gram_handle)?;
         let gram_len = cols * cols;
         let gram_bytes = (gram_len as u64) * (self.element_size as u64);
-        let gram_scratch = self
-            .kernel_resources
-            .scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
-                gram_bytes,
-                "runmat-qr-gram-scratch",
-            );
+        let gram_scratch = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
+            gram_bytes,
+            "runmat-qr-gram-scratch",
+        );
         if gram_bytes > 0 {
-            let mut encoder = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-qr-gram-copy"),
-                });
+            let mut encoder =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-qr-gram-copy"),
+                    });
             encoder.copy_buffer_to_buffer(
                 gram_entry.buffer.as_ref(),
                 0,
@@ -12771,22 +12770,18 @@ impl AccelProvider for WgpuProvider {
 
         let len_out = cols * cols;
         let r_bytes = (len_out as u64) * (self.element_size as u64);
-        let r_buffer = self
-            .kernel_resources
-            .scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::QrR,
-                r_bytes,
-                "runmat-qr-r-scratch",
-            );
-        let r_inv_buffer = self
-            .kernel_resources
-            .scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::QrRInv,
-                r_bytes,
-                "runmat-qr-rinv-scratch",
-            );
+        let r_buffer = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::QrR,
+            r_bytes,
+            "runmat-qr-r-scratch",
+        );
+        let r_inv_buffer = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::QrRInv,
+            r_bytes,
+            "runmat-qr-rinv-scratch",
+        );
 
         let params = QrPowerIterParams {
             cols: cols as u32,
@@ -13318,18 +13313,18 @@ impl AccelProvider for WgpuProvider {
                 self.queue
                     .write_buffer(uniform_buf.as_ref(), 0, bytes_of(&uniforms));
                 let bind_entries = [
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: uniform_buf.as_entire_binding(),
-                        },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform_buf.as_entire_binding(),
+                    },
                 ];
                 let layout = &self.pipelines.image_normalize.layout;
                 let bind_group =
@@ -13342,7 +13337,7 @@ impl AccelProvider for WgpuProvider {
                                     entries: &bind_entries,
                                 },
                             ))
-                });
+                        });
 
                 crate::backend::wgpu::dispatch::image_normalize::run(
                     self.device_ref(),
@@ -13444,7 +13439,7 @@ impl AccelProvider for WgpuProvider {
                 rhs_entry.len,
                 rhs_ref_count
             );
-        Ok(normalized)
+            Ok(normalized)
         }
     }
     fn covariance(
@@ -14571,8 +14566,8 @@ impl AccelProvider for WgpuProvider {
                     self.bind_group_cache.invalidate_buffer(buffer_ptr);
                     self.buffer_residency
                         .release(entry.usage, entry.len, entry.buffer.clone());
-                    } else {
-                        log::trace!(
+                } else {
+                    log::trace!(
                         "buffer_residency: not pooling buffer id={} len={} due to outstanding views",
                         h.buffer_id,
                         entry.len
@@ -14724,7 +14719,9 @@ impl WgpuProvider {
 
         let mut out_buffer = self.create_storage_buffer(cols, "runmat-reduce-nd-mean-out");
         // Prevent aliasing: output must not be the same as input buffer
-        if (out_buffer.as_ref() as *const wgpu::Buffer) == (entry.buffer.as_ref() as *const wgpu::Buffer) {
+        if (out_buffer.as_ref() as *const wgpu::Buffer)
+            == (entry.buffer.as_ref() as *const wgpu::Buffer)
+        {
             let size_bytes = (cols * self.element_size) as u64;
             out_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-nd-mean-out-unique"),

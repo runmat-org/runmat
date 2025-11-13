@@ -8,12 +8,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::{
     auto_offload_options,
     fusion::{active_fusion, FusionKind},
-    fusion_residency, AutoOffloadLogLevel,
+    fusion_residency,
+    precision::ensure_provider_supports_dtype,
+    AutoOffloadLogLevel,
 };
 use anyhow::{anyhow, Result};
 use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
-use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
 use runmat_runtime::gather_if_needed;
 use serde::{Deserialize, Serialize};
@@ -761,6 +763,9 @@ impl NativeAutoOffload {
         match value {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
+                if ensure_provider_supports_dtype(self.provider, t.dtype).is_err() {
+                    return Ok(value.clone());
+                }
                 if t.data.len() >= threshold && threshold > 0 {
                     log_promotion(|| {
                         format!(
@@ -1419,10 +1424,19 @@ fn compare_elemwise(
     if elements == 0 {
         return Ok(Some(false));
     }
-    let data: Vec<f64> = (0..elements).map(|i| i as f64).collect();
-    let tensor = Tensor::new(data.clone(), vec![elements, 1]).map_err(|e| anyhow!(e))?;
-    let a = Value::Tensor(tensor.clone());
-    let b = Value::Tensor(tensor.clone());
+    let shape = vec![elements, 1];
+    let template = match provider.precision() {
+        ProviderPrecision::F64 => {
+            Tensor::new((0..elements).map(|i| i as f64).collect(), shape.clone())
+                .map_err(|e| anyhow!(e))?
+        }
+        ProviderPrecision::F32 => {
+            Tensor::from_f32((0..elements).map(|i| i as f32).collect(), shape.clone())
+                .map_err(|e| anyhow!(e))?
+        }
+    };
+    let a = Value::Tensor(template.clone());
+    let b = Value::Tensor(template.clone());
     let cpu_time = time(|| runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]))?;
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
@@ -1438,8 +1452,8 @@ fn compare_elemwise(
         }
     }
     let view = HostTensorView {
-        data: &data,
-        shape: &[elements, 1],
+        data: template.data.as_slice(),
+        shape: template.shape.as_slice(),
     };
     let ha = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let hb = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
@@ -1480,9 +1494,18 @@ fn compare_reduction(
     elements: usize,
     cpu_cost_slot: &mut f64,
 ) -> Result<Option<bool>> {
-    let data: Vec<f64> = (0..elements).map(|i| i as f64).collect();
-    let tensor = Tensor::new(data.clone(), vec![elements, 1]).map_err(|e| anyhow!(e))?;
-    let value = Value::Tensor(tensor.clone());
+    let shape = vec![elements, 1];
+    let template = match provider.precision() {
+        ProviderPrecision::F64 => {
+            Tensor::new((0..elements).map(|i| i as f64).collect(), shape.clone())
+                .map_err(|e| anyhow!(e))?
+        }
+        ProviderPrecision::F32 => {
+            Tensor::from_f32((0..elements).map(|i| i as f32).collect(), shape.clone())
+                .map_err(|e| anyhow!(e))?
+        }
+    };
+    let value = Value::Tensor(template.clone());
     let cpu_time = time(|| runmat_runtime::call_builtin("sum", &[value.clone()]))?;
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
@@ -1498,8 +1521,8 @@ fn compare_reduction(
         }
     }
     let view = HostTensorView {
-        data: &data,
-        shape: &[elements, 1],
+        data: template.data.as_slice(),
+        shape: template.shape.as_slice(),
     };
     let h = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
@@ -1544,10 +1567,23 @@ fn compare_matmul(
         return Ok(Some(false));
     }
     let total = n * n;
-    let data_a: Vec<f64> = (0..total).map(|i| (i % 13) as f64).collect();
-    let data_b: Vec<f64> = (0..total).map(|i| (i % 7) as f64).collect();
-    let ta = Tensor::new(data_a.clone(), vec![n, n]).map_err(|e| anyhow!(e))?;
-    let tb = Tensor::new(data_b.clone(), vec![n, n]).map_err(|e| anyhow!(e))?;
+    let shape = vec![n, n];
+    let (ta, tb) = match provider.precision() {
+        ProviderPrecision::F64 => {
+            let data_a: Vec<f64> = (0..total).map(|i| (i % 13) as f64).collect();
+            let data_b: Vec<f64> = (0..total).map(|i| (i % 7) as f64).collect();
+            let ta = Tensor::new(data_a, shape.clone()).map_err(|e| anyhow!(e))?;
+            let tb = Tensor::new(data_b, shape.clone()).map_err(|e| anyhow!(e))?;
+            (ta, tb)
+        }
+        ProviderPrecision::F32 => {
+            let data_a: Vec<f32> = (0..total).map(|i| (i % 13) as f32).collect();
+            let data_b: Vec<f32> = (0..total).map(|i| (i % 7) as f32).collect();
+            let ta = Tensor::from_f32(data_a, shape.clone()).map_err(|e| anyhow!(e))?;
+            let tb = Tensor::from_f32(data_b, shape.clone()).map_err(|e| anyhow!(e))?;
+            (ta, tb)
+        }
+    };
     let a = Value::Tensor(ta.clone());
     let b = Value::Tensor(tb.clone());
     let cpu_time = time(|| runmat_runtime::matrix::value_matmul(&a, &b))?;
@@ -1565,12 +1601,12 @@ fn compare_matmul(
         }
     }
     let view_a = HostTensorView {
-        data: &data_a,
-        shape: &[n, n],
+        data: ta.data.as_slice(),
+        shape: ta.shape.as_slice(),
     };
     let view_b = HostTensorView {
-        data: &data_b,
-        shape: &[n, n],
+        data: tb.data.as_slice(),
+        shape: tb.shape.as_slice(),
     };
     let ha = provider
         .upload(&view_a)

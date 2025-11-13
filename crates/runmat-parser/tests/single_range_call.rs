@@ -19,5 +19,3 @@ fn single_of_range_parses_as_function_call() {
         other => panic!("expected Assign, got {other:?}"),
     }
 }
-
-

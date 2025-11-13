@@ -1,7 +1,9 @@
 #![cfg(feature = "wgpu")]
 
 use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
-use runmat_accelerate::fusion::{FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp, ReductionMode};
+use runmat_accelerate::fusion::{
+    FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp, ReductionMode,
+};
 use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{InstrSpan, ShapeInfo, ValueId};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
@@ -11,7 +13,12 @@ use std::collections::HashMap;
 static TEST_MUTEX: once_cell::sync::Lazy<std::sync::Mutex<()>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
 
-fn upload(provider: &runmat_accelerate::backend::wgpu::provider_impl::WgpuProvider, rows: usize, cols: usize, data: &[f64]) -> GpuTensorHandle {
+fn upload(
+    provider: &runmat_accelerate::backend::wgpu::provider_impl::WgpuProvider,
+    rows: usize,
+    cols: usize,
+    data: &[f64],
+) -> GpuTensorHandle {
     provider
         .upload(&HostTensorView {
             data,
@@ -100,7 +107,9 @@ fn fused_sum_square_dim0_matches_manual() {
             acc += v * v;
         }
         let got = out.data[c];
-        assert!((got - acc).abs() < 1e-6, "sumsq col={c} got={got} exp={acc}");
+        assert!(
+            (got - acc).abs() < 1e-6,
+            "sumsq col={c} got={got} exp={acc}"
+        );
     }
 }
-

@@ -294,6 +294,16 @@ impl Tensor {
         Self::new(data, vec![rows, cols])
     }
 
+    pub fn from_f32(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
+        let converted: Vec<f64> = data.into_iter().map(|v| v as f64).collect();
+        Self::new_with_dtype(converted, shape, NumericDType::F32)
+    }
+
+    pub fn from_f32_slice(data: &[f32], shape: &[usize]) -> Result<Self, String> {
+        let converted: Vec<f64> = data.iter().map(|&v| v as f64).collect();
+        Self::new_with_dtype(converted, shape.to_vec(), NumericDType::F32)
+    }
+
     pub fn new_with_dtype(
         data: Vec<f64>,
         shape: Vec<usize>,

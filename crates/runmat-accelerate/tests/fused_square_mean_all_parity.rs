@@ -6,7 +6,7 @@ use runmat_accelerate::fusion::{
 };
 use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{
-    AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, AccelGraphTag, InstrSpan, PrimitiveOp,
+    AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
 use runmat_accelerate_api::{AccelProvider, HostTensorView};
@@ -105,7 +105,11 @@ fn fused_square_mean_all_matches_cpu() {
         var_bindings,
     };
     let groups = detect_fusion_groups(&graph);
-    let red_group = groups.iter().find(|g| g.kind.is_reduction()).unwrap().clone();
+    let red_group = groups
+        .iter()
+        .find(|g| g.kind.is_reduction())
+        .unwrap()
+        .clone();
 
     let plan = FusionGroupPlan {
         index: red_group.id,
@@ -137,7 +141,7 @@ fn fused_square_mean_all_matches_cpu() {
         },
         reduction_data: Some(v_sq),
         reduction_dim: None,
-            reduction_mode: Some(runmat_accelerate::fusion::ReductionMode::Mean),
+        reduction_mode: Some(runmat_accelerate::fusion::ReductionMode::Mean),
         pattern: None,
     };
 
@@ -162,5 +166,3 @@ fn fused_square_mean_all_matches_cpu() {
         expected
     );
 }
-
-

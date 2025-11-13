@@ -121,7 +121,11 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
 
     // Detect and build plan
     let groups = detect_fusion_groups(&graph);
-    let red_group = groups.iter().find(|g| g.kind.is_reduction()).unwrap().clone();
+    let red_group = groups
+        .iter()
+        .find(|g| g.kind.is_reduction())
+        .unwrap()
+        .clone();
     let plan = FusionGroupPlan {
         index: red_group.id,
         group: red_group.clone(),
@@ -175,5 +179,3 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
         _ => panic!("expected GPU tensor result"),
     }
 }
-
-

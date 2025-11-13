@@ -1,12 +1,14 @@
 #![cfg(feature = "wgpu")]
 
 use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
-use runmat_accelerate::fusion::{detect_fusion_groups, FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp};
+use runmat_accelerate::fusion::{
+    detect_fusion_groups, FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
+};
 use runmat_accelerate::fusion_exec::{
     execute_elementwise, execute_reduction, FusionExecutionRequest,
 };
 use runmat_accelerate::graph::{
-    AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, AccelGraphTag, InstrSpan, PrimitiveOp,
+    AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
@@ -101,9 +103,7 @@ fn nlms_two_fused_reductions_integration() {
         };
         let sum_node = AccelNode {
             id: 1,
-            label: AccelNodeLabel::Builtin {
-                name: "sum".into(),
-            },
+            label: AccelNodeLabel::Builtin { name: "sum".into() },
             category: AccelOpCategory::Reduction,
             inputs: vec![v_mul, v_dim],
             outputs: vec![v_sum],
@@ -126,7 +126,11 @@ fn nlms_two_fused_reductions_integration() {
             var_bindings,
         };
         let groups = detect_fusion_groups(&graph);
-        let red_group = groups.iter().find(|g| g.kind.is_reduction()).unwrap().clone();
+        let red_group = groups
+            .iter()
+            .find(|g| g.kind.is_reduction())
+            .unwrap()
+            .clone();
         let plan = FusionGroupPlan {
             index: red_group.id,
             group: red_group.clone(),
@@ -233,9 +237,7 @@ fn nlms_two_fused_reductions_integration() {
         };
         let sum_node = AccelNode {
             id: 1,
-            label: AccelNodeLabel::Builtin {
-                name: "sum".into(),
-            },
+            label: AccelNodeLabel::Builtin { name: "sum".into() },
             category: AccelOpCategory::Reduction,
             inputs: vec![v_mul, v_dim],
             outputs: vec![v_sum],
@@ -266,7 +268,11 @@ fn nlms_two_fused_reductions_integration() {
             var_bindings,
         };
         let groups = detect_fusion_groups(&graph);
-        let red_group = groups.iter().find(|g| g.kind.is_reduction()).unwrap().clone();
+        let red_group = groups
+            .iter()
+            .find(|g| g.kind.is_reduction())
+            .unwrap()
+            .clone();
         let plan = FusionGroupPlan {
             index: red_group.id,
             group: red_group.clone(),
@@ -354,7 +360,10 @@ fn nlms_two_fused_reductions_integration() {
         };
         let req = FusionExecutionRequest {
             plan: &plan,
-            inputs: vec![Value::GpuTensor(y_handle.clone()), Value::GpuTensor(y_handle.clone())],
+            inputs: vec![
+                Value::GpuTensor(y_handle.clone()),
+                Value::GpuTensor(y_handle.clone()),
+            ],
         };
         let e_val = execute_elementwise(req).expect("fused elementwise sub");
         match e_val {
@@ -436,7 +445,11 @@ fn nlms_two_fused_reductions_integration() {
             var_bindings,
         };
         let groups = detect_fusion_groups(&graph);
-        let red_group = groups.iter().find(|g| g.kind.is_reduction()).unwrap().clone();
+        let red_group = groups
+            .iter()
+            .find(|g| g.kind.is_reduction())
+            .unwrap()
+            .clone();
         let plan = FusionGroupPlan {
             index: red_group.id,
             group: red_group.clone(),
@@ -484,5 +497,3 @@ fn nlms_two_fused_reductions_integration() {
         }
     }
 }
-
-

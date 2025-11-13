@@ -10,8 +10,8 @@ use crate::graph::{
     AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin,
 };
-use runmat_accelerate_api::CovNormalization;
 use crate::reduction_meta::{detect_reduction_signature, ReductionBehavior};
+use runmat_accelerate_api::CovNormalization;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FusionKind {
@@ -767,10 +767,7 @@ impl FusionGroupPlan {
                         if !deps.contains(&p) {
                             // Skip trivial constants embedded in const_values; those are handled separately
                             let is_const = plan.const_values.get(&p).is_some()
-                                || graph
-                                    .value(p)
-                                    .and_then(|vi| vi.constant.as_ref())
-                                    .is_some();
+                                || graph.value(p).and_then(|vi| vi.constant.as_ref()).is_some();
                             if !is_const {
                                 deps.push(p);
                             }
@@ -795,8 +792,8 @@ impl FusionGroupPlan {
                     if let Some(old_idx) = original_inputs.iter().position(|v| v == vid) {
                         if original_stack_pattern.contains(&old_idx) {
                             new_stack_pattern.push(new_idx);
-            }
-        }
+                        }
+                    }
                 }
 
                 // Rebuild constants map using the new input ordering.
@@ -837,7 +834,8 @@ impl FusionGroupPlan {
             let original_inputs = plan.inputs.clone();
             plan.inputs.retain(|vid| {
                 if let Some(info) = graph.value(*vid) {
-                    !matches!(info.origin, ValueOrigin::Constant) && !plan.const_values.contains_key(vid)
+                    !matches!(info.origin, ValueOrigin::Constant)
+                        && !plan.const_values.contains_key(vid)
                 } else {
                     true
                 }
@@ -1027,45 +1025,51 @@ impl FusionGroupPlan {
         // MATLAB dim is 1-based: dim=1 reduces rows (axis=0), dim=2 reduces cols (axis=1).
         let mut axis = 0usize;
         // Support 'all' via either index-keyed constants or value-id keyed const_values
-        let reduce_all = self.constants.values().any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")))
-            || self.const_values.values().any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")));
+        let reduce_all = self
+            .constants
+            .values()
+            .any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")))
+            || self
+                .const_values
+                .values()
+                .any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")));
         if reduce_all {
             // We'll flatten in VM by setting nrows = total and ncols = 1; axis=0 works with that.
             axis = 0;
         } else {
-        if let Some(dim_vid) = self.reduction_dim {
-            if let Some(v) = self.const_values.get(&dim_vid) {
-                match v {
-                    Value::Num(n) if *n >= 1.0 => {
-                        axis = (*n as usize).saturating_sub(1);
-                    }
-                    Value::Int(i) => {
-                        let val = i.to_f64();
-                        if val >= 1.0 {
-                            axis = (val as usize).saturating_sub(1);
+            if let Some(dim_vid) = self.reduction_dim {
+                if let Some(v) = self.const_values.get(&dim_vid) {
+                    match v {
+                        Value::Num(n) if *n >= 1.0 => {
+                            axis = (*n as usize).saturating_sub(1);
                         }
-                    }
-                    _ => {}
-                }
-            }
-        } else {
-            // Fallback: scan constant table for a plausible dim
-        for v in self.constants.values() {
-            match v {
-                Value::Num(n) if *n >= 1.0 => {
-                    axis = (*n as usize).saturating_sub(1);
-                    break;
-                }
-                Value::Int(i) => {
-                    let val = i.to_f64();
-                    if val >= 1.0 {
-                        axis = (val as usize).saturating_sub(1);
-                        break;
+                        Value::Int(i) => {
+                            let val = i.to_f64();
+                            if val >= 1.0 {
+                                axis = (val as usize).saturating_sub(1);
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                _ => {}
+            } else {
+                // Fallback: scan constant table for a plausible dim
+                for v in self.constants.values() {
+                    match v {
+                        Value::Num(n) if *n >= 1.0 => {
+                            axis = (*n as usize).saturating_sub(1);
+                            break;
+                        }
+                        Value::Int(i) => {
+                            let val = i.to_f64();
+                            if val >= 1.0 {
+                                axis = (val as usize).saturating_sub(1);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
                 }
-            }
             }
         }
 
@@ -1144,10 +1148,10 @@ impl FusionGroupPlan {
         shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
         // Bind all input tensors dynamically, followed by output and params
         for (idx, _) in self.inputs.iter().enumerate() {
-        shader.push_str(&format!(
+            shader.push_str(&format!(
                 "@group(0) @binding({}) var<storage, read> input{}: Tensor;\n",
                 idx, idx
-        ));
+            ));
         }
         shader.push_str(&format!(
             "@group(0) @binding({}) var<storage, read_write> output: Tensor;\n",

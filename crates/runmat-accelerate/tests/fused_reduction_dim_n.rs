@@ -1,11 +1,13 @@
 #![cfg(feature = "wgpu")]
 
 use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
-use runmat_accelerate::fusion::{detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp, ReductionMode};
+use runmat_accelerate::fusion::{
+    detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp, ReductionMode,
+};
 use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{
-    AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp, ShapeInfo, ValueId,
-    ValueInfo, ValueOrigin, VarBinding, VarKind,
+    AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
+    ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{Type, Value};
@@ -112,9 +114,7 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
         };
         let sum_node = AccelNode {
             id: 1,
-            label: AccelNodeLabel::Builtin {
-                name: "sum".into(),
-            },
+            label: AccelNodeLabel::Builtin { name: "sum".into() },
             category: AccelOpCategory::Reduction,
             inputs: vec![v_mul, v_dim],
             outputs: vec![v_y],
@@ -144,7 +144,11 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
             var_bindings,
         };
         let groups = detect_fusion_groups(&graph);
-        let red_group = groups.iter().find(|g| g.kind.is_reduction()).unwrap().clone();
+        let red_group = groups
+            .iter()
+            .find(|g| g.kind.is_reduction())
+            .unwrap()
+            .clone();
 
         let plan = FusionGroupPlan {
             index: red_group.id,
@@ -184,8 +188,13 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
             plan: &plan,
             inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
         };
-        let (reduce_len, num_slices) = if dim_val == 1.0 { (rows, cols) } else { (cols, rows) };
-        let result = execute_reduction(req, reduce_len, num_slices, 0).expect("execute fused reduction");
+        let (reduce_len, num_slices) = if dim_val == 1.0 {
+            (rows, cols)
+        } else {
+            (cols, rows)
+        };
+        let result =
+            execute_reduction(req, reduce_len, num_slices, 0).expect("execute fused reduction");
         let out_handle = match result {
             Value::GpuTensor(h) => h,
             _ => panic!("expected GPU tensor"),
@@ -200,7 +209,10 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
                     acc += xh[r + c * rows] * wh[r + c * rows];
                 }
                 let got = out.data[c];
-                assert!((got - acc).abs() < 1e-6, "dim=1 col={c} got={got} exp={acc}");
+                assert!(
+                    (got - acc).abs() < 1e-6,
+                    "dim=1 col={c} got={got} exp={acc}"
+                );
             }
         } else {
             assert_eq!(out.shape, vec![rows]);
@@ -210,10 +222,11 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
                     acc += xh[r + c * rows] * wh[r + c * rows];
                 }
                 let got = out.data[r];
-                assert!((got - acc).abs() < 1e-6, "dim=2 row={r} got={got} exp={acc}");
+                assert!(
+                    (got - acc).abs() < 1e-6,
+                    "dim=2 row={r} got={got} exp={acc}"
+                );
             }
         }
     }
 }
-
-

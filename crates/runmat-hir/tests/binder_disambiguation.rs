@@ -1,5 +1,5 @@
-use runmat_parser::parse;
 use runmat_hir::{lower, HirExprKind, HirStmt};
+use runmat_parser::parse;
 
 #[test]
 fn ident_call_with_range_is_func_call_when_no_shadowing() {
@@ -7,16 +7,14 @@ fn ident_call_with_range_is_func_call_when_no_shadowing() {
     let hir = lower(&ast).expect("lower");
     assert_eq!(hir.body.len(), 1);
     match &hir.body[0] {
-        HirStmt::Assign(_, expr, _) => {
-            match &expr.kind {
-                HirExprKind::FuncCall(name, args) => {
-                    assert_eq!(name, "single");
-                    assert_eq!(args.len(), 1);
-                    assert!(matches!(args[0].kind, HirExprKind::Range(_, _, _)));
-                }
-                other => panic!("expected FuncCall(single,_), got {other:?}"),
+        HirStmt::Assign(_, expr, _) => match &expr.kind {
+            HirExprKind::FuncCall(name, args) => {
+                assert_eq!(name, "single");
+                assert_eq!(args.len(), 1);
+                assert!(matches!(args[0].kind, HirExprKind::Range(_, _, _)));
             }
-        }
+            other => panic!("expected FuncCall(single,_), got {other:?}"),
+        },
         other => panic!("expected Assign, got {other:?}"),
     }
 }
@@ -56,5 +54,3 @@ fn array_indexing_remains_index() {
         other => panic!("expected Assign, got {other:?}"),
     }
 }
-
-

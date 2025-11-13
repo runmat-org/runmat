@@ -19,12 +19,17 @@ pub struct ReductionSignature {
 /// - Data input: the first input whose type is Tensor; otherwise fall back to the first input.
 /// - Dim arg: the first input (after data) that is a scalar numeric or int constant (by ValueId; resolution is done by callers).
 /// - Behavior: inferred via a minimal registry keyed by builtin name for post-scale choices (mean -> MeanLike). This is centralized here.
-pub fn detect_reduction_signature(graph: &AccelGraph, node: &AccelNode) -> Option<ReductionSignature> {
+pub fn detect_reduction_signature(
+    graph: &AccelGraph,
+    node: &AccelNode,
+) -> Option<ReductionSignature> {
     if node.category != AccelOpCategory::Reduction {
         return None;
     }
     let (name_opt, inputs) = match &node.label {
-        crate::graph::AccelNodeLabel::Builtin { name } => (Some(name.as_str()), node.inputs.as_slice()),
+        crate::graph::AccelNodeLabel::Builtin { name } => {
+            (Some(name.as_str()), node.inputs.as_slice())
+        }
         _ => (None, node.inputs.as_slice()),
     };
     if inputs.is_empty() {
@@ -76,5 +81,3 @@ pub fn detect_reduction_signature(graph: &AccelGraph, node: &AccelNode) -> Optio
         behavior,
     })
 }
-
-

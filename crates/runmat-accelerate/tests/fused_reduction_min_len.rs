@@ -1,7 +1,9 @@
 #![cfg(feature = "wgpu")]
 
 use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
-use runmat_accelerate::fusion::{FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp, ReductionMode};
+use runmat_accelerate::fusion::{
+    FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp, ReductionMode,
+};
 use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{InstrSpan, PrimitiveOp, ShapeInfo, ValueId};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
@@ -104,5 +106,3 @@ fn fused_single_pass_reduce_len_1_no_alias() {
     // reduce_len=rows=1, num_slices=cols
     let _ = execute_reduction(req, rows, cols, 0).expect("fused sum(x.*W,1) should run");
 }
-
-
