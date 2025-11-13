@@ -90,7 +90,7 @@ export default function HomePage() {
           
 
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-          We speak GPU so you don't have to. RunMat fuses operations and optimizes CPU/GPU execution into fewer steps.
+          We speak GPU so you don&apos;t have to. RunMat fuses operations and optimizes CPU/GPU execution into fewer steps.
         MATLAB syntax. No kernel code, no rewrites.
          
          
