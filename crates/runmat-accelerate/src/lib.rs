@@ -16,6 +16,7 @@ pub mod fusion;
 pub mod fusion_exec;
 pub mod fusion_residency;
 pub mod graph;
+mod reduction_meta;
 mod host_lu;
 pub mod native_auto;
 pub mod simple_provider;

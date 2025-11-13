@@ -92,6 +92,7 @@ fn fused_sum_mul_dim0_matches_manual() {
             supported: true,
         },
         reduction_data: Some(vid_mul),
+        reduction_dim: None,
         reduction_mode: Some(ReductionMode::Sum),
         pattern: None,
     };
@@ -178,6 +179,7 @@ fn fused_mean_mul_dim0_matches_manual() {
             supported: true,
         },
         reduction_data: Some(vid_mul),
+        reduction_dim: None,
         reduction_mode: Some(ReductionMode::Mean),
         pattern: None,
     };
@@ -262,6 +264,7 @@ fn fused_sum_mul_dim1_matches_manual() {
             supported: true,
         },
         reduction_data: Some(vid_mul),
+        reduction_dim: None,
         reduction_mode: Some(ReductionMode::Sum),
         pattern: None,
     };

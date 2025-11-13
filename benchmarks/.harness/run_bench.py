@@ -318,8 +318,20 @@ def main() -> None:
             "case": args.case,
             "results": [],
         }
+        # Variant-aware env overrides (parity vs perf)
+        variant_env: Dict[str, str] = {}
+        if args.variant.lower() == "parity":
+            # Force CPU path for RNG and ops to keep host-deterministic behavior
+            variant_env["RUNMAT_ACCEL_THRESHOLD_ALL"] = str(1_000_000_000)
+            variant_env["RUNMAT_DISABLE_RNG"] = "1"
+        elif args.variant.lower() == "perf":
+            # Prefer GPU RNG and normal thresholds; allow unique reduction out if desired
+            # (leave defaults; users can still override via env)
+            pass
         for impl in impls:
-            suite_result["results"].append(run_impl(impl, args.iterations, args.timeout))
+            suite_result["results"].append(
+                run_impl(impl, args.iterations, args.timeout, env_overrides=variant_env or None)
+            )
 
     with open(args.output, "w") as f:
         json.dump(suite_result, f, indent=2)

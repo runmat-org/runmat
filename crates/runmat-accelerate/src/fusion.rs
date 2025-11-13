@@ -11,6 +11,7 @@ use crate::graph::{
     ShapeInfo, ValueId, ValueInfo, ValueOrigin,
 };
 use runmat_accelerate_api::CovNormalization;
+use crate::reduction_meta::{detect_reduction_signature, ReductionBehavior};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FusionKind {
@@ -322,6 +323,8 @@ pub struct FusionGroupPlan {
     pub kernel: FusionKernelSpec,
     // For reductions: track the ValueId of the data tensor being reduced, if identifiable
     pub reduction_data: Option<ValueId>,
+    // For reductions: track the ValueId of the dim argument when identifiable
+    pub reduction_dim: Option<ValueId>,
     // For reductions: the semantic mode (sum or mean)
     pub reduction_mode: Option<ReductionMode>,
     pub pattern: Option<FusionPattern>,
@@ -490,6 +493,7 @@ impl FusionGroupPlan {
         let mut operations = Vec::new();
         let mut reduction_mode: Option<ReductionMode> = None;
         let mut reduction_data: Option<ValueId> = None;
+        let mut reduction_dim: Option<ValueId> = None;
         let mut output: Option<ValueId> = None;
 
         let is_reduction_group = group.kind.is_reduction();
@@ -580,15 +584,14 @@ impl FusionGroupPlan {
             if let Some(out) = node.outputs.get(0).copied() {
                 output = Some(out);
             }
-            // If this is a reduction builtin we recognize, record its first input as the data operand
-            if let AccelNodeLabel::Builtin { name } = &node.label {
-                let lname = name.to_ascii_lowercase();
-                if (lname == "sum" || lname == "mean") && !node.inputs.is_empty() {
-                    reduction_data = Some(node.inputs[0]);
-                    reduction_mode = Some(if lname == "mean" {
-                        ReductionMode::Mean
-                    } else {
-                        ReductionMode::Sum
+            // Generic reduction signature (no name checks)
+            if node.is_reduction() {
+                if let Some(sig) = detect_reduction_signature(graph, node) {
+                    reduction_data = Some(sig.data_input);
+                    reduction_dim = sig.dim_arg;
+                    reduction_mode = Some(match sig.behavior {
+                        ReductionBehavior::MeanLike => ReductionMode::Mean,
+                        _ => ReductionMode::Sum,
                     });
                 }
             }
@@ -607,6 +610,7 @@ impl FusionGroupPlan {
             output,
             kernel: FusionKernelSpec::new(kind, true),
             reduction_data,
+            reduction_dim,
             reduction_mode,
             pattern,
         };
@@ -678,7 +682,8 @@ impl FusionGroupPlan {
                             continue;
                         }
                     }
-                    if original_inputs.contains(&cur) {
+                    // Do not short-circuit on the reduction_data itself; expand through its producers first.
+                    if original_inputs.contains(&cur) && cur != data_vid {
                         if !deps.contains(&cur) {
                             deps.push(cur);
                         }
@@ -756,6 +761,22 @@ impl FusionGroupPlan {
                         }
                     }
                 }
+                // Ensure direct parents of the reduction data are materialized as inputs
+                if let Some(parents) = prod.get(&data_vid) {
+                    for &p in parents {
+                        if !deps.contains(&p) {
+                            // Skip trivial constants embedded in const_values; those are handled separately
+                            let is_const = plan.const_values.get(&p).is_some()
+                                || graph
+                                    .value(p)
+                                    .and_then(|vi| vi.constant.as_ref())
+                                    .is_some();
+                            if !is_const {
+                                deps.push(p);
+                            }
+                        }
+                    }
+                }
                 // Prepend the newly discovered ops so they are available to codegen
                 // Keep original operations as well (the reduction op itself)
                 if !extra_ops.is_empty() {
@@ -774,8 +795,8 @@ impl FusionGroupPlan {
                     if let Some(old_idx) = original_inputs.iter().position(|v| v == vid) {
                         if original_stack_pattern.contains(&old_idx) {
                             new_stack_pattern.push(new_idx);
-                        }
-                    }
+            }
+        }
                 }
 
                 // Rebuild constants map using the new input ordering.
@@ -811,12 +832,39 @@ impl FusionGroupPlan {
             }
         }
 
+        // Final sanitize: for reduction groups, ensure inputs contain no constants
+        if plan.group.kind.is_reduction() {
+            let original_inputs = plan.inputs.clone();
+            plan.inputs.retain(|vid| {
+                if let Some(info) = graph.value(*vid) {
+                    !matches!(info.origin, ValueOrigin::Constant) && !plan.const_values.contains_key(vid)
+                } else {
+                    true
+                }
+            });
+            if plan.inputs.len() != original_inputs.len() {
+                let mut new_stack: Vec<usize> = Vec::new();
+                for old_idx in &plan.stack_pattern {
+                    if *old_idx < original_inputs.len() {
+                        let vid = original_inputs[*old_idx];
+                        if let Some(new_idx) = plan.inputs.iter().position(|v| *v == vid) {
+                            new_stack.push(new_idx);
+                        }
+                    }
+                }
+                plan.stack_pattern = new_stack;
+            }
+        }
+
+        // Determine kernel support:
+        // - Elementwise: require WGSL generation at plan time.
+        // - Reduction: require WGSL generation at plan time as well.
+        // - Other kinds: executed via provider paths.
         let supported = if plan.kernel.kind.is_elementwise() {
             plan.generate_wgsl("f32").is_some()
         } else if plan.kernel.kind.is_reduction() {
             plan.generate_reduction_wgsl("f32").is_some()
         } else {
-            // Non-WGSL kinds are executed via provider paths
             true
         };
         plan.kernel.supported = plan.kernel.supported && supported;
@@ -975,8 +1023,33 @@ impl FusionGroupPlan {
         if self.inputs.is_empty() {
             return None;
         }
-        // Determine axis from any numeric constant; 1-based MATLAB dim => 0 for columns, 1 for rows.
+        // Determine axis from the reduction builtin's explicit dim argument when available.
+        // MATLAB dim is 1-based: dim=1 reduces rows (axis=0), dim=2 reduces cols (axis=1).
         let mut axis = 0usize;
+        // Support 'all' via either index-keyed constants or value-id keyed const_values
+        let reduce_all = self.constants.values().any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")))
+            || self.const_values.values().any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")));
+        if reduce_all {
+            // We'll flatten in VM by setting nrows = total and ncols = 1; axis=0 works with that.
+            axis = 0;
+        } else {
+        if let Some(dim_vid) = self.reduction_dim {
+            if let Some(v) = self.const_values.get(&dim_vid) {
+                match v {
+                    Value::Num(n) if *n >= 1.0 => {
+                        axis = (*n as usize).saturating_sub(1);
+                    }
+                    Value::Int(i) => {
+                        let val = i.to_f64();
+                        if val >= 1.0 {
+                            axis = (val as usize).saturating_sub(1);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            // Fallback: scan constant table for a plausible dim
         for v in self.constants.values() {
             match v {
                 Value::Num(n) if *n >= 1.0 => {
@@ -991,6 +1064,8 @@ impl FusionGroupPlan {
                     }
                 }
                 _ => {}
+                }
+            }
             }
         }
 
@@ -1058,6 +1133,7 @@ impl FusionGroupPlan {
                 }
             }
         }
+        // Require a folded expression for the reduction operand; if missing, defer (no WGSL).
         let val_expr = match exprs.get(&data_vid) {
             Some(s) => s.clone(),
             None => return None,
@@ -1089,6 +1165,7 @@ impl FusionGroupPlan {
             "const OMITNAN: bool = {};\n\n",
             if omitnan { "true" } else { "false" }
         ));
+        // Determine mean semantics from planner-populated reduction_mode
         let is_mean = matches!(self.reduction_mode, Some(ReductionMode::Mean));
         let post_scale = if is_mean {
             if axis == 0 {
@@ -1188,7 +1265,7 @@ impl FusionGroupPlan {
             shader.push_str("  var saw_nan: bool = false;\n  var c = lid.x;\n");
             {
                 let mut loop_body = String::new();
-                // input0 as 'v' — stride equals number of rows (params.ncols carries rows when axis=1)
+                // input0 as 'v' — provider encodes rows in params.ncols for axis=1
                 loop_body.push_str("    let v = input0.data[ row + (c * params.ncols) ];\n");
                 // additional inputs as v1, v2, ...
                 for (idx, _) in self.inputs.iter().enumerate().skip(1) {

@@ -24,14 +24,14 @@ for t = 1:T
   idx = rid .* double(C) + cid + salt + 0.0;
   state = mod(1664525.0 .* idx + 1013904223.0, 4294967296.0);
   x = single(state ./ 4294967296.0);
-  % Column-wise dot products
-  d = single(dot(x, x, 1));
-  y = single(dot(x, W, 1));
+  % Column-wise reductions (exercise fused reduction)
+  d = sum(x .* x, 1);
+  y = sum(x .* W, 1);
   e = d - y;                       % error per column
   nx = d + eps0;  % normalization term per column
   scale = repmat(single(e ./ nx), p, 1);
-  W = W + mu * single(double(x) .* double(scale));  % NLMS update on CPU semantics
+  W = W + mu * (x .* scale);  % NLMS update (single-precision, device-agnostic)
 end
 
-mse = mean((d - single(dot(x, W, 1))).^2, 'all');
+mse = mean((d - sum(x .* W, 1)).^2, 'all');
 fprintf('RESULT_ok MSE=%.6e\n', double(mse));

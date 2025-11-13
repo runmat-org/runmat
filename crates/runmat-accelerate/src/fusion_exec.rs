@@ -115,13 +115,48 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
             request.inputs.len()
         ));
     }
+    // Determine output shape from the fusion plan; if unknown, derive from runtime inputs via broadcasting.
+    fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
+        // Collect shapes; scalars map to empty shape which broadcasts to any
+        let mut shapes: Vec<Vec<usize>> = Vec::new();
+        for v in values {
+            match v {
+                Value::GpuTensor(h) => shapes.push(h.shape.clone()),
+                Value::Tensor(t) => shapes.push(t.shape.clone()),
+                Value::Num(_) | Value::Int(_) => shapes.push(Vec::new()),
+                _ => return None, // unsupported at runtime for broadcasting
+            }
+        }
+        let rank = shapes.iter().map(|s| s.len()).max().unwrap_or(0);
+        let mut out = vec![1usize; rank];
+        for shape in shapes {
+            let offset = rank.saturating_sub(shape.len());
+            for (i, &dim) in shape.iter().enumerate() {
+                let j = offset + i;
+                let a = out[j];
+                let b = dim;
+                if a == 1 {
+                    out[j] = b.max(1);
+                } else if b == 1 || a == b {
+                    // keep a
+                } else {
+                    return None; // incompatible
+                }
+            }
+        }
+        Some(out)
+    }
     // Determine output shape from the fusion plan and derive the element count from it.
     let output_shape = match &request.plan.group.shape {
         ShapeInfo::Tensor(dims) if !dims.is_empty() => {
             let resolved: Vec<usize> = dims.iter().map(|d| d.unwrap_or(1)).collect();
             resolved
         }
-        _ => return Err(anyhow!("fusion: unknown output shape")),
+        _ => {
+            // Fallback to runtime broadcasting inference
+            runtime_broadcast_shape(&request.inputs)
+                .ok_or_else(|| anyhow!("fusion: unknown output shape"))?
+        }
     };
     let len: usize = output_shape.iter().copied().product();
     if len == 0 {
@@ -212,6 +247,9 @@ pub fn execute_reduction(
     num_slices: usize,
     workgroup_size: u32,
 ) -> Result<Value> {
+    if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION").is_ok() {
+        return Err(anyhow!("fused reduction disabled by env"));
+    }
     crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_reduction() {
         return Err(anyhow!("unsupported fusion kind"));
