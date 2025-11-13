@@ -66,6 +66,8 @@ export default function HomePage() {
       {/* SEO-optimized opening content */}
       <div className="sr-only">
         <h1>RunMat - The Blazing-Fast Runtime for Math</h1>
+       
+       
         <p>
         RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device.
           MATLAB syntax. No kernel code, no rewrites.
@@ -77,15 +79,21 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="flex flex-col items-center space-y-6 text-center">
           <Badge variant="secondary" className="rounded-lg px-3 py-1 text-sm">
-            🚀 Open Source • MIT Licensed • Free Forever
+            🚀 Open Source • MIT Licensed
           </Badge>
+
+
           <h1 className="font-heading text-3xl sm:text-5xl md:text-6xl lg:text-7xl text-center">
-              <span className="gradient-brand">The Blazing-Fast Runtime for Math</span>
+              <span className="gradient-brand">The Fastest Runtime for Your Math</span>
           </h1>
+
+          
+
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-             
-          RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device.
-          MATLAB syntax. No kernel code, no rewrites.
+          We speak GPU so you don't have to. RunMat fuses operations and optimizes CPU/GPU execution into fewer steps.
+        MATLAB syntax. No kernel code, no rewrites.
+         
+         
              
           </p>
             <div className="flex flex-col sm:flex-row gap-4">
@@ -117,7 +125,7 @@ export default function HomePage() {
           <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-6xl">
           GPU-Accelerated Math          </h2>
           <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-          Designed to compete with the top open source stack, Python + PyTorch (CUDA), in various GPU-optimized workloads.
+          Built to compete with the top open source stack, Python + PyTorch (CUDA), in various GPU-optimized workloads.
 
           </p>
           </div>

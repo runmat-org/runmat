@@ -5,7 +5,7 @@ date: "2025-11-05"
 author: "Nabeel Allana"
 readTime: "7 min read"
 slug: "runmat-accel-intro-blog"
-tags: ["MATLAB", "Rust", "JIT", "Octave", "scientific computing", "open source"]
+tags: ["MATLAB", "Pytorch", "JIT", "Julia", "scientific computing", "open source"]
 keywords: "MATLAB runtime, GNU Octave comparison, Rust scientific computing, JIT compiler, numerical computing, open source"
 excerpt: "RunMat Accelerate is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
 image: "/images/blog/runmat-hero.png"
@@ -19,13 +19,23 @@ twitterDescription: "RunMat is a modern, open-source runtime that executes MATLA
 canonical: "https://runmat.org/blog/runmat-accel-intro-blog"
 ---
 
-## The Fastest Runtime for Math
+## The Fastest Runtime for your Math
 
 ### Why a faster way to do math
 
 Your mathematical code is elegant. It's also 50x slower than it should be. You know GPUs could fix this, but the path there is absurd: rewrite everything in CUDA, manage device memory explicitly, accept vendor lock-in, or pay thousands per seat for accelerators that still require code changes. The gap between "math as we think it" and "math as GPUs want it" has become so normalized that we've forgotten to question why  (A \- mean(A)) / std(A) should require anything more than writing exactly that. 
 
 RunMat eliminates this gap entirely. Write your mathematical operations in clean, readable syntax. RunMat automatically fuses them into optimized GPU kernels that match or exceed hand-tuned CUDA performance. It runs on whatever GPU you have—NVIDIA, AMD, Apple Silicon, Intel—through native APIs (Metal/DirectX/Vulkan). No device management. No vendor lock-in. No rewrites. If you're tired of choosing between mathematical clarity and computational speed, this is for you.
+
+### What “Fastest Runtime for Your Math” means
+
+Most engineers write math the same way: array operations, reductions, filters, and chained transforms. For this kind of work, the math you already write, RunMat is usually the fastest runtime you can pick.
+
+RunMat takes MATLAB-style code and fuses stretches of your program into optimized GPU kernels. It keeps data on the device, cuts kernel launch overhead, and avoids unnecessary host-to-device copies. You get GPU-level speed without writing GPU code.
+
+Some workloads can still run faster with hand-written CUDA or highly specialized PyTorch operations, such as certain deep learning blocks. That is expected. For most real numerical work, including image pipelines, simulations, elementwise math, reductions, and many linear algebra epilogues, RunMat is difficult to beat.
+
+When we say “your math”, we mean the way you already write array math today, without needing GPU expertise.
 
 #### What the best path looks like
 
@@ -157,9 +167,9 @@ MATLAB is commonly taught in engineering programs, so many engineers already thi
 
 #### Try for yourself
 
-* **Download RunMat:** \[Download\]
+* **Download RunMat:** [Download](/download)
 
-* **See benchmarks and examples:** \[Benchmarks\]
+* **See benchmarks and examples:** [Benchmarks](/benchmarks)
 
 #### FAQ
 
