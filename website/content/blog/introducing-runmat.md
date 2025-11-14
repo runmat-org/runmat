@@ -112,7 +112,7 @@ cat results/benchmark_YYYYMMDD_HHMMSS.yaml
 - **Slim builtins**: a curated set in core; everything else via packages. Docs are generated from runtime metadata.
 - **Great developer experience**: built in Jupyter kernel, flow-sensitive inference for great autocomplete and type hints, and more.
 - **Portable**: single binary, no dependencies, runs on Linux/macOS/Windows and embedded devices.
-- **GPU-optimized**: built in, configurable, swappable GPU planner with reverse-mode autograd support by default. Run your code on GPUs without any modifications across CPU, CUDA, ROCm, Metal, Vulkan, OpenCL, and WGPU platforms (coming soon).
+- **GPU-optimized**: built in, configurable, swappable GPU planner with automatic fusion and data residency. Run your code on GPUs without any modifications across CPU, Metal (macOS), DirectX 12 (Windows), and Vulkan (Linux) via the wgpu backend. Additional backends (CUDA, ROCm, OpenCL) are planned.
 
 For a deeper dive, see [How It Works](/docs/how-it-works) and the [Architecture & Internals](/docs/architecture) section.
 
@@ -132,7 +132,7 @@ Documentation is generated from runtime metadata, so everything you add shows up
 ## What you can run today
 
 - Core language: arrays, slicing (`end`, colon, logical masks), functions and multiple returns, cells/structs, OOP (`classdef` with properties/methods), `try/catch`, `global`, `persistent`, function handles, command-form.
-- A curated builtin set in the runtime (canonical math like `sin/cos/tan`, reductions like `sum/min/max`, basic string/formatting via `fprintf/sprintf`, array creation like `zeros/ones/eye`), with more coming through packages.
+- Extensive builtin coverage in the runtime (canonical math like `sin/cos/tan`, reductions like `sum/min/max`, basic string/formatting via `fprintf/sprintf`, array creation like `zeros/ones/eye`, linear algebra, FFT/signal processing, statistics, and I/O), with additional functions available through packages.
 
 If your code relies on many niche built-ins, the recommended path is to move those pieces into packages. The docs call out differences and migration notes where they exist.
 

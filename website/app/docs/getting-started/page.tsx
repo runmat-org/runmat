@@ -8,6 +8,7 @@ import {
   FileText,
   CheckCircle,
   ArrowRight,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
@@ -139,7 +140,7 @@ export default function GettingStartedPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  Generate beautiful plots with GPU acceleration:
+                Generate plots with your computed data:
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
                   <div className="text-blue-400">runmat&gt;</div> <span>x = [0, 1, 2, 3, 4, 5]</span>
@@ -173,7 +174,7 @@ export default function GettingStartedPage() {
             </CardHeader>
             <CardContent>
               <p className="text-muted-foreground mb-4">
-                Run existing MATLAB/Octave scripts directly:
+                Run existing MATLAB/Octave scripts directly with automatic GPU acceleration:
               </p>
               <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
                 <div className="text-gray-400"># Run a script file</div>
@@ -241,7 +242,7 @@ export default function GettingStartedPage() {
                 </div>
                 <div className="flex items-center space-x-2 text-sm text-blue-600 dark:text-blue-400">
                   <CheckCircle className="h-4 w-4" />
-                  <span>Full MATLAB syntax support with 150x faster execution than GNU Octave</span>
+                  <span>Full MATLAB syntax support with automatic GPU acceleration</span>
                 </div>
               </CardContent>
             </Card>
@@ -278,7 +279,7 @@ export default function GettingStartedPage() {
             Next Steps
           </h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -291,7 +292,7 @@ export default function GettingStartedPage() {
                   Dive deeper into RunMat&apos;s features and capabilities.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
-                  <Link href="/docs/how-it-works">
+                  <Link href="/docs/how-it-works" className="flex items-center justify-center">
                     How RunMat Works
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
@@ -299,19 +300,42 @@ export default function GettingStartedPage() {
               </CardContent>
             </Card>
 
-            <Card className="opacity-60 transition-shadow">
+            <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Terminal className="h-5 w-5 mr-2 text-gray-400" />
-                  <span className="text-gray-500 dark:text-gray-400">Explore Examples</span>
+                  <Terminal className="h-5 w-5 mr-2 text-green-600 dark:text-green-400" />
+                  Explore Examples
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-gray-500 dark:text-gray-400 mb-4">
+                <p className="text-muted-foreground mb-4">
                   See RunMat in action with real-world examples.
                 </p>
-                <Button variant="outline" className="w-full opacity-50 cursor-not-allowed" disabled>
-                  Coming Soon
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/benchmarks" className="flex items-center justify-center">
+                    Benchmarks
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Zap className="h-5 w-5 mr-2 text-orange-600" />
+                  Discover RunMat on the GPU
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  How RunMat turns ordinary MATLAB-syntax scripts into GPU-accelerated workloads
+                </p>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/docs/accelerate/gpu-residency" className="flex items-center justify-center">
+                    RunMat Accelerate
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
                 </Button>
               </CardContent>
             </Card>

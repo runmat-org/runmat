@@ -7,7 +7,7 @@ The core language and runtime are complete. The major remaining items are:
 - The GUI plotting backend has a few edges that need to be smoothed out.
 - The package manager needs to be implemented.
 - The JIT currently optimizes a subset of the language, with an interpreter fallback for operations that are currently not implemented in the JIT. Full JIT coverage will be implemented before the 1.0 release.
-- Some of the built-in functions have partial implementations. We will take a full pass through the built-in functions to ensure they're a good minimal set, with full canonical behavior.
+- Continued expansion of built-in function coverage. RunMat now has extensive built-in function coverage across arrays, linear algebra, FFT/signal processing, statistics, strings, and I/O. Additional functions continue to be added based on user needs.
 
 The below tracks the progress of the project towards the 1.0 release to date.
 
@@ -41,8 +41,8 @@ The below tracks the progress of the project towards the 1.0 release to date.
 - [x] Full language coverage (`docs/LANGUAGE_COVERAGE.md`).
 - [x] v0.2 release.
 - [ ] Finish plotting library integration.
-- [ ] Full standard library pass for canonical built-ins.
+- [x] Extensive built-in function coverage (arrays, linalg, FFT/signal, stats, strings, I/O).
 - [ ] Implement package manager.
 - [ ] Implement LSP server.
-- [ ] Complete Accelerate (GPU) support.
+- [x] Complete Accelerate (GPU) support.
 - [ ] MEX/C API (`runmat-ffi`).

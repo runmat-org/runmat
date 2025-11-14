@@ -121,3 +121,119 @@ export function loadBuiltins(): Builtin[] {
     return builtin;
   });
 }
+
+/**
+ * Formats a category array like ["array/sorting_sets"] into a readable label like "Array: Sorting & Sets"
+ */
+export function formatCategoryLabel(category: string[]): string {
+  if (!category || category.length === 0) {
+    return 'General';
+  }
+  
+  // Take the first category (most specific)
+  const cat = category[0];
+  
+  // Split by '/' and format each part
+  const parts = cat.split('/').map(part => {
+    // Convert snake_case or kebab-case to Title Case
+    return part
+      .split(/[-_]/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  });
+  
+  // Join with ': ' if multiple parts, otherwise just return the formatted part
+  if (parts.length > 1) {
+    return `${parts[0]}: ${parts.slice(1).join(' & ')}`;
+  }
+  
+  return parts[0];
+}
+
+/**
+ * Detects if a function has GPU support by checking for "GPU Execution Behaviour" section in MDX content
+ * and verifying that it actually supports GPU execution (not just host-only behavior)
+ */
+export function detectGpuSupport(mdxContent: string): boolean {
+  if (!mdxContent || typeof mdxContent !== 'string') {
+    return false;
+  }
+  
+  // First check if there's a GPU Execution Behaviour section
+  const gpuSectionPattern = /##\s+.*GPU\s+Execution\s+Behaviour/i;
+  if (!gpuSectionPattern.test(mdxContent)) {
+    return false;
+  }
+  
+  // Extract the content of the GPU Execution Behaviour section
+  // Find the section heading and get content until the next heading or end
+  const lines = mdxContent.split(/\r?\n/);
+  let inGpuSection = false;
+  let gpuSectionContent = '';
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Check if this is the GPU Execution Behaviour section heading
+    if (/^##\s+.*GPU\s+Execution\s+Behaviour/i.test(line)) {
+      inGpuSection = true;
+      continue;
+    }
+    
+    // Stop at next heading (## or ###)
+    if (inGpuSection && /^#{2,3}\s+/.test(line)) {
+      break;
+    }
+    
+    // Collect content from the section
+    if (inGpuSection) {
+      gpuSectionContent += line + ' ';
+    }
+  }
+  
+  // Check for indicators of actual GPU support (not host-only)
+  const gpuSupportIndicators = [
+    /\bprovider['"]?s\s+\w+_?\w*\s+hook/i,  // "provider's reduce_sum hook"
+    /\bprovider\s+exposes\s+.*hook/i,        // "provider exposes the custom hook"
+    /\bdevice[-\s]?side/i,                    // "device-side"
+    /\bexecutes?\s+.*on\s+the\s+device/i,    // "executes on the device"
+    /\bkeeps?\s+.*on\s+the\s+GPU/i,          // "keeps on the GPU"
+    /\bGPU\s+handle/i,                        // "GPU handle"
+    /\bgpuArray\s+handle/i,                   // "gpuArray handle"
+    /\bresidency\s+sink/i,                    // "residency sink" (indicates GPU support)
+    /\bnew\s+GPU\s+handle/i,                  // "new GPU handle"
+  ];
+  
+  // Check for indicators of host-only behavior
+  const hostOnlyIndicators = [
+    /\bhost[-\s]?only\s+builtin/i,            // "host-only builtin"
+    /\bno\s+provider\s+hooks?\s+(?:are\s+)?required/i,  // "no provider hooks required"
+    /\balways\s+(?:allocated|resides?)\s+in\s+host/i,    // "always allocated in host"
+    /\balways\s+.*host\s+memory/i,           // "always in host memory"
+  ];
+  
+  // If it explicitly says host-only, return false
+  if (hostOnlyIndicators.some(pattern => pattern.test(gpuSectionContent))) {
+    return false;
+  }
+  
+  // If it has GPU support indicators, return true
+  return gpuSupportIndicators.some(pattern => pattern.test(gpuSectionContent));
+}
+
+/**
+ * Extracts metadata for a builtin function
+ */
+export type BuiltinMetadata = {
+  category: string;
+  gpuSupport: boolean;
+  fusion: string; // Currently always "TBC" as placeholder
+};
+
+export function getBuiltinMetadata(builtin: Builtin, mdxContent: string): BuiltinMetadata {
+  return {
+    category: formatCategoryLabel(builtin.category),
+    gpuSupport: detectGpuSupport(mdxContent),
+    fusion: 'TBC', // Placeholder until fusion metadata is added to source files
+  };
+}

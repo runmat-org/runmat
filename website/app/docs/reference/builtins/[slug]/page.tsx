@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { loadBuiltins } from '@/lib/builtins';
+import { loadBuiltins, getBuiltinMetadata } from '@/lib/builtins';
 import fs from 'fs';
 import path from 'path';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { slugifyHeading } from '@/lib/utils';
 import { builtinMetadataForSlug } from './meta';
+import { BuiltinMetadataChips } from '@/components/BuiltinMetadataChips';
 
 export const dynamic = 'force-static';
 
@@ -34,14 +35,16 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   }
   if (!source) return notFound();
   const toc = extractHeadings(source);
+  const metadata = getBuiltinMetadata(b, source);
   return (
     <>
       <div className="container mx-auto px-4 md:px-6 pt-8">
-        <p className="my-6 text-muted-foreground leading-relaxed break-words">
+        <p className="mb-4 text-muted-foreground leading-relaxed break-words">
           <Link href="/docs/matlab-function-reference" className="text-muted-foreground hover:text-foreground transition-colors">
             View all functions
           </Link>
         </p>
+        <BuiltinMetadataChips metadata={metadata} />
       </div>
       <div className="container mx-auto px-4 md:px-6 pb-8">
       <div className="grid gap-8 lg:grid-cols-[1fr_280px]">

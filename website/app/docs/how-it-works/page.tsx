@@ -30,8 +30,7 @@ export default function HowItWorksPage() {
             How RunMat Works
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed">
-            RunMat is a new, modern runtime for MATLAB code. It implements the full language grammar and core
-            semantics — arrays and indexing, control flow, functions and multiple returns, cells/structs, and
+          RunMat is a GPU-accelerated runtime for MATLAB code that automatically optimizes your math across CPU and GPU—often outperforming hand-tuned PyTorch without any kernel programming. It implements the full language grammar and core semantics — arrays and indexing, control flow, functions and multiple returns, cells/structs, and
             classdef OOP — with a fast, V8-inspired engine.
           </p>
           <p className="text-lg text-muted-foreground leading-relaxed mt-8">
@@ -42,19 +41,16 @@ export default function HowItWorksPage() {
 
         {/* The Problem with Traditional Scientific Computing */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">Why legacy approaches are slow</h2>
+          <h2 className="text-3xl font-bold mb-6 text-foreground">Why existing approaches are slow</h2>
           <div className="bg-gradient-to-r from-amber-100 to-yellow-100 dark:from-amber-900/40 dark:to-yellow-900/40 rounded-lg p-6 mb-8 border border-amber-200 dark:border-amber-800">
               <p className="text-lg leading-relaxed">
-              <strong>Heavy startup:</strong> Large monolithic runtimes load thousands of functions, licensing systems,
-              and global tables on boot. That overhead dominates short-running scripts.
+              <strong>Traditional MATLAB/Octave:</strong> Slow startup, interpreted loops, no GPU support without expensive toolboxes.
               </p>
               <p className="text-lg leading-relaxed mt-4">
-              <strong>Runtime inefficiencies:</strong> Traditional interpreters translate operations line-by-line on every
-              execution. Hot loops are re-interpreted over and over; dispatch overhead swamps the math.
+              <strong>PyTorch/TensorFlow:</strong> Requires rewriting code, explicit device management, kernel programming knowledge.
               </p>
               <p className="text-lg leading-relaxed mt-4 text-muted-foreground">
-              <strong>The result?</strong> You wait — at startup, at every loop, and whenever the runtime can&apos;t optimize to
-              the way your code actually behaves.
+              <strong>The result:</strong> Scientists choose between ease (MATLAB) or speed (PyTorch)—not both.
               </p>
             </div>
         </section>
@@ -113,7 +109,34 @@ export default function HowItWorksPage() {
           </div>
         </section>
 
-
+        {/* Automatic GPU Acceleration */}
+        <section className="mb-12">
+          <h2 className="text-3xl font-bold mb-6 text-foreground">Automatic GPU Acceleration: Faster than Hand-Optimized Code</h2>
+          <p className="text-lg leading-relaxed mb-6 text-muted-foreground">
+            RunMat&apos;s fusion engine automatically:
+          </p>
+          <ul className="space-y-4 mb-6 text-lg leading-relaxed">
+            <li className="flex items-start">
+              <span className="text-green-600 mr-3 mt-1">•</span>
+              <span>Detects GPU-friendly operations and routes them intelligently</span>
+            </li>
+            <li className="flex items-start">
+              <span className="text-green-600 mr-3 mt-1">•</span>
+              <span>Fuses operation chains into optimized kernels (like PyTorch&apos;s <code className="bg-muted px-1.5 py-0.5 rounded">torch.compile</code>, but automatic)</span>
+            </li>
+            <li className="flex items-start">
+              <span className="text-green-600 mr-3 mt-1">•</span>
+              <span>Manages memory placement between CPU/GPU for maximum throughput</span>
+            </li>
+            <li className="flex items-start">
+              <span className="text-green-600 mr-3 mt-1">•</span>
+              <span>Often beats hand-tuned PyTorch—see our <a href="/benchmarks" className="text-blue-600 hover:underline">benchmarks</a></span>
+            </li>
+          </ul>
+          <p className="text-lg leading-relaxed font-medium">
+            No device flags. No kernel code. Just math that runs at maximum speed.
+          </p>
+        </section>
 
         {/* Language and Semantics */}
         <section className="mb-12">
@@ -302,6 +325,41 @@ export default function HowItWorksPage() {
 
           <div className="mt-6 text-sm text-muted-foreground">
             Benchmarks run on Apple M2 Max (32GB RAM) under identical conditions. Full suite available in <code>/benchmarks</code>; reproduce with <code>./benchmarks/run_benchmarks.sh</code>. Note that we cannot benchmark RunMat against MathWorks&apos;s MATLAB and ecosystem because installing it requires agreeing to their strict and dense license agreement, which we will not.
+          </div>
+        </section>
+
+        {/* How GPU Acceleration Works */}
+        <section className="mb-12">
+          <h2 className="text-3xl font-bold mb-6 text-foreground">How GPU Acceleration Works</h2>
+          
+          <div className="space-y-8">
+            <div>
+              <h3 className="text-2xl font-semibold mb-4">Stage 1: Capture the Math</h3>
+              <p className="text-lg text-muted-foreground leading-relaxed">
+                RunMat builds an acceleration graph of your operations, tracking shapes, dependencies, and operation types. This graph captures the mathematical intent without being tied to specific hardware, enabling intelligent optimization decisions.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-2xl font-semibold mb-4">Stage 2: Intelligent Routing</h3>
+              <p className="text-lg text-muted-foreground leading-relaxed">
+                Auto-offload heuristics decide CPU vs GPU based on size and operation type. Small operations stay on CPU to avoid transfer overhead, while large computations automatically route to GPU for maximum throughput.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-2xl font-semibold mb-4">Stage 3: Kernel Fusion</h3>
+              <p className="text-lg text-muted-foreground leading-relaxed">
+                Sequential operations compile into single GPU kernels, eliminating memory transfers between steps. Instead of launching ten separate kernels, RunMat fuses them into one optimized GPU program that runs end-to-end on device.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-2xl font-semibold mb-4">Stage 4: Execution with Residency</h3>
+              <p className="text-lg text-muted-foreground leading-relaxed">
+                Data stays on GPU between operations, copying back only when needed. This residency-aware execution minimizes host↔device transfers, keeping your data where it can be processed fastest.
+              </p>
+            </div>
           </div>
         </section>
 
@@ -568,17 +626,6 @@ export default function HowItWorksPage() {
                   Compile your MATLAB code to run on any platform — from embedded microcontrollers 
                   and edge devices to web browsers via WebAssembly, mobile devices, and cloud infrastructure. 
                   Write once in MATLAB, deploy everywhere from IoT sensors to high-performance clusters.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-l-4 border-l-red-500">
-              <CardContent className="p-6">
-                <h4 className="text-xl font-semibold mb-3">GPU Compute: Massively Parallel Everything</h4>
-                <p className="text-muted-foreground">
-                  Why limit matrix operations to your CPU? Direct CUDA and ROCm integration will 
-                  automatically offload heavy computations to your GPU, turning your graphics card 
-                  into a scientific supercomputer.
                 </p>
               </CardContent>
             </Card>
