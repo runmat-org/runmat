@@ -22,3 +22,5 @@ artifacts/
 
 .bench_venv/
 __pycache__/
+
+benchmarks/results/

@@ -36,14 +36,8 @@ def main() -> None:
 
     W = np.zeros((p, C), dtype=np.float32)
 
-    for t in range(T):
-        # Deterministic per-index LCG using uint32 to match MATLAB/RunMat exactly
-        rid = np.arange(p, dtype=np.uint32)[:, None]
-        cid = np.arange(C, dtype=np.uint32)[None, :]
-        salt = np.uint32(t) * np.uint32(p * C)
-        idx = rid * np.uint32(C) + cid + salt + np.uint32(0)
-        state = (np.uint32(1664525) * idx + np.uint32(1013904223)).astype(np.uint32)
-        x = (state.astype(np.float32) / np.float32(4294967296.0)).astype(np.float32)
+    for _ in range(T):
+        x = np.random.rand(p, C).astype(np.float32)
         d = np.sum(x * x, axis=0)
         y = np.sum(x * W, axis=0)
         e = d - y
@@ -56,3 +50,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

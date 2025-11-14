@@ -10,6 +10,15 @@ K_default = single(100.0);
 if ~exist('seed','var'), seed = seed_default; end
 rng(seed);
 
+env_M = getenv('MC_M');
+if numel(env_M)
+  M_default = str2double(env_M);
+end
+env_T = getenv('MC_T');
+if numel(env_T)
+  T_default = str2double(env_T);
+end
+
 if ~exist('M','var'), M = M_default; end
 if ~exist('T','var'), T = T_default; end
 if ~exist('S0','var'), S0 = S0_default; else S0 = single(S0); end

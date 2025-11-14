@@ -67,6 +67,7 @@ pub fn run_two_pass(
     bg2: &wgpu::BindGroup,
     g0: u32,
     g1: u32,
+    g2: u32,
 ) {
     // Pass 1 in its own encoder
     {
@@ -80,7 +81,7 @@ pub fn run_two_pass(
             });
             pass.set_pipeline(pipeline_p1);
             pass.set_bind_group(0, bg1, &[]);
-            pass.dispatch_workgroups(g0, g1, 1);
+            pass.dispatch_workgroups(g0, g1, g2);
         }
         submit(device, queue, enc);
     }

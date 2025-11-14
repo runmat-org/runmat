@@ -264,7 +264,17 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    impls = build_impl_commands(args.case, args.variant)
+    def variant_tag(name: str) -> str:
+        lowered = name.lower()
+        if lowered == "parity":
+            return "lcg"
+        if lowered == "perf":
+            return "rng"
+        if lowered in ("", "default"):
+            return "lcg"
+        return lowered
+
+    impls = build_impl_commands(args.case, variant_tag(args.variant))
     if not impls:
         raise SystemExit(f"No implementations found for case: {args.case}")
 
@@ -324,10 +334,6 @@ def main() -> None:
             # Force CPU path for RNG and ops to keep host-deterministic behavior
             variant_env["RUNMAT_ACCEL_THRESHOLD_ALL"] = str(1_000_000_000)
             variant_env["RUNMAT_DISABLE_RNG"] = "1"
-        elif args.variant.lower() == "perf":
-            # Prefer GPU RNG and normal thresholds; allow unique reduction out if desired
-            # (leave defaults; users can still override via env)
-            pass
         for impl in impls:
             suite_result["results"].append(
                 run_impl(impl, args.iterations, args.timeout, env_overrides=variant_env or None)

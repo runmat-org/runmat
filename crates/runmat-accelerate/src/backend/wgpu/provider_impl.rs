@@ -2928,7 +2928,8 @@ impl WgpuProvider {
             0u32
         };
         let chunks = ((reduce_len as u32) + workgroup_size - 1) / workgroup_size;
-        let partials_len = num_slices.max(1) * (chunks as usize);
+        let total_chunks = chunks.max(1);
+        let partials_len = num_slices.max(1) * (total_chunks as usize);
         let (pass1, pass2) = crate::backend::wgpu::shaders::reduction::build_two_pass_shaders(
             scalar_ty,
             workgroup_size,
@@ -3084,6 +3085,7 @@ impl WgpuProvider {
             ld: u32,
             flags: u32,
             chunks: u32,
+            chunk_stride: u32,
         }
         #[repr(C)]
         #[derive(Clone, Copy, Pod, Zeroable)]
@@ -3092,16 +3094,38 @@ impl WgpuProvider {
             chunks: u32,
             flags: u32,
         }
+        let max_dispatch = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as u32;
+        let mut chunk_stride = total_chunks.min(max_dispatch);
+        let mut chunk_tiles =
+            ((total_chunks as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
+        if chunk_tiles > max_dispatch as u64 {
+            let required_stride =
+                ((total_chunks as u64) + max_dispatch as u64 - 1) / (max_dispatch as u64);
+            chunk_stride = required_stride
+                .max(1)
+                .min(max_dispatch as u64) as u32;
+            chunk_tiles =
+                ((total_chunks as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
+            if chunk_tiles > max_dispatch as u64 {
+                return Err(anyhow!(
+                    "fused_reduction: chunk grid {} exceeds dispatch limits (stride {}, tiles {})",
+                    total_chunks,
+                    chunk_stride,
+                    chunk_tiles
+                ));
+            }
+        }
         let p1u = P1 {
             nrows: reduce_len as u32,
             ncols: num_slices as u32,
             ld: reduce_len as u32,
             flags,
-            chunks,
+            chunks: total_chunks,
+            chunk_stride,
         };
         let p2u = P2 {
             ncols: num_slices as u32,
-            chunks,
+            chunks: total_chunks,
             flags,
         };
         let p1_buf = self.kernel_resources.uniform_buffer(
@@ -3171,15 +3195,17 @@ impl WgpuProvider {
                 )
             });
         let g0 = (num_slices as u32).max(1);
-        let g1 = chunks.max(1);
+        let g1 = chunk_stride.max(1);
+        let g2 = (chunk_tiles as u32).max(1);
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
             eprintln!(
-                "[fused-reduction-2pass] in ptr={:p} partials ptr={:p} out ptr={:p} g0={} g1={}",
+                "[fused-reduction-2pass] in ptr={:p} partials ptr={:p} out ptr={:p} g0={} g1={} g2={}",
                 input_buf.as_ref(),
                 partials_buffer.as_ref(),
                 out_buffer.as_ref(),
                 g0,
-                g1
+                g1,
+                g2
             );
             // Mirror to file as well for full capture
             let debug_path = std::env::var("RUNMAT_DEBUG_FILE")
@@ -3193,12 +3219,13 @@ impl WgpuProvider {
                 use std::io::Write;
                 let _ = writeln!(
                     f,
-                    "[fused-reduction-2pass] in ptr={:p} partials ptr={:p} out ptr={:p} g0={} g1={}",
+                    "[fused-reduction-2pass] in ptr={:p} partials ptr={:p} out ptr={:p} g0={} g1={} g2={}",
                     input_buf.as_ref(),
                     partials_buffer.as_ref(),
                     out_buffer.as_ref(),
                     g0,
-                    g1
+                    g1,
+                    g2
                 );
             }
         }
@@ -3211,6 +3238,7 @@ impl WgpuProvider {
             bg2.as_ref(),
             g0,
             g1,
+            g2,
         );
         Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), num_slices.max(1)))
     }

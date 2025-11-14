@@ -56,37 +56,27 @@ if ~exist('debug_gpu_mse','var'), debug_gpu_mse = 0; end
 W = zeros(p, C, 'single');
 
 for t = 1:T
-  % Deterministic pseudo-random design matrix per-iteration (float LCG to match NumPy)
-  rid = double(reshape(0:p-1, [p 1]));
-  cid = double(reshape(0:C-1, [1 C]));
-  salt = double(t - 1) * double(p * C);
-  idx = rid .* double(C) + cid + salt + 0.0;
-  state = mod(1664525.0 .* idx + 1013904223.0, 4294967296.0);
-  x = single(state ./ 4294967296.0);
-  % Column-wise reductions (exercise fused reduction)
+  x = rand(p, C, 'single');
   d = sum(x .* x, 1, 'native');
   y = sum(x .* W, 1, 'native');
-  e = d - y;                       % error per column
-  nx = d + eps0;  % normalization term per column
+  e = d - y;
+  nx = d + eps0;
   scale = repmat(single(e ./ nx), p, 1);
-  W = W + mu * (x .* scale);  % NLMS update (single-precision, device-agnostic)
+  W = W + mu * (x .* scale);
 end
 
 d_single = single(d);
 y_single = single(y);
 err_single = d_single - y_single;
-% Exercise the fused square+mean(all) reduction on the last single-precision state
-gpu_mse_single = mean(err_single .* err_single, 'all', 'native');
-gpu_mse = double(gpu_mse_single);
+gpu_mse = mean(err_single .* err_single, 'all', 'native');
 
-% Recompute the final error in double for parity reporting
-final_d = double(sum(x .* x, 1, 'native'));
-final_y = double(sum(x .* W, 1, 'native'));
-mse = mean((final_d - final_y).^2, 'all');
+final_d = sum(x .* x, 1, 'native');
+final_y = sum(x .* W, 1, 'native');
+mse = mean((final_d - final_y).^2, 'all', 'native');
 
-% Optional sanity check if users set debug flags in the harness
 if debug_gpu_mse
-  fprintf('gpu_mse=%.6e mse_ref=%.6e delta=%.3e\n', gpu_mse, mse, abs(mse - gpu_mse));
+  fprintf('gpu_mse=%.6e mse_ref=%.6e delta=%.3e\n', gpu_mse, mse, abs(double(mse) - double(gpu_mse)));
 end
 
-fprintf('RESULT_ok MSE=%.6e\n', double(mse));
+fprintf('RESULT_ok MSE=%.6e\n', mse);
+

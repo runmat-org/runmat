@@ -2,6 +2,7 @@
 import os
 from typing import Optional, Tuple
 
+import numpy as np
 import torch
 
 
@@ -30,6 +31,15 @@ def resolve_params(default_p: int, default_c: int, default_t: int) -> Tuple[int,
     return p, c, t
 
 
+def lcg_matrix(p: int, c: int, t: int) -> np.ndarray:
+    rid = np.arange(p, dtype=np.uint32)[:, None]
+    cid = np.arange(c, dtype=np.uint32)[None, :]
+    salt = np.uint32(t) * np.uint32(p * c)
+    idx = rid * np.uint32(c) + cid + salt + np.uint32(0)
+    state = (np.uint32(1664525) * idx + np.uint32(1013904223)).astype(np.uint32)
+    return (state.astype(np.float32) / np.float32(4294967296.0)).astype(np.float32)
+
+
 def main() -> None:
     torch.manual_seed(0)
     override = os.environ.get("TORCH_DEVICE")
@@ -43,13 +53,14 @@ def main() -> None:
 
     W = torch.zeros((p, C), device=device, dtype=torch.float32)
 
-    for _ in range(T):
-        x = torch.rand((p, C), device=device, dtype=torch.float32)
+    for t in range(T):
+        x_np = lcg_matrix(p, C, t)
+        x = torch.from_numpy(x_np).to(device)
         d = torch.sum(x * x, dim=0)
         y = torch.sum(x * W, dim=0)
         e = d - y
         nx = torch.sum(x.pow(2), dim=0) + eps0
-        scale = (e / nx).unsqueeze(0)  # shape (1, C)
+        scale = (e / nx).unsqueeze(0)
         W = W + mu * x * scale
 
     mse = torch.mean((d - torch.sum(x * W, dim=0)).pow(2)).double().item()
@@ -59,3 +70,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
