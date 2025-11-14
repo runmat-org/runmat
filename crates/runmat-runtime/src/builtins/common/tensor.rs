@@ -4,7 +4,14 @@ use runmat_builtins::{LogicalArray, NumericDType, Tensor, Value};
 
 /// Return the total number of elements for a given shape.
 pub fn element_count(shape: &[usize]) -> usize {
-    shape.iter().copied().product()
+    let mut acc: u128 = 1;
+    for &dim in shape {
+        let dim128 = dim as u128;
+        acc = acc
+            .checked_mul(dim128)
+            .expect("tensor::element_count: overflow computing element count");
+    }
+    usize::try_from(acc).expect("tensor::element_count: overflow converting to usize")
 }
 
 /// Construct a zero-filled tensor with the provided shape.

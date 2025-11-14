@@ -9896,7 +9896,81 @@ fn try_execute_fusion_group(
 
             let (r, c) = rows_cols.unwrap_or((1, 1));
             if reduce_all {
-                (r.saturating_mul(c).max(1), 1usize)
+                let mut total_elems: Option<usize> = None;
+                // Prefer fully-known graph shape for the reduction operand
+                if let Some(shape) = plan.reduction_data_shape(graph) {
+                    let prod = shape.into_iter().fold(1usize, |acc, dim| {
+                        let d = dim.max(1);
+                        acc.saturating_mul(d)
+                    });
+                    total_elems = Some(prod.max(1));
+                }
+                // Fall back to runtime tensor shapes (consumed stack values first, then inputs)
+                if total_elems.is_none() {
+                    let inspect_value = |value: &Value| -> Option<usize> {
+                        match value {
+                            Value::GpuTensor(handle) => {
+                                if handle.shape.is_empty() {
+                                    Some(1)
+                                } else {
+                                    Some(
+                                        handle
+                                            .shape
+                                            .iter()
+                                            .copied()
+                                            .map(|d| d.max(1))
+                                            .fold(1usize, |acc, dim| acc.saturating_mul(dim)),
+                                    )
+                                }
+                            }
+                            Value::Tensor(tensor) => {
+                                if tensor.shape.is_empty() {
+                                    Some(1)
+                                } else {
+                                    Some(
+                                        tensor
+                                            .shape
+                                            .iter()
+                                            .copied()
+                                            .map(|d| d.max(1))
+                                            .fold(1usize, |acc, dim| acc.saturating_mul(dim)),
+                                    )
+                                }
+                            }
+                            _ => None,
+                        }
+                    };
+                    for value in &consumed {
+                        if let Some(prod) = inspect_value(value) {
+                            total_elems = Some(prod.max(1));
+                            break;
+                        }
+                    }
+                    if total_elems.is_none() {
+                        for value in &request.inputs {
+                            if let Some(prod) = inspect_value(value) {
+                                total_elems = Some(prod.max(1));
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Final fallback: use group-level element count or the 2-D heuristic
+                if total_elems.is_none() {
+                    if let Some(ec) = plan.element_count() {
+                        total_elems = Some(ec.max(1));
+                    }
+                }
+                let total = total_elems.unwrap_or_else(|| r.saturating_mul(c).max(1));
+                if fusion_debug_enabled() {
+                    log::debug!(
+                        "fusion reduction (all): total_elems={} fallback_rows={} fallback_cols={}",
+                        total,
+                        r,
+                        c
+                    );
+                }
+                (total, 1usize)
             } else {
                 if fusion_debug_enabled() {
                     if r == 1 && c == 1 {

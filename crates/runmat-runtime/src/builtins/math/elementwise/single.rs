@@ -2,7 +2,7 @@
 
 use log::trace;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
@@ -337,6 +337,7 @@ fn single_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 
 fn single_tensor_to_host(mut tensor: Tensor) -> Result<Tensor, String> {
     cast_slice_to_single(&mut tensor.data);
+    tensor.dtype = NumericDType::F32;
     Ok(tensor)
 }
 

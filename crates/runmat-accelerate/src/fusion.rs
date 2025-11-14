@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::{Arc, OnceLock, RwLock, Weak};
 
 use once_cell::sync::Lazy;
 use runmat_builtins::Value;
@@ -379,6 +379,14 @@ static PLAN_CACHE: Lazy<RwLock<HashMap<usize, Weak<FusionPlan>>>> =
 
 thread_local! {
     static ACTIVE_PLAN: RefCell<Option<ActiveContext>> = const { RefCell::new(None) };
+}
+
+fn fusion_debug_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| match std::env::var("RUNMAT_DEBUG_FUSION") {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"),
+        Err(_) => false,
+    })
 }
 
 pub fn prepare_fusion_plan(
@@ -784,6 +792,23 @@ impl FusionGroupPlan {
                     plan.operations = new_ops;
                 }
                 plan.inputs = deps;
+                // Ensure constants referenced by any newly added operations are recorded.
+                for op in &plan.operations {
+                    let inputs = match op {
+                        FusionOp::Primitive { inputs, .. } => inputs,
+                        FusionOp::Builtin { inputs, .. } => inputs,
+                    };
+                    for vid in inputs {
+                        if plan.const_values.contains_key(vid) {
+                            continue;
+                        }
+                        if let Some(info) = graph.value(*vid) {
+                            if let Some(cv) = info.constant.clone() {
+                                plan.const_values.insert(*vid, cv);
+                            }
+                        }
+                    }
+                }
 
                 // Rebuild stack pattern based on the dependencies that were previously sourced
                 // from the execution stack.
@@ -866,6 +891,48 @@ impl FusionGroupPlan {
             true
         };
         plan.kernel.supported = plan.kernel.supported && supported;
+        if !plan.kernel.supported && fusion_debug_enabled() {
+            let const_ids: Vec<ValueId> = plan.const_values.keys().copied().collect();
+            log::debug!(
+                "fusion plan {} unsupported: kind={:?} group_kind={:?} inputs={:?} reduction_data={:?} reduction_dim={:?} const_ids={:?}",
+                plan.index,
+                plan.kernel.kind,
+                plan.group.kind,
+                plan.inputs,
+                plan.reduction_data,
+                plan.reduction_dim,
+                const_ids
+            );
+            if plan.kernel.kind.is_reduction() {
+                let mut seen: HashSet<ValueId> = HashSet::new();
+                let mut value_info: Vec<String> = Vec::new();
+                for op in &plan.operations {
+                    let inputs = match op {
+                        FusionOp::Primitive { inputs, .. } => inputs,
+                        FusionOp::Builtin { inputs, .. } => inputs,
+                    };
+                    for vid in inputs {
+                        if seen.insert(*vid) {
+                            if let Some(info) = graph.value(*vid) {
+                                value_info.push(format!(
+                                    "vid={} origin={:?} constant={}",
+                                    vid,
+                                    info.origin,
+                                    info.constant.is_some()
+                                ));
+                            } else {
+                                value_info.push(format!("vid={} origin=<missing>", vid));
+                            }
+                        }
+                    }
+                }
+                log::debug!(
+                    "fusion reduction plan {} value summary: [{}]",
+                    plan.index,
+                    value_info.join(", ")
+                );
+            }
+        }
 
         if matches!(plan.group.kind, FusionKind::CenteredGram) && plan.stack_pattern.is_empty() {
             let mut centered_stack_idxs: Vec<usize> = Vec::new();
@@ -1105,6 +1172,14 @@ impl FusionGroupPlan {
                         format!("{}", f as f32)
                     }
                 }
+                Value::Tensor(t) if t.data.len() == 1 => {
+                    let scalar = t.data[0];
+                    if scalar_ty == "f64" {
+                        format!("f64({})", scalar)
+                    } else {
+                        format!("{}", scalar as f32)
+                    }
+                }
                 _ => {
                     if scalar_ty == "f64" {
                         "f64(0.0)".to_string()
@@ -1115,32 +1190,59 @@ impl FusionGroupPlan {
             };
             exprs.insert(*vid, lit);
         }
-        for op in &self.operations {
-            match op {
-                FusionOp::Primitive { op, inputs, output } => {
-                    if let Some(out) = output {
-                        if let Some(code) = primitive_expr(*op, inputs, &exprs) {
-                            exprs.insert(*out, code);
+        let mut progressed = true;
+        while progressed {
+            progressed = false;
+            for op in &self.operations {
+                match op {
+                    FusionOp::Primitive { op, inputs, output } => {
+                        if let Some(out) = output {
+                            if exprs.contains_key(out) {
+                                continue;
+                            }
+                            if let Some(code) = primitive_expr(*op, inputs, &exprs) {
+                                exprs.insert(*out, code);
+                                progressed = true;
+                            }
+                        }
+                    }
+                    FusionOp::Builtin {
+                        name,
+                        inputs,
+                        output,
+                    } => {
+                        if let Some(out) = output {
+                            if exprs.contains_key(out) {
+                                continue;
+                            }
+                            if let Some(code) = builtin_expr(name, inputs, &exprs, scalar_ty) {
+                                exprs.insert(*out, code);
+                                progressed = true;
+                            }
                         }
                     }
                 }
-                FusionOp::Builtin {
-                    name,
-                    inputs,
-                    output,
-                } => {
-                    if let Some(out) = output {
-                        if let Some(code) = builtin_expr(name, inputs, &exprs, scalar_ty) {
-                            exprs.insert(*out, code);
-                        }
-                    }
-                }
+            }
+            if exprs.contains_key(&data_vid) {
+                break;
             }
         }
         // Require a folded expression for the reduction operand; if missing, defer (no WGSL).
         let val_expr = match exprs.get(&data_vid) {
             Some(s) => s.clone(),
-            None => return None,
+            None => {
+                if fusion_debug_enabled() {
+                    let expr_keys: Vec<ValueId> = exprs.keys().copied().collect();
+                    log::debug!(
+                        "fusion reduction WGSL: missing expression for data {:?}; inputs={:?} expr_keys={:?} ops={:?}",
+                        data_vid,
+                        self.inputs,
+                        expr_keys,
+                        self.operations
+                    );
+                }
+                return None;
+            }
         };
 
         let mut shader = String::new();

@@ -27,14 +27,14 @@ idx = bid .* strideHW + yid .* strideW + xid + seed32;
 state = mod(1664525 .* idx + 1013904223, 4294967296.0);
 imgs = single(state) ./ single(4294967296.0);
 
-% Use nested means to ensure exact MATLAB semantics for dims [2 3]
-mu = mean(mean(imgs, 2), 3);
-sigma = sqrt(mean(mean((imgs - mu).^2, 2), 3) + eps0);
+% Reduce over dims 2 and 3 in a single call, keeping native precision
+mu = single(mean(imgs, [2 3], 'native'));
+sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
 
-out = ((imgs - mu) ./ sigma) * gain + bias;
+out = single(((imgs - mu) ./ sigma) * gain + bias);
 % Clamp to avoid NaNs from fractional power on negatives
 out = max(out, single(0));
-out = out .^ gamma;
+out = single(out .^ gamma);
 mse = mean((out - imgs).^2, 'all');
 
 fprintf('RESULT_ok MSE=%.6e\n', double(mse));

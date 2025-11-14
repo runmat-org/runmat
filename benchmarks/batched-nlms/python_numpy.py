@@ -2,12 +2,35 @@
 import os
 import numpy as np
 
+
+def _shape_from_tshirt(label: str):
+    mapping = {
+        "s": (128, 512, 200),
+        "small": (128, 512, 200),
+        "m": (128, 2048, 200),
+        "medium": (128, 2048, 200),
+        "l": (256, 4096, 200),
+        "large": (256, 4096, 200),
+    }
+    return mapping.get(label)
+
+
+def resolve_params(default_p: int, default_c: int, default_t: int):
+    tshirt = os.environ.get("NLMS_TSHIRT")
+    if tshirt:
+        normalized = tshirt.strip().lower()
+        resolved = _shape_from_tshirt(normalized)
+        if resolved:
+            return resolved
+    p = int(os.environ.get("NLMS_P", default_p))
+    c = int(os.environ.get("NLMS_C", default_c))
+    t = int(os.environ.get("NLMS_T", default_t))
+    return p, c, t
+
+
 def main() -> None:
     np.random.seed(0)
-    p, C, T = 128, 2048, 200
-    p = int(os.environ.get("NLMS_P", p))
-    C = int(os.environ.get("NLMS_C", C))
-    T = int(os.environ.get("NLMS_T", T))
+    p, C, T = resolve_params(128, 2048, 200)
     mu = np.float32(0.5)
     eps0 = np.float32(1e-3)
 

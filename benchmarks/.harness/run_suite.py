@@ -625,14 +625,14 @@ def main() -> None:
                     if xkey in r:
                         val = _extract_metric(r.get("stdout_tail", ""), metric_regex)
                         if val is not None:
-                            ref_vals[int(r[xkey])] = val
+                            ref_vals[str(r[xkey])] = val
             for r in case_result.get("results", []):
                 impl = r.get("impl")
                 xkey = scale_key or "n"
                 nval = r.get(xkey)
                 if impl == "python-numpy" or nval is None:
                     continue
-                ref = ref_vals.get(int(nval)) if ref_vals else None
+                ref = ref_vals.get(str(nval)) if ref_vals else None
                 got = _extract_metric(r.get("stdout_tail", ""), metric_regex)
                 ok = True
                 if ref is not None and got is not None:

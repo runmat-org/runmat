@@ -1,8 +1,9 @@
 //! MATLAB-compatible `rand` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use std::sync::OnceLock;
 
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::{
@@ -332,6 +333,9 @@ fn build_output(parsed: ParsedRand) -> Result<Value, String> {
 }
 
 fn rand_double(shape: &[usize]) -> Result<Value, String> {
+    if let Some(value) = try_gpu_uniform(shape, NumericDType::F64)? {
+        return Ok(value);
+    }
     let len = tensor::element_count(shape);
     let data = random::generate_uniform(len, "rand")?;
     let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| format!("rand: {e}"))?;
@@ -355,6 +359,9 @@ fn rand_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
 }
 
 fn rand_single(shape: &[usize]) -> Result<Value, String> {
+    if let Some(value) = try_gpu_uniform(shape, NumericDType::F32)? {
+        return Ok(value);
+    }
     let len = tensor::element_count(shape);
     let data = random::generate_uniform_single(len, "rand")?;
     let tensor = Tensor::new_with_dtype(data, shape.to_vec(), NumericDType::F32)
@@ -371,13 +378,21 @@ fn rand_complex(shape: &[usize]) -> Result<Value, String> {
 
 fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
+        let precision =
+            runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
+        let dtype = dtype_from_precision(precision);
         let attempt = if handle.shape == shape {
             provider.random_uniform_like(handle)
         } else {
             provider.random_uniform(shape)
         };
         if let Ok(gpu) = attempt {
+            runmat_accelerate_api::set_handle_precision(&gpu, precision);
+            let len = tensor::element_count(shape);
+            random::skip_uniform(len, "rand")?;
             return Ok(Value::GpuTensor(gpu));
+        } else {
+            log_rand_fallback(shape, dtype, "provider-like-error");
         }
 
         let len = tensor::element_count(shape);
@@ -388,13 +403,79 @@ fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, Str
             shape: &tensor.shape,
         };
         if let Ok(gpu) = provider.upload(&view) {
+            runmat_accelerate_api::set_handle_precision(&gpu, precision);
             return Ok(Value::GpuTensor(gpu));
+        } else {
+            log_rand_fallback(shape, dtype, "upload-error");
         }
+    } else {
+        log_rand_fallback(shape, NumericDType::F32, "no-provider-like");
     }
 
     let gathered = crate::dispatcher::gather_if_needed(&Value::GpuTensor(handle.clone()))
         .map_err(|e| format!("rand: {e}"))?;
+    log_rand_fallback(shape, NumericDType::F32, "gather-fallback");
     rand_like(&gathered, shape)
+}
+
+fn try_gpu_uniform(shape: &[usize], dtype: NumericDType) -> Result<Option<Value>, String> {
+    let Some(provider) = runmat_accelerate_api::provider() else {
+        log_rand_fallback(shape, dtype, "no-provider");
+        return Ok(None);
+    };
+    let precision = match dtype {
+        NumericDType::F32 => ProviderPrecision::F32,
+        NumericDType::F64 => ProviderPrecision::F64,
+    };
+    if provider.precision() != precision {
+        log_rand_fallback(shape, dtype, "precision-mismatch");
+        return Ok(None);
+    }
+    match provider.random_uniform(shape) {
+        Ok(handle) => {
+            runmat_accelerate_api::set_handle_precision(&handle, precision);
+            let len = tensor::element_count(shape);
+            random::skip_uniform(len, "rand")?;
+            Ok(Some(Value::GpuTensor(handle)))
+        }
+        Err(err) => {
+            log::warn!(
+                "rand: provider random_uniform failed ({err}); falling back to host tensor path"
+            );
+            log_rand_fallback(shape, dtype, "provider-error");
+            Ok(None)
+        }
+    }
+}
+
+fn rand_fallback_debug_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| {
+        matches!(
+            std::env::var("RUNMAT_DEBUG_RAND_FALLBACK"),
+            Ok(value) if value == "1"
+                || value.eq_ignore_ascii_case("true")
+                || value.eq_ignore_ascii_case("yes")
+        )
+    })
+}
+
+fn log_rand_fallback(shape: &[usize], dtype: NumericDType, reason: &str) {
+    if !rand_fallback_debug_enabled() {
+        return;
+    }
+    let elems = tensor::element_count(shape);
+    eprintln!(
+        "[rand_debug] fallback dtype={:?} elems={} shape={:?} reason={}",
+        dtype, elems, shape, reason
+    );
+}
+
+fn dtype_from_precision(precision: ProviderPrecision) -> NumericDType {
+    match precision {
+        ProviderPrecision::F32 => NumericDType::F32,
+        ProviderPrecision::F64 => NumericDType::F64,
+    }
 }
 
 #[cfg(test)]
@@ -587,5 +668,22 @@ mod tests {
         let summed = crate::call_builtin("sum", &[s, Value::Num(1.0)]).expect("sum");
         let gathered = test_support::gather(summed).expect("gather");
         assert_eq!(gathered.shape, vec![1, 2]);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn rand_wgpu_single_allocates_gpu_without_like() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let value = rand_single(&[2, 2]).expect("rand single");
+        match value {
+            Value::GpuTensor(handle) => {
+                let gathered =
+                    test_support::gather(Value::GpuTensor(handle)).expect("gather to host");
+                assert_eq!(gathered.shape, vec![2, 2]);
+            }
+            other => panic!("expected gpu tensor, got {other:?}"),
+        }
     }
 }

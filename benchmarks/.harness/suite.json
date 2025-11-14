@@ -104,10 +104,14 @@
       },
       "include_impl": ["runmat", "python-numpy", "python-torch"],
       "params": {
-        "defaults": {"M": 8192, "T": 64},
-        "scale": {"key": "M", "values": [4096, 8192]}
+        "defaults": {},
+        "scale": {"key": "tshirt", "values": ["s", "m", "l", "xl-lite", "xl-mid"]}
       },
-      "env_map": {"M": "IIR_M", "T": "IIR_T"},
+      "env_map": {
+        "tshirt": "IIR_TSHIRT",
+        "M": "IIR_M",
+        "T": "IIR_T"
+      },
       "parity": {
         "metric_regex": "MEAN=([0-9eE+\\-.]+)",
         "rtol": 0.001,

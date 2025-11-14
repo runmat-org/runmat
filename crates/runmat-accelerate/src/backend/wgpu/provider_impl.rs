@@ -13810,16 +13810,34 @@ impl AccelProvider for WgpuProvider {
         } else {
             crate::backend::wgpu::types::DimReduceOp::AllInclude
         };
-        let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
-        match self.reduce_dim_sum_mean_exec(&first, 1, op) {
-            Ok(handle) => {
-                let _ = self.free(&first);
-                Ok(handle)
+        let total_elems = if a.shape.is_empty() {
+            1
+        } else {
+            product_checked(&a.shape)
+                .ok_or_else(|| anyhow!("reduce_all: tensor size exceeds GPU limits"))?
+        };
+        if total_elems == 0 {
+            return self.fill(&[1usize, 1usize], f64::NAN);
+        }
+        if a.shape.len() <= 2 {
+            let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
+            match self.reduce_dim_sum_mean_exec(&first, 1, op) {
+                Ok(handle) => {
+                    let _ = self.free(&first);
+                    Ok(handle)
+                }
+                Err(err) => {
+                    let _ = self.free(&first);
+                    Err(err)
+                }
             }
-            Err(err) => {
-                let _ = self.free(&first);
-                Err(err)
-            }
+        } else {
+            let original_shape = a.shape.clone();
+            let flattened_shape = vec![total_elems, 1usize];
+            let flattened = self.reshape(a, &flattened_shape)?;
+            let result = self.reduce_dim_sum_mean_exec(&flattened, 0, op);
+            let _ = self.reshape(a, &original_shape);
+            result
         }
     }
 

@@ -21,8 +21,8 @@ def main() -> None:
     idx = bid * strideHW + yid * strideW + xid + seed32
     state = (np.uint32(1664525) * idx + np.uint32(1013904223)).astype(np.uint32)
     imgs = (state.astype(np.float32) / np.float32(2.0**32))
-    mu = imgs.mean(axis=(1, 2), keepdims=True)
-    sigma = np.sqrt(((imgs - mu) ** 2).mean(axis=(1, 2), keepdims=True) + eps0)
+    mu = imgs.mean(axis=(1, 2), dtype=np.float32, keepdims=True)
+    sigma = np.sqrt(((imgs - mu) ** 2).mean(axis=(1, 2), dtype=np.float32, keepdims=True) + eps0)
 
     out = ((imgs - mu) / sigma) * gain + bias
     # Clamp to avoid fractional power of negative numbers producing NaN

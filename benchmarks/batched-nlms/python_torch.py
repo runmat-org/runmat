@@ -1,6 +1,34 @@
 #!/usr/bin/env python3
 import os
+from typing import Optional, Tuple
+
 import torch
+
+
+def _shape_from_tshirt(label: Optional[str]) -> Optional[Tuple[int, int, int]]:
+    if not label:
+        return None
+    normalized = label.strip().lower()
+    mapping = {
+        "s": (128, 512, 200),
+        "small": (128, 512, 200),
+        "m": (128, 2048, 200),
+        "medium": (128, 2048, 200),
+        "l": (256, 4096, 200),
+        "large": (256, 4096, 200),
+    }
+    return mapping.get(normalized)
+
+
+def resolve_params(default_p: int, default_c: int, default_t: int) -> Tuple[int, int, int]:
+    resolved = _shape_from_tshirt(os.environ.get("NLMS_TSHIRT"))
+    if resolved:
+        return resolved
+    p = int(os.environ.get("NLMS_P", default_p))
+    c = int(os.environ.get("NLMS_C", default_c))
+    t = int(os.environ.get("NLMS_T", default_t))
+    return p, c, t
+
 
 def main() -> None:
     torch.manual_seed(0)
@@ -9,10 +37,7 @@ def main() -> None:
         device = torch.device(override)
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    p, C, T = 128, 2048, 200
-    p = int(os.environ.get("NLMS_P", p))
-    C = int(os.environ.get("NLMS_C", C))
-    T = int(os.environ.get("NLMS_T", T))
+    p, C, T = resolve_params(128, 2048, 200)
     mu = torch.tensor(0.5, dtype=torch.float32, device=device)
     eps0 = torch.tensor(1e-3, dtype=torch.float32, device=device)
 

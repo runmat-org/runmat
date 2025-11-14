@@ -899,16 +899,56 @@ fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> Result
             }
             Ok(current)
         }
-        MeanAxes::All => {
-            if tensor.shape.is_empty() {
-                Ok(tensor)
-            } else {
-                let mut current = tensor;
-                for dim in 1..=current.shape.len() {
-                    current = reduce_tensor_mean_dim(&current, dim, nan_mode)?;
+        MeanAxes::All => mean_tensor_all(&tensor, nan_mode),
+    }
+}
+
+fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, String> {
+    if tensor.shape.is_empty() {
+        return Ok(tensor.clone());
+    }
+    let total_elems = tensor
+        .shape
+        .iter()
+        .copied()
+        .map(|dim| dim.max(1))
+        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
+    if total_elems == 0 || tensor.data.is_empty() {
+        return Tensor::new(vec![f64::NAN], vec![1, 1]).map_err(|e| format!("mean: {e}"));
+    }
+    let mut sum = 0.0f64;
+    let mut count = 0usize;
+    let mut saw_nan = false;
+    match nan_mode {
+        ReductionNaN::Include => {
+            for &value in &tensor.data {
+                if value.is_nan() {
+                    saw_nan = true;
+                    break;
                 }
-                Ok(current)
+                sum += value;
             }
+            let result = if saw_nan {
+                f64::NAN
+            } else {
+                sum / (total_elems as f64)
+            };
+            Tensor::new(vec![result], vec![1, 1]).map_err(|e| format!("mean: {e}"))
+        }
+        ReductionNaN::Omit => {
+            for &value in &tensor.data {
+                if value.is_nan() {
+                    continue;
+                }
+                sum += value;
+                count += 1;
+            }
+            let result = if count == 0 {
+                f64::NAN
+            } else {
+                sum / (count as f64)
+            };
+            Tensor::new(vec![result], vec![1, 1]).map_err(|e| format!("mean: {e}"))
         }
     }
 }
@@ -1493,6 +1533,29 @@ mod tests {
         match result {
             Value::Num(v) => assert!((v - 3.0).abs() < 1e-12),
             other => panic!("expected numeric result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mean_all_matches_sequential_for_nd_tensor() {
+        let data: Vec<f64> = (1..=24).map(|v| v as f64).collect();
+        let tensor = Tensor::new(data, vec![2, 3, 4]).expect("tensor");
+        let fused =
+            mean_builtin(Value::Tensor(tensor.clone()), vec![Value::from("all")]).expect("mean");
+        let sequential = mean_builtin(
+            mean_builtin(Value::Tensor(tensor.clone()), vec![Value::Num(1.0)]).expect("mean"),
+            vec![Value::Num(2.0)],
+        )
+        .and_then(|v| mean_builtin(v, vec![Value::Num(3.0)]))
+        .expect("mean");
+        assert_eq!(fused, sequential);
+        if let Value::Num(v) = fused {
+            assert!((v - 12.5).abs() < 1e-12);
+        } else if let Value::Tensor(t) = fused {
+            assert_eq!(t.data.len(), 1);
+            assert!((t.data[0] - 12.5).abs() < 1e-12);
+        } else {
+            panic!("unexpected result {fused:?}");
         }
     }
 
