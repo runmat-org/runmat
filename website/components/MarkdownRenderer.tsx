@@ -217,12 +217,21 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
   function sanitizeMarkdown(input: string): string {
     const lines = input.split(/\r?\n/);
     let inFence = false;
+    let fenceLanguage = '';
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (/^\s*```/.test(line)) {
         inFence = !inFence;
+        // Extract language from fence (e.g., ```mermaid or ```matlab)
+        if (inFence) {
+          const match = line.match(/^```(\w+)/);
+          fenceLanguage = match ? match[1] : '';
+        } else {
+          fenceLanguage = '';
+        }
         continue;
       }
+      // Skip processing inside code fences (including mermaid)
       if (inFence) continue;
       // Process only parts of the line that are not inside inline code (backticks)
       const segments = line.split(/(`[^`]*`)/g);

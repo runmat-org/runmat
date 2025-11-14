@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import mermaid from 'mermaid';
 import { useTheme } from 'next-themes';
 
 interface MermaidDiagramProps {
@@ -14,11 +13,30 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
   const { theme } = useTheme();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  // Ensure we're on the client side
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
+    if (!mounted) return;
+
     const renderChart = async () => {
       // Early return if ref is not available
       if (!ref.current) return;
+
+      // Dynamically import mermaid only on client side
+      let mermaid;
+      try {
+        mermaid = (await import('mermaid')).default;
+      } catch (err) {
+        console.error('Failed to load mermaid:', err);
+        setError('Failed to load Mermaid library');
+        setIsLoading(false);
+        return;
+      }
 
       setIsLoading(true);
       setError(null);
@@ -77,7 +95,18 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
     const timeoutId = setTimeout(renderChart, 100);
     
     return () => clearTimeout(timeoutId);
-  }, [chart, theme]);
+  }, [chart, theme, mounted]);
+
+  // Don't render anything during SSR
+  if (!mounted) {
+    return (
+      <div className={`w-full ${className ?? ''}`}>
+        <div className="flex items-center justify-center p-8">
+          <div className="animate-pulse text-gray-500 dark:text-gray-400">Loading diagram...</div>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
