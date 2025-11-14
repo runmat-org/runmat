@@ -25,7 +25,18 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
 
     const renderChart = async () => {
       // Early return if ref is not available
-      if (!ref.current) return;
+      if (!ref.current) {
+        console.warn('MermaidDiagram: ref.current is not available');
+        return;
+      }
+
+      // Check if chart content is valid
+      if (!chart || chart.trim().length === 0) {
+        console.warn('MermaidDiagram: chart content is empty');
+        setError('Mermaid chart content is empty');
+        setIsLoading(false);
+        return;
+      }
 
       // Dynamically import mermaid only on client side
       let mermaid;

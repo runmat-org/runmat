@@ -140,6 +140,24 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       <td className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-muted-foreground" {...props}>{children}</td>
     ),
     pre: ({ children, ...props }: { children?: React.ReactNode }) => {
+      // Check if this contains a mermaid code block
+      const hasMermaid = React.Children.toArray(children).some(child => {
+        if (React.isValidElement(child)) {
+          const childType = typeof child.type === 'string' ? child.type : null;
+          if (childType === 'code') {
+            const childProps = child.props as { className?: string };
+            return childProps?.className?.includes('language-mermaid') || 
+                   childProps?.className?.includes('mermaid');
+          }
+        }
+        return false;
+      });
+
+      // If it's mermaid, don't wrap in pre - let the code component handle it
+      if (hasMermaid) {
+        return <>{children}</>;
+      }
+
       // Check if this is a code block (has code child with hljs or language- class, or any code child)
       const hasCodeBlock = React.Children.toArray(children).some(child => {
         if (React.isValidElement(child)) {
@@ -164,11 +182,24 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       return <pre className="overflow-x-auto max-w-full break-words" {...props}>{children}</pre>;
     },
     code: ({ children, className, ...props }: { children?: React.ReactNode; className?: string }) => {
-      // Render Mermaid even if the renderer bypassed <pre> wrapper
-      if (className && /language-mermaid/.test(className)) {
+      // Render Mermaid - check for language-mermaid or mermaid class
+      // Also handle cases where rehype-highlight might have added hljs classes
+      if (className && (/language-mermaid/.test(className) || className.includes('mermaid'))) {
+        // Extract the actual mermaid content - children might be wrapped in additional elements
+        const toPlain = (node: React.ReactNode): string => {
+          if (node == null) return '';
+          if (typeof node === 'string' || typeof node === 'number') return String(node);
+          if (Array.isArray(node)) return node.map(toPlain).join('');
+          if (React.isValidElement(node)) {
+            return toPlain(node.props?.children);
+          }
+          return '';
+        };
+        const mermaidContent = toPlain(children);
+        
         return (
           <div className="my-8 w-full">
-            <MermaidDiagram chart={String(children ?? '')} />
+            <MermaidDiagram chart={mermaidContent.trim()} />
           </div>
         );
       }
@@ -260,7 +291,12 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       options={{
         mdxOptions: {
           remarkPlugins: [remarkGfm],
-          rehypePlugins: [[rehypeHighlight, { ignoreMissing: true }]],
+          rehypePlugins: [[rehypeHighlight, { 
+            ignoreMissing: true,
+            // Don't highlight mermaid code blocks
+            detect: true,
+            subset: ['javascript', 'typescript', 'python', 'matlab', 'bash', 'shell', 'json', 'yaml', 'markdown'],
+          }]],
           development: process.env.NODE_ENV !== 'production',
         },
       }}
