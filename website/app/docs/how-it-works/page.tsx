@@ -130,7 +130,7 @@ export default function HowItWorksPage() {
             </li>
             <li className="flex items-start">
               <span className="text-green-600 mr-3 mt-1">•</span>
-              <span>Often beats hand-tuned PyTorch—see our <a href="/benchmarks" className="text-blue-600 hover:underline">benchmarks</a></span>
+              <span>Often beats hand-tuned PyTorch—see our <Link href="/benchmarks" className="text-blue-600 hover:underline">benchmarks</Link></span>
             </li>
           </ul>
           <p className="text-lg leading-relaxed font-medium">
