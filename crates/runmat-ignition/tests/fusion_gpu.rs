@@ -59,6 +59,62 @@ impl TestProvider {
 }
 
 impl AccelProvider for TestProvider {
+    fn gather_linear(
+        &self,
+        source: &GpuTensorHandle,
+        indices: &[u32],
+        output_shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let (data, _) = self.pull(source)?;
+        let mut out = Vec::with_capacity(indices.len());
+        for (pos, &idx) in indices.iter().enumerate() {
+            let lin = idx as usize;
+            if lin >= data.len() {
+                return Err(anyhow!(
+                    "gather_linear: index {} (pos {}) out of bounds for buffer {}",
+                    lin,
+                    pos,
+                    source.buffer_id
+                ));
+            }
+            out.push(data[lin]);
+        }
+        Ok(self.push(out, output_shape.to_vec()))
+    }
+
+    fn scatter_linear(
+        &self,
+        target: &GpuTensorHandle,
+        indices: &[u32],
+        values: &GpuTensorHandle,
+    ) -> anyhow::Result<()> {
+        let (vals, _) = self.pull(values)?;
+        if vals.len() != indices.len() {
+            return Err(anyhow!(
+                "scatter_linear: values length {} mismatch indices {}",
+                vals.len(),
+                indices.len()
+            ));
+        }
+        let mut guard = self.buffers.lock().unwrap();
+        let target_buf = guard
+            .get_mut(&target.buffer_id)
+            .ok_or_else(|| anyhow!("scatter_linear: unknown target {}", target.buffer_id))?;
+        for (pos, &idx) in indices.iter().enumerate() {
+            let lin = idx as usize;
+            if lin >= target_buf.0.len() {
+                return Err(anyhow!(
+                    "scatter_linear: index {} (pos {}) out of bounds for buffer {}",
+                    lin,
+                    pos,
+                    target.buffer_id
+                ));
+            }
+            target_buf.0[lin] = vals[pos];
+        }
+        Ok(())
+    }
+
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }

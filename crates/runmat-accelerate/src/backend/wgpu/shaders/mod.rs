@@ -12,6 +12,7 @@ pub mod flip;
 pub mod image_normalize;
 pub mod imfilter;
 pub mod ind2sub;
+pub mod index_select;
 pub mod kron;
 pub mod matmul;
 pub mod matmul_smallk;

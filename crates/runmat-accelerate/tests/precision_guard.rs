@@ -7,6 +7,24 @@ use runmat_builtins::NumericDType;
 struct F32TestProvider;
 
 impl AccelProvider for F32TestProvider {
+    fn gather_linear(
+        &self,
+        _: &GpuTensorHandle,
+        _: &[u32],
+        _: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        unreachable!("gather_linear should not be invoked in this test")
+    }
+
+    fn scatter_linear(
+        &self,
+        _: &GpuTensorHandle,
+        _: &[u32],
+        _: &GpuTensorHandle,
+    ) -> anyhow::Result<()> {
+        unreachable!("scatter_linear should not be invoked in this test")
+    }
+
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         unreachable!("upload should not be invoked in this test")
     }

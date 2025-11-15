@@ -131,6 +131,14 @@ const STOCHASTIC_EVOLUTION_SHADER_F64: &str =
     crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F64;
 const STOCHASTIC_EVOLUTION_SHADER_F32: &str =
     crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F32;
+const LINEAR_GATHER_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_GATHER_SHADER_F64;
+const LINEAR_GATHER_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_GATHER_SHADER_F32;
+const LINEAR_SCATTER_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_SCATTER_SHADER_F64;
+const LINEAR_SCATTER_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_SCATTER_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -184,6 +192,8 @@ pub struct WgpuPipelines {
     pub polyint: PipelineBundle,
     pub diag_from_vector: PipelineBundle,
     pub diag_extract: PipelineBundle,
+    pub gather_linear: PipelineBundle,
+    pub scatter_linear: PipelineBundle,
     pub find: PipelineBundle,
     pub bandwidth: PipelineBundle,
     pub symmetry: PipelineBundle,
@@ -919,6 +929,40 @@ impl WgpuPipelines {
             },
         );
 
+        let gather_linear = create_pipeline(
+            device,
+            "runmat-gather-linear-layout",
+            "runmat-gather-linear-shader",
+            "runmat-gather-linear-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => LINEAR_GATHER_SHADER_F64,
+                NumericPrecision::F32 => LINEAR_GATHER_SHADER_F32,
+            },
+        );
+
+        let scatter_linear = create_pipeline(
+            device,
+            "runmat-scatter-linear-layout",
+            "runmat-scatter-linear-shader",
+            "runmat-scatter-linear-pipeline",
+            vec![
+                storage_read_write_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => LINEAR_SCATTER_SHADER_F64,
+                NumericPrecision::F32 => LINEAR_SCATTER_SHADER_F32,
+            },
+        );
+
         let find = create_pipeline(
             device,
             "runmat-find-layout",
@@ -1051,6 +1095,8 @@ impl WgpuPipelines {
             polyint,
             diag_from_vector,
             diag_extract,
+            gather_linear,
+            scatter_linear,
             find,
             bandwidth,
             symmetry,

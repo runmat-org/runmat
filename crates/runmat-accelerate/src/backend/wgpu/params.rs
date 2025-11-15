@@ -11,6 +11,20 @@ pub struct LenOpParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct LinearGatherParams {
+    pub count: u32,
+    pub _pad: [u32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct LinearScatterParams {
+    pub count: u32,
+    pub _pad: [u32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ScalarParamsF64 {
     pub len: u32,
     pub op: u32,

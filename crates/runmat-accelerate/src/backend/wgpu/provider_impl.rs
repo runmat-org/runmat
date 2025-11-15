@@ -60,9 +60,10 @@ use crate::backend::wgpu::cache::{
 use crate::backend::wgpu::config::{DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD};
 use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
-    DiffParams, FilterParams, ImageNormalizeUniforms, QrPowerIterParams, SymmetryParamsF32,
-    SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN,
-    IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
+    DiffParams, FilterParams, ImageNormalizeUniforms, LinearGatherParams, LinearScatterParams,
+    QrPowerIterParams, SymmetryParamsF32, SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS,
+    IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE,
+    SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
@@ -10033,6 +10034,169 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, vec![diag_len, 1], diag_len))
     }
+
+    pub(crate) fn gather_linear_exec(
+        &self,
+        source: &GpuTensorHandle,
+        indices: &[u32],
+        output_shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(source)?;
+        let expected = product_checked(output_shape)
+            .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
+        ensure!(
+            expected == indices.len(),
+            "gather_linear: index count {} does not match output size {}",
+            indices.len(),
+            expected
+        );
+        if expected == 0 {
+            let out = self.create_storage_buffer(0, "runmat-gather-linear-empty");
+            return Ok(self.register_existing_buffer(out, output_shape.to_vec(), 0));
+        }
+        ensure!(
+            indices.len() <= u32::MAX as usize,
+            "gather_linear: index count exceeds GPU limits"
+        );
+        let indices_len_bytes = (indices.len() * std::mem::size_of::<u32>()) as u64;
+        let indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-gather-linear-indices"),
+            size: indices_len_bytes.max(4),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        if !indices.is_empty() {
+            self.queue
+                .write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
+        }
+
+        let out_buffer =
+            self.create_storage_buffer_checked(expected, "runmat-gather-linear-out")?;
+        let params = crate::backend::wgpu::params::LinearGatherParams {
+            count: indices.len() as u32,
+            _pad: [0; 3],
+        };
+        let params_buffer = self.uniform_buffer(&params, "runmat-gather-linear-params");
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-gather-linear-bind"),
+                layout: &self.pipelines.gather_linear.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: indices_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            indices.len() as u32,
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+        );
+        crate::backend::wgpu::dispatch::creation::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.gather_linear.pipeline,
+            &bind_group,
+            workgroups,
+            "runmat-gather-linear-encoder",
+            "runmat-gather-linear-pass",
+        );
+
+        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), expected))
+    }
+
+    pub(crate) fn scatter_linear_exec(
+        &self,
+        target: &GpuTensorHandle,
+        indices: &[u32],
+        values: &GpuTensorHandle,
+    ) -> Result<()> {
+        if indices.is_empty() {
+            return Ok(());
+        }
+        ensure!(
+            indices.len() <= u32::MAX as usize,
+            "scatter_linear: index count exceeds GPU limits"
+        );
+        let target_entry = self.get_entry(target)?;
+        let values_entry = self.get_entry(values)?;
+        ensure!(
+            values_entry.len == indices.len(),
+            "scatter_linear: values length {} does not match indices length {}",
+            values_entry.len,
+            indices.len()
+        );
+        ensure!(
+            indices.iter().all(|&idx| (idx as usize) < target_entry.len),
+            "scatter_linear: index out of bounds for target tensor"
+        );
+        let indices_len_bytes = (indices.len() * std::mem::size_of::<u32>()) as u64;
+        let indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-scatter-linear-indices"),
+            size: indices_len_bytes.max(4),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        self.queue
+            .write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
+        let params = crate::backend::wgpu::params::LinearScatterParams {
+            count: indices.len() as u32,
+            _pad: [0; 3],
+        };
+        let params_buffer = self.uniform_buffer(&params, "runmat-scatter-linear-params");
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-scatter-linear-bind"),
+                layout: &self.pipelines.scatter_linear.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: target_entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: values_entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: indices_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            indices.len() as u32,
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+        );
+        crate::backend::wgpu::dispatch::creation::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.scatter_linear.pipeline,
+            &bind_group,
+            workgroups,
+            "runmat-scatter-linear-encoder",
+            "runmat-scatter-linear-pass",
+        );
+        Ok(())
+    }
+
     pub(crate) fn binary_op_exec(
         &self,
         op: crate::backend::wgpu::types::BinaryOpCode,
@@ -12111,6 +12275,24 @@ impl WgpuProvider {
     }
 }
 impl AccelProvider for WgpuProvider {
+    fn gather_linear(
+        &self,
+        source: &GpuTensorHandle,
+        indices: &[u32],
+        output_shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        self.gather_linear_exec(source, indices, output_shape)
+    }
+
+    fn scatter_linear(
+        &self,
+        target: &GpuTensorHandle,
+        indices: &[u32],
+        values: &GpuTensorHandle,
+    ) -> Result<()> {
+        self.scatter_linear_exec(target, indices, values)
+    }
+
     fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         self.zeros_exec(shape)
     }

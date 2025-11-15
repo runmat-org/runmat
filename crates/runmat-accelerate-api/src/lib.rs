@@ -792,6 +792,29 @@ pub trait AccelProvider: Send + Sync {
     fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
     fn device_info(&self) -> String;
 
+    /// Gather elements from `source` at the provided zero-based linear `indices`, materialising
+    /// a dense tensor with the specified `output_shape`.
+    fn gather_linear(
+        &self,
+        _source: &GpuTensorHandle,
+        _indices: &[u32],
+        _output_shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("gather_linear not supported by provider"))
+    }
+
+    /// Scatter the contents of `values` into `target` at the provided zero-based linear `indices`.
+    ///
+    /// The provider must ensure `values.len() == indices.len()` and update `target` in place.
+    fn scatter_linear(
+        &self,
+        _target: &GpuTensorHandle,
+        _indices: &[u32],
+        _values: &GpuTensorHandle,
+    ) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("scatter_linear not supported by provider"))
+    }
+
     /// Structured device information (optional to override). Default adapts from `device_info()`.
     fn device_info_struct(&self) -> ApiDeviceInfo {
         ApiDeviceInfo {

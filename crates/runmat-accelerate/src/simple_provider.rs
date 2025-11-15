@@ -1209,6 +1209,71 @@ fn is_vector_like(rows: usize, cols: usize, dims: usize) -> bool {
 }
 
 impl AccelProvider for InProcessProvider {
+    fn gather_linear(
+        &self,
+        source: &GpuTensorHandle,
+        indices: &[u32],
+        output_shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+            guard
+                .get(&source.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("gather_linear: unknown buffer {}", source.buffer_id))?
+        };
+        let mut out = Vec::with_capacity(indices.len());
+        for (pos, &idx) in indices.iter().enumerate() {
+            let lin = idx as usize;
+            ensure!(
+                lin < data.len(),
+                "gather_linear: index {} (position {}) out of bounds for buffer {} (len={})",
+                lin,
+                pos,
+                source.buffer_id,
+                data.len()
+            );
+            out.push(data[lin]);
+        }
+        Ok(self.allocate_tensor(out, output_shape.to_vec()))
+    }
+
+    fn scatter_linear(
+        &self,
+        target: &GpuTensorHandle,
+        indices: &[u32],
+        values: &GpuTensorHandle,
+    ) -> Result<()> {
+        let values_data = {
+            let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+            guard.get(&values.buffer_id).cloned().ok_or_else(|| {
+                anyhow!("scatter_linear: unknown values buffer {}", values.buffer_id)
+            })?
+        };
+        ensure!(
+            values_data.len() == indices.len(),
+            "scatter_linear: values length {} does not match indices length {}",
+            values_data.len(),
+            indices.len()
+        );
+        let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+        let target_buf = guard
+            .get_mut(&target.buffer_id)
+            .ok_or_else(|| anyhow!("scatter_linear: unknown target buffer {}", target.buffer_id))?;
+        for (pos, &idx) in indices.iter().enumerate() {
+            let lin = idx as usize;
+            ensure!(
+                lin < target_buf.len(),
+                "scatter_linear: index {} (position {}) out of bounds for target len {}",
+                lin,
+                pos,
+                target_buf.len()
+            );
+            target_buf[lin] = values_data[pos];
+        }
+        Ok(())
+    }
+
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }
