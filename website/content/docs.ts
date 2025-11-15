@@ -7,6 +7,7 @@ export type DocsNode = {
   slug?: string[]; // URL path segments under /docs
   file?: string; // absolute-ish repo path to markdown to render
   externalHref?: string; // for non-markdown custom pages
+  hideChildrenInNav?: boolean; // keep children from rendering in sidebar
   seo?: {
     description?: string;
     keywords?: string[];
@@ -91,8 +92,22 @@ export const docsTree: DocsNode[] = [
     title: "Accelerate (GPU)",
     children: [
       { title: "How Accelerate Works", slug: ["accelerate", "how-it-works"], file: "docs/HOW_RUNMAT_ACCELERATE_WORKS.md", seo: { description: "How RunMat Accelerate works: GPU acceleration architecture, planner, and execution.", keywords: ["GPU", "accelerate", "how it works", "planner", "execution"] } },
-      { title: "How GPU Data Residency Works", slug: ["accelerate", "gpu-residency"], file: "docs/INTRODUCTION_TO_RUNMAT_GPU.md", seo: { description: "How RunMat manages GPU data residency: keeping arrays on device, minimizing transfers.", keywords: ["GPU", "residency", "data residency", "device memory"] } },
+      {
+        title: "Fusion Guide",
+        externalHref: "/docs/fusion-guide",
+        hideChildrenInNav: true,
+        children: [
+          { title: "Elementwise Chains", slug: ["fusion", "elementwise"], file: "docs/fusion/elementwise.md" },
+          { title: "Reductions", slug: ["fusion", "reduction"], file: "docs/fusion/reduction.md" },
+          { title: "Matmul Epilogues", slug: ["fusion", "matmul-epilogue"], file: "docs/fusion/matmul_epilogue.md" },
+          { title: "Centered Gram / Covariance", slug: ["fusion", "centered-gram"], file: "docs/fusion/centered_gram.md" },
+          { title: "Power-Step Normalisation", slug: ["fusion", "power-step-normalize"], file: "docs/fusion/power_step_normalize.md" },
+          { title: "Explained Variance", slug: ["fusion", "explained-variance"], file: "docs/fusion/explained_variance.md" },
+          { title: "Image Normalisation", slug: ["fusion", "image-normalize"], file: "docs/fusion/image_normalize.md" },
+        ],
+      },
       { title: "How Fusion Works", slug: ["accelerate", "fusion"], file: "docs/HOW_RUNMAT_FUSION_WORKS.md", seo: { description: "Deep dive into RunMat fusion: detecting fusible sub-graphs, generating GPU kernels, and execution.", keywords: ["fusion", "GPU kernels", "elementwise", "reduction", "WGSL"] } },
+      { title: "How GPU Data Residency Works", slug: ["accelerate", "gpu-residency"], file: "docs/INTRODUCTION_TO_RUNMAT_GPU.md", seo: { description: "How RunMat manages GPU data residency: keeping arrays on device, minimizing transfers.", keywords: ["GPU", "residency", "data residency", "device memory"] } },
       { title: "Accelerate Design", slug: ["accelerate", "overview"], file: "crates/runmat-accelerate/README.md", seo: { description: "RunMat GPU acceleration architecture: gpuArray/gather, planner, and backend design.", keywords: ["GPU", "accelerate", "gpuArray", "gather", "wgpu", "CUDA", "ROCm"] } },
       { title: "Accelerate API", slug: ["accelerate", "api"], file: "crates/runmat-accelerate-api/README.md", seo: { description: "Provider API between RunMat runtime and GPU backends (upload, download, free, device info).", keywords: ["GPU API", "provider", "acceleration"] } },
     ],

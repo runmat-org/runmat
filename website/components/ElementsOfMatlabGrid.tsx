@@ -409,12 +409,6 @@ function ElementTile({ builtin }: { builtin: Builtin }) {
                 {badge}
               </Badge>
             ))}
-            <Badge
-              variant="secondary"
-              className="text-xs px-1.5 py-0.5 h-4 font-medium bg-white/20 text-white border-white/30"
-            >
-              Fusion Y/N
-            </Badge>
           </div>
         </Card>
       </Link>
@@ -719,12 +713,6 @@ function ListTile({ builtin }: { builtin: Builtin }) {
               {badge}
             </Badge>
           ))}
-          <Badge
-            variant="secondary"
-            className="px-3 py-1 font-semibold"
-          >
-            Fusion Y/N
-          </Badge>
         </div>
       </div>
     </Link>
@@ -765,12 +753,6 @@ function ViewAllTile({
 
         {/* Feature badges - always show for consistent height */}
         <div className="flex items-center gap-1.5 flex-wrap mt-auto pt-1.5 border-t border-white/20 min-h-[20px]">
-          <Badge
-            variant="secondary"
-            className="text-xs px-1.5 py-0.5 h-4 font-medium bg-white/20 text-white border-white/30"
-          >
-            Fusion Y/N
-          </Badge>
         </div>
       </Card>
     </button>
@@ -807,12 +789,6 @@ function CollapseTile({
 
         {/* Feature badges - always show for consistent height */}
         <div className="flex items-center gap-1.5 flex-wrap mt-auto pt-1.5 border-t border-white/20 min-h-[20px]">
-          <Badge
-            variant="secondary"
-            className="text-xs px-1.5 py-0.5 h-4 font-medium bg-white/20 text-white border-white/30"
-          >
-            Fusion Y/N
-          </Badge>
         </div>
       </Card>
     </button>

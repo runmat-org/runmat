@@ -107,8 +107,25 @@ function Sidebar() {
 }
 
 function Section({ node }: { node: DocsNode }) {
-  const pathname = usePathname();
+  const pathnameRaw = usePathname() || "/";
+  const pathname = normalizePath(pathnameRaw);
   const title = <div className="text-sm font-semibold text-foreground/90 mb-2">{node.title}</div>;
+  const showChildren =
+    node.children &&
+    (!node.hideChildrenInNav || (pathname ? nodeMatchesPath(node, pathname) : false));
+
+  const renderLink = (href: string | undefined, label: string) =>
+    href ? (
+      <Link
+        href={href}
+        className={`text-sm hover:text-foreground ${pathname === normalizePath(href) ? "text-foreground font-medium" : "text-muted-foreground"}`}
+      >
+        {label}
+      </Link>
+    ) : (
+      <span className="text-sm text-muted-foreground">{label}</span>
+    );
+
   // Section header only if it has children or a direct link
   return (
     <div>
@@ -116,38 +133,22 @@ function Section({ node }: { node: DocsNode }) {
       {node.externalHref && (
         <ul className="space-y-1 pl-3 border-l border-border/50">
           <li>
-            <Link href={node.externalHref} className={`text-sm hover:text-foreground ${pathname === node.externalHref ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+            <Link href={node.externalHref} className={`text-sm hover:text-foreground ${pathname === normalizePath(node.externalHref) ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
               {node.title}
             </Link>
           </li>
         </ul>
       )}
-      {node.children && (
+      {showChildren && (
         <ul className="space-y-1 pl-3 border-l border-border/50">
           {node.children.map((c, i) => (
             <li key={i}>
-              {c.externalHref ? (
-                <Link href={c.externalHref} className={`text-sm hover:text-foreground ${pathname === c.externalHref ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{c.title}</Link>
-              ) : c.slug ? (
-                <Link href={["/docs", ...c.slug].join("/")} className={`text-sm hover:text-foreground ${pathname === ["/docs", ...c.slug].join("/") ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{c.title}</Link>
-              ) : (
-                <span className="text-sm text-muted-foreground">{c.title}</span>
-              )}
-              {c.children && (
+              {renderLink(c.slug ? ["/docs", ...c.slug].join("/") : c.externalHref, c.title)}
+              {c.children && !c.hideChildrenInNav && (
                 <ul className="pl-3 mt-1 space-y-1 border-l border-border/50">
                   {c.children.map((g, j) => (
                     <li key={j}>
-                      {g.externalHref ? (
-                        <Link href={g.externalHref} className={`text-sm hover:text-foreground ${pathname === g.externalHref ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                          {g.title}
-                        </Link>
-                      ) : g.slug ? (
-                        <Link href={["/docs", ...g.slug].join("/")} className={`text-sm hover:text-foreground ${pathname === ["/docs", ...g.slug].join("/") ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                          {g.title}
-                        </Link>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">{g.title}</span>
-                      )}
+                      {renderLink(g.slug ? ["/docs", ...g.slug].join("/") : g.externalHref, g.title)}
                     </li>
                   ))}
                 </ul>
@@ -158,6 +159,36 @@ function Section({ node }: { node: DocsNode }) {
       )}
     </div>
   );
+}
+
+function nodeMatchesPath(node: DocsNode, pathname: string): boolean {
+  // Normalize pathname for consistent comparison
+  const normalizedPathname = normalizePath(pathname);
+  
+  // Check if current path matches this node's slug or external href
+  const slugPath = node.slug ? normalizePath(["/docs", ...node.slug].join("/")) : undefined;
+  if (slugPath && (normalizedPathname === slugPath || normalizedPathname.startsWith(`${slugPath}/`))) return true;
+  
+  if (node.externalHref) {
+    const external = normalizePath(node.externalHref);
+    if (normalizedPathname === external || normalizedPathname.startsWith(`${external}/`)) return true;
+    
+    // Special case for fusion guide: also match child paths
+    if (external === "/docs/fusion-guide") {
+      if (normalizedPathname === "/docs/fusion-guide" || normalizedPathname.startsWith("/docs/fusion/")) {
+        return true;
+      }
+    }
+  }
+  
+  // Recursively check children
+  return (node.children || []).some((child) => nodeMatchesPath(child, normalizedPathname));
+}
+
+function normalizePath(path: string): string {
+  if (!path) return "/";
+  const normalized = path.replace(/\/+$/, "") || "/";
+  return normalized;
 }
 
 

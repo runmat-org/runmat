@@ -35,7 +35,7 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   }
   if (!source) return notFound();
   const toc = extractHeadings(source);
-  const metadata = getBuiltinMetadata(b, source);
+  const metadata = getBuiltinMetadata(b);
   return (
     <>
       <div className="container mx-auto px-4 md:px-6 pt-8">

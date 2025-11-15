@@ -45,7 +45,7 @@ What we deliberately do not put in the core:
 MATLAB is a language, a large proprietary standard library, an IDE, and an ecosystem of toolboxes. We treat each separately.
 
 - The language is a syntax and semantics for arrays, functions, control flow, and errors. That we support in the core.
-- The library (built-ins) is open-ended. RunMat ships a slim standard library and lets packages provide the rest. Documentation is generated from the runtime (not a hand-maintained spreadsheet of parity; parity is not a product goal).
+- The library (built-ins) is open-ended. RunMat ships a standard library and lets packages provide the rest. Documentation is generated from the runtime (not a hand-maintained spreadsheet of parity; parity is not a product goal).
 - RunMat is not an IDE. It is a runtime that can be used with any IDE (such as Cursor, VSCode, or IntelliJ).
 
 This separation keeps the core maintainable and lets the community move fast without destabilizing the runtime.
@@ -108,10 +108,6 @@ Both package kinds show up identically to users: functions appear in the namespa
 - A smaller trusted compute base (TCB), easier auditing, faster iteration.
 - A runtime that can target new back-ends (SIMD profiles, GPUs, accelerators) without breaking package authors.
 
-## Roadmap (high-level)
-
-- v0.x: polish core semantics, stabilize Value/Type/ABI, publish initial package examples, ship the registry and `.runmat` flow, keep JIT/GC focused and fast, finish plotting library. 
-- v1.0: locked waist (stable ABI), registry GA, hardened GC and profiling, documented performance guide, full reference generated from runtime metadata.
 
 ## Appendix: Frequently asked questions
 

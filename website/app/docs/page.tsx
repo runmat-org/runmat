@@ -109,7 +109,7 @@ export default function DocsPage() {
           </Link>
 
           {/* Built-in Functions */}
-          <Link href="/docs/reference/builtins" className="block">
+          <Link href="/docs/matlab-function-reference" className="block">
             <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
@@ -148,21 +148,21 @@ export default function DocsPage() {
             </Card>
           </Link>
 
-          {/* Language Coverage (from repo docs) */}
-          <Link href="/docs/language-coverage" className="block">
+          {/* Fusion Guide */}
+          <Link href="/docs/fusion-guide" className="block">
             <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
-                  <BookOpen className="h-6 w-6 text-primary" />
-                  <CardTitle>Language Coverage</CardTitle>
+                  <Zap className="h-6 w-6 text-primary" />
+                  <CardTitle>Fusion Guide</CardTitle>
                 </div>
                 <CardDescription>
-                  Track MATLAB syntax and feature support in RunMat
+                  Understand RunMat fusion groups, how workloads stay on the GPU, and where to dive deeper into each fusion topic.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-sm text-muted-foreground">
-                  View Coverage →
+                <div className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                  Read Guide →
                 </div>
               </CardContent>
             </Card>

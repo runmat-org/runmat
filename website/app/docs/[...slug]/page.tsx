@@ -84,13 +84,17 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
             .map((c, i) => (
               <span key={i}>
                 {i > 0 && <span className="mx-1">/</span>}
-                {c.slug ? (
-                  <a href={["/docs", ...(c.slug || [])].join("/")} className="hover:text-foreground">
-                    {c.title}
-                  </a>
-                ) : (
-                  <span>{c.title}</span>
-                )}
+                {(() => {
+                  const href = c.slug ? ["/docs", ...(c.slug || [])].join("/") : c.externalHref;
+                  if (href) {
+                    return (
+                      <a href={href} className="hover:text-foreground">
+                        {c.title}
+                      </a>
+                    );
+                  }
+                  return <span>{c.title}</span>;
+                })()}
               </span>
             ))}
         </nav>

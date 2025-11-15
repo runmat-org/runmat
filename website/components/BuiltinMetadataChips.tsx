@@ -1,12 +1,13 @@
 import { Badge } from '@/components/ui/badge';
 import { BuiltinMetadata } from '@/lib/builtins';
-import { Layers, Zap, Flame } from 'lucide-react';
+import { Layers, Zap } from 'lucide-react';
 
 interface BuiltinMetadataChipsProps {
   metadata: BuiltinMetadata;
 }
 
 export function BuiltinMetadataChips({ metadata }: BuiltinMetadataChipsProps) {
+  const otherBadges = metadata.badges.filter((badge) => badge !== 'GPU');
   return (
     <div className="flex flex-wrap items-center gap-3 mb-6">
       <Badge variant="outline" className="px-3 py-1.5 h-auto border-border/50 bg-muted/30">
@@ -29,14 +30,16 @@ export function BuiltinMetadataChips({ metadata }: BuiltinMetadataChipsProps) {
           </div>
         </Badge>
       )}
-      
-      <Badge variant="outline" className="px-3 py-1.5 h-auto border-border/50 bg-muted/30">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Fusion</span>
-          <Flame className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="font-medium text-foreground">{metadata.fusion}</span>
-        </div>
-      </Badge>
+
+      {otherBadges.map((badge) => (
+        <Badge
+          key={badge}
+          variant="outline"
+          className="px-3 py-1.5 h-auto border-border/50 bg-muted/30 font-medium"
+        >
+          {badge}
+        </Badge>
+      ))}
     </div>
   );
 }

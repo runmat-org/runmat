@@ -130,11 +130,38 @@ export default function GettingStartedPage() {
               </CardContent>
             </Card>
 
+            {/* GPU Acceleration */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <span className="bg-orange-100 dark:bg-orange-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-orange-600 mr-3">4</span>
+                  Experience Automatic GPU Acceleration
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  RunMat keeps data on the GPU and fuses operations automatically—no device flags required.
+                </p>
+                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
+                  <div className="text-blue-400">runmat&gt;</div>{" "}
+                  <span>x = rand(1000, 1000);</span>
+                  <span className="text-gray-400">  % Million elements</span>
+                  <div className="text-blue-400 mt-2">runmat&gt;</div>{" "}
+                  <span>y = sin(x) .* exp(x);</span>
+                  <span className="text-gray-400">  % Fused on GPU automatically</span>
+                  <div className="text-blue-400 mt-2">runmat&gt;</div>{" "}
+                  <span>m = mean(y, 'all');</span>
+                  <span className="text-gray-400">  % Stays on GPU</span>
+                  <div className="text-gray-400 mt-3">[GPU] Fused 2 operations, 1M elements in 0.8ms</div>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Plotting */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <span className="bg-purple-100 dark:bg-purple-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-purple-600 mr-3">4</span>
+                  <span className="bg-purple-100 dark:bg-purple-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-purple-600 mr-3">5</span>
                   Create Your First Plot
                 </CardTitle>
               </CardHeader>
@@ -329,7 +356,7 @@ export default function GettingStartedPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  How RunMat turns ordinary MATLAB-syntax scripts into GPU-accelerated workloads
+                  How RunMat turns MATLAB scripts into GPU-accelerated workloads
                 </p>
                 <Button variant="outline" className="w-full" asChild>
                   <Link href="/docs/accelerate/gpu-residency" className="flex items-center justify-center">
