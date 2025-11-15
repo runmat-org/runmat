@@ -15,7 +15,7 @@ export default async function ElementsOfMatlabPage() {
       <div className="mb-8">
         <h1 className="text-3xl md:text-4xl font-bold mb-2">MATLAB Function Reference</h1>
         <p className="text-muted-foreground">
-        Discover MATLAB-compatible builtins implemented in RunMat. Search by name, category, or keywords.
+        Discover MATLAB-compatible builtins (functions) implemented in RunMat. Search by name, category, or keywords.
 
 
         </p>
