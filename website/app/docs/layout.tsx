@@ -139,7 +139,7 @@ function Section({ node }: { node: DocsNode }) {
           </li>
         </ul>
       )}
-      {showChildren && (
+      {showChildren && node.children && (
         <ul className="space-y-1 pl-3 border-l border-border/50">
           {node.children.map((c, i) => (
             <li key={i}>
