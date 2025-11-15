@@ -191,7 +191,8 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
           if (typeof node === 'string' || typeof node === 'number') return String(node);
           if (Array.isArray(node)) return node.map(toPlain).join('');
           if (React.isValidElement(node)) {
-            return toPlain(node.props?.children);
+            const props = node.props as { children?: React.ReactNode };
+            return toPlain(props?.children);
           }
           return '';
         };
