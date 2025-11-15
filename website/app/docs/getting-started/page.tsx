@@ -150,7 +150,7 @@ export default function GettingStartedPage() {
                   <span>y = sin(x) .* exp(x);</span>
                   <span className="text-gray-400">  % Fused on GPU automatically</span>
                   <div className="text-blue-400 mt-2">runmat&gt;</div>{" "}
-                  <span>m = mean(y, 'all');</span>
+                  <span>m = mean(y, &apos;all&apos;);</span>
                   <span className="text-gray-400">  % Stays on GPU</span>
                   <div className="text-gray-400 mt-3">[GPU] Fused 2 operations, 1M elements in 0.8ms</div>
                 </div>

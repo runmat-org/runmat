@@ -138,7 +138,7 @@ export default function FusionGuidePage() {
                 </li>
                 <li className="text-muted-foreground">
                   <strong>Covariance / Gram / power-step / explained-variance chains:</strong> Iterative factorizations spend
-                  most of their time in repeated "multiply, renormalize, measure" loops. Treating each stage as a fusion kind
+                  most of their time in repeated &quot;multiply, renormalize, measure&quot; loops. Treating each stage as a fusion kind
                   keeps eigensolvers and Krylov methods resident on the GPU.
                 </li>
                 <li className="text-muted-foreground">
@@ -166,7 +166,7 @@ export default function FusionGuidePage() {
                 </li>
                 <li className="text-muted-foreground">
                   <strong>Full end-to-end GPU paths:</strong> Close the remaining host fallbacks in the Accelerate roadmap so
-                  "GPU mode" truly means zero CPU detours for supported types.
+                  &quot;GPU mode&quot; truly means zero CPU detours for supported types.
                 </li>
                 <li className="text-muted-foreground">
                   <strong>JIT parity for CPU fallbacks:</strong> Finish the CraneLift tier for constructs that still spill to the
