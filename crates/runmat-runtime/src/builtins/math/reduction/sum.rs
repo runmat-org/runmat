@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
 use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -657,6 +657,7 @@ fn reduce_omitnan_2d(
             reduce_len,
             num_slices,
             256,
+            ReductionFlavor::Sum,
         )
         .ok()
 }

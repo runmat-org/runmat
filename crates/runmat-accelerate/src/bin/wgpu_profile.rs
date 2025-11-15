@@ -9,7 +9,9 @@ use log::info;
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate::provider_cache_stats;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView, ReductionFlavor,
+};
 use serde::Serialize;
 #[cfg(feature = "wgpu")]
 use wgpu::PowerPreference;
@@ -563,6 +565,7 @@ fn run_fused_wgsl_case(
             rows,
             cols,
             wg_size,
+            ReductionFlavor::Sum,
         )?;
         let compute_time = compute_start.elapsed();
         let (_out_matrix, download_time) = download_matrix(provider, &handle_matrix)?;
@@ -830,6 +833,7 @@ fn run_reduction_sweep_case(
             rows,
             cols,
             wg_size,
+            ReductionFlavor::Sum,
         )?;
         let compute_time = compute_start.elapsed();
         info!(

@@ -18,8 +18,9 @@ use runmat_accelerate_api::{
     ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision,
     ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult,
     ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
-    SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult, SortRowsColumnSpec,
-    UnionOptions, UnionResult, UniqueOptions, UniqueResult,
+    ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
+    SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult, UniqueOptions,
+    UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -67,6 +68,8 @@ use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::resources::{KernelResourceRegistry, UniformBufferKey};
 use crate::backend::wgpu::types::NumericPrecision;
+const QR_DEVICE_MAX_COLS: usize = 64;
+const QR_DEVICE_MAX_ELEMS: usize = 1_000_000;
 use crate::fusion::{active_fusion, active_group_plan_clone};
 use crate::host_lu::{lu_factor_host, LuHostFactors};
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
@@ -139,6 +142,7 @@ pub struct WgpuProvider {
     kernel_resources: KernelResourceRegistry,
     metrics: crate::backend::wgpu::metrics::WgpuMetrics,
     telemetry: AccelTelemetry,
+    reduction_two_pass_mode: ReductionTwoPassMode,
     reduction_two_pass_threshold: usize,
     reduction_workgroup_size_default: u32,
     pipeline_cache_dir: Option<std::path::PathBuf>,
@@ -162,6 +166,19 @@ struct MatrixOperandView {
     cols: usize,
     lda: u32,
     transpose: bool,
+}
+
+fn parse_two_pass_mode(raw: &str) -> Option<ReductionTwoPassMode> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "auto" => Some(ReductionTwoPassMode::Auto),
+        "force_on" | "on" | "true" | "1" => Some(ReductionTwoPassMode::ForceOn),
+        "force_off" | "off" | "false" | "0" => Some(ReductionTwoPassMode::ForceOff),
+        _ => None,
+    }
 }
 
 fn build_matrix_operand_view(
@@ -1620,6 +1637,20 @@ fn seed_from_state(state: u64) -> u32 {
     seed | 1
 }
 
+fn philox_keys_from_state(state: u64) -> (u32, u32) {
+    let lo = state as u32;
+    let hi = (state >> 32) as u32;
+    let mut key0 = lo ^ hi.rotate_left(7);
+    if key0 == 0 {
+        key0 = 0x9E37_79B9;
+    }
+    let mut key1 = hi ^ lo.rotate_right(3);
+    if key1 == 0 {
+        key1 = 0xBB67_AE85;
+    }
+    (key0, key1)
+}
+
 fn rng_state() -> &'static Mutex<u64> {
     static RNG: OnceCell<Mutex<u64>> = OnceCell::new();
     RNG.get_or_init(|| Mutex::new(RNG_DEFAULT_SEED))
@@ -1971,6 +2002,19 @@ impl WgpuProvider {
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(DEFAULT_REDUCTION_WG);
+        let reduction_two_pass_mode = match std::env::var("RUNMAT_REDUCTION_TWO_PASS") {
+            Ok(raw) if !raw.trim().is_empty() => match parse_two_pass_mode(&raw) {
+                Some(mode) => mode,
+                None => {
+                    warn!(
+                        "RUNMAT_REDUCTION_TWO_PASS='{}' not recognized (expected auto|force_on|force_off); defaulting to auto",
+                        raw
+                    );
+                    ReductionTwoPassMode::Auto
+                }
+            },
+            _ => ReductionTwoPassMode::Auto,
+        };
 
         let required_features = match precision {
             NumericPrecision::F64 => wgpu::Features::SHADER_F64,
@@ -2020,6 +2064,13 @@ impl WgpuProvider {
                 .join(format!("wgpu-pipeline-cache-{}", device_id))
         };
 
+        info!(
+            "Reduction two-pass mode={} threshold={} workgroup_size={}",
+            reduction_two_pass_mode.as_str(),
+            two_pass_threshold,
+            reduction_wg_default
+        );
+
         Ok(Self {
             device,
             queue,
@@ -2039,6 +2090,7 @@ impl WgpuProvider {
             kernel_resources: KernelResourceRegistry::new(),
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::new(),
             telemetry: AccelTelemetry::new(),
+            reduction_two_pass_mode,
             reduction_two_pass_threshold: two_pass_threshold,
             reduction_workgroup_size_default: reduction_wg_default,
             pipeline_cache_dir: Some(cache_dir),
@@ -2114,6 +2166,316 @@ impl WgpuProvider {
                 entry.usage = usage;
             }
         }
+    }
+
+    fn qr_factor_device(
+        &self,
+        matrix: &GpuTensorHandle,
+        rows: usize,
+        cols: usize,
+        reuse_q: Option<&GpuTensorHandle>,
+        label: &str,
+        retain_r_inv: bool,
+    ) -> Result<(GpuTensorHandle, GpuTensorHandle, Option<GpuTensorHandle>)> {
+        ensure!(rows >= cols, "qr: rows must be >= cols for device path");
+        ensure!(
+            cols > 0,
+            "qr: zero-column input not supported for device path"
+        );
+
+        let gram_handle = self.syrk_exec(matrix)?;
+
+        let gram_entry = self.get_entry(&gram_handle)?;
+        let gram_len = cols * cols;
+        ensure!(
+            gram_entry.len == gram_len,
+            "qr: gram len mismatch (expected {}, got {})",
+            gram_len,
+            gram_entry.len
+        );
+        let gram_bytes = (gram_len as u64) * (self.element_size as u64);
+        let gram_scratch = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
+            gram_bytes,
+            "runmat-qr-gram-scratch",
+        );
+        if gram_bytes > 0 {
+            let gram_copy_label = format!("{label}-gram-copy");
+            let mut encoder =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some(gram_copy_label.as_str()),
+                    });
+            encoder.copy_buffer_to_buffer(
+                gram_entry.buffer.as_ref(),
+                0,
+                gram_scratch.as_ref(),
+                0,
+                gram_bytes,
+            );
+            self.submit(encoder);
+        }
+
+        let len_out = cols * cols;
+        let r_bytes = (len_out as u64) * (self.element_size as u64);
+        let r_buffer = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::QrR,
+            r_bytes,
+            "runmat-qr-r-scratch",
+        );
+        let r_inv_buffer = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::QrRInv,
+            r_bytes,
+            "runmat-qr-rinv-scratch",
+        );
+
+        let params = QrPowerIterParams {
+            cols: cols as u32,
+            stride: cols as u32,
+            _pad0: [0, 0],
+        };
+        let params_buffer = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            UniformBufferKey::QrPowerIterParams,
+            std::mem::size_of::<QrPowerIterParams>() as u64,
+            "runmat-qr-power-params",
+        );
+        self.queue
+            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+
+        let layout = &self.pipelines.qr_power_iter.layout;
+        let bind_entries = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: gram_scratch.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: r_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: r_inv_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buffer.as_entire_binding(),
+            },
+        ];
+        let bind_group = self
+            .bind_group_cache
+            .get_or_create(layout, &bind_entries, || {
+                Arc::new(
+                    self.device_ref()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-qr-power-bind"),
+                            layout,
+                            entries: &bind_entries,
+                        }),
+                )
+            });
+        crate::backend::wgpu::dispatch::qr_power_iter::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.qr_power_iter.pipeline,
+            bind_group.as_ref(),
+        );
+
+        let _ = self.free(&gram_handle);
+
+        let r_shape = vec![cols, cols];
+        let r_handle = self.register_existing_buffer_with_usage(
+            r_buffer.clone(),
+            r_shape.clone(),
+            len_out,
+            BufferUsageClass::FusionOut,
+        );
+        self.mark_buffer_usage(&r_handle, BufferUsageClass::FusionOut);
+
+        let r_inv_handle = self.register_existing_buffer_with_usage(
+            r_inv_buffer.clone(),
+            r_shape,
+            len_out,
+            BufferUsageClass::FusionOut,
+        );
+        self.mark_buffer_usage(&r_inv_handle, BufferUsageClass::FusionOut);
+
+        let q_temp =
+            self.matmul_exec_with_usage(matrix, &r_inv_handle, BufferUsageClass::FusionOut)?;
+
+        let q_temp_entry = self.get_entry(&q_temp)?;
+        let q_result = if let Some(target) = reuse_q {
+            let target_entry = self.get_entry(target)?;
+            if Arc::strong_count(&target_entry.buffer) <= 2 && target_entry.len == q_temp_entry.len
+            {
+                let bytes = (target_entry.len as u64) * self.element_size as u64;
+                if bytes > 0 {
+                    let copy_label = format!("{label}-reuse-copy");
+                    let mut encoder =
+                        self.device_ref()
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some(copy_label.as_str()),
+                            });
+                    encoder.copy_buffer_to_buffer(
+                        q_temp_entry.buffer.as_ref(),
+                        0,
+                        target_entry.buffer.as_ref(),
+                        0,
+                        bytes,
+                    );
+                    self.submit(encoder);
+                }
+                let _ = self.free(&q_temp);
+                self.mark_buffer_usage(target, BufferUsageClass::FusionOut);
+                target.clone()
+            } else {
+                q_temp
+            }
+        } else {
+            q_temp
+        };
+
+        let r_inv_result = if retain_r_inv {
+            Some(r_inv_handle)
+        } else {
+            let _ = self.free(&r_inv_handle);
+            None
+        };
+
+        Ok((q_result, r_handle, r_inv_result))
+    }
+
+    fn qr_power_iter_host(
+        &self,
+        product: &GpuTensorHandle,
+        options: &ProviderQrOptions,
+    ) -> Result<Option<ProviderQrPowerIterResult>> {
+        let host_product = self.download(product)?;
+        let tensor =
+            Tensor::new(host_product.data.clone(), host_product.shape.clone()).map_err(|e| {
+                anyhow!("qr_power_iter: failed to construct host tensor for fallback: {e}")
+            })?;
+        let host_result = self.qr_host_result(tensor, options)?;
+        let _ = self.free(product);
+        Ok(Some(ProviderQrPowerIterResult {
+            q: host_result.q,
+            r: host_result.r,
+            perm_matrix: host_result.perm_matrix,
+            perm_vector: host_result.perm_vector,
+        }))
+    }
+
+    fn try_qr_device(
+        &self,
+        matrix: &GpuTensorHandle,
+        options: &ProviderQrOptions,
+    ) -> Result<Option<ProviderQrResult>> {
+        if !options.economy {
+            return Ok(None);
+        }
+        if options.pivot != ProviderQrPivot::Matrix {
+            return Ok(None);
+        }
+        if self.precision() != ProviderPrecision::F32 {
+            return Ok(None);
+        }
+        let entry = self.get_entry(matrix)?;
+        if entry.shape.len() != 2 {
+            return Ok(None);
+        }
+        let rows = entry.shape[0];
+        let cols = entry.shape[1];
+        if rows < cols || cols == 0 {
+            return Ok(None);
+        }
+        if cols > QR_DEVICE_MAX_COLS {
+            return Ok(None);
+        }
+        if rows
+            .checked_mul(cols)
+            .map(|v| v > QR_DEVICE_MAX_ELEMS)
+            .unwrap_or(true)
+        {
+            return Ok(None);
+        }
+
+        let (q_handle, r_handle, _) =
+            self.qr_factor_device(matrix, rows, cols, None, "runmat-qr-direct", false)?;
+
+        let mut perm_matrix = vec![0.0f64; cols * cols];
+        for i in 0..cols {
+            perm_matrix[i + i * cols] = 1.0;
+        }
+        let perm_vector: Vec<f64> = (1..=cols).map(|v| v as f64).collect();
+
+        let perm_matrix_shape = [cols, cols];
+        let perm_matrix_handle = self.upload(&HostTensorView {
+            data: &perm_matrix,
+            shape: &perm_matrix_shape,
+        })?;
+        let perm_vector_shape = vec![cols, 1];
+        let perm_vector_handle = self.upload(&HostTensorView {
+            data: &perm_vector,
+            shape: &perm_vector_shape,
+        })?;
+
+        Ok(Some(ProviderQrResult {
+            q: q_handle,
+            r: r_handle,
+            perm_matrix: perm_matrix_handle,
+            perm_vector: perm_vector_handle,
+        }))
+    }
+
+    fn qr_host_result(
+        &self,
+        tensor: Tensor,
+        options: &ProviderQrOptions,
+    ) -> Result<ProviderQrResult> {
+        let mut args = Vec::new();
+        if options.economy {
+            args.push(Value::Num(0.0));
+        }
+        if matches!(options.pivot, ProviderQrPivot::Vector) {
+            args.push(Value::from("vector"));
+        }
+        let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
+            Value::Tensor(tensor),
+            &args,
+        )
+        .map_err(|e| anyhow!("qr: {e}"))?;
+
+        let q_tensor = host_tensor_from_value("qr", eval.q())?;
+        let r_tensor = host_tensor_from_value("qr", eval.r())?;
+        let perm_matrix_tensor = host_tensor_from_value("qr", eval.permutation_matrix())?;
+        let perm_vector_tensor = host_tensor_from_value("qr", eval.permutation_vector())?;
+
+        let q = self.upload(&HostTensorView {
+            data: &q_tensor.data,
+            shape: &q_tensor.shape,
+        })?;
+        let r = self.upload(&HostTensorView {
+            data: &r_tensor.data,
+            shape: &r_tensor.shape,
+        })?;
+        let perm_matrix = self.upload(&HostTensorView {
+            data: &perm_matrix_tensor.data,
+            shape: &perm_matrix_tensor.shape,
+        })?;
+        let perm_vector = self.upload(&HostTensorView {
+            data: &perm_vector_tensor.data,
+            shape: &perm_vector_tensor.shape,
+        })?;
+
+        Ok(ProviderQrResult {
+            q,
+            r,
+            perm_matrix,
+            perm_vector,
+        })
     }
 
     fn trim_polynomial_handle(
@@ -2592,6 +2954,14 @@ impl WgpuProvider {
             BufferUsageClass::FusionOut,
         ))
     }
+    fn should_use_two_pass(&self, reduce_len: usize) -> bool {
+        match self.reduction_two_pass_mode {
+            ReductionTwoPassMode::ForceOn => true,
+            ReductionTwoPassMode::ForceOff => false,
+            ReductionTwoPassMode::Auto => reduce_len > self.two_pass_threshold(),
+        }
+    }
+
     pub(crate) fn fused_reduction_exec(
         &self,
         shader: &str,
@@ -2600,6 +2970,7 @@ impl WgpuProvider {
         reduce_len: usize,
         num_slices: usize,
         workgroup_size: u32,
+        flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
         if inputs.is_empty() {
             return Err(anyhow!("fused_reduction: no inputs"));
@@ -2621,7 +2992,8 @@ impl WgpuProvider {
         } else {
             workgroup_size
         };
-        let two_pass = reduce_len > self.two_pass_threshold() as usize;
+        let two_pass = self.should_use_two_pass(reduce_len);
+        let scale_value = flavor.scale(reduce_len);
         if !two_pass {
             let layout_tag = &format!("runmat-reduction-layout-{}", inputs.len());
             let module = crate::backend::wgpu::pipelines::create_shader_module(
@@ -2675,23 +3047,13 @@ impl WgpuProvider {
             self.submit(flush_enc);
             let out_len = num_slices.max(1);
             // Output buffer selection: default to scratch (faster); allow forcing unique via env
-            let unique_out = std::env::var("RUNMAT_UNIQUE_REDUCTION_OUT").is_ok();
-            let mut out_buffer = if unique_out {
-                self.create_storage_buffer_for_usage(
+            let mut out_buffer = self
+                .create_storage_buffer_for_usage(
                     BufferUsageClass::FusionOut,
                     out_len,
                     "runmat-reduction-out",
                 )
-                .0
-            } else {
-                let out_bytes = (out_len * self.element_size) as u64;
-                self.kernel_resources.scratch_storage_buffer(
-                    self.device_ref(),
-                    crate::backend::wgpu::resources::ScratchBufferKind::ReductionOut,
-                    out_bytes,
-                    "runmat-reduction-out-scratch",
-                )
-            };
+                .0;
             // Alias guard: ensure out_buffer is not identical to any input buffer
             {
                 let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
@@ -3038,23 +3400,13 @@ impl WgpuProvider {
             "runmat-reduction-partials-scratch",
         );
         let out_len = num_slices.max(1);
-        let unique_out = std::env::var("RUNMAT_UNIQUE_REDUCTION_OUT").is_ok();
-        let mut out_buffer = if unique_out {
-            self.create_storage_buffer_for_usage(
+        let mut out_buffer = self
+            .create_storage_buffer_for_usage(
                 BufferUsageClass::FusionOut,
                 out_len,
                 "runmat-reduction-out",
             )
-            .0
-        } else {
-            let out_bytes = (out_len * self.element_size) as u64;
-            self.kernel_resources.scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::ReductionOut,
-                out_bytes,
-                "runmat-reduction-out-scratch",
-            )
-        };
+            .0;
         // Alias guards: partials/out must not alias input, and partials must not alias out
         {
             let in_ptr = input_buf.as_ref() as *const wgpu::Buffer as usize;
@@ -3089,10 +3441,20 @@ impl WgpuProvider {
         }
         #[repr(C)]
         #[derive(Clone, Copy, Pod, Zeroable)]
-        struct P2 {
+        struct P2F32 {
             ncols: u32,
             chunks: u32,
             flags: u32,
+            scale: f32,
+        }
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct P2F64 {
+            ncols: u32,
+            chunks: u32,
+            flags: u32,
+            _pad: u32,
+            scale: f64,
         }
         let max_dispatch = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as u32;
         let mut chunk_stride = total_chunks.min(max_dispatch);
@@ -3101,11 +3463,8 @@ impl WgpuProvider {
         if chunk_tiles > max_dispatch as u64 {
             let required_stride =
                 ((total_chunks as u64) + max_dispatch as u64 - 1) / (max_dispatch as u64);
-            chunk_stride = required_stride
-                .max(1)
-                .min(max_dispatch as u64) as u32;
-            chunk_tiles =
-                ((total_chunks as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
+            chunk_stride = required_stride.max(1).min(max_dispatch as u64) as u32;
+            chunk_tiles = ((total_chunks as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
             if chunk_tiles > max_dispatch as u64 {
                 return Err(anyhow!(
                     "fused_reduction: chunk grid {} exceeds dispatch limits (stride {}, tiles {})",
@@ -3123,25 +3482,44 @@ impl WgpuProvider {
             chunks: total_chunks,
             chunk_stride,
         };
-        let p2u = P2 {
-            ncols: num_slices as u32,
-            chunks: total_chunks,
-            flags,
-        };
         let p1_buf = self.kernel_resources.uniform_buffer(
             self.device_ref(),
             crate::backend::wgpu::resources::UniformBufferKey::ReductionPass1Params,
             std::mem::size_of::<P1>() as u64,
             "runmat-reduction-p1-params",
         );
+        let p2_size = match self.precision {
+            NumericPrecision::F64 => std::mem::size_of::<P2F64>() as u64,
+            NumericPrecision::F32 => std::mem::size_of::<P2F32>() as u64,
+        };
         let p2_buf = self.kernel_resources.uniform_buffer(
             self.device_ref(),
             crate::backend::wgpu::resources::UniformBufferKey::ReductionPass2Params,
-            std::mem::size_of::<P2>() as u64,
+            p2_size,
             "runmat-reduction-p2-params",
         );
         self.queue.write_buffer(p1_buf.as_ref(), 0, bytes_of(&p1u));
-        self.queue.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
+        match self.precision {
+            NumericPrecision::F64 => {
+                let p2u = P2F64 {
+                    ncols: num_slices as u32,
+                    chunks: total_chunks,
+                    flags,
+                    _pad: 0,
+                    scale: scale_value,
+                };
+                self.queue.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
+            }
+            NumericPrecision::F32 => {
+                let p2u = P2F32 {
+                    ncols: num_slices as u32,
+                    chunks: total_chunks,
+                    flags,
+                    scale: scale_value as f32,
+                };
+                self.queue.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
+            }
+        }
         let entries_bg1 = vec![
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -8363,13 +8741,13 @@ impl WgpuProvider {
                 .map_err(|_| anyhow!("rand: chunk length exceeds GPU dispatch limits"))?;
             let offset_u32 = u32::try_from(offset)
                 .map_err(|_| anyhow!("rand: tensor offset exceeds GPU limits"))?;
-            let seed = seed_from_state(chunk_state);
+            let (key0, key1) = philox_keys_from_state(chunk_state);
 
             let params = crate::backend::wgpu::params::RandomScalarParams {
                 offset: offset_u32,
                 chunk: chunk_u32,
-                seed,
-                _pad: 0,
+                key0,
+                key1,
             };
             let params_buffer = self.uniform_buffer(&params, "runmat-rng-uniform-params");
 
@@ -8469,13 +8847,13 @@ impl WgpuProvider {
                 .map_err(|_| anyhow!("randn: chunk length exceeds GPU dispatch limits"))?;
             let offset_u32 = u32::try_from(offset)
                 .map_err(|_| anyhow!("randn: tensor offset exceeds GPU limits"))?;
-            let seed = seed_from_state(chunk_state);
+            let (key0, key1) = philox_keys_from_state(chunk_state);
 
             let params = crate::backend::wgpu::params::RandomScalarParams {
                 offset: offset_u32,
                 chunk: chunk_u32,
-                seed,
-                _pad: 0,
+                key0,
+                key1,
             };
             let params_buffer = self.uniform_buffer(&params, "runmat-rng-normal-params");
 
@@ -8519,6 +8897,132 @@ impl WgpuProvider {
         drop(rng_guard);
 
         Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), total_len))
+    }
+
+    pub(crate) fn stochastic_evolution_exec(
+        &self,
+        state: &GpuTensorHandle,
+        drift: f64,
+        scale: f64,
+        steps: u32,
+    ) -> Result<GpuTensorHandle> {
+        let total_len = product_checked(&state.shape)
+            .ok_or_else(|| anyhow!("stochastic_evolution: tensor size exceeds GPU limits"))?;
+        let start = std::time::Instant::now();
+        let state_entry = self.get_entry(state)?;
+        let out_buffer =
+            self.create_storage_buffer_checked(total_len, "runmat-stochastic-evolution-out")?;
+        if total_len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, state_entry.shape.clone(), 0));
+        }
+        ensure!(
+            total_len <= u32::MAX as usize,
+            "stochastic_evolution: tensor length too large"
+        );
+
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+
+        let mut rng_guard = rng_state()
+            .lock()
+            .map_err(|_| anyhow!("stochastic_evolution: provider RNG mutex poisoned"))?;
+        let mut chunk_state = *rng_guard;
+
+        let pipeline = &self.pipelines.stochastic_evolution;
+        let mut offset = 0usize;
+        while offset < total_len {
+            let remaining = total_len - offset;
+            let chunk_len = remaining.min(chunk_capacity);
+            let chunk_u32 = u32::try_from(chunk_len).map_err(|_| {
+                anyhow!("stochastic_evolution: chunk length exceeds GPU dispatch limits")
+            })?;
+            let offset_u32 = u32::try_from(offset)
+                .map_err(|_| anyhow!("stochastic_evolution: offset exceeds GPU limits"))?;
+            let len_u32 = u32::try_from(total_len)
+                .map_err(|_| anyhow!("stochastic_evolution: len overflow"))?;
+            let (key0, key1) = philox_keys_from_state(chunk_state);
+
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = crate::backend::wgpu::params::StochasticEvolutionParamsF64 {
+                        offset: offset_u32,
+                        chunk: chunk_u32,
+                        len: len_u32,
+                        steps,
+                        key0,
+                        key1,
+                        _pad0: 0,
+                        _pad1: 0,
+                        drift,
+                        scale,
+                    };
+                    self.uniform_buffer(&params, "runmat-stochastic-evolution-f64-params")
+                }
+                NumericPrecision::F32 => {
+                    let params = crate::backend::wgpu::params::StochasticEvolutionParamsF32 {
+                        offset: offset_u32,
+                        chunk: chunk_u32,
+                        len: len_u32,
+                        steps,
+                        key0,
+                        key1,
+                        _pad0: 0,
+                        _pad1: 0,
+                        drift: drift as f32,
+                        scale: scale as f32,
+                    };
+                    self.uniform_buffer(&params, "runmat-stochastic-evolution-f32-params")
+                }
+            };
+
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-stochastic-evolution-bind"),
+                    layout: &pipeline.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: state_entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::creation::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline.pipeline,
+                &bind_group,
+                workgroups,
+                "runmat-stochastic-evolution-encoder",
+                "runmat-stochastic-evolution-pass",
+            );
+
+            if steps > 0 {
+                let advance = u64::from(chunk_u32) * u64::from(steps);
+                chunk_state = advance_rng_state(chunk_state, advance);
+            }
+            offset += chunk_len;
+        }
+
+        *rng_guard = chunk_state;
+        drop(rng_guard);
+
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
+        Ok(self.register_existing_buffer(out_buffer, state_entry.shape.clone(), total_len))
     }
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         let spec =
@@ -11653,6 +12157,16 @@ impl AccelProvider for WgpuProvider {
         self.random_normal_exec(shape)
     }
 
+    fn stochastic_evolution(
+        &self,
+        state: &GpuTensorHandle,
+        drift: f64,
+        scale: f64,
+        steps: u32,
+    ) -> Result<GpuTensorHandle> {
+        self.stochastic_evolution_exec(state, drift, scale, steps)
+    }
+
     fn fspecial(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         self.fspecial_exec(request)
     }
@@ -12370,50 +12884,13 @@ impl AccelProvider for WgpuProvider {
         })
     }
     fn qr(&self, handle: &GpuTensorHandle, options: ProviderQrOptions) -> Result<ProviderQrResult> {
+        if let Some(result) = self.try_qr_device(handle, &options)? {
+            return Ok(result);
+        }
         let host = self.download(handle)?;
         let tensor =
             Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("qr: {e}"))?;
-        let mut args = Vec::new();
-        if options.economy {
-            args.push(Value::Num(0.0));
-        }
-        if matches!(options.pivot, ProviderQrPivot::Vector) {
-            args.push(Value::from("vector"));
-        }
-        let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
-            Value::Tensor(tensor),
-            &args,
-        )
-        .map_err(|e| anyhow!("qr: {e}"))?;
-
-        let q_tensor = host_tensor_from_value("qr", eval.q())?;
-        let r_tensor = host_tensor_from_value("qr", eval.r())?;
-        let perm_matrix_tensor = host_tensor_from_value("qr", eval.permutation_matrix())?;
-        let perm_vector_tensor = host_tensor_from_value("qr", eval.permutation_vector())?;
-
-        let q = self.upload(&HostTensorView {
-            data: &q_tensor.data,
-            shape: &q_tensor.shape,
-        })?;
-        let r = self.upload(&HostTensorView {
-            data: &r_tensor.data,
-            shape: &r_tensor.shape,
-        })?;
-        let perm_matrix = self.upload(&HostTensorView {
-            data: &perm_matrix_tensor.data,
-            shape: &perm_matrix_tensor.shape,
-        })?;
-        let perm_vector = self.upload(&HostTensorView {
-            data: &perm_vector_tensor.data,
-            shape: &perm_vector_tensor.shape,
-        })?;
-
-        Ok(ProviderQrResult {
-            q,
-            r,
-            perm_matrix,
-            perm_vector,
-        })
+        self.qr_host_result(tensor, &options)
     }
 
     fn take_matmul_sources(
@@ -12438,8 +12915,6 @@ impl AccelProvider for WgpuProvider {
         options: &ProviderQrOptions,
     ) -> Result<Option<ProviderQrPowerIterResult>> {
         let debug_qr = std::env::var("RUNMAT_DEBUG_QR").is_ok();
-        const QR_MAX_COLS: usize = 64;
-
         if !options.economy {
             return Ok(None);
         }
@@ -12453,12 +12928,12 @@ impl AccelProvider for WgpuProvider {
         if rows == 0 || cols == 0 {
             return Ok(None);
         }
-        if cols > QR_MAX_COLS {
+        if cols > QR_DEVICE_MAX_COLS {
             if debug_qr {
                 log::debug!(
                     "qr_power_iter: column count {} exceeds device kernel limit {}; falling back",
                     cols,
-                    QR_MAX_COLS
+                    QR_DEVICE_MAX_COLS
                 );
             }
             return Ok(None);
@@ -12712,27 +13187,14 @@ impl AccelProvider for WgpuProvider {
                             );
                         }
                     }
-                    if let Ok(q_host) = q_download {
-                        let mut q_nan = 0usize;
-                        let mut q_inf = 0usize;
-                        let mut q_max = 0.0f64;
-                        for value in &q_host.data {
-                            if value.is_nan() {
-                                q_nan += 1;
-                            } else if !value.is_finite() {
-                                q_inf += 1;
-                            } else {
-                                q_max = q_max.max(value.abs());
-                            }
-                        }
-                        log::warn!(
-                            "qr_power_iter recompute diagnostics: product_id={} max_q_abs={:.6e} nan_count={} inf_count={}",
-                            product.buffer_id,
-                            q_max,
-                            q_nan,
-                            q_inf
-                        );
+                    log::warn!(
+                        "qr_power_iter: recomputed product is still zero; falling back to host QR"
+                    );
+                    let _ = self.free(&recomputed);
+                    if let Some(handle) = self.qr_power_iter_host(product, options)? {
+                        return Ok(Some(handle));
                     }
+                    return Ok(None);
                 }
                 pre_product_max = Some(max_val);
 
@@ -12745,185 +13207,37 @@ impl AccelProvider for WgpuProvider {
             }
         }
 
-        let product_t = self.transpose_exec(product)?;
-        let gram_handle =
-            self.matmul_exec_with_usage(&product_t, product, BufferUsageClass::FusionOut)?;
-        if debug_qr {
-            match self.download(&gram_handle) {
-                Ok(host) => {
-                    let max_gram_val = host
-                        .data
-                        .iter()
-                        .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                    log::info!(
-                        "qr_power_iter gram check: product={} max_gram_abs={:.6e}",
-                        product.buffer_id,
-                        max_gram_val
-                    );
-                }
-                Err(err) => {
-                    log::info!(
-                        "qr_power_iter gram download failed: product={} err={}",
-                        product.buffer_id,
-                        err
-                    );
+        let (q_result, r_handle, mut r_inv_opt) =
+            self.qr_factor_device(product, rows, cols, Some(q_handle), "runmat-qr-power", true)?;
+
+        let mut fallback_needed = false;
+        if let Ok(host_r) = self.download(&r_handle) {
+            for col in 0..cols {
+                let diag = host_r.data[col + col * cols];
+                if !diag.is_finite() || diag.abs() <= 1.0e-12 {
+                    fallback_needed = true;
+                    break;
                 }
             }
         }
-        let _ = self.free(&product_t);
-        let gram_entry = self.get_entry(&gram_handle)?;
-        let gram_len = cols * cols;
-        let gram_bytes = (gram_len as u64) * (self.element_size as u64);
-        let gram_scratch = self.kernel_resources.scratch_storage_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
-            gram_bytes,
-            "runmat-qr-gram-scratch",
-        );
-        if gram_bytes > 0 {
-            let mut encoder =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-qr-gram-copy"),
-                    });
-            encoder.copy_buffer_to_buffer(
-                gram_entry.buffer.as_ref(),
-                0,
-                gram_scratch.as_ref(),
-                0,
-                gram_bytes,
-            );
-            self.submit(encoder);
+
+        if fallback_needed {
+            if let Some(handle) = r_inv_opt.take() {
+                let _ = self.free(&handle);
+            }
+            let _ = self.free(&q_result);
+            let _ = self.free(&r_handle);
+            return self.qr_power_iter_host(product, options);
         }
 
-        let len_out = cols * cols;
-        let r_bytes = (len_out as u64) * (self.element_size as u64);
-        let r_buffer = self.kernel_resources.scratch_storage_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::ScratchBufferKind::QrR,
-            r_bytes,
-            "runmat-qr-r-scratch",
-        );
-        let r_inv_buffer = self.kernel_resources.scratch_storage_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::ScratchBufferKind::QrRInv,
-            r_bytes,
-            "runmat-qr-rinv-scratch",
-        );
-
-        let params = QrPowerIterParams {
-            cols: cols as u32,
-            stride: cols as u32,
-            _pad0: [0, 0],
-        };
-        let params_buffer = self.kernel_resources.uniform_buffer(
-            self.device_ref(),
-            UniformBufferKey::QrPowerIterParams,
-            std::mem::size_of::<QrPowerIterParams>() as u64,
-            "runmat-qr-power-params",
-        );
-        self.queue
-            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-
-        let layout = &self.pipelines.qr_power_iter.layout;
-        let bind_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: gram_scratch.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: r_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: r_inv_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: params_buffer.as_entire_binding(),
-            },
-        ];
-        let bind_group = self
-            .bind_group_cache
-            .get_or_create(layout, &bind_entries, || {
-                Arc::new(
-                    self.device_ref()
-                        .create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("runmat-qr-power-bind"),
-                            layout,
-                            entries: &bind_entries,
-                        }),
-                )
-            });
-        crate::backend::wgpu::dispatch::qr_power_iter::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.qr_power_iter.pipeline,
-            bind_group.as_ref(),
-        );
-
-        let gram_debug = if debug_qr {
-            match self.download(&gram_handle) {
-                Ok(data) => Some(data),
-                Err(err) => {
-                    log::info!(
-                        "qr_power_iter gram debug download failed: product={} err={}",
-                        product.buffer_id,
-                        err
-                    );
-                    None
-                }
+        if pre_product_max.unwrap_or(0.0) <= 1.0e-8 {
+            if let Some(handle) = r_inv_opt.take() {
+                let _ = self.free(&handle);
             }
-        } else {
-            None
-        };
-        let _ = self.free(&gram_handle);
-
-        let r_shape = vec![cols, cols];
-        let r_handle = self.register_existing_buffer_with_usage(
-            r_buffer.clone(),
-            r_shape.clone(),
-            len_out,
-            BufferUsageClass::FusionOut,
-        );
-        self.mark_buffer_usage(&r_handle, BufferUsageClass::FusionOut);
-
-        let r_inv_handle = self.register_existing_buffer_with_usage(
-            r_inv_buffer.clone(),
-            r_shape.clone(),
-            len_out,
-            BufferUsageClass::FusionOut,
-        );
-        self.mark_buffer_usage(&r_inv_handle, BufferUsageClass::FusionOut);
-
-        let q_temp =
-            self.matmul_exec_with_usage(product, &r_inv_handle, BufferUsageClass::FusionOut)?;
-
-        let q_temp_entry = self.get_entry(&q_temp)?;
-        let mut reused = false;
-        if Arc::strong_count(&q_entry.buffer) <= 2 && q_entry.len == q_temp_entry.len {
-            let bytes = (q_entry.len as u64) * self.element_size as u64;
-            if bytes > 0 {
-                let mut encoder =
-                    self.device_ref()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-qr-power-copy"),
-                        });
-                encoder.copy_buffer_to_buffer(
-                    q_temp_entry.buffer.as_ref(),
-                    0,
-                    q_entry.buffer.as_ref(),
-                    0,
-                    bytes,
-                );
-                self.submit(encoder);
-            }
-            let _ = self.free(&q_temp);
-            self.mark_buffer_usage(q_handle, BufferUsageClass::FusionOut);
-            reused = true;
+            let _ = self.free(&q_result);
+            let _ = self.free(&r_handle);
+            return self.qr_power_iter_host(product, options);
         }
-        let q_result = if reused { q_handle.clone() } else { q_temp };
 
         if debug_qr {
             if let Err(err) = self.debug_qr_power_iter(
@@ -12933,8 +13247,10 @@ impl AccelProvider for WgpuProvider {
                 pre_q_max,
                 &q_result,
                 &r_handle,
-                &r_inv_handle,
-                gram_debug.as_ref(),
+                r_inv_opt
+                    .as_ref()
+                    .expect("retain_r_inv=true must provide inverse handle"),
+                None::<&runmat_accelerate_api::HostTensorOwned>,
                 rows,
                 cols,
             ) {
@@ -12942,7 +13258,9 @@ impl AccelProvider for WgpuProvider {
             }
         }
 
-        let _ = self.free(&r_inv_handle);
+        if let Some(handle) = r_inv_opt.take() {
+            let _ = self.free(&handle);
+        }
 
         let mut perm_matrix = vec![0.0f64; k * k];
         for i in 0..k {
@@ -12950,9 +13268,10 @@ impl AccelProvider for WgpuProvider {
         }
         let perm_vector: Vec<f64> = (1..=k).map(|v| v as f64).collect();
 
+        let perm_matrix_shape = [k, k];
         let perm_matrix_handle = self.upload(&HostTensorView {
             data: &perm_matrix,
-            shape: &r_shape,
+            shape: &perm_matrix_shape,
         })?;
         let perm_vector_shape = vec![k, 1];
         let perm_vector_handle = self.upload(&HostTensorView {
@@ -14298,6 +14617,7 @@ impl AccelProvider for WgpuProvider {
         reduce_len: usize,
         num_slices: usize,
         workgroup_size: u32,
+        flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
         let start = std::time::Instant::now();
         let result = self.fused_reduction_exec(
@@ -14307,6 +14627,7 @@ impl AccelProvider for WgpuProvider {
             reduce_len,
             num_slices,
             workgroup_size,
+            flavor,
         );
         if result.is_ok() {
             let elapsed = start.elapsed();
@@ -14437,6 +14758,10 @@ impl AccelProvider for WgpuProvider {
 
     fn two_pass_threshold(&self) -> usize {
         self.reduction_two_pass_threshold
+    }
+
+    fn reduction_two_pass_mode(&self) -> ReductionTwoPassMode {
+        self.reduction_two_pass_mode
     }
 
     fn scatter_column(

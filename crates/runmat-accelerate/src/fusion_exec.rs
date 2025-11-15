@@ -7,7 +7,7 @@ use crate::graph::{ShapeInfo, ValueId};
 use crate::precision::ensure_provider_supports_dtype;
 use runmat_accelerate_api::{
     provider, AccelProvider, CovRows, CovarianceOptions, GpuTensorHandle, HostTensorView,
-    ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision,
+    ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision, ReductionFlavor,
 };
 use runmat_builtins::{NumericDType, Value};
 use runmat_runtime::gather_if_needed;
@@ -374,8 +374,19 @@ pub fn execute_reduction(
     } else {
         workgroup_size
     };
-    let output =
-        provider.fused_reduction(&shader, &handles, &output_shape, reduce_len, num_slices, wg)?;
+    let flavor = request
+        .plan
+        .reduction_flavor
+        .unwrap_or(ReductionFlavor::Sum);
+    let output = provider.fused_reduction(
+        &shader,
+        &handles,
+        &output_shape,
+        reduce_len,
+        num_slices,
+        wg,
+        flavor,
+    )?;
     fusion_residency::mark(&output);
 
     for input in prepared {

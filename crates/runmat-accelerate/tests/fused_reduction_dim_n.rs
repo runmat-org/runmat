@@ -2,14 +2,14 @@
 
 use runmat_accelerate::backend::wgpu::provider_impl::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
-    detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp, ReductionMode,
+    detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
 use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
 use runmat_builtins::{Type, Value};
 use std::collections::HashMap;
 
@@ -180,7 +180,7 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
             },
             reduction_data: Some(v_mul),
             reduction_dim: Some(v_dim),
-            reduction_mode: Some(ReductionMode::Sum),
+            reduction_flavor: Some(ReductionFlavor::Sum),
             pattern: None,
         };
 

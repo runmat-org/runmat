@@ -165,7 +165,7 @@ fn nlms_two_fused_reductions_integration() {
             },
             reduction_data: Some(v_mul),
             reduction_dim: Some(v_dim),
-            reduction_mode: None,
+            reduction_flavor: None,
             pattern: None,
         };
         let req = FusionExecutionRequest {
@@ -307,7 +307,7 @@ fn nlms_two_fused_reductions_integration() {
             },
             reduction_data: Some(v_mul),
             reduction_dim: Some(v_dim),
-            reduction_mode: None,
+            reduction_flavor: None,
             pattern: None,
         };
         assert_eq!(plan.inputs.len(), 2, "two-input fused plan required");
@@ -355,7 +355,7 @@ fn nlms_two_fused_reductions_integration() {
             },
             reduction_data: None,
             reduction_dim: None,
-            reduction_mode: None,
+            reduction_flavor: None,
             pattern: None,
         };
         let req = FusionExecutionRequest {
@@ -480,7 +480,7 @@ fn nlms_two_fused_reductions_integration() {
             },
             reduction_data: Some(v_sq),
             reduction_dim: None,
-            reduction_mode: None,
+            reduction_flavor: None,
             pattern: None,
         };
         // Reduce all elements: reduce_len=c, num_slices=1

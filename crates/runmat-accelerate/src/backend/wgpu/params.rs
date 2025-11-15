@@ -636,8 +636,38 @@ pub struct RandomIntParamsF32 {
 pub struct RandomScalarParams {
     pub offset: u32,
     pub chunk: u32,
-    pub seed: u32,
-    pub _pad: u32,
+    pub key0: u32,
+    pub key1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct StochasticEvolutionParamsF32 {
+    pub offset: u32,
+    pub chunk: u32,
+    pub len: u32,
+    pub steps: u32,
+    pub key0: u32,
+    pub key1: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub drift: f32,
+    pub scale: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct StochasticEvolutionParamsF64 {
+    pub offset: u32,
+    pub chunk: u32,
+    pub len: u32,
+    pub steps: u32,
+    pub key0: u32,
+    pub key1: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub drift: f64,
+    pub scale: f64,
 }
 
 #[repr(C)]

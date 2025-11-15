@@ -26,6 +26,7 @@ pub mod reduction;
 pub mod repmat;
 pub mod scan;
 pub mod scatter;
+pub mod stochastic_evolution;
 pub mod sub2ind;
 pub mod symmetry;
 pub mod syrk;

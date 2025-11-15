@@ -50,17 +50,17 @@ fn mean_all_native_preserves_single_dtype_and_value() {
     ];
     let result = rt::call_builtin("mean", &args).expect("mean");
     let scalar = expect_tensor(result);
-    assert_eq!(scalar.shape, vec![1, 1], "mean('all') should produce scalar");
+    assert_eq!(
+        scalar.shape,
+        vec![1, 1],
+        "mean('all') should produce scalar"
+    );
     assert_eq!(
         scalar.dtype,
         NumericDType::F32,
         "mean(...,'native') should retain single dtype"
     );
-    let expected =
-        data.iter()
-            .map(|&v| v as f64)
-            .sum::<f64>()
-            / (rows * cols) as f64;
+    let expected = data.iter().map(|&v| v as f64).sum::<f64>() / (rows * cols) as f64;
     assert_close(&scalar.data, &[expected], 1e-7);
 }
 
@@ -110,4 +110,3 @@ fn nlms_style_column_reductions_match_reference() {
     let expected_xw = column_sum_of_products(&x_vals, &w_vals, rows, cols);
     assert_close(&sum_xw_tensor.data, &expected_xw, 1e-6);
 }
-

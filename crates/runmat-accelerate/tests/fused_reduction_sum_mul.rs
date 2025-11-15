@@ -2,11 +2,11 @@
 
 use runmat_accelerate::backend::wgpu::provider_impl::{WgpuProvider, WgpuProviderOptions};
 use runmat_accelerate::fusion::{
-    FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp, ReductionMode,
+    FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
 use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{InstrSpan, ShapeInfo, ValueId};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
 use runmat_builtins::Value;
 use std::collections::HashMap;
 
@@ -93,7 +93,7 @@ fn fused_sum_mul_dim0_matches_manual() {
         },
         reduction_data: Some(vid_mul),
         reduction_dim: None,
-        reduction_mode: Some(ReductionMode::Sum),
+        reduction_flavor: Some(ReductionFlavor::Sum),
         pattern: None,
     };
 
@@ -184,7 +184,7 @@ fn fused_mean_mul_dim0_matches_manual() {
         },
         reduction_data: Some(vid_mul),
         reduction_dim: None,
-        reduction_mode: Some(ReductionMode::Mean),
+        reduction_flavor: Some(ReductionFlavor::Mean),
         pattern: None,
     };
     let request = FusionExecutionRequest {
@@ -272,7 +272,7 @@ fn fused_sum_mul_dim1_matches_manual() {
         },
         reduction_data: Some(vid_mul),
         reduction_dim: None,
-        reduction_mode: Some(ReductionMode::Sum),
+        reduction_flavor: Some(ReductionFlavor::Sum),
         pattern: None,
     };
 

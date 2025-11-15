@@ -1067,6 +1067,79 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "wgpu")]
+    fn qr_wgpu_economy_device_path() {
+        std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("register wgpu provider");
+
+        let tensor = Matrix::new(
+            vec![
+                1.0, 4.0, 2.0, 5.0, 3.0, 6.0, //
+                7.0, 8.0, 1.5, 2.5, 3.5, 4.5,
+            ],
+            vec![6, 2],
+        )
+        .unwrap();
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        let provider = runmat_accelerate_api::provider().expect("provider");
+        let handle = provider.upload(&view).expect("upload");
+        let gpu_eval =
+            evaluate(Value::GpuTensor(handle), &[Value::from(0.0)]).expect("gpu economy eval");
+
+        match gpu_eval.q() {
+            Value::GpuTensor(_) => {}
+            other => panic!("expected gpuArray Q, got {:?}", other),
+        }
+        match gpu_eval.r() {
+            Value::GpuTensor(_) => {}
+            other => panic!("expected gpuArray R, got {:?}", other),
+        }
+
+        let gpu_q = test_support::gather(gpu_eval.q()).expect("gather Q");
+        let gpu_r = test_support::gather(gpu_eval.r()).expect("gather R");
+
+        // Q'*Q ≈ I
+        let mut qtq_data = vec![0.0; gpu_q.cols() * gpu_q.cols()];
+        for i in 0..gpu_q.cols() {
+            for j in 0..gpu_q.cols() {
+                let mut sum = 0.0;
+                for k in 0..gpu_q.rows() {
+                    sum += gpu_q.data[k + i * gpu_q.rows()] * gpu_q.data[k + j * gpu_q.rows()];
+                }
+                qtq_data[i + j * gpu_q.cols()] = sum;
+            }
+        }
+        let qtq = Matrix::new(qtq_data, vec![gpu_q.cols(), gpu_q.cols()]).unwrap();
+        let identity = Matrix::new(
+            (0..(gpu_q.cols() * gpu_q.cols()))
+                .map(|idx| {
+                    let row = idx % gpu_q.cols();
+                    let col = idx / gpu_q.cols();
+                    if row == col {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect::<Vec<_>>(),
+            vec![gpu_q.cols(), gpu_q.cols()],
+        )
+        .unwrap();
+        tensor_close(&qtq, &identity, 1e-3);
+
+        // Q*R reconstructs the input (no pivoting)
+        let qr_product = crate::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
+        let a_matrix = Matrix::new(tensor.data.clone(), tensor.shape.clone()).unwrap();
+        tensor_close(&qr_product, &a_matrix, 1e-3);
+    }
+
+    #[test]
     #[cfg(feature = "doc_export")]
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);

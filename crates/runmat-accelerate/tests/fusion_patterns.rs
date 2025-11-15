@@ -1,4 +1,4 @@
-use runmat_accelerate::fusion::{FusionKind, FusionPlan};
+use runmat_accelerate::fusion::{detect_fusion_groups, FusionKind, FusionPlan};
 use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOrigin};
 use runmat_hir::lower;
 use runmat_ignition::compile;
@@ -155,7 +155,7 @@ fn detects_centered_gram_group() {
     cov = (centered.' * centered) / (n - 1);
     "#;
     let graph = compile_graph(source);
-    let groups = graph.detect_fusion_groups();
+    let groups = detect_fusion_groups(&graph);
     assert!(groups
         .iter()
         .any(|group| matches!(group.kind, FusionKind::CenteredGram)));
@@ -180,7 +180,7 @@ fn detects_power_step_group() {
     Q = Q ./ norms;
     "#;
     let graph = compile_graph(source);
-    let groups = graph.detect_fusion_groups();
+    let groups = detect_fusion_groups(&graph);
     assert!(groups
         .iter()
         .any(|group| matches!(group.kind, FusionKind::PowerStepNormalize)));
@@ -205,7 +205,7 @@ fn detects_explained_variance_group() {
     eval = diag(cov);
     "#;
     let graph = compile_graph(source);
-    let groups = graph.detect_fusion_groups();
+    let groups = detect_fusion_groups(&graph);
     assert!(groups
         .iter()
         .any(|group| matches!(group.kind, FusionKind::ExplainedVariance)));
@@ -228,7 +228,7 @@ fn detects_image_normalize_group() {
     out = out .^ gamma;
     "#;
     let graph = compile_graph(source);
-    let groups = graph.detect_fusion_groups();
+    let groups = detect_fusion_groups(&graph);
     let plan = FusionPlan::from_graph(&graph, &groups);
     let image_group = plan
         .groups
@@ -267,7 +267,7 @@ fn explained_variance_plan_inputs() {
     eval = diag(cov);
     "#;
     let graph = compile_graph(source);
-    let groups = graph.detect_fusion_groups();
+    let groups = detect_fusion_groups(&graph);
     let plan = FusionPlan::from_graph(&graph, &groups);
     let explained = plan
         .groups
@@ -299,7 +299,7 @@ fn explained_variance_plan_inputs_with_rand() {
     eval = diag(cov);
     "#;
     let graph = compile_graph(source);
-    let groups = graph.detect_fusion_groups();
+    let groups = detect_fusion_groups(&graph);
     let plan = FusionPlan::from_graph(&graph, &groups);
     let explained = plan
         .groups

@@ -127,6 +127,10 @@ const REDUCE_ND_MOMENTS_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_ND_MOMENTS_SHADER_F64;
 const REDUCE_ND_MOMENTS_SHADER_F32: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_ND_MOMENTS_SHADER_F32;
+const STOCHASTIC_EVOLUTION_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F64;
+const STOCHASTIC_EVOLUTION_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -170,6 +174,7 @@ pub struct WgpuPipelines {
     pub random_int: PipelineBundle,
     pub random_uniform: PipelineBundle,
     pub random_normal: PipelineBundle,
+    pub stochastic_evolution: PipelineBundle,
     pub randperm: PipelineBundle,
     pub fspecial: PipelineBundle,
     pub imfilter: PipelineBundle,
@@ -759,6 +764,22 @@ impl WgpuPipelines {
             },
         );
 
+        let stochastic_evolution = create_pipeline(
+            device,
+            "runmat-stochastic-evolution-layout",
+            "runmat-stochastic-evolution-shader",
+            "runmat-stochastic-evolution-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => STOCHASTIC_EVOLUTION_SHADER_F64,
+                NumericPrecision::F32 => STOCHASTIC_EVOLUTION_SHADER_F32,
+            },
+        );
+
         let randperm = create_pipeline(
             device,
             "runmat-randperm-layout",
@@ -1020,6 +1041,7 @@ impl WgpuPipelines {
             random_int,
             random_uniform,
             random_normal,
+            stochastic_evolution,
             randperm,
             fspecial,
             imfilter,

@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock, RwLock, Weak};
 
 use once_cell::sync::Lazy;
+use runmat_accelerate_api::ReductionFlavor;
 use runmat_builtins::Value;
 use serde::{Deserialize, Serialize};
 
@@ -325,14 +326,9 @@ pub struct FusionGroupPlan {
     pub reduction_data: Option<ValueId>,
     // For reductions: track the ValueId of the dim argument when identifiable
     pub reduction_dim: Option<ValueId>,
-    // For reductions: the semantic mode (sum or mean)
-    pub reduction_mode: Option<ReductionMode>,
+    // For reductions: flavor metadata (e.g., sum vs mean scaling)
+    pub reduction_flavor: Option<ReductionFlavor>,
     pub pattern: Option<FusionPattern>,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReductionMode {
-    Sum,
-    Mean,
 }
 
 #[derive(Debug, Clone)]
@@ -499,7 +495,7 @@ impl FusionGroupPlan {
         let mut constants: HashMap<usize, Value> = HashMap::new();
         let const_values: HashMap<ValueId, Value> = HashMap::new();
         let mut operations = Vec::new();
-        let mut reduction_mode: Option<ReductionMode> = None;
+        let mut reduction_flavor: Option<ReductionFlavor> = None;
         let mut reduction_data: Option<ValueId> = None;
         let mut reduction_dim: Option<ValueId> = None;
         let mut output: Option<ValueId> = None;
@@ -555,6 +551,19 @@ impl FusionGroupPlan {
                         idx
                     };
 
+                    if fusion_debug_enabled() {
+                        let origin = graph.value(*input).map(|v| v.origin.clone());
+                        log::debug!(
+                            "fusion plan #{:?} consider input vid={} origin={:?} binding={:?} newly_added={} is_variable={} stack_candidate={}",
+                            index,
+                            input,
+                            origin,
+                            binding,
+                            newly_added,
+                            is_variable,
+                            !is_variable && newly_added
+                        );
+                    }
                     if let Some(constant) = maybe_constant.clone() {
                         constants.insert(input_idx, constant);
                     } else if !is_variable && newly_added {
@@ -597,9 +606,9 @@ impl FusionGroupPlan {
                 if let Some(sig) = detect_reduction_signature(graph, node) {
                     reduction_data = Some(sig.data_input);
                     reduction_dim = sig.dim_arg;
-                    reduction_mode = Some(match sig.behavior {
-                        ReductionBehavior::MeanLike => ReductionMode::Mean,
-                        _ => ReductionMode::Sum,
+                    reduction_flavor = Some(match sig.behavior {
+                        ReductionBehavior::MeanLike => ReductionFlavor::Mean,
+                        _ => ReductionFlavor::Sum,
                     });
                 }
             }
@@ -619,7 +628,7 @@ impl FusionGroupPlan {
             kernel: FusionKernelSpec::new(kind, true),
             reduction_data,
             reduction_dim,
-            reduction_mode,
+            reduction_flavor,
             pattern,
         };
 
@@ -1271,8 +1280,8 @@ impl FusionGroupPlan {
             "const OMITNAN: bool = {};\n\n",
             if omitnan { "true" } else { "false" }
         ));
-        // Determine mean semantics from planner-populated reduction_mode
-        let is_mean = matches!(self.reduction_mode, Some(ReductionMode::Mean));
+        // Determine mean semantics from planner-populated reduction flavor
+        let is_mean = matches!(self.reduction_flavor, Some(ReductionFlavor::Mean));
         let post_scale = if is_mean {
             if axis == 0 {
                 if scalar_ty == "f64" {

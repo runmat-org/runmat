@@ -139,7 +139,7 @@ fn fused_single_pass_sum_mul_no_alias() {
         },
         reduction_data: Some(v_mul),
         reduction_dim: Some(v_dim),
-        reduction_mode: None,
+        reduction_flavor: None,
         pattern: None,
     };
 

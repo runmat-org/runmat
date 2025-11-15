@@ -377,6 +377,50 @@ pub enum ProviderPrecision {
     F64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReductionTwoPassMode {
+    Auto,
+    ForceOn,
+    ForceOff,
+}
+
+impl ReductionTwoPassMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReductionTwoPassMode::Auto => "auto",
+            ReductionTwoPassMode::ForceOn => "force_on",
+            ReductionTwoPassMode::ForceOff => "force_off",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ReductionFlavor {
+    Sum,
+    Mean,
+    CustomScale(f64),
+}
+
+impl ReductionFlavor {
+    pub fn is_mean(self) -> bool {
+        matches!(self, ReductionFlavor::Mean)
+    }
+
+    pub fn scale(self, reduce_len: usize) -> f64 {
+        match self {
+            ReductionFlavor::Sum => 1.0,
+            ReductionFlavor::Mean => {
+                if reduce_len == 0 {
+                    1.0
+                } else {
+                    1.0 / reduce_len as f64
+                }
+            }
+            ReductionFlavor::CustomScale(scale) => scale,
+        }
+    }
+}
+
 /// Normalisation mode for correlation coefficients.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CorrcoefNormalization {
@@ -951,6 +995,18 @@ pub trait AccelProvider: Send + Sync {
     /// Allocate a tensor of standard normal values matching a prototype's shape.
     fn random_normal_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         self.random_normal(&prototype.shape)
+    }
+
+    fn stochastic_evolution(
+        &self,
+        _state: &GpuTensorHandle,
+        _drift: f64,
+        _scale: f64,
+        _steps: u32,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "stochastic_evolution not supported by provider"
+        ))
     }
 
     /// Set the provider RNG state to align with the host RNG.
@@ -1806,6 +1862,7 @@ pub trait AccelProvider: Send + Sync {
         _reduce_len: usize,
         _num_slices: usize,
         _workgroup_size: u32,
+        _flavor: ReductionFlavor,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("fused_reduction not supported by provider"))
     }
@@ -1851,6 +1908,11 @@ pub trait AccelProvider: Send + Sync {
     /// Threshold above which provider will prefer two-pass reduction.
     fn two_pass_threshold(&self) -> usize {
         1024
+    }
+
+    /// Current two-pass mode preference (auto/forced on/off).
+    fn reduction_two_pass_mode(&self) -> ReductionTwoPassMode {
+        ReductionTwoPassMode::Auto
     }
 
     /// Fast-path: write a GPU column in a matrix from a GPU vector, returning a new handle.

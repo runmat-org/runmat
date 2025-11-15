@@ -1975,7 +1975,8 @@ async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
                 telemetry.bind_group_cache_hits, telemetry.bind_group_cache_misses
             );
             println!(
-                "Reduction defaults: two_pass_threshold={}, workgroup_size={} (overridable via RUNMAT_TWO_PASS_THRESHOLD / RUNMAT_REDUCTION_WG)",
+                "Reduction defaults: two_pass_mode={}, two_pass_threshold={}, workgroup_size={} (env: RUNMAT_REDUCTION_TWO_PASS / RUNMAT_TWO_PASS_THRESHOLD / RUNMAT_REDUCTION_WG)",
+                p.reduction_two_pass_mode().as_str(),
                 p.two_pass_threshold(),
                 p.default_reduction_workgroup_size()
             );

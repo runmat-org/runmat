@@ -16,7 +16,9 @@ use runmat_accelerate::{
 use runmat_accelerate::{active_group_plan_clone, FusionKind, ShapeInfo, ValueOrigin, VarKind};
 use runmat_builtins::{Type, Value};
 use runmat_runtime::{
-    call_builtin,
+    builtins::common::tensor,
+    builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
+    call_builtin, gather_if_needed,
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
 use std::cell::RefCell;
@@ -1785,6 +1787,27 @@ pub fn interpret_with_vars(
             Instr::Jump(target) => {
                 pc = target;
                 continue;
+            }
+            Instr::StochasticEvolution => {
+                let steps_value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let scale_value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let drift_value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let state_value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let evolved = stochastic_evolution_dispatch(
+                    state_value,
+                    drift_value,
+                    scale_value,
+                    steps_value,
+                )?;
+                stack.push(evolved);
             }
             Instr::CallBuiltin(name, arg_count) => {
                 if name == "nargin" {
@@ -9354,6 +9377,119 @@ pub fn interpret_with_vars(
     }
     Ok(vars)
 }
+
+fn stochastic_evolution_dispatch(
+    state: Value,
+    drift: Value,
+    scale: Value,
+    steps: Value,
+) -> Result<Value, String> {
+    let steps_u32 = parse_steps_value(&steps)?;
+    if steps_u32 == 0 {
+        return Ok(state);
+    }
+
+    #[cfg(feature = "native-accel")]
+    {
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            let (state_handle, state_owned) = ensure_gpu_tensor_for_stochastic(provider, &state)?;
+            let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
+            let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
+            let output = provider
+                .stochastic_evolution(&state_handle, drift_scalar, scale_scalar, steps_u32)
+                .map_err(|e| format!("stochastic_evolution: {e}"))?;
+            if let Some(temp) = state_owned {
+                let _ = provider.free(&temp);
+            }
+            fusion_residency::mark(&output);
+            return Ok(Value::GpuTensor(output));
+        }
+    }
+
+    let gathered_state =
+        gather_if_needed(&state).map_err(|e| format!("stochastic_evolution: {e}"))?;
+    let mut tensor_value = match gathered_state {
+        Value::Tensor(t) => t,
+        other => tensor::value_into_tensor_for("stochastic_evolution", other)?,
+    };
+    let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
+    let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
+    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)?;
+    Ok(Value::Tensor(tensor_value))
+}
+
+fn scalar_from_value_scalar(value: &Value, label: &str) -> Result<f64, String> {
+    match value {
+        Value::Num(n) => Ok(*n),
+        Value::Int(i) => Ok(i.to_f64()),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) => Err(format!(
+            "{label}: expected scalar tensor, got {} elements",
+            t.data.len()
+        )),
+        Value::GpuTensor(_) => {
+            let gathered = gather_if_needed(value).map_err(|e| format!("{label}: {e}"))?;
+            scalar_from_value_scalar(&gathered, label)
+        }
+        other => Err(format!("{label}: expected numeric scalar, got {:?}", other)),
+    }
+}
+
+fn parse_steps_value(value: &Value) -> Result<u32, String> {
+    let raw = scalar_from_value_scalar(value, "stochastic_evolution steps")?;
+    if !raw.is_finite() || raw < 0.0 {
+        return Err("stochastic_evolution: steps must be a non-negative scalar".to_string());
+    }
+    Ok(raw.round() as u32)
+}
+
+#[cfg(feature = "native-accel")]
+fn ensure_gpu_tensor_for_stochastic(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    value: &Value,
+) -> Result<
+    (
+        runmat_accelerate_api::GpuTensorHandle,
+        Option<runmat_accelerate_api::GpuTensorHandle>,
+    ),
+    String,
+> {
+    match value {
+        Value::GpuTensor(handle) => Ok((handle.clone(), None)),
+        Value::Tensor(tensor) => {
+            let handle = upload_tensor_view(provider, tensor)?;
+            Ok((handle.clone(), Some(handle)))
+        }
+        _ => {
+            let gathered =
+                gather_if_needed(value).map_err(|e| format!("stochastic_evolution: {e}"))?;
+            match gathered {
+                Value::Tensor(t) => {
+                    let handle = upload_tensor_view(provider, &t)?;
+                    Ok((handle.clone(), Some(handle)))
+                }
+                other => {
+                    let tensor = tensor::value_into_tensor_for("stochastic_evolution", other)?;
+                    let handle = upload_tensor_view(provider, &tensor)?;
+                    Ok((handle.clone(), Some(handle)))
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "native-accel")]
+fn upload_tensor_view(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    tensor: &runmat_builtins::Tensor,
+) -> Result<runmat_accelerate_api::GpuTensorHandle, String> {
+    let view = runmat_accelerate_api::HostTensorView {
+        data: &tensor.data,
+        shape: &tensor.shape,
+    };
+    provider.upload(&view).map_err(|e| e.to_string())
+}
+
 #[cfg(feature = "native-accel")]
 #[inline]
 fn value_kind(value: &Value) -> &'static str {
@@ -9486,29 +9622,35 @@ fn try_execute_fusion_group(
         );
     }
 
-    let stack_needed = plan.stack_pattern.len();
-    if stack.len() < stack_needed {
-        println!(
-            "fusion stack underflow: needed {} have {} pattern {:?}",
-            stack_needed,
-            stack.len(),
-            plan.stack_pattern
-        );
+    let pattern_len = plan.stack_pattern.len();
+    if stack.len() < pattern_len {
+        if fusion_debug_enabled() {
+            log::debug!(
+                "fusion stack underflow: plan={} needed={} available={} pattern={:?}",
+                plan.index,
+                pattern_len,
+                stack.len(),
+                plan.stack_pattern
+            );
+        }
         return Err("fusion: stack underflow gathering inputs".to_string());
     }
-    let slice_start = stack.len() - stack_needed;
+    let available = pattern_len;
+    let slice_start = stack.len() - available;
     let slice = stack[slice_start..].to_vec();
     stack.truncate(slice_start);
+    let mut consumed: Vec<Option<Value>> = vec![None; pattern_len];
+    let skip = 0;
 
-    debug_assert_eq!(slice.len(), stack_needed);
-
-    let mut consumed: Vec<Value> = Vec::new();
     for (offset, input_idx) in plan.stack_pattern.iter().enumerate() {
-        let val = slice
-            .get(offset)
-            .cloned()
-            .ok_or_else(|| "fusion: unable to read stack segment".to_string())?;
-        consumed.push(val.clone());
+        if offset < skip {
+            continue;
+        }
+        let slice_idx = offset - skip;
+        let Some(val) = slice.get(slice_idx).cloned() else {
+            continue;
+        };
+        consumed[offset] = Some(val.clone());
         if inputs[*input_idx].is_none() {
             // For reductions, only populate from stack if the value is a numeric tensor.
             // This avoids accidentally binding non-tensor metadata (e.g., dim strings) into the fused kernel inputs.
@@ -9607,8 +9749,8 @@ fn try_execute_fusion_group(
         match execute_elementwise(request) {
             Ok(result) => Ok(result),
             Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
+                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                    stack.push(value.clone());
                 }
                 Err(err.to_string())
             }
@@ -9726,7 +9868,7 @@ fn try_execute_fusion_group(
                 }
             }
             // Prefer immediately-consumed stack values (common for reductions over producer results)
-            for v in &consumed {
+            for v in consumed.iter().filter_map(|v| v.as_ref()) {
                 match v {
                     Value::GpuTensor(h) => {
                         rows_cols = Some((
@@ -9756,7 +9898,7 @@ fn try_execute_fusion_group(
                         .iter()
                         .position(|&idx| idx == input_index)
                     {
-                        if let Some(val) = consumed.get(stack_offset) {
+                        if let Some(val) = consumed.get(stack_offset).and_then(|v| v.as_ref()) {
                             match val {
                                 Value::GpuTensor(h) => {
                                     let r = h.shape.get(0).copied().unwrap_or(1).max(1);
@@ -9842,7 +9984,7 @@ fn try_execute_fusion_group(
 
             // Fallback: any tensor input
             if rows_cols.is_none() {
-                for v in &consumed {
+                for v in consumed.iter().filter_map(|v| v.as_ref()) {
                     match v {
                         Value::GpuTensor(h) => {
                             rows_cols = Some((
@@ -9940,7 +10082,7 @@ fn try_execute_fusion_group(
                             _ => None,
                         }
                     };
-                    for value in &consumed {
+                    for value in consumed.iter().filter_map(|v| v.as_ref()) {
                         if let Some(prod) = inspect_value(value) {
                             total_elems = Some(prod.max(1));
                             break;
@@ -10046,7 +10188,7 @@ fn try_execute_fusion_group(
                 }
                 _ => {}
             };
-            for v in &consumed {
+            for v in consumed.iter().filter_map(|v| v.as_ref()) {
                 check_val(v);
             }
             for v in &request.inputs {
@@ -10058,8 +10200,8 @@ fn try_execute_fusion_group(
             log::debug!(
                 "fusion reduction: skipping fusion due to unresolved shape; falling back to provider path"
             );
-            for value in consumed.into_iter().rev() {
-                stack.push(value);
+            for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                stack.push(value.clone());
             }
             return Err("fusion: reduction shape unresolved".to_string());
         }
@@ -10070,8 +10212,8 @@ fn try_execute_fusion_group(
             .as_deref()
             == Some("1")
         {
-            for value in consumed.into_iter().rev() {
-                stack.push(value);
+            for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                stack.push(value.clone());
             }
             return Err("fusion: fused reductions disabled".to_string());
         }
@@ -10107,8 +10249,8 @@ fn try_execute_fusion_group(
         match execute_reduction(request, reduce_len, num_slices, workgroup_size) {
             Ok(result) => Ok(result),
             Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
+                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                    stack.push(value.clone());
                 }
                 Err(err.to_string())
             }
@@ -10117,8 +10259,8 @@ fn try_execute_fusion_group(
         match execute_centered_gram(request) {
             Ok(result) => Ok(result),
             Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
+                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                    stack.push(value.clone());
                 }
                 Err(err.to_string())
             }
@@ -10127,8 +10269,8 @@ fn try_execute_fusion_group(
         match execute_power_step_normalize(request) {
             Ok(result) => Ok(result),
             Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
+                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                    stack.push(value.clone());
                 }
                 Err(err.to_string())
             }
@@ -10139,8 +10281,8 @@ fn try_execute_fusion_group(
             Ok(result) => Ok(result),
             Err(err) => {
                 log::debug!("explained variance fusion fallback: {}", err);
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
+                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                    stack.push(value.clone());
                 }
                 Err(err.to_string())
             }
@@ -10149,8 +10291,8 @@ fn try_execute_fusion_group(
         match execute_matmul_epilogue(request) {
             Ok(result) => Ok(result),
             Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
+                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                    stack.push(value.clone());
                 }
                 Err(err.to_string())
             }
@@ -10159,16 +10301,16 @@ fn try_execute_fusion_group(
         match execute_image_normalize(request) {
             Ok(result) => Ok(result),
             Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
+                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                    stack.push(value.clone());
                 }
                 Err(err.to_string())
             }
         }
     } else {
         // Unknown fusion kind; restore stack and report
-        for value in consumed.into_iter().rev() {
-            stack.push(value);
+        for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+            stack.push(value.clone());
         }
         Err("fusion: unsupported fusion kind".to_string())
     }

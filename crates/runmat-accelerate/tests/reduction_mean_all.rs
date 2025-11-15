@@ -9,7 +9,7 @@ use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
 use runmat_builtins::{Type, Value};
 use std::collections::HashMap;
 
@@ -156,7 +156,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
         },
         reduction_data: Some(v_sq),
         reduction_dim: None,
-        reduction_mode: Some(runmat_accelerate::fusion::ReductionMode::Mean),
+        reduction_flavor: Some(ReductionFlavor::Mean),
         pattern: None,
     };
 
