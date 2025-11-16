@@ -1,7 +1,9 @@
 use anyhow::anyhow;
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
 
 type ResidencyClearFn = fn(&GpuTensorHandle);
@@ -791,6 +793,9 @@ pub trait AccelProvider: Send + Sync {
     fn download(&self, h: &GpuTensorHandle) -> anyhow::Result<crate::HostTensorOwned>;
     fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
     fn device_info(&self) -> String;
+    fn device_id(&self) -> u32 {
+        0
+    }
 
     /// Gather elements from `source` at the provided zero-based linear `indices`, materialising
     /// a dense tensor with the specified `output_shape`.
@@ -2030,6 +2035,12 @@ pub trait AccelProvider: Send + Sync {
 
 static GLOBAL_PROVIDER: Lazy<RwLock<Option<&'static dyn AccelProvider>>> =
     Lazy::new(|| RwLock::new(None));
+static PROVIDER_REGISTRY: Lazy<RwLock<HashMap<u32, &'static dyn AccelProvider>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+static DEVICE_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
+thread_local! {
+    static THREAD_PROVIDER: Cell<Option<&'static dyn AccelProvider>> = Cell::new(None);
+}
 
 /// Register a global acceleration provider.
 ///
@@ -2042,9 +2053,19 @@ pub unsafe fn register_provider(p: &'static dyn AccelProvider) {
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = Some(p);
     }
+    register_provider_for_device(p.device_id(), p);
+}
+
+unsafe fn register_provider_for_device(device_id: u32, provider: &'static dyn AccelProvider) {
+    if let Ok(mut guard) = PROVIDER_REGISTRY.write() {
+        guard.insert(device_id, provider);
+    }
 }
 
 pub fn provider() -> Option<&'static dyn AccelProvider> {
+    if let Some(p) = THREAD_PROVIDER.with(|cell| cell.get()) {
+        return Some(p);
+    }
     GLOBAL_PROVIDER
         .read()
         .ok()
@@ -2056,6 +2077,51 @@ pub fn clear_provider() {
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = None;
     }
+    if let Ok(mut map) = PROVIDER_REGISTRY.write() {
+        map.clear();
+    }
+}
+
+pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider> {
+    PROVIDER_REGISTRY
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&device_id).copied())
+        .or_else(|| provider())
+}
+
+pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
+    provider_for_device(handle.device_id)
+}
+
+pub fn next_device_id() -> u32 {
+    DEVICE_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+pub struct ThreadProviderGuard {
+    prev: Option<&'static dyn AccelProvider>,
+}
+
+impl ThreadProviderGuard {
+    pub fn set(provider: Option<&'static dyn AccelProvider>) -> Self {
+        let prev = THREAD_PROVIDER.with(|cell| {
+            let old = cell.get();
+            cell.set(provider);
+            old
+        });
+        ThreadProviderGuard { prev }
+    }
+}
+
+impl Drop for ThreadProviderGuard {
+    fn drop(&mut self) {
+        let prev = self.prev.take();
+        THREAD_PROVIDER.with(|cell| cell.set(prev));
+    }
+}
+
+pub fn set_thread_provider(provider: Option<&'static dyn AccelProvider>) {
+    THREAD_PROVIDER.with(|cell| cell.set(provider));
 }
 
 /// Convenience: perform elementwise add via provider if possible; otherwise return None

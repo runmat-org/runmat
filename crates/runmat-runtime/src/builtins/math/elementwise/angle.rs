@@ -243,7 +243,7 @@ fn angle_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn angle_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(device_result) = provider.unary_angle(&handle) {
             return Ok(Value::GpuTensor(device_result));
         }

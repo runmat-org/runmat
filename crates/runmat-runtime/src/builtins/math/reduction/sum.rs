@@ -2,8 +2,12 @@
 
 use std::collections::HashSet;
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
-use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision, ReductionFlavor,
+};
+use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
+const NAME: &str = "sum";
+
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -240,6 +244,29 @@ fn sum_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     apply_output_template(raw_result, &parsed.output, &input_meta)
 }
 
+fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
+    match value {
+        Value::Tensor(t) => Some(t.dtype),
+        Value::GpuTensor(handle) => {
+            let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
+                runmat_accelerate_api::provider_for_handle(handle)
+                    .map(|provider| provider.precision())
+            });
+            precision.map(precision_to_dtype)
+        }
+        Value::Num(_) => Some(NumericDType::F64),
+        Value::LogicalArray(_) => Some(NumericDType::F64),
+        _ => None,
+    }
+}
+
+fn precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
+    match precision {
+        ProviderPrecision::F32 => NumericDType::F32,
+        ProviderPrecision::F64 => NumericDType::F64,
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 enum DimSelection {
     Auto,
@@ -296,6 +323,7 @@ enum IntClass {
 struct InputMeta {
     class: InputClass,
     device: DevicePreference,
+    numeric_dtype: Option<NumericDType>,
 }
 
 impl InputMeta {
@@ -311,7 +339,12 @@ impl InputMeta {
             Value::GpuTensor(_) => DevicePreference::Gpu,
             _ => DevicePreference::Host,
         };
-        Self { class, device }
+        let numeric_dtype = numeric_dtype_from_value(value);
+        Self {
+            class,
+            device,
+            numeric_dtype,
+        }
     }
 }
 
@@ -1007,8 +1040,58 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String
             Value::Tensor(t) if t.data.len() == 1 => class.to_value(t.data[0]),
             other => Ok(other),
         },
-        _ => Ok(value),
+        _ => {
+            if let Some(dtype) = meta.numeric_dtype {
+                coerce_value_to_dtype(value, dtype)
+            } else {
+                Ok(value)
+            }
+        }
     }
+}
+
+fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> Result<Value, String> {
+    match dtype {
+        NumericDType::F64 => Ok(value),
+        NumericDType::F32 => match value {
+            Value::Tensor(tensor) => {
+                let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
+                Ok(Value::Tensor(tensor))
+            }
+            Value::Num(n) => {
+                let tensor = Tensor::new_with_dtype(vec![n], vec![1, 1], NumericDType::F32)
+                    .map_err(|e| format!("{NAME}: {e}"))?;
+                Ok(Value::Tensor(tensor))
+            }
+            Value::LogicalArray(logical) => {
+                let tensor =
+                    tensor::logical_to_tensor(&logical).map_err(|e| format!("{NAME}: {e}"))?;
+                let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
+                Ok(Value::Tensor(tensor))
+            }
+            Value::GpuTensor(handle) => {
+                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
+                Ok(Value::Tensor(tensor))
+            }
+            other => Ok(other),
+        },
+    }
+}
+
+fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
+    match dtype {
+        NumericDType::F64 => {
+            tensor.dtype = NumericDType::F64;
+        }
+        NumericDType::F32 => {
+            for value in &mut tensor.data {
+                *value = (*value as f32) as f64;
+            }
+            tensor.dtype = NumericDType::F32;
+        }
+    }
+    tensor
 }
 
 fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String> {

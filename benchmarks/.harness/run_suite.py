@@ -500,10 +500,72 @@ def _accumulate_calibration(target: Dict[str, Any], sample: Dict[str, Any]) -> N
             target["provider_conflict"] = True
             target["provider"] = None
 
+def _run_auto_calibrate(results_path: Path, dry_run: bool, json_report: Optional[Path]) -> None:
+    bin_path = ROOT / "target" / "release" / "runmat"
+    if not bin_path.exists():
+        raise SystemExit(
+            f"runmat binary not found at {bin_path}. Re-run without --auto-calibrate or build the release binary."
+        )
+
+    cmd = [str(bin_path), "accel-calibrate", str(results_path)]
+    if dry_run:
+        cmd.append("--dry-run")
+
+    if json_report:
+        ensure_output_path(json_report)
+        cmd.append("--json")
+        proc = subprocess.run(cmd, cwd=str(ROOT), text=True, capture_output=True)
+        if proc.returncode != 0:
+            print(proc.stdout)
+            print(proc.stderr, file=sys.stderr)
+            raise SystemExit(
+                f"runmat accel calibrate failed (dry_run={dry_run}) for {results_path}"
+            )
+        payload = proc.stdout.strip() or "{}"
+        json_report.write_text(payload)
+        print(
+            json.dumps(
+                {
+                    "AUTO_CALIBRATION": {
+                        "input": str(results_path),
+                        "dry_run": dry_run,
+                        "report": str(json_report),
+                    }
+                },
+                indent=2,
+            )
+        )
+    else:
+        proc = subprocess.run(cmd, cwd=str(ROOT), text=True)
+        if proc.returncode != 0:
+            raise SystemExit(
+                f"runmat accel calibrate failed (dry_run={dry_run}) for {results_path}"
+            )
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Run full benchmark suite with parity checks")
+    ap = argparse.ArgumentParser(description="Run full benchmark suite with parity or perf variants")
     ap.add_argument("--suite", default=str(HARNESS_DIR / "suite.yaml"))
     ap.add_argument("--output", default=str(CASES_DIR / "../results/suite_results.json"))
+    ap.add_argument(
+        "--variant",
+        default="parity",
+        help="Benchmark variant to run (parity|perf); overrides per-case config.",
+    )
+    ap.add_argument(
+        "--auto-calibrate",
+        action="store_true",
+        help="After the suite finishes, apply auto-offload calibration using runmat accel calibrate.",
+    )
+    ap.add_argument(
+        "--auto-calibration-dry-run",
+        action="store_true",
+        help="Preview calibration adjustments without persisting them (requires --auto-calibrate).",
+    )
+    ap.add_argument(
+        "--auto-calibration-report",
+        help="Optional path to write the JSON report from `runmat accel calibrate --json`.",
+    )
     args = ap.parse_args()
 
     # Ensure runmat is prebuilt once so build time is not included in any run
@@ -536,10 +598,15 @@ def main() -> None:
             continue
         label = case.get("label", case_id)
         case_dir = case.get("case", case_id)  # directory name under benchmarks/benchmarks
-        parity = case.get("parity", {})
-        metric_regex = parity.get("metric_regex")
-        rtol = float(parity.get("rtol", 1e-3))
-        atol = float(parity.get("atol", 1e-5))
+        parity_cfg = case.get("parity")
+        if isinstance(parity_cfg, dict):
+            metric_regex = parity_cfg.get("metric_regex")
+            rtol = float(parity_cfg.get("rtol", 1e-3))
+            atol = float(parity_cfg.get("atol", 1e-5))
+        else:
+            metric_regex = None
+            rtol = float(1e-3)
+            atol = float(1e-5)
         harness = case.get("harness", {})
         warmup = int(harness.get("warmup", 0))
         per_case_timeout = int(harness.get("timeout_s", timeout_s))
@@ -558,7 +625,8 @@ def main() -> None:
                 elif isinstance(v, int):
                     overrides[k] = v
         include_impl = case.get("include_impl") or [impl for impl in essential_impls if impl in case.get("entries", {})]
-        variant = case.get("variant", "default")
+        case_variant = case.get("variant")
+        variant = case_variant if case_variant else args.variant
 
         # Parameterization: support new schema with defaults + scale
         params = case.get("params", {})
@@ -676,6 +744,24 @@ def main() -> None:
         results["suite"]["auto_offload_calibration"] = suite_calib_payload    
     out.write_text(json.dumps(results, indent=2))
     print(json.dumps({"WROTE": str(out)}, indent=2))
+
+    if args.auto_calibrate:
+        calib_exists = "auto_offload_calibration" in results["suite"]
+        if not calib_exists:
+            print(
+                json.dumps(
+                    {
+                        "AUTO_CALIBRATION": {
+                            "status": "skipped",
+                            "reason": "no auto_offload_calibration sample present",
+                        }
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            report_path = Path(args.auto_calibration_report).resolve() if args.auto_calibration_report else None
+            _run_auto_calibrate(out, args.auto_calibration_dry_run, report_path)
 
 
 if __name__ == "__main__":

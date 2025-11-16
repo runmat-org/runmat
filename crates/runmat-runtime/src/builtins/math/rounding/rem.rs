@@ -248,31 +248,33 @@ fn rem_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
 }
 
 fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if a.shape == b.shape {
-            if let Ok(div) = provider.elem_div(&a, &b) {
-                match provider.unary_fix(&div) {
-                    Ok(fixed) => match provider.elem_mul(&b, &fixed) {
-                        Ok(mul) => match provider.elem_sub(&a, &mul) {
-                            Ok(out) => {
-                                let _ = provider.free(&div);
-                                let _ = provider.free(&fixed);
-                                let _ = provider.free(&mul);
-                                return Ok(Value::GpuTensor(out));
-                            }
+    if a.device_id == b.device_id {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
+            if a.shape == b.shape {
+                if let Ok(div) = provider.elem_div(&a, &b) {
+                    match provider.unary_fix(&div) {
+                        Ok(fixed) => match provider.elem_mul(&b, &fixed) {
+                            Ok(mul) => match provider.elem_sub(&a, &mul) {
+                                Ok(out) => {
+                                    let _ = provider.free(&div);
+                                    let _ = provider.free(&fixed);
+                                    let _ = provider.free(&mul);
+                                    return Ok(Value::GpuTensor(out));
+                                }
+                                Err(_) => {
+                                    let _ = provider.free(&mul);
+                                    let _ = provider.free(&fixed);
+                                    let _ = provider.free(&div);
+                                }
+                            },
                             Err(_) => {
-                                let _ = provider.free(&mul);
                                 let _ = provider.free(&fixed);
                                 let _ = provider.free(&div);
                             }
                         },
                         Err(_) => {
-                            let _ = provider.free(&fixed);
                             let _ = provider.free(&div);
                         }
-                    },
-                    Err(_) => {
-                        let _ = provider.free(&div);
                     }
                 }
             }

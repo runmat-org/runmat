@@ -277,7 +277,7 @@ fn pow2_binary(mantissa: Value, exponent: Value) -> Result<Value, String> {
 }
 
 fn pow2_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_pow2(&handle) {
             return Ok(Value::GpuTensor(out));
         }
@@ -287,10 +287,12 @@ fn pow2_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 }
 
 fn pow2_gpu_scale(mantissa: GpuTensorHandle, exponent: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if mantissa.shape == exponent.shape {
-            if let Ok(out) = provider.pow2_scale(&mantissa, &exponent) {
-                return Ok(Value::GpuTensor(out));
+    if mantissa.device_id == exponent.device_id {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&mantissa) {
+            if mantissa.shape == exponent.shape {
+                if let Ok(out) = provider.pow2_scale(&mantissa, &exponent) {
+                    return Ok(Value::GpuTensor(out));
+                }
             }
         }
     }

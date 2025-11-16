@@ -438,7 +438,18 @@ fn ctranspose_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 
         if let Some(transposed_handle) = transposed {
             match provider.unary_conj(&transposed_handle) {
-                Ok(conjugated) => return Ok(Value::GpuTensor(conjugated)),
+                Ok(conjugated) => {
+                    if let Some(info) =
+                        runmat_accelerate_api::handle_transpose_info(&transposed_handle)
+                    {
+                        runmat_accelerate_api::record_handle_transpose(
+                            &conjugated,
+                            info.base_rows,
+                            info.base_cols,
+                        );
+                    }
+                    return Ok(Value::GpuTensor(conjugated));
+                }
                 Err(err) => {
                     let info = provider.device_info_struct();
                     warn!(

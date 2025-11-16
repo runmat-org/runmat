@@ -240,7 +240,7 @@ fn exp_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn exp_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_exp(&handle) {
             return Ok(Value::GpuTensor(out));
         }

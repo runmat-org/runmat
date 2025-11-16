@@ -39,6 +39,7 @@ where
     runmat_accelerate::simple_provider::register_inprocess_provider();
     runmat_accelerate::simple_provider::reset_inprocess_rng();
     let provider = runmat_accelerate_api::provider().expect("test provider registered");
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     f(provider)
 }
 

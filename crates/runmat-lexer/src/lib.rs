@@ -199,6 +199,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
     tokenize_detailed(input)
         .into_iter()
         .map(|t| t.token)
+        .filter(|tok| !matches!(tok, Token::Newline))
         .collect()
 }
 
@@ -565,12 +566,11 @@ fn transpose_filter(lex: &mut Lexer<Token>) -> Filter<()> {
 fn ellipsis_emit_and_skip_to_eol(lex: &mut Lexer<Token>) -> Filter<()> {
     // After an ellipsis, ignore the remainder of the physical line (including comments)
     let rest = lex.remainder();
-    if let Some(pos) = rest.find('\n') {
-        lex.bump(pos); // position to before the newline; newline token will consume it
+    if let Some((idx, len)) = find_line_terminator(rest) {
+        lex.bump(idx + len); // consume through the newline so no standalone newline token is emitted
     } else {
         lex.bump(rest.len());
     }
-    // Ellipsis itself is a token and is considered to be in an expression context
     lex.extras.last_was_value = true; // e.g., '1 + ...\n 2' the ellipsis does not reset value-ness
     Filter::Emit(())
 }
@@ -584,8 +584,11 @@ fn newline_skip(lex: &mut Lexer<Token>) -> Filter<()> {
 fn section_marker(lex: &mut Lexer<Token>) -> Filter<()> {
     // Only emit a Section token when at start of line; otherwise, treat as a comment and skip
     if lex.extras.line_start {
-        lex.extras.line_start = false;
+        lex.extras.line_start = true;
         lex.extras.last_was_value = false;
+        if let Some((_, len)) = find_line_terminator(lex.remainder()) {
+            lex.bump(len);
+        }
         Filter::Emit(())
     } else {
         // Skip to end of line (already consumed by regex except for the newline char)
@@ -603,6 +606,11 @@ fn block_comment_skip(lex: &mut Lexer<Token>) -> Filter<()> {
     } else {
         lex.bump(rest.len()); // consume to end if no terminator
     }
+    if let Some((_, len)) = find_line_terminator(lex.remainder()) {
+        lex.bump(len);
+        lex.extras.line_start = true;
+        lex.extras.last_was_value = false;
+    }
     Filter::Skip
 }
 
@@ -615,4 +623,22 @@ fn line_comment_start(lex: &mut Lexer<Token>) -> Filter<()> {
         lex.bump(rest.len());
     }
     Filter::Skip
+}
+
+fn find_line_terminator(s: &str) -> Option<(usize, usize)> {
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'\n' => return Some((i, 1)),
+            b'\r' => {
+                if bytes.get(i + 1) == Some(&b'\n') {
+                    return Some((i, 2));
+                } else {
+                    return Some((i, 1));
+                }
+            }
+            _ => continue,
+        }
+    }
+    None
 }

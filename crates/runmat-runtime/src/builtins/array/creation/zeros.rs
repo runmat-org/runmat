@@ -601,26 +601,18 @@ mod tests {
     fn zeros_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![3, 3]);
+        assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
     #[test]
     fn zeros_rectangular_from_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 4]);
-                assert_eq!(t.data.len(), 8);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 4]);
+        assert_eq!(tensor.data.len(), 8);
     }
 
     #[test]
@@ -628,10 +620,8 @@ mod tests {
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 3]),
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 3]);
     }
 
     #[test]
@@ -652,13 +642,9 @@ mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
     #[test]
@@ -688,13 +674,9 @@ mod tests {
             Value::Tensor(proto),
         ];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 3]);
+        assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
     #[test]
@@ -702,13 +684,9 @@ mod tests {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
     #[test]

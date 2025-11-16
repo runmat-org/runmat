@@ -38,7 +38,7 @@ def detect_runmat_command() -> List[str]:
     )
 
 
-def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
+def build_impl_commands(case: str, variant: str = "default", include_impl: Optional[List[str]] = None) -> List[Dict]:
     """Return a list of implementations with command invocations and metadata.
 
     If variant != "default", prefer variant-specific files when present, e.g.:
@@ -55,7 +55,7 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
     runmat_m_variant = casedir / f"runmat_{variant}.m"
     runmat_m_default = casedir / "runmat.m"
     runmat_m = runmat_m_variant if runmat_m_variant.exists() else runmat_m_default
-    if runmat_m.exists():
+    if runmat_m.exists() and (include_impl is None or "runmat" in include_impl):
         impls.append(
             {
                 "name": "runmat",
@@ -66,7 +66,7 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
         )
 
     # GNU Octave (reuse the same .m file)
-    if runmat_m.exists() and which("octave"):
+    if runmat_m.exists() and which("octave") and (include_impl is None or "octave" in include_impl):
         impls.append(
             {
                 "name": "octave",
@@ -89,7 +89,11 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
     numpy_py_variant = casedir / f"python_numpy_{variant}.py"
     numpy_py_default = casedir / "python_numpy.py"
     numpy_py = numpy_py_variant if numpy_py_variant.exists() else numpy_py_default
-    if numpy_py.exists() and (which("python3") or (ROOT / ".bench_venv").exists()):
+    if (
+        numpy_py.exists()
+        and (which("python3") or (ROOT / ".bench_venv").exists())
+        and (include_impl is None or "python-numpy" in include_impl)
+    ):
         impls.append(
             {
                 "name": "python-numpy",
@@ -103,7 +107,11 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
     torch_py_variant = casedir / f"python_torch_{variant}.py"
     torch_py_default = casedir / "python_torch.py"
     torch_py = torch_py_variant if torch_py_variant.exists() else torch_py_default
-    if torch_py.exists() and (which("python3") or (ROOT / ".bench_venv").exists()):
+    if (
+        torch_py.exists()
+        and (which("python3") or (ROOT / ".bench_venv").exists())
+        and (include_impl is None or "python-torch" in include_impl)
+    ):
         impls.append(
             {
                 "name": "python-torch",
@@ -117,7 +125,7 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
     julia_jl_variant = casedir / f"julia_{variant}.jl"
     julia_jl_default = casedir / "julia.jl"
     julia_jl = julia_jl_variant if julia_jl_variant.exists() else julia_jl_default
-    if julia_jl.exists() and which("julia"):
+    if julia_jl.exists() and which("julia") and (include_impl is None or "julia" in include_impl):
         impls.append(
             {
                 "name": "julia",
@@ -274,17 +282,15 @@ def main() -> None:
             return "lcg"
         return lowered
 
-    impls = build_impl_commands(args.case, variant_tag(args.variant))
+    include_list: List[str] = [s.strip() for s in args.include_impl.split(",") if s.strip()]
+    impls = build_impl_commands(
+        args.case, variant_tag(args.variant), include_impl=(include_list or None)
+    )
     if not impls:
         raise SystemExit(f"No implementations found for case: {args.case}")
 
-    include: List[str] = [s.strip() for s in args.include_impl.split(",") if s.strip()]
     exclude: List[str] = [s.strip() for s in args.exclude_impl.split(",") if s.strip()]
 
-    if include:
-        impls = [impl for impl in impls if impl["name"] in include]
-        if not impls:
-            raise SystemExit(f"No implementations remain after include filter: {include}")
     if exclude:
         impls = [impl for impl in impls if impl["name"] not in exclude]
         if not impls:

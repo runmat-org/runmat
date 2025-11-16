@@ -255,31 +255,33 @@ fn mod_builtin(lhs: Value, rhs: Value) -> Result<Value, String> {
 }
 
 fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if a.shape == b.shape {
-            if let Ok(div) = provider.elem_div(&a, &b) {
-                match provider.unary_floor(&div) {
-                    Ok(floored) => match provider.elem_mul(&b, &floored) {
-                        Ok(mul) => match provider.elem_sub(&a, &mul) {
-                            Ok(out) => {
-                                let _ = provider.free(&div);
-                                let _ = provider.free(&floored);
-                                let _ = provider.free(&mul);
-                                return Ok(Value::GpuTensor(out));
-                            }
+    if a.device_id == b.device_id {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
+            if a.shape == b.shape {
+                if let Ok(div) = provider.elem_div(&a, &b) {
+                    match provider.unary_floor(&div) {
+                        Ok(floored) => match provider.elem_mul(&b, &floored) {
+                            Ok(mul) => match provider.elem_sub(&a, &mul) {
+                                Ok(out) => {
+                                    let _ = provider.free(&div);
+                                    let _ = provider.free(&floored);
+                                    let _ = provider.free(&mul);
+                                    return Ok(Value::GpuTensor(out));
+                                }
+                                Err(_) => {
+                                    let _ = provider.free(&mul);
+                                    let _ = provider.free(&floored);
+                                    let _ = provider.free(&div);
+                                }
+                            },
                             Err(_) => {
-                                let _ = provider.free(&mul);
                                 let _ = provider.free(&floored);
                                 let _ = provider.free(&div);
                             }
                         },
                         Err(_) => {
-                            let _ = provider.free(&floored);
                             let _ = provider.free(&div);
                         }
-                    },
-                    Err(_) => {
-                        let _ = provider.free(&div);
                     }
                 }
             }

@@ -302,7 +302,7 @@ fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
 }
 
 fn factorial_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_factorial(&handle) {
             return Ok(Value::GpuTensor(out));
         }

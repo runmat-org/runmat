@@ -32,7 +32,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
                     );
                 }
             }
-            let provider = runmat_accelerate_api::provider()
+            let provider = runmat_accelerate_api::provider_for_handle(handle)
                 .ok_or_else(|| "gather: no acceleration provider registered".to_string())?;
             let is_logical = runmat_accelerate_api::handle_is_logical(handle);
             let host = provider.download(handle).map_err(|e| e.to_string())?;

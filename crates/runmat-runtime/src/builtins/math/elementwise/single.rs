@@ -303,7 +303,7 @@ fn single_from_char_array(chars: CharArray) -> Result<Value, String> {
 }
 
 fn single_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match provider.unary_single(&handle) {
             Ok(result) => {
                 let _ = provider.free(&handle);
@@ -317,7 +317,7 @@ fn single_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 
     let tensor = gpu_helpers::gather_tensor(&handle)?;
     let converted = single_tensor_to_host(tensor)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let _ = provider.free(&handle);
         let view = HostTensorView {
             data: &converted.data,

@@ -303,7 +303,7 @@ fn ceil_char_array(ca: CharArray, strategy: CeilStrategy) -> Result<Value, Strin
 
 fn ceil_gpu(handle: GpuTensorHandle, args: &CeilArgs) -> Result<Value, String> {
     if matches!(args.strategy, CeilStrategy::Integer) {
-        if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             if let Ok(out) = provider.unary_ceil(&handle) {
                 return Ok(Value::GpuTensor(out));
             }

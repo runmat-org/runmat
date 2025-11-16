@@ -7,6 +7,9 @@ use runmat_builtins::NumericDType;
 struct F32TestProvider;
 
 impl AccelProvider for F32TestProvider {
+    fn device_id(&self) -> u32 {
+        0
+    }
     fn gather_linear(
         &self,
         _: &GpuTensorHandle,

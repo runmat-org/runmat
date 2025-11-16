@@ -1209,6 +1209,9 @@ fn is_vector_like(rows: usize, cols: usize, dims: usize) -> bool {
 }
 
 impl AccelProvider for InProcessProvider {
+    fn device_id(&self) -> u32 {
+        0
+    }
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,

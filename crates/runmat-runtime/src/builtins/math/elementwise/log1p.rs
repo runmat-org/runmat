@@ -251,7 +251,7 @@ fn log1p_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn log1p_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         // Fast path: try device op first; if unsupported, fall back to complex-domain check
         if let Ok(out) = provider.unary_log1p(&handle) {
             return Ok(Value::GpuTensor(out));

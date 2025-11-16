@@ -1,3 +1,4 @@
+use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -93,17 +94,32 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
             wgsl_str,
         );
         let key = compute_hash(&wgsl_bytes, layout_tag, meta.workgroup_size);
-        let pipeline = get_or_create(
-            key,
-            &pl,
-            &module,
-            "warmup-precompiled-pipeline",
-            Some(&wgsl_bytes),
-            Some(layout_tag),
-            meta.workgroup_size,
-        );
-        after_create_noop(&pipeline);
-        compiled += 1;
+        let compiled_pipeline = panic::catch_unwind(AssertUnwindSafe(|| {
+            let pipeline = get_or_create(
+                key,
+                &pl,
+                &module,
+                "warmup-precompiled-pipeline",
+                Some(&wgsl_bytes),
+                Some(layout_tag),
+                meta.workgroup_size,
+            );
+            after_create_noop(&pipeline);
+        }));
+        match compiled_pipeline {
+            Ok(_) => {
+                compiled += 1;
+            }
+            Err(_) => {
+                log::warn!(
+                    "warmup: failed to precompile pipeline {}; removing incompatible cache entry",
+                    stem
+                );
+                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_file(&wgsl_path);
+                continue;
+            }
+        }
     }
     if compiled > 0 {
         log::info!(

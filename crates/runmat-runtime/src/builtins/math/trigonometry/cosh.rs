@@ -226,7 +226,7 @@ fn cosh_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn cosh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_cosh(&handle) {
             return Ok(Value::GpuTensor(out));
         }

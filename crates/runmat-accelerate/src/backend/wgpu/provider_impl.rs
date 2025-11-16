@@ -133,7 +133,8 @@ pub struct WgpuProvider {
     buffer_residency: BufferResidency,
     next_id: AtomicU64,
     pipelines: WgpuPipelines,
-    device_id: u32,
+    runtime_device_id: u32,
+    cache_device_id: u32,
     precision: NumericPrecision,
     element_size: usize,
     fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
@@ -186,9 +187,9 @@ fn build_matrix_operand_view(
     handle: &GpuTensorHandle,
     entry: &BufferEntry,
 ) -> Result<MatrixOperandView> {
-    if entry.shape.len() != 2 {
+    if entry.shape.len() < 2 {
         return Err(anyhow!(
-            "matrix operand requires 2D tensor (buffer {} shape {:?})",
+            "matrix operand requires at least 2D tensor (buffer {} shape {:?})",
             handle.buffer_id,
             entry.shape
         ));
@@ -1702,7 +1703,7 @@ impl WgpuProvider {
         self.create_storage_buffer_checked_with_usage(len, label, BufferUsageClass::Generic)
     }
     pub fn device_id(&self) -> u32 {
-        self.device_id
+        self.cache_device_id
     }
 
     pub(crate) fn device_ref(&self) -> &wgpu::Device {
@@ -2034,7 +2035,8 @@ impl WgpuProvider {
 
         let pipelines = WgpuPipelines::new(&device, precision);
         let adapter_info = adapter.get_info();
-        let device_id = adapter_info.device;
+        let cache_device_id = adapter_info.device;
+        let runtime_device_id = runmat_accelerate_api::next_device_id();
         let element_size = match precision {
             NumericPrecision::F64 => std::mem::size_of::<f64>(),
             NumericPrecision::F32 => std::mem::size_of::<f32>(),
@@ -2057,12 +2059,12 @@ impl WgpuProvider {
         } else if let Some(base) = dirs::cache_dir() {
             base.join("runmat")
                 .join("pipelines")
-                .join(format!("device-{}", device_id))
+                .join(format!("device-{}", cache_device_id))
         } else {
             // Fallback to local target/tmp
             std::path::PathBuf::from("target")
                 .join("tmp")
-                .join(format!("wgpu-pipeline-cache-{}", device_id))
+                .join(format!("wgpu-pipeline-cache-{}", cache_device_id))
         };
 
         info!(
@@ -2081,7 +2083,8 @@ impl WgpuProvider {
             buffer_residency: BufferResidency::new(Self::BUFFER_RESIDENCY_MAX_PER_KEY),
             next_id: AtomicU64::new(1),
             pipelines,
-            device_id,
+            runtime_device_id,
+            cache_device_id,
             precision,
             element_size,
             fused_pipeline_cache: Mutex::new(HashMap::new()),
@@ -2133,7 +2136,7 @@ impl WgpuProvider {
         log::trace!("wgpu register id={} len={} shape={:?}", id, len, &shape);
         let handle = GpuTensorHandle {
             shape,
-            device_id: self.device_id,
+            device_id: self.runtime_device_id,
             buffer_id: id,
         };
         runmat_accelerate_api::set_handle_logical(&handle, false);
@@ -2147,7 +2150,7 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
     ) {
-        if lhs.device_id != self.device_id || rhs.device_id != self.device_id {
+        if lhs.device_id != self.runtime_device_id || rhs.device_id != self.runtime_device_id {
             return;
         }
         log::debug!(
@@ -2604,10 +2607,10 @@ impl WgpuProvider {
         self.device.poll(wgpu::Maintain::Wait);
     }
     fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
-        if handle.device_id != self.device_id {
+        if handle.device_id != self.runtime_device_id {
             return Err(anyhow!(
                 "handle device mismatch: expected {}, got {}",
-                self.device_id,
+                self.runtime_device_id,
                 handle.device_id
             ));
         }
@@ -10072,7 +10075,7 @@ impl WgpuProvider {
 
         let out_buffer =
             self.create_storage_buffer_checked(expected, "runmat-gather-linear-out")?;
-        let params = crate::backend::wgpu::params::LinearGatherParams {
+        let params = LinearGatherParams {
             count: indices.len() as u32,
             _pad: [0; 3],
         };
@@ -10152,7 +10155,7 @@ impl WgpuProvider {
         }));
         self.queue
             .write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
-        let params = crate::backend::wgpu::params::LinearScatterParams {
+        let params = LinearScatterParams {
             count: indices.len() as u32,
             _pad: [0; 3],
         };
@@ -10351,6 +10354,9 @@ impl WgpuProvider {
             offset += chunk_len;
         }
         let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
+            runmat_accelerate_api::record_handle_transpose(&handle, info.base_rows, info.base_cols);
+        }
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(handle)
@@ -12275,6 +12281,9 @@ impl WgpuProvider {
     }
 }
 impl AccelProvider for WgpuProvider {
+    fn device_id(&self) -> u32 {
+        self.runtime_device_id
+    }
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,
@@ -15149,7 +15158,7 @@ impl AccelProvider for WgpuProvider {
             None
         };
         ApiDeviceInfo {
-            device_id: self.device_id,
+            device_id: self.runtime_device_id,
             name: self.adapter_info.name.clone(),
             vendor: canonical_vendor_name(&self.adapter_info),
             memory_bytes,
@@ -15182,7 +15191,7 @@ impl WgpuProvider {
                 if let Some(entry) = base_entry {
                     let base_handle = GpuTensorHandle {
                         shape: entry.shape.clone(),
-                        device_id: self.device_id,
+                        device_id: self.runtime_device_id,
                         buffer_id: base_id,
                     };
                     let moments = self.reduce_moments_nd_exec(&base_handle, dims_zero_based)?;

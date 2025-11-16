@@ -237,7 +237,7 @@ fn round_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
 
 fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> Result<Value, String> {
     if !strategy.requires_host() {
-        if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             if let Ok(out) = provider.unary_round(&handle) {
                 return Ok(Value::GpuTensor(out));
             }

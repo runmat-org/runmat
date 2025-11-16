@@ -269,7 +269,7 @@ fn atanh_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn atanh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match gpu_domain_is_real(provider, &handle) {
             Ok(true) => {
                 if let Ok(out) = provider.unary_atanh(&handle) {

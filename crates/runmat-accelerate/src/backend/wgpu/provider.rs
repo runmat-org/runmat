@@ -14,6 +14,7 @@ pub fn register_wgpu_provider(opts: WgpuProviderOptions) -> Result<&'static Wgpu
     })?;
     // Reinstall the WGPU provider reference (same singleton) to ensure it is the active global.
     unsafe { runmat_accelerate_api::register_provider(leaked) };
+    runmat_accelerate_api::set_thread_provider(Some(leaked));
     Ok(leaked)
 }
 

@@ -1,7 +1,7 @@
 //! MATLAB-compatible `times` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -609,17 +609,20 @@ fn times_host(lhs: Value, rhs: Value) -> Result<Value, String> {
 
 fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("times: {err}"))?;
+    let dtype = real_result_dtype(lhs, rhs);
     if plan.len() == 0 {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
+        let mut tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("times: {e}"))?;
+        apply_result_dtype(&mut tensor, dtype);
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut out = vec![0.0f64; plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         out[out_idx] = lhs.data[idx_lhs] * rhs.data[idx_rhs];
     }
-    let tensor =
+    let mut tensor =
         Tensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("times: {e}"))?;
+    apply_result_dtype(&mut tensor, dtype);
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -659,6 +662,28 @@ fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> Result<Value, String
     let tensor =
         ComplexTensor::new(out, plan.output_shape().to_vec()).map_err(|e| format!("times: {e}"))?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+fn real_result_dtype(lhs: &Tensor, rhs: &Tensor) -> NumericDType {
+    if lhs.dtype == NumericDType::F32 && rhs.dtype == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    }
+}
+
+fn apply_result_dtype(tensor: &mut Tensor, dtype: NumericDType) {
+    match dtype {
+        NumericDType::F64 => {
+            tensor.dtype = NumericDType::F64;
+        }
+        NumericDType::F32 => {
+            for value in &mut tensor.data {
+                *value = (*value as f32) as f64;
+            }
+            tensor.dtype = NumericDType::F32;
+        }
+    }
 }
 
 fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> Result<Value, String> {

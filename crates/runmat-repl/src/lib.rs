@@ -3,7 +3,7 @@ use log::{debug, info, warn};
 use runmat_builtins::{Type, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
 
-use runmat_lexer::{tokenize, tokenize_detailed, Token as LexToken};
+use runmat_lexer::{tokenize_detailed, Token as LexToken};
 use runmat_parser::parse;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use runmat_turbine::TurbineEngine;
@@ -866,10 +866,9 @@ impl Default for ReplEngine {
 /// Tokenize the input string and return a space separated string of token names.
 /// This is kept for backward compatibility with existing tests.
 pub fn format_tokens(input: &str) -> String {
-    let tokens = tokenize(input);
-    tokens
+    tokenize_detailed(input)
         .into_iter()
-        .map(|t| format!("{t:?}"))
+        .map(|t| format!("{:?}", t.token))
         .collect::<Vec<_>>()
         .join(" ")
 }

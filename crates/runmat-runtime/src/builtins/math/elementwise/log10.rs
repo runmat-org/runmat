@@ -244,7 +244,7 @@ fn log10_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn log10_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(false) => {
                 if let Ok(out) = provider.unary_log10(&handle) {
