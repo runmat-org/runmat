@@ -1,5 +1,5 @@
 # 🚀 RunMat: The fastest runtime for your math
-### RunMat automatically **fuses operations and intelligently routes between CPU/GPU.MATLAB syntax.** No kernel code, no rewrites.
+### RunMat automatically fuses operations and intelligently routes between CPU and GPU — using MATLAB-style syntax. No kernel code. No device flags. No rewrites.
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/runmat-org/runmat/ci.yml?branch=main)](https://github.com/runmat-org/runmat/actions)
 [![License](https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg)](LICENSE.md)
@@ -16,6 +16,8 @@ With RunMat you write your math in clean, readable MATLAB-style syntax. RunMat a
 
 It runs on whatever GPU you have — NVIDIA, AMD, Apple Silicon, Intel — through native APIs (Metal / DirectX 12 / Vulkan). No device management. No vendor lock-in. No rewrites.
 
+**RunMat Accelerate** is the part of RunMat that does this planning: it uses a fusion engine to map your MATLAB-style code across CPU JIT, BLAS, and fused GPU kernels.
+
 Core ideas:
 
 - **MATLAB syntax, not a new language**  
@@ -29,7 +31,7 @@ Core ideas:
 | 🧮 Math language   | Lets you write MATLAB-style `.m` files   | MATLAB-style syntax, arrays, indexing, control flow    |
 | 🧰 Builtin library | Gives you ready-made tools                | **200+ MATLAB-style builtin functions** (math, stats, signal processing, array ops) |
 | ⚙️ CPU runtime     | Runs and JIT-compiles your code          | Ignition interpreter, Turbine JIT, GC, snapshots       |
-| 🔥 Fusion engine   | Fuses ops and picks CPU vs GPU           | Op graph, fusion, cost model, residency manager        |
+| 🔥 RunMat Accelerate (Fusion)   | Fuses ops and picks CPU vs GPU           | Op graph, fusion, cost model, residency manager        |
 | 🚀 GPU backend     | Runs big workloads on your GPU           | `wgpu` backend: Metal, DirectX 12, Vulkan              |
 | 🎨 Plotting        | Draws basic plots                        | 2D plots today, 3D plotting planned                    |
 
@@ -38,8 +40,6 @@ Core ideas:
 
 These are large workloads where **Fusion chooses GPU**.  
 Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
-
-### CPU Performance (JIT vs Octave)
 
 
 
@@ -177,14 +177,14 @@ RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks C
 
 | Component              | Purpose                                  | Technology / Notes                                                  |
 | ---------------------- | ---------------------------------------- | ------------------------------------------------------------------- |
-| ⚙️ `runmat-ignition`   | Baseline interpreter for instant startup | HIR → bytecode compiler, stack-based interpreter                    |
-| ⚡ `runmat-turbine`     | Optimizing JIT for hot code              | Cranelift backend, tuned for numeric workloads                      |
-| 🧠 `runmat-gc`         | High-performance memory management       | Generational GC with pointer compression                            |
-| 🚀 `runmat-accelerate` | GPU acceleration subsystem               | Fusion engine + auto-offload planner + `wgpu` backend               |
+| ⚙️ runmat-ignition   | Baseline interpreter for instant startup | HIR → bytecode compiler, stack-based interpreter                    |
+| ⚡ runmat-turbine     | Optimizing JIT for hot code              | Cranelift backend, tuned for numeric workloads                      |
+| 🧠 runmat-gc         | High-performance memory management       | Generational GC with pointer compression                            |
+| 🚀 runmat-accelerate | GPU acceleration subsystem               | Fusion engine + auto-offload planner + `wgpu` backend               |
 | 🔥 Fusion engine       | Collapses op chains, chooses CPU vs GPU  | Builds op graph, fuses ops, estimates cost, keeps tensors on device |
-| 🎨 `runmat-plot`       | Plotting layer                           | GPU-accelerated plotting via `wgpu` (where available)               |
-| 📸 `runmat-snapshot`   | Fast startup snapshots                   | Binary blob serialization / restore                                 |
-| 🧰 `runmat-runtime`    | Core runtime + 200+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
+| 🎨 runmat-plot       | Plotting layer                           | GPU-accelerated plotting via `wgpu` (where available)               |
+| 📸 runmat-snapshot   | Fast startup snapshots                   | Binary blob serialization / restore                                 |
+| 🧰 runmat-runtime    | Core runtime + 200+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
 
 
 ### Why this matters
