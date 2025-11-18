@@ -236,14 +236,12 @@
   .hljs-built_in, .hljs-builtin-name, .hljs-meta { color: #bb9af7; }
   .hljs-comment { color: #6b7280; }
 
-  .gradient-brand {
+.gradient-brand {
     background: linear-gradient(135deg, #3ea7fd 0%, #bb51ff 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
     display: inline-block;
-    text-align: center;
-    width: 100%;
     padding-bottom: 0.1em;
     line-height: 1.2;
   }

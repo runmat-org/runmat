@@ -8,11 +8,13 @@ This document explains the “why” and the “how” of that design.
 
 ## TL;DR
 
-- We separate the language from the runtime. The runtime stays slim; the language surface grows via packages.
-- We implement a minimal, well-specified subset of semantics in the core (arrays, indexing, control flow, functions, errors). Built-in functions in core are deliberately few.
-- We expose a first-class package system: native (Rust) packages and source (MATLAB) packages. Both can add functions, operators, types and documentation.
-- We emphasize performance (tiered execution, careful GC, predictable memory layout) and clarity (simple rules, strict errors), not historical quirks.
-- We value stability and composability over maximal compatibility. Where MATLAB's legacy is ambiguous or inconsistent, we choose consistency.
+- Full language: the core implements the MATLAB grammar and semantics, not a small subset.
+- Full built-ins: the core aims to ship the complete base MATLAB built-in set, with clear docs and tests.
+- Tiered CPU execution: Ignition interpreter for fast startup, Turbine JIT for hot code.
+- GPU-first math: a Fusion engine that turns MATLAB-style code into fast GPU workloads when shapes and patterns fit.
+- Small, portable runtime: single static binary, fast startup, modern CLI, and Jupyter kernel support.
+- Toolboxes on top: signal, stats, image, optimization, and other domains sit above the core as libraries and packages.
+
 
 ## Historical precedents that work
 
