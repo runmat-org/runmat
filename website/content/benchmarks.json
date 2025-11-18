@@ -1,0 +1,3154 @@
+{
+  "suite": {
+    "version": 1,
+    "started_at": "2025-11-18T19:20:17.716976Z",
+    "finished_at": "2025-11-18T19:29:00.240271Z",
+    "auto_offload_calibration": {
+      "runs": 10,
+      "cpu_time_ms": {
+        "elementwise": 1928.0755000019394,
+        "reduction": 0.0,
+        "matmul": 0.0
+      },
+      "units": {
+        "elementwise": 75.0,
+        "reduction": 0.0,
+        "matmul_flops": 0.0
+      },
+      "provider": {
+        "backend": "metal",
+        "device_id": 1,
+        "memory_bytes": 20100448256,
+        "name": "Apple M2 Max",
+        "vendor": "Apple"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "4k-image-processing",
+      "label": "4K Image Pipeline Perf Sweep",
+      "parity_ok": true,
+      "parity": [],
+      "sweep": {
+        "param": "B",
+        "values": [
+          4,
+          8,
+          16,
+          32,
+          64
+        ]
+      },
+      "results": [
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 204.23925000068266,
+          "all_ms": [
+            211.84741700017184,
+            181.93362499914656,
+            204.23925000068266
+          ],
+          "mse": 0.2850092,
+          "stdout_tail": "RESULT_ok MSE=2.850092e-1\n",
+          "stderr_tail": "offload: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-18T19:20:18Z INFO  runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:20:18Z INFO  runmat] Script executed successfully in 111.847542ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493618341
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493618341
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493618341
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493618341
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493618341
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 2960805009.5308805,
+                  "decision": "gpu",
+                  "elements": 33177600,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493618409
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 2960805009.5308805,
+                  "decision": "gpu",
+                  "elements": 33177600,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493618418
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 2960805009.5308805,
+                  "decision": "gpu",
+                  "elements": 33177600,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493618427
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "layout_ptr_0x7092418f0"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 3,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "total_wall_time_ns": 28352417
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 6951500
+              },
+              "fusion_cache_hits": 2,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 20
+            }
+          },
+          "B": 4
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 522.3779999996623,
+          "all_ms": [
+            516.6020420001587,
+            522.3779999996623,
+            525.6783330005419
+          ],
+          "mse": 0.2850724,
+          "stdout_tail": "RESULT_ok MSE=2.850724e-01\n",
+          "stderr_tail": "",
+          "B": 4
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 914.9597080013336,
+          "all_ms": [
+            898.2914999996865,
+            914.9597080013336,
+            940.4864170010114
+          ],
+          "mse": 0.285215,
+          "stdout_tail": "RESULT_ok MSE=2.852150e-01 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "B": 4
+        },
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 265.0612090001232,
+          "all_ms": [
+            280.8334579985967,
+            265.0612090001232,
+            261.6190420012572
+          ],
+          "mse": 14076030000.0,
+          "stdout_tail": "RESULT_ok MSE=1.407603e10\n",
+          "stderr_tail": "offload: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-18T19:20:23Z INFO  runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:20:23Z INFO  runmat] Script executed successfully in 170.600709ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493623531
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493623531
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493623531
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493623531
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493623531
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 5921610019.061761,
+                  "decision": "gpu",
+                  "elements": 66355200,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493623628
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 5921610019.061761,
+                  "decision": "gpu",
+                  "elements": 66355200,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493623645
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 5921610019.061761,
+                  "decision": "gpu",
+                  "elements": 66355200,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493623661
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "layout_ptr_0xbcaebd0f0"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 3,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "total_wall_time_ns": 49619542
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 6814292
+              },
+              "fusion_cache_hits": 2,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 20
+            }
+          },
+          "B": 8
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 939.1226249990723,
+          "all_ms": [
+            957.6076249995822,
+            939.1226249990723,
+            932.5130830002308
+          ],
+          "mse": 0.2850916,
+          "stdout_tail": "RESULT_ok MSE=2.850916e-01\n",
+          "stderr_tail": "",
+          "B": 8
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 869.1261250005482,
+          "all_ms": [
+            866.2486670000362,
+            880.6762079984765,
+            869.1261250005482
+          ],
+          "mse": 0.2851851,
+          "stdout_tail": "RESULT_ok MSE=2.851851e-01 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "B": 8
+        },
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 299.1720419995545,
+          "all_ms": [
+            316.0258749994682,
+            296.0567079990142,
+            299.1720419995545
+          ],
+          "mse": 0.3333283,
+          "stdout_tail": "RESULT_ok MSE=3.333283e-1\n",
+          "stderr_tail": "_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:20:29Z WARN  runmat_accelerate::backend::wgpu::provider_impl] runmat-rng-uniform-out: large GPU allocation (530841600 bytes) len=132710400 elems\n[2025-11-18T19:20:30Z WARN  runmat_accelerate::backend::wgpu::provider_impl] runmat-image-normalize-out: large GPU allocation (530841600 bytes) len=132710400 elems\n[2025-11-18T19:20:30Z INFO  runmat] Script executed successfully in 212.543041ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493629972
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493629972
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493629972
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493629972
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493629973
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 11843220038.123522,
+                  "decision": "gpu",
+                  "elements": 132710400,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493630059
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 11843220038.123522,
+                  "decision": "gpu",
+                  "elements": 132710400,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493630090
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 11843220038.123522,
+                  "decision": "gpu",
+                  "elements": 132710400,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493630120
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "layout_ptr_0xac6ed90f0"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 3,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "total_wall_time_ns": 91547834
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 6890542
+              },
+              "fusion_cache_hits": 2,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 20
+            }
+          },
+          "B": 16
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 1821.2543340014236,
+          "all_ms": [
+            1834.5434590009972,
+            1818.3519579997665,
+            1821.2543340014236
+          ],
+          "mse": 0.2850792,
+          "stdout_tail": "RESULT_ok MSE=2.850792e-01\n",
+          "stderr_tail": "",
+          "B": 16
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 990.5129589988064,
+          "all_ms": [
+            952.8240829986316,
+            993.2928329999413,
+            990.5129589988064
+          ],
+          "mse": 0.2851658,
+          "stdout_tail": "RESULT_ok MSE=2.851658e-01 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "B": 16
+        },
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 493.22912500065286,
+          "all_ms": [
+            505.73166700087313,
+            475.13100000105624,
+            493.22912500065286
+          ],
+          "mse": 0.3333225,
+          "stdout_tail": "RESULT_ok MSE=3.333225e-1\n",
+          "stderr_tail": "lems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:20:39Z WARN  runmat_accelerate::backend::wgpu::provider_impl] runmat-rng-uniform-out: large GPU allocation (1061683200 bytes) len=265420800 elems\n[2025-11-18T19:20:39Z WARN  runmat_accelerate::backend::wgpu::provider_impl] runmat-image-normalize-out: large GPU allocation (1061683200 bytes) len=265420800 elems\n[2025-11-18T19:20:40Z INFO  runmat] Script executed successfully in 392.930625ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493639805
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493639805
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493639805
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493639805
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493639805
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 23686440076.247044,
+                  "decision": "gpu",
+                  "elements": 265420800,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493639950
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 23686440076.247044,
+                  "decision": "gpu",
+                  "elements": 265420800,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493640008
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 23686440076.247044,
+                  "decision": "gpu",
+                  "elements": 265420800,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493640066
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "layout_ptr_0x8d32358f0"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 3,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "total_wall_time_ns": 183802501
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 9203791
+              },
+              "fusion_cache_hits": 2,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 20
+            }
+          },
+          "B": 32
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 3736.3252920004015,
+          "all_ms": [
+            3866.8247920013528,
+            3662.390666999272,
+            3736.3252920004015
+          ],
+          "mse": 0.2851013,
+          "stdout_tail": "RESULT_ok MSE=2.851013e-01\n",
+          "stderr_tail": "",
+          "B": 32
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 1065.0621670010878,
+          "all_ms": [
+            1065.0621670010878,
+            1059.5711250007298,
+            1099.630792001335
+          ],
+          "mse": 0.2850548,
+          "stdout_tail": "RESULT_ok MSE=2.850548e-01 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "B": 32
+        },
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 871.1155000000872,
+          "all_ms": [
+            1589.2120829994383,
+            871.1155000000872,
+            870.841832998849
+          ],
+          "mse": 0.3333415,
+          "stdout_tail": "RESULT_ok MSE=3.333415e-1\n",
+          "stderr_tail": "elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:20:57Z WARN  runmat_accelerate::backend::wgpu::provider_impl] runmat-rng-uniform-out: large GPU allocation (2123366400 bytes) len=530841600 elems\n[2025-11-18T19:20:57Z WARN  runmat_accelerate::backend::wgpu::provider_impl] runmat-image-normalize-out: large GPU allocation (2123366400 bytes) len=530841600 elems\n[2025-11-18T19:20:58Z INFO  runmat] Script executed successfully in 782.38225ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493657368
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493657368
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493657368
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493657368
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493657368
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 47372880152.49409,
+                  "decision": "gpu",
+                  "elements": 530841600,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493657628
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 47372880152.49409,
+                  "decision": "gpu",
+                  "elements": 530841600,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493657746
+                },
+                {
+                  "batch": 3840,
+                  "cpu_estimate_ms": 47372880152.49409,
+                  "decision": "gpu",
+                  "elements": 530841600,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493657873
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "layout_ptr_0xa115ed8f0"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 3,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "total_wall_time_ns": 381647583
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 11992125
+              },
+              "fusion_cache_hits": 2,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 20
+            }
+          },
+          "B": 64
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 7255.143791999217,
+          "all_ms": [
+            7255.143791999217,
+            7711.309624999558,
+            7114.339540999936
+          ],
+          "mse": 0.2850831,
+          "stdout_tail": "RESULT_ok MSE=2.850831e-01\n",
+          "stderr_tail": "",
+          "B": 64
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 1278.8434160011093,
+          "all_ms": [
+            1690.3247089994693,
+            1278.8434160011093,
+            1272.557667000001
+          ],
+          "mse": 0.2850757,
+          "stdout_tail": "RESULT_ok MSE=2.850757e-01 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "B": 64
+        }
+      ],
+      "summary": {
+        "speedups": {
+          "baseline": "python-numpy",
+          "x_param": "B",
+          "series": [
+            {
+              "impl": "python-torch",
+              "points": [
+                {
+                  "param": 4,
+                  "speedup": 0.570930058921131
+                },
+                {
+                  "param": 8,
+                  "speedup": 1.0805366424792258
+                },
+                {
+                  "param": 16,
+                  "speedup": 1.8386981386314383
+                },
+                {
+                  "param": 32,
+                  "speedup": 3.5080818826950084
+                },
+                {
+                  "param": 64,
+                  "speedup": 5.673207291230191
+                }
+              ],
+              "mean_speedup": 2.534290802791399,
+              "auc_trapz": 204.65473948065812
+            },
+            {
+              "impl": "runmat",
+              "points": [
+                {
+                  "param": 4,
+                  "speedup": 2.55767684222262
+                },
+                {
+                  "param": 8,
+                  "speedup": 3.543040600100167
+                },
+                {
+                  "param": 16,
+                  "speedup": 6.087648838537311
+                },
+                {
+                  "param": 32,
+                  "speedup": 7.5752324885426345
+                },
+                {
+                  "param": 64,
+                  "speedup": 8.328566983366144
+                }
+              ],
+              "mean_speedup": 5.618433150553775,
+              "auc_trapz": 414.48803480637554
+            }
+          ]
+        },
+        "telemetry": {
+          "runs": 5,
+          "per_point": [
+            {
+              "median_ms": 204.23925000068266,
+              "upload_bytes": 20,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "wall_ms": 28.352417
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 6.9515
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 2,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 3
+              },
+              "status": "ok",
+              "param": {
+                "B": 4
+              },
+              "auto_offload": {
+                "decisions_total": 8,
+                "by_reason": {
+                  "threshold": 5,
+                  "residency": 3
+                },
+                "by_decision": {
+                  "cpu": 5,
+                  "gpu": 3
+                }
+              }
+            },
+            {
+              "median_ms": 265.0612090001232,
+              "upload_bytes": 20,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "wall_ms": 49.619542
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 6.814292
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 2,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 3
+              },
+              "status": "ok",
+              "param": {
+                "B": 8
+              },
+              "auto_offload": {
+                "decisions_total": 8,
+                "by_reason": {
+                  "threshold": 5,
+                  "residency": 3
+                },
+                "by_decision": {
+                  "cpu": 5,
+                  "gpu": 3
+                }
+              }
+            },
+            {
+              "median_ms": 299.1720419995545,
+              "upload_bytes": 20,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "wall_ms": 91.547834
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 6.890542
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 2,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 3
+              },
+              "status": "ok",
+              "param": {
+                "B": 16
+              },
+              "auto_offload": {
+                "decisions_total": 8,
+                "by_reason": {
+                  "threshold": 5,
+                  "residency": 3
+                },
+                "by_decision": {
+                  "cpu": 5,
+                  "gpu": 3
+                }
+              }
+            },
+            {
+              "median_ms": 493.22912500065286,
+              "upload_bytes": 20,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "wall_ms": 183.802501
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 9.203791
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 2,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 3
+              },
+              "status": "ok",
+              "param": {
+                "B": 32
+              },
+              "auto_offload": {
+                "decisions_total": 8,
+                "by_reason": {
+                  "threshold": 5,
+                  "residency": 3
+                },
+                "by_decision": {
+                  "cpu": 5,
+                  "gpu": 3
+                }
+              }
+            },
+            {
+              "median_ms": 871.1155000000872,
+              "upload_bytes": 20,
+              "download_bytes": 4,
+              "fused_elementwise": {
+                "count": 3,
+                "wall_ms": 381.647583
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 11.992125
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 2,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 3
+              },
+              "status": "ok",
+              "param": {
+                "B": 64
+              },
+              "auto_offload": {
+                "decisions_total": 8,
+                "by_reason": {
+                  "threshold": 5,
+                  "residency": 3
+                },
+                "by_decision": {
+                  "cpu": 5,
+                  "gpu": 3
+                }
+              }
+            }
+          ],
+          "totals": {
+            "upload_bytes": 100,
+            "download_bytes": 20,
+            "fused_elementwise": {
+              "count": 15,
+              "wall_ms": 734.969877
+            },
+            "fused_reduction": {
+              "count": 5,
+              "wall_ms": 41.852250000000005
+            },
+            "matmul": {
+              "count": 0,
+              "wall_ms": 0.0
+            },
+            "fusion_cache": {
+              "hits": 10,
+              "misses": 140
+            },
+            "bind_group_cache": {
+              "hits": 0,
+              "misses": 15
+            }
+          },
+          "device": {
+            "backend": "metal",
+            "device_id": 1,
+            "memory_bytes": 20100448256,
+            "name": "Apple M2 Max",
+            "vendor": "Apple"
+          },
+          "auto_offload": {
+            "base_source": "loaded-from-cache",
+            "thresholds": {
+              "binary_min_elems": 4096,
+              "cpu_elem_per_elem": 0.08924108463333334,
+              "cpu_matmul_per_flop": 2.5e-11,
+              "cpu_reduction_per_elem": 1.2e-07,
+              "matmul_min_flops": 262144,
+              "reduction_min_elems": 4096,
+              "small_batch_max_dim": 8,
+              "small_batch_min_elems": 1048576,
+              "unary_min_elems": 4096
+            },
+            "env_overrides_applied": false,
+            "calibrate_duration_ms": null,
+            "decision_counts_by_reason": {
+              "threshold": 25,
+              "residency": 15
+            },
+            "decision_counts_by_disposition": {
+              "cpu": 25,
+              "gpu": 15
+            }
+          },
+          "auto_offload_calibration": {
+            "runs": 5,
+            "cpu_time_ms": {
+              "elementwise": 1355.9949990011005,
+              "reduction": 0.0,
+              "matmul": 0.0
+            },
+            "units": {
+              "elementwise": 25.0,
+              "reduction": 0.0,
+              "matmul_flops": 0.0
+            },
+            "provider": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "monte-carlo-analysis",
+      "label": "Monte Carlo Perf Sweep",
+      "parity_ok": true,
+      "parity": [],
+      "sweep": {
+        "param": "M",
+        "values": [
+          250000,
+          500000,
+          1000000,
+          2000000,
+          5000000
+        ]
+      },
+      "results": [
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 167.71766700003354,
+          "all_ms": [
+            166.52458300086437,
+            167.71766700003354,
+            184.37358300070628
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.557874\n",
+          "stderr_tail": "-offload: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-18T19:21:25Z INFO  runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:21:25Z INFO  runmat] Script executed successfully in 88.151417ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685092
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685092
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685092
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685092
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685092
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685092
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685094
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685094
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685094
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 22310271.158333335,
+                  "decision": "gpu",
+                  "elements": 250000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685157
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493685177
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-fusion-layout-2"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 3,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "total_wall_time_ns": 73859542
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 5611875
+              },
+              "fusion_cache_hits": 3,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 1000000
+            }
+          },
+          "M": 250000
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 4150.46916600113,
+          "all_ms": [
+            4094.0309580000758,
+            4150.46916600113,
+            4163.593208000748
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.560496\n",
+          "stderr_tail": "",
+          "M": 250000
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 849.145166001108,
+          "all_ms": [
+            840.7503329999599,
+            849.145166001108,
+            933.9715839996643
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.419365 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "M": 250000
+        },
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 165.75154200108955,
+          "all_ms": [
+            219.00195800117217,
+            164.99095799917995,
+            165.75154200108955
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.526167\n",
+          "stderr_tail": "-offload: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-18T19:21:40Z INFO  runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:21:40Z INFO  runmat] Script executed successfully in 79.616125ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700809
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700809
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700809
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700809
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700809
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700809
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700811
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700811
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700811
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 44620542.31666667,
+                  "decision": "gpu",
+                  "elements": 500000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700868
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493700886
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-layout-1"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-fusion-layout-2"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 2,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "total_wall_time_ns": 67059582
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 4052666
+              },
+              "fusion_cache_hits": 2,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 2000000
+            }
+          },
+          "M": 500000
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 8306.552625001132,
+          "all_ms": [
+            8473.824374999822,
+            8280.659957999887,
+            8306.552625001132
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.580228\n",
+          "stderr_tail": "",
+          "M": 500000
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 881.5047919997596,
+          "all_ms": [
+            908.3306659995287,
+            881.5047919997596,
+            869.5069999994303
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.371815 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "M": 500000
+        },
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 239.63245800041477,
+          "all_ms": [
+            239.63245800041477,
+            237.28291699990223,
+            240.53004199959105
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.486852\n",
+          "stderr_tail": "-offload: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-18T19:22:09Z INFO  runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:22:09Z INFO  runmat] Script executed successfully in 144.47625ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729302
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729302
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729302
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729302
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729302
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729302
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729306
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729306
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729306
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89241084.63333334,
+                  "decision": "gpu",
+                  "elements": 1000000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729416
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493729441
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-fusion-layout-2"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 3,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "total_wall_time_ns": 120610749
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 6070541
+              },
+              "fusion_cache_hits": 3,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 4000000
+            }
+          },
+          "M": 1000000
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 16559.984749999785,
+          "all_ms": [
+            16559.984749999785,
+            16766.092458999992,
+            16508.099540998955
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.468233\n",
+          "stderr_tail": "",
+          "M": 1000000
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 949.5249159990635,
+          "all_ms": [
+            949.5249159990635,
+            946.0743749987159,
+            954.6095419991616
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.455097 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "M": 1000000
+        },
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 343.1571659984911,
+          "all_ms": [
+            329.8552500000369,
+            354.90070800005924,
+            343.1571659984911
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.480706\n",
+          "stderr_tail": "offload: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-18T19:23:03Z INFO  runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:23:03Z INFO  runmat] Script executed successfully in 234.067208ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783048
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783048
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783048
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783048
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783048
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783048
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783057
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783057
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783057
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 178482169.26666668,
+                  "decision": "gpu",
+                  "elements": 2000000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783257
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493783279
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-fusion-layout-2"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-layout-1"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 2,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "total_wall_time_ns": 210858292
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 5340708
+              },
+              "fusion_cache_hits": 2,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 8000000
+            }
+          },
+          "M": 2000000
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 33039.063791000444,
+          "all_ms": [
+            32951.553167000384,
+            33039.063791000444,
+            33217.89212499971
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.461781\n",
+          "stderr_tail": "",
+          "M": 2000000
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 1141.0952909991465,
+          "all_ms": [
+            1118.3404170005815,
+            1192.1705410004506,
+            1141.0952909991465
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.462563 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "M": 2000000
+        },
+        {
+          "impl": "runmat",
+          "lang": "matlab-syntax",
+          "iterations": 3,
+          "median_ms": 651.8625410008099,
+          "all_ms": [
+            651.8625410008099,
+            667.0836670000426,
+            650.4096250009752
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.451878\n",
+          "stderr_tail": "offload: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-18T19:24:47Z INFO  runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-18T19:24:48Z INFO  runmat] Script executed successfully in 544.762583ms (interpreter)\n",
+          "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493887488
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493887488
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493887488
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493887488
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493887488
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493887488
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493887515
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493887515
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493887515
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 446205423.1666667,
+                  "decision": "gpu",
+                  "elements": 5000000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493888008
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763493888030
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
+            "device": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            },
+            "telemetry": {
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-fusion-layout-2"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                }
+              ],
+              "bind_group_cache_hits": 0,
+              "bind_group_cache_misses": 3,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "total_wall_time_ns": 497096834
+              },
+              "fused_reduction": {
+                "count": 1,
+                "total_wall_time_ns": 5480084
+              },
+              "fusion_cache_hits": 3,
+              "fusion_cache_misses": 28,
+              "kernel_launches": [],
+              "matmul": {
+                "count": 0,
+                "total_wall_time_ns": 0
+              },
+              "upload_bytes": 20000000
+            }
+          },
+          "M": 5000000
+        },
+        {
+          "impl": "python-numpy",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 82013.20304100045,
+          "all_ms": [
+            81765.36699999997,
+            82013.20304100045,
+            82857.54395799995
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.469337\n",
+          "stderr_tail": "",
+          "M": 5000000
+        },
+        {
+          "impl": "python-torch",
+          "lang": "python",
+          "iterations": 3,
+          "median_ms": 1837.4157910002396,
+          "all_ms": [
+            1837.4157910002396,
+            1907.7065420005965,
+            1815.0229580005544
+          ],
+          "mse": null,
+          "stdout_tail": "RESULT_ok PRICE=25.488119 device=mps\n",
+          "stderr_tail": "",
+          "device": "mps",
+          "M": 5000000
+        }
+      ],
+      "summary": {
+        "speedups": {
+          "baseline": "python-numpy",
+          "x_param": "M",
+          "series": [
+            {
+              "impl": "python-torch",
+              "points": [
+                {
+                  "param": 250000,
+                  "speedup": 4.887820519013252
+                },
+                {
+                  "param": 500000,
+                  "speedup": 9.423150844315996
+                },
+                {
+                  "param": 1000000,
+                  "speedup": 17.440284579131696
+                },
+                {
+                  "param": 2000000,
+                  "speedup": 28.953816610768186
+                },
+                {
+                  "param": 5000000,
+                  "speedup": 44.63508120628194
+                }
+              ],
+              "mean_speedup": 21.068030751902214,
+              "auc_trapz": 142085127.59680322
+            },
+            {
+              "impl": "runmat",
+              "points": [
+                {
+                  "param": 250000,
+                  "speedup": 24.746761866180147
+                },
+                {
+                  "param": 500000,
+                  "speedup": 50.11448174006447
+                },
+                {
+                  "param": 1000000,
+                  "speedup": 69.10576675706895
+                },
+                {
+                  "param": 2000000,
+                  "speedup": 96.27968483439952
+                },
+                {
+                  "param": 5000000,
+                  "speedup": 125.81364610257388
+                }
+              ],
+              "mean_speedup": 73.21206826005739,
+              "auc_trapz": 454995439.7762583
+            }
+          ]
+        },
+        "telemetry": {
+          "runs": 5,
+          "per_point": [
+            {
+              "median_ms": 167.71766700003354,
+              "upload_bytes": 1000000,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "wall_ms": 73.859542
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 5.611875
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 3,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 3
+              },
+              "status": "ok",
+              "param": {
+                "M": 250000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 10,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 10,
+                  "gpu": 1
+                }
+              }
+            },
+            {
+              "median_ms": 165.75154200108955,
+              "upload_bytes": 2000000,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "wall_ms": 67.059582
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 4.052666
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 2,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 2
+              },
+              "status": "ok",
+              "param": {
+                "M": 500000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 10,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 10,
+                  "gpu": 1
+                }
+              }
+            },
+            {
+              "median_ms": 239.63245800041477,
+              "upload_bytes": 4000000,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "wall_ms": 120.610749
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 6.070541
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 3,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 3
+              },
+              "status": "ok",
+              "param": {
+                "M": 1000000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 10,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 10,
+                  "gpu": 1
+                }
+              }
+            },
+            {
+              "median_ms": 343.1571659984911,
+              "upload_bytes": 8000000,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "wall_ms": 210.858292
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 5.340708
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 2,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 2
+              },
+              "status": "ok",
+              "param": {
+                "M": 2000000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 10,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 10,
+                  "gpu": 1
+                }
+              }
+            },
+            {
+              "median_ms": 651.8625410008099,
+              "upload_bytes": 20000000,
+              "download_bytes": 8,
+              "fused_elementwise": {
+                "count": 6,
+                "wall_ms": 497.096834
+              },
+              "fused_reduction": {
+                "count": 1,
+                "wall_ms": 5.480084
+              },
+              "matmul": {
+                "count": 0,
+                "wall_ms": 0.0
+              },
+              "fusion_cache": {
+                "hits": 3,
+                "misses": 28
+              },
+              "bind_group_cache": {
+                "hits": 0,
+                "misses": 3
+              },
+              "status": "ok",
+              "param": {
+                "M": 5000000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 10,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 10,
+                  "gpu": 1
+                }
+              }
+            }
+          ],
+          "totals": {
+            "upload_bytes": 35000000,
+            "download_bytes": 40,
+            "fused_elementwise": {
+              "count": 30,
+              "wall_ms": 969.484999
+            },
+            "fused_reduction": {
+              "count": 5,
+              "wall_ms": 26.555874000000003
+            },
+            "matmul": {
+              "count": 0,
+              "wall_ms": 0.0
+            },
+            "fusion_cache": {
+              "hits": 13,
+              "misses": 140
+            },
+            "bind_group_cache": {
+              "hits": 0,
+              "misses": 13
+            }
+          },
+          "device": {
+            "backend": "metal",
+            "device_id": 1,
+            "memory_bytes": 20100448256,
+            "name": "Apple M2 Max",
+            "vendor": "Apple"
+          },
+          "auto_offload": {
+            "base_source": "loaded-from-cache",
+            "thresholds": {
+              "binary_min_elems": 4096,
+              "cpu_elem_per_elem": 0.08924108463333334,
+              "cpu_matmul_per_flop": 2.5e-11,
+              "cpu_reduction_per_elem": 1.2e-07,
+              "matmul_min_flops": 262144,
+              "reduction_min_elems": 4096,
+              "small_batch_max_dim": 8,
+              "small_batch_min_elems": 1048576,
+              "unary_min_elems": 4096
+            },
+            "env_overrides_applied": false,
+            "calibrate_duration_ms": null,
+            "decision_counts_by_reason": {
+              "threshold": 50,
+              "residency": 5
+            },
+            "decision_counts_by_disposition": {
+              "cpu": 50,
+              "gpu": 5
+            }
+          },
+          "auto_offload_calibration": {
+            "runs": 5,
+            "cpu_time_ms": {
+              "elementwise": 572.0805010008389,
+              "reduction": 0.0,
+              "matmul": 0.0
+            },
+            "units": {
+              "elementwise": 50.0,
+              "reduction": 0.0,
+              "matmul_flops": 0.0
+            },
+            "provider": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
