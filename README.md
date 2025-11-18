@@ -1,5 +1,5 @@
-# 🚀 RunMat: Modern Free MATLAB Compatible Runtime
-### A GPU-accelerated, open-source MATLAB runtime with automatic fusion, by the creators of [Dystr](https://dystr.com)
+# 🚀 RunMat: The fastest runtime for your math
+### RunMat automatically **fuses operations and intelligently routes between CPU/GPU.MATLAB syntax.** No kernel code, no rewrites.
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/runmat-org/runmat/ci.yml?branch=main)](https://github.com/runmat-org/runmat/actions)
 [![License](https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg)](LICENSE.md)
@@ -12,76 +12,86 @@
 
 ## What is RunMat?
 
-RunMat is a **modern, GPU-accelerated runtime** for MATLAB® and GNU Octave code that eliminates license fees, vendor lock-in, and performance bottlenecks. Built from the ground up in Rust with a **V8-inspired architecture**, it delivers:
+With RunMat you write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best place — CPU or GPU. On GPU, it can match or beat hand-tuned CUDA on many math-heavy workloads.
 
-- 🚀 **GPU-accelerated execution** with automatic fusion and intelligent CPU/GPU routing (10x-1000x speedups)
-- ⚡ **Instant startup** (5ms vs 900ms+ in Octave) via advanced snapshotting
-- 🔥 **Fusion engine** that collapses operation chains into single GPU dispatches
-- 📚 **Extensive built-in library** (200+ functions) covering arrays, linear algebra, FFT/signal processing, statistics, strings, and I/O
-- 📦 **Package system** supporting both native Rust packages and MATLAB source packages
-- 🎨 **GPU-accelerated plotting** that's beautiful and responsive
-- 📊 **Native Jupyter support** with rich interactive widgets
-- 🛡️ **Memory safety** and **zero crashes** guaranteed by Rust
-- 💰 **$0 licensing costs** - completely free and open source
+It runs on whatever GPU you have — NVIDIA, AMD, Apple Silicon, Intel — through native APIs (Metal / DirectX 12 / Vulkan). No device management. No vendor lock-in. No rewrites.
 
-## 📊 Performance Benchmarks
+Core ideas:
 
-RunMat delivers exceptional performance through its tiered execution engine and GPU acceleration. Our comprehensive benchmark suite compares RunMat against NumPy, PyTorch, Julia, and Octave across real-world workloads.
+- **MATLAB syntax, not a new language**  
+- **Fast on CPU and GPU**, with one runtime  
+- **No device flags** — Fusion chooses CPU vs GPU for you, based on data size and cost  
+
+
+## ✨ Features at a glance
+
+- **MATLAB language**
+
+  - Familiar `.m` files, arrays, control flow  
+  - Many MATLAB / Octave scripts run with few or no changes  
+
+- **Fusion: automatic CPU+GPU choice**
+
+  - Builds an internal graph of array ops  
+  - Fuses elementwise ops and reductions into bigger kernels  
+  - Chooses CPU or GPU per kernel based on shape and transfer cost  
+  - Keeps arrays on device when that is faster  
+
+- **Modern CPU runtime**
+
+  - Ignition interpreter for fast startup  
+  - Turbine JIT (Cranelift) for hot paths  
+  - Generational GC tuned for numeric code  
+  - Memory-safe by design (Rust)
+
+- **Cross-platform GPU backend**
+
+  - Uses wgpu / WebGPU  
+  - Supports **Metal (macOS), DirectX 12 (Windows), Vulkan (Linux)**  
+  - Falls back to CPU when workloads are too small for GPU to win  
+
+- **Plotting and tooling**
+
+  - Basic 2D plotting today  
+  - 3D plotting engine **on the roadmap**  
+  - VS Code / Cursor extension **on the roadmap**  
+
+- **Open source**
+
+  - MIT License with attribution  
+  - Small binary, CLI-first design  
+
+## 📊 Performance highlights
+
+These are large workloads where **Fusion chooses GPU**.  
+Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
 
 ### CPU Performance (JIT vs Octave)
 
-<table>
-<tr>
-<th>Benchmark</th>
-<th>GNU Octave 9.4</th>
-<th>RunMat (JIT)</th>
-<th>Speedup</th>
-</tr>
-<tr>
-<td>Startup time (cold)</td>
-<td>915ms</td>
-<td>5ms</td>
-<td><strong>183x faster</strong></td>
-</tr>
-<tr>
-<td>Matrix operations</td>
-<td>822ms</td>
-<td>5ms</td>
-<td><strong>164x faster</strong></td>
-</tr>
-<tr>
-<td>Mathematical functions</td>
-<td>868ms</td>
-<td>5ms</td>
-<td><strong>163x faster</strong></td>
-</tr>
-<tr>
-<td>Control flow (loops)</td>
-<td>876ms</td>
-<td>6ms</td>
-<td><strong>155x faster</strong></td>
-</tr>
-</table>
 
-### GPU Acceleration Performance
 
-RunMat's fusion engine and auto-offload system deliver significant speedups on GPU-accelerated workloads:
+### 4K Image Pipeline Perf Sweep (B = image batch size)
+| B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|---|-------------|--------------|------------|----------------|------------------|
+| 4  | 204.2 | 915.0  | 522.4  | 2.56× | 4.48× |
+| 8  | 265.1 | 869.1  | 939.1  | 3.54× | 3.28× |
+| 16 | 299.2 | 990.5  | 1,821.3| 6.09× | 3.31× |
+| 32 | 493.2 | 1,065.1| 3,736.3| 7.58× | 2.16× |
+| 64 | 871.1 | 1,278.8| 7,255.1| 8.33× | 1.47× |
 
-- **10× or greater speedups** for image processing, computer vision, and DSP workloads with long elementwise chains
-- **100× or greater speedups** for quant finance, simulation, and batched linear algebra workloads
-- **1000× or greater speedups** for massively parallel telemetry and independent channel processing
+### Monte Carlo Perf Sweep
+| M | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|---|-------------|--------------|------------|----------------|------------------|
+| 250 000  | 167.7 | 849.1  | 4,150.5  | 24.75× | 5.06× |
+| 500 000  | 165.8 | 881.5  | 8,306.6  | 50.11× | 5.32× |
+| 1 000 000| 239.6 | 949.5  | 16,560.0 | 69.11× | 3.97× |
+| 2 000 000| 343.2 | 1,141.1| 33,039.1 | 96.28× | 3.32× |
+| 5 000 000| 651.9 | 1,837.4| 82,013.2 | 125.81×| 2.82× |
 
-### Benchmark Suite
-
-Our reproducible benchmark suite includes:
-
-- **4K Image Processing** - Per-pixel normalization, radiometric correction, and gamma correction
-- **PCA** - Principal component analysis on large datasets
-- **Batched NLMS** - Adaptive filtering across multiple channels
-- **Monte Carlo Analysis** - Risk path simulation and statistical analysis
-- **Batched IIR Smoothing** - Signal smoothing across large batches
+On smaller arrays, Fusion keeps work on CPU so you still get low overhead and a fast JIT.
 
 *Benchmarks run on Apple M2 Max with BLAS/LAPACK optimization and GPU acceleration. See [benchmarks/](benchmarks/) for reproducible test scripts, detailed results, and comparisons against NumPy, PyTorch, and Julia.*
+
 
 ---
 
@@ -199,22 +209,7 @@ m = mean(y, 'all');            % Reduction stays on GPU
 fprintf('m=%.6f\n', double(m)); % Single download at sink
 ```
 
-### Performance That Scales
-```matlab
-% Matrix operations that fly - 150x+ faster than Octave
-n = 1000;
-A = randn(n, n);
-B = randn(n, n);
-tic; C = A * B; toc  % Executes in ~5ms vs 800ms+ in Octave
-
-% GPU acceleration for large workloads
-imgs = rand(16, 2160, 3840, 'single');  % 4K image batch
-mu = mean(imgs, [2 3]);                 % GPU-accelerated
-sigma = sqrt(mean((imgs - mu).^2, [2 3]));
-out = ((imgs - mu) ./ sigma) * 1.0123 - 0.02;  % Fused GPU kernel
-```
-
-### Beautiful, Interactive Plotting
+### Plotting
 ```matlab
 % Create a stunning 3D surface plot with GPU acceleration
 [X, Y] = meshgrid(-2:0.1:2, -2:0.1:2);
@@ -443,30 +438,36 @@ See [Design Philosophy](docs/DESIGN_PHILOSOPHY.md) for the complete design ratio
 
 ## 🌍 Who Uses RunMat?
 
+RunMat is built for array-heavy math in many domains.
+
+Examples: 
+
 <div align="center">
 <table>
 <tr>
 <td align="center" width="25%">
-<strong>🎓 Universities</strong><br/>
-Teaching numerical methods<br/>without license fees
+<strong>Imaging / geospatial</strong><br/>
+4K+ tiles, normalization, radiometric correction, QC metrics
 </td>
 <td align="center" width="25%">
-<strong>🔬 Research Labs</strong><br/>
-Reproducible science with<br/>open-source tools
+<strong>Quant / simulation</strong><br/>
+Monte Carlo risk, scenario analysis, covariance, factor models
 </td>
 <td align="center" width="25%">
-<strong>🏭 Engineering Teams</strong><br/>
-Embedded scientific computing<br/>in production systems
+<strong>Signal processing / control</strong><br/>
+Filters, NLMS, large time-series jobs
 </td>
 <td align="center" width="25%">
-<strong>🚀 Startups</strong><br/>
-Rapid prototyping without<br/>expensive toolchain costs
+<strong>Researchers and students</strong><br/>
+MATLAB background, need faster runs on laptops or clusters
 </td>
 </tr>
 </table>
 </div>
 
-## 🤝 Join the Revolution
+If you write math in MATLAB and hit performance walls on CPU, RunMat is built for you.
+
+## 🤝 Join the mission
 
 RunMat is more than just software—it's a movement toward **open, fast, and accessible scientific computing**. We're building the future of numerical programming, and we need your help.
 
@@ -489,7 +490,6 @@ RunMat is more than just software—it's a movement toward **open, fast, and acc
 
 **🔬 For Domain Experts**
 - Add mathematical functions
-- Improve MATLAB compatibility
 - Write comprehensive tests
 - Create benchmarks
 
@@ -513,8 +513,7 @@ RunMat is more than just software—it's a movement toward **open, fast, and acc
 ### 💬 Connect With Us
 
 - **GitHub Discussions**: [Share ideas and get help](https://github.com/runmat-org/runmat/discussions)  
-- **Twitter**: [@dystr_ai](https://x.com/dystr_ai) for updates and announcements
-- **Newsletter**: [Subscribe](https://runmat.org/newsletter) for monthly updates
+- **Twitter**: [@dystreng](https://x.com/dystreng) for updates and announcements
 
 ## 📜 License
 
@@ -532,7 +531,7 @@ See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.org/license](ht
 
 **Built with ❤️ by [Dystr Inc.](https://dystr.com) and the RunMat community**
 
-⭐ **Star us on GitHub** if RunMat helps your work!
+⭐ **Star us on GitHub** if RunMat is useful to you.
 
 [**🚀 Get Started**](https://runmat.org/docs/getting-started) • [**🐦 Follow @dystr**](https://x.com/dystr_ai)
 
