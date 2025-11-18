@@ -88,33 +88,33 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
       ) : (
         <svg width={width} height={height} role="img" aria-label="Benchmark line chart">
           <Group left={margin.left} top={margin.top}>
-            <Group top={-32} left={innerWidth / 2} className="legend-group">
-              {(() => {
-                const itemWidth = 170;
-                const totalWidth = itemWidth * data.series.length;
-                return data.series.map((series, idx) => {
-                  const color = series.impl === data.highlightImpl ? "#a855f7" : SERIES_COLORS[idx % SERIES_COLORS.length];
-                  const dash = series.impl === data.baselineImpl ? "4 4" : undefined;
-                  const offset = idx * itemWidth - totalWidth / 2;
-                  return (
-                    <g key={series.impl} transform={`translate(${offset}, 0)`}>
-                      <line
-                        x1={-20}
-                        y1={0}
-                        x2={6}
-                        y2={0}
-                        stroke={color}
-                        strokeWidth={series.impl === data.highlightImpl ? 3 : 2}
-                        strokeDasharray={dash}
-                      />
-                      <Text x={10} y={4} fill="rgba(255,255,255,0.9)" fontSize={13}>
-                        {series.label}
-                      </Text>
-                    </g>
-                  );
-                });
-              })()}
-            </Group>
+              <Group top={-32} left={innerWidth / 2} className="legend-group">
+                {(() => {
+                  const itemWidth = 170;
+                  const totalWidth = itemWidth * data.series.length;
+                  return data.series.map((series, idx) => {
+                    const color = series.impl === data.highlightImpl ? "#a855f7" : SERIES_COLORS[idx % SERIES_COLORS.length];
+                    const dash = series.impl === data.baselineImpl ? "4 4" : undefined;
+                    const offset = idx * itemWidth - totalWidth / 2;
+                    return (
+                      <g key={series.impl} transform={`translate(${offset}, 0)`}>
+                        <line
+                          x1={-20}
+                          y1={0}
+                          x2={6}
+                          y2={0}
+                          stroke={color}
+                          strokeWidth={series.impl === data.highlightImpl ? 3 : 2}
+                          strokeDasharray={dash}
+                        />
+                        <Text x={10} y={4} fill="rgba(255,255,255,0.9)" fontSize={13}>
+                          {series.label}
+                        </Text>
+                      </g>
+                    );
+                  });
+                })()}
+              </Group>
             <GridRows
               scale={yScale}
               width={innerWidth}
