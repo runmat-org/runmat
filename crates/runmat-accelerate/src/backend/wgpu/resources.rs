@@ -23,7 +23,7 @@ pub enum UniformBufferKey {
 pub struct KernelResourceRegistry {
     uniform_buffers: Mutex<HashMap<UniformBufferKey, Arc<wgpu::Buffer>>>,
     matmul_sources: Mutex<HashMap<u64, (GpuTensorHandle, GpuTensorHandle)>>,
-    scratch_buffers: Mutex<HashMap<(ScratchBufferKind, u64), Arc<wgpu::Buffer>>>,
+    scratch_buffers: Mutex<HashMap<ScratchBufferKind, (u64, Arc<wgpu::Buffer>)>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -84,29 +84,25 @@ impl KernelResourceRegistry {
         size: u64,
         label: &'static str,
     ) -> Arc<wgpu::Buffer> {
-        let key = (kind, size);
-        if let Some(existing) = self
+        let mut guard = self
             .scratch_buffers
             .lock()
-            .expect("scratch buffer registry poisoned")
-            .get(&key)
-            .cloned()
-        {
-            return existing;
+            .expect("scratch buffer registry poisoned");
+        if let Some((capacity, existing)) = guard.get(&kind) {
+            if *capacity >= size {
+                return existing.clone();
+            }
         }
+        let alloc_size = size.max(1);
         let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
-            size,
+            size: alloc_size,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
-        let mut guard = self
-            .scratch_buffers
-            .lock()
-            .expect("scratch buffer registry poisoned");
-        guard.entry(key).or_insert_with(|| buffer.clone());
+        guard.insert(kind, (alloc_size, buffer.clone()));
         buffer
     }
 

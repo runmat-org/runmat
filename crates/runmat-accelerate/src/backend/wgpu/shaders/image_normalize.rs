@@ -1,16 +1,31 @@
 pub const IMAGE_NORMALIZE_SHADER_F64: &str = r#"
-struct Tensor {
+const BATCH_TILE: u32 = @BT@u;
+const VALUES_PER_THREAD: u32 = @VP@u;
+const LANE_COUNT: u32 = @WG@u;
+const SPATIAL_TILE: u32 = @ST@u;
+const LANE_STRIDE: u32 = LANE_COUNT * SPATIAL_TILE;
+const BATCH_VEC_WIDTH: u32 = @BV@u;
+const BATCH_GROUPS: u32 = (BATCH_TILE + BATCH_VEC_WIDTH - 1u) / BATCH_VEC_WIDTH;
+const PARTIAL_STRIDE: u32 = LANE_STRIDE * BATCH_GROUPS;
+
+struct TensorScalar {
     data: array<f64>,
 };
 
+struct TensorVec {
+    data: array<vec4<f64>>,
+};
+
 struct Params {
-    batches: u32,
+    batch_count: u32,
     height: u32,
     width: u32,
     plane: u32,
     stride_h: u32,
     stride_w: u32,
     flags: u32,
+    batch_stride: u32,
+    batch_offset: u32,
     _pad0: u32,
     epsilon: f64,
     gain: f64,
@@ -18,154 +33,270 @@ struct Params {
     gamma: f64,
 };
 
-@group(0) @binding(0) var<storage, read> input_tensor: Tensor;
-@group(0) @binding(1) var<storage, read_write> output_tensor: Tensor;
+@group(0) @binding(0) var<storage, read> input_tensor: TensorScalar;
+@group(0) @binding(1) var<storage, read_write> output_tensor: TensorScalar;
 @group(0) @binding(2) var<uniform> params: Params;
+@group(0) @binding(3) var<storage, read> input_tensor_vec: TensorVec;
+@group(0) @binding(4) var<storage, read_write> output_tensor_vec: TensorVec;
 
-var<workgroup> partial_mean: array<f64, @WG@>;
-var<workgroup> partial_m2: array<f64, @WG@>;
-var<workgroup> partial_count: array<u32, @WG@>;
-var<workgroup> shared_mean: f64;
-var<workgroup> shared_inv_sigma: f64;
+var<workgroup> partial_sum: array<vec4<f64>, PARTIAL_STRIDE>;
+var<workgroup> partial_sum_sq: array<vec4<f64>, PARTIAL_STRIDE>;
+var<workgroup> shared_mean: array<vec4<f64>, BATCH_GROUPS>;
+var<workgroup> shared_inv_sigma: array<vec4<f64>, BATCH_GROUPS>;
 
 fn has_flag(mask: u32) -> bool {
     return (params.flags & mask) != 0u;
 }
 
-fn index_for(batch: u32, idx: u32) -> u32 {
-    let h = idx % params.height;
-    let w = idx / params.height;
-    return batch + h * params.stride_h + w * params.stride_w;
+fn plane_offset(idx: u32) -> u32 {
+    return idx * params.batch_stride;
 }
 
-@compute @workgroup_size(@WG@)
+fn can_use_vec_path(base: u32, count: u32) -> bool {
+    return count == BATCH_VEC_WIDTH && (base & (BATCH_VEC_WIDTH - 1u)) == 0u;
+}
+
+fn group_count(active_batches: u32) -> u32 {
+    return (active_batches + BATCH_VEC_WIDTH - 1u) / BATCH_VEC_WIDTH;
+}
+
+fn group_component_count(active_batches: u32, group: u32) -> u32 {
+    let consumed = group * BATCH_VEC_WIDTH;
+    if consumed >= active_batches {
+        return 0u;
+    }
+    let remaining = active_batches - consumed;
+    return min(BATCH_VEC_WIDTH, remaining);
+}
+
+fn batch_group_mask(active_batches: u32, group: u32) -> vec4<f64> {
+    let count = group_component_count(active_batches, group);
+    if count == BATCH_VEC_WIDTH {
+        return vec4<f64>(1.0);
+    }
+    var mask = vec4<f64>(0.0);
+    for (var i = 0u; i < count; i = i + 1u) {
+        mask[i] = 1.0;
+    }
+    return mask;
+}
+
+fn load_batch_group(base: u32, count: u32) -> vec4<f64> {
+    if count == 0u {
+        return vec4<f64>(0.0);
+    }
+    if can_use_vec_path(base, count) {
+        let vec_index = base >> 2u;
+        return input_tensor_vec.data[vec_index];
+    }
+    var value = vec4<f64>(0.0);
+    for (var i = 0u; i < count; i = i + 1u) {
+        value[i] = input_tensor.data[base + i];
+    }
+    return value;
+}
+
+fn store_batch_group(base: u32, count: u32, value: vec4<f64>) {
+    if count == 0u {
+        return;
+    }
+    if can_use_vec_path(base, count) {
+        let vec_index = base >> 2u;
+        output_tensor_vec.data[vec_index] = value;
+        return;
+    }
+    for (var i = 0u; i < count; i = i + 1u) {
+        output_tensor.data[base + i] = value[i];
+    }
+}
+
+@compute @workgroup_size(@WG@, @ST@, 1)
 fn main(
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
 ) {
-    let batch = wid.x;
-    if batch >= params.batches {
+    let local_base_batch = wid.x * BATCH_TILE;
+    if local_base_batch >= params.batch_count {
         return;
     }
-    let lane = lid.x;
+    let active_batches = min(BATCH_TILE, params.batch_count - local_base_batch);
+    let base_batch = params.batch_offset + local_base_batch;
     let plane = params.plane;
     if plane == 0u {
         return;
     }
 
-    var mean = 0.0f64;
-    var m2 = 0.0f64;
-    var count: u32 = 0u;
-
-    var idx = lane;
+    let lane = lid.x;
+    let spatial_lane = lid.y;
+    let lane_index = spatial_lane * LANE_COUNT + lane;
+    let lane_stride = LANE_STRIDE * VALUES_PER_THREAD;
+    var idx = spatial_lane * (LANE_COUNT * VALUES_PER_THREAD) + lane * VALUES_PER_THREAD;
+    let total_groups = group_count(active_batches);
+    var sum: array<vec4<f64>, BATCH_GROUPS>;
+    var sum_sq: array<vec4<f64>, BATCH_GROUPS>;
+    for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+        sum[g] = vec4<f64>(0.0);
+        sum_sq[g] = vec4<f64>(0.0);
+    }
     loop {
         if idx >= plane {
             break;
         }
-        let offset = index_for(batch, idx);
-        let value = input_tensor.data[offset];
-        let new_count = count + 1u;
-        let delta = value - mean;
-        mean = mean + delta / f64(new_count);
-        let delta2 = value - mean;
-        m2 = m2 + delta * delta2;
-        count = new_count;
-        idx = idx + @WG@u;
-    }
-
-    partial_mean[lane] = mean;
-    partial_m2[lane] = m2;
-    partial_count[lane] = count;
-    workgroupBarrier();
-
-    if lane == 0u {
-        var agg_mean = 0.0f64;
-        var agg_m2 = 0.0f64;
-        var agg_count: u32 = 0u;
-        var i = 0u;
+        var inner = 0u;
         loop {
-            if i >= @WG@u {
+            if inner >= VALUES_PER_THREAD {
                 break;
             }
-            let c = partial_count[i];
-            if c != 0u {
-                let pm = partial_mean[i];
-                let pm2 = partial_m2[i];
-                if agg_count == 0u {
-                    agg_mean = pm;
-                    agg_m2 = pm2;
-                    agg_count = c;
-                } else {
-                    let delta = pm - agg_mean;
-                    let new_count = agg_count + c;
-                    let nf = f64(new_count);
-                    let cf = f64(c);
-                    agg_mean = agg_mean + delta * (cf / nf);
-                    agg_m2 = agg_m2 + pm2 + delta * delta * f64(agg_count) * cf / nf;
-                    agg_count = new_count;
-                }
+            let sample_idx = idx + inner;
+            if sample_idx >= plane {
+                break;
             }
-            i = i + 1u;
+            let sample_base = plane_offset(sample_idx) + base_batch;
+            var group = 0u;
+            loop {
+                if group >= total_groups {
+                    break;
+                }
+                let comp = group_component_count(active_batches, group);
+                let offset = sample_base + group * BATCH_VEC_WIDTH;
+                let value = load_batch_group(offset, comp);
+                sum[group] = sum[group] + value;
+                sum_sq[group] = sum_sq[group] + value * value;
+                group = group + 1u;
+            }
+            inner = inner + 1u;
         }
+        idx = idx + lane_stride;
+    }
 
-        shared_mean = agg_mean;
-        var variance = 0.0f64;
-        if agg_count > 0u {
-            variance = agg_m2 / f64(agg_count);
+    let lane_base = lane_index * BATCH_GROUPS;
+    for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+        partial_sum[lane_base + g] = sum[g];
+        partial_sum_sq[lane_base + g] = sum_sq[g];
+    }
+    workgroupBarrier();
+
+    var stride = LANE_STRIDE / 2u;
+    loop {
+        if stride == 0u {
+            break;
         }
-        let sigma = sqrt(variance + params.epsilon);
-        var inv_sigma = 0.0f64;
-        if sigma > 0.0f64 {
-            inv_sigma = 1.0f64 / sigma;
+        if lane_index < stride {
+            let dst = lane_index * BATCH_GROUPS;
+            let src = (lane_index + stride) * BATCH_GROUPS;
+            for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+                partial_sum[dst + g] = partial_sum[dst + g] + partial_sum[src + g];
+                partial_sum_sq[dst + g] =
+                    partial_sum_sq[dst + g] + partial_sum_sq[src + g];
+            }
         }
-        shared_inv_sigma = inv_sigma;
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+
+    if lane_index == 0u {
+        let inv_plane = 1.0f64 / f64(plane);
+        for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+            let mask = batch_group_mask(active_batches, g);
+            let total_sum = partial_sum[g];
+            let total_sq = partial_sum_sq[g];
+            let mean = total_sum * inv_plane;
+            var variance = total_sq * inv_plane - mean * mean;
+            variance = max(variance, vec4<f64>(0.0));
+            let sigma = sqrt(variance + vec4<f64>(params.epsilon));
+            var inv_sigma_vec = vec4<f64>(0.0);
+            inv_sigma_vec =
+                select(inv_sigma_vec, vec4<f64>(1.0) / sigma, sigma > vec4<f64>(0.0));
+            shared_mean[g] = mean * mask;
+            shared_inv_sigma[g] = inv_sigma_vec * mask;
+        }
     }
 
     workgroupBarrier();
 
-    let mean_val = shared_mean;
-    let inv_sigma = shared_inv_sigma;
     let apply_gain = has_flag(1u);
     let apply_bias = has_flag(2u);
     let apply_gamma = has_flag(4u);
 
-    var write_idx = lane;
+    var write_idx = spatial_lane * (LANE_COUNT * VALUES_PER_THREAD) + lane * VALUES_PER_THREAD;
     loop {
         if write_idx >= plane {
             break;
         }
-        let offset = index_for(batch, write_idx);
-        let value = input_tensor.data[offset];
-        var out_value = (value - mean_val) * inv_sigma;
-        if apply_gain {
-            out_value = out_value * params.gain;
+        var inner = 0u;
+        loop {
+            if inner >= VALUES_PER_THREAD {
+                break;
+            }
+            let sample_idx = write_idx + inner;
+            if sample_idx >= plane {
+                break;
+            }
+            let sample_base = plane_offset(sample_idx) + base_batch;
+            var group = 0u;
+            loop {
+                if group >= total_groups {
+                    break;
+                }
+                let comp = group_component_count(active_batches, group);
+                if comp == 0u {
+                    break;
+                }
+                let offset = sample_base + group * BATCH_VEC_WIDTH;
+                var out_value = load_batch_group(offset, comp);
+                var normalized = (out_value - shared_mean[group]) * shared_inv_sigma[group];
+                for (var c = 0u; c < comp; c = c + 1u) {
+                    var component = normalized[c];
+                    if apply_gain {
+                        component = component * params.gain;
+                    }
+                    if apply_bias {
+                        component = component + params.bias;
+                    }
+                    component = max(component, 0.0f64);
+                    if apply_gamma {
+                        component = pow(component, params.gamma);
+                    }
+                    normalized[c] = component;
+                }
+                store_batch_group(offset, comp, normalized);
+                group = group + 1u;
+            }
+            inner = inner + 1u;
         }
-        if apply_bias {
-            out_value = out_value + params.bias;
-        }
-        out_value = max(out_value, 0.0f64);
-        if apply_gamma {
-            out_value = pow(out_value, params.gamma);
-        }
-        output_tensor.data[offset] = out_value;
-        write_idx = write_idx + @WG@u;
+        write_idx = write_idx + lane_stride;
     }
 }
 "#;
 
 pub const IMAGE_NORMALIZE_SHADER_F32: &str = r#"
-struct Tensor {
+const BATCH_TILE: u32 = @BT@u;
+const VALUES_PER_THREAD: u32 = @VP@u;
+const LANE_COUNT: u32 = @WG@u;
+const SPATIAL_TILE: u32 = @ST@u;
+const LANE_STRIDE: u32 = LANE_COUNT * SPATIAL_TILE;
+const BATCH_VEC_WIDTH: u32 = @BV@u;
+const BATCH_GROUPS: u32 = (BATCH_TILE + BATCH_VEC_WIDTH - 1u) / BATCH_VEC_WIDTH;
+const PARTIAL_STRIDE: u32 = LANE_STRIDE * BATCH_GROUPS;
+
+struct TensorScalar {
     data: array<f32>,
 };
 
+struct TensorVec {
+    data: array<vec4<f32>>,
+};
+
 struct Params {
-    batches: u32,
+    batch_count: u32,
     height: u32,
     width: u32,
     plane: u32,
     stride_h: u32,
     stride_w: u32,
     flags: u32,
+    batch_stride: u32,
+    batch_offset: u32,
     _pad0: u32,
     epsilon: f32,
     gain: f32,
@@ -173,137 +304,234 @@ struct Params {
     gamma: f32,
 };
 
-@group(0) @binding(0) var<storage, read> input_tensor: Tensor;
-@group(0) @binding(1) var<storage, read_write> output_tensor: Tensor;
+@group(0) @binding(0) var<storage, read> input_tensor: TensorScalar;
+@group(0) @binding(1) var<storage, read_write> output_tensor: TensorScalar;
 @group(0) @binding(2) var<uniform> params: Params;
+@group(0) @binding(3) var<storage, read> input_tensor_vec: TensorVec;
+@group(0) @binding(4) var<storage, read_write> output_tensor_vec: TensorVec;
 
-var<workgroup> partial_mean: array<f32, @WG@>;
-var<workgroup> partial_m2: array<f32, @WG@>;
-var<workgroup> partial_count: array<u32, @WG@>;
-var<workgroup> shared_mean: f32;
-var<workgroup> shared_inv_sigma: f32;
+var<workgroup> partial_sum: array<vec4<f32>, PARTIAL_STRIDE>;
+var<workgroup> partial_sum_sq: array<vec4<f32>, PARTIAL_STRIDE>;
+var<workgroup> shared_mean: array<vec4<f32>, BATCH_GROUPS>;
+var<workgroup> shared_inv_sigma: array<vec4<f32>, BATCH_GROUPS>;
 
 fn has_flag(mask: u32) -> bool {
     return (params.flags & mask) != 0u;
 }
 
-fn index_for(batch: u32, idx: u32) -> u32 {
-    let h = idx % params.height;
-    let w = idx / params.height;
-    return batch + h * params.stride_h + w * params.stride_w;
+fn plane_offset(idx: u32) -> u32 {
+    return idx * params.batch_stride;
 }
 
-@compute @workgroup_size(@WG@)
+fn can_use_vec_path(base: u32, count: u32) -> bool {
+    return count == BATCH_VEC_WIDTH && (base & (BATCH_VEC_WIDTH - 1u)) == 0u;
+}
+
+fn group_count(active_batches: u32) -> u32 {
+    return (active_batches + BATCH_VEC_WIDTH - 1u) / BATCH_VEC_WIDTH;
+}
+
+fn group_component_count(active_batches: u32, group: u32) -> u32 {
+    let consumed = group * BATCH_VEC_WIDTH;
+    if consumed >= active_batches {
+        return 0u;
+    }
+    let remaining = active_batches - consumed;
+    return min(BATCH_VEC_WIDTH, remaining);
+}
+
+fn batch_group_mask(active_batches: u32, group: u32) -> vec4<f32> {
+    let count = group_component_count(active_batches, group);
+    if count == BATCH_VEC_WIDTH {
+        return vec4<f32>(1.0);
+    }
+    var mask = vec4<f32>(0.0);
+    for (var i = 0u; i < count; i = i + 1u) {
+        mask[i] = 1.0;
+    }
+    return mask;
+}
+
+fn load_batch_group(base: u32, count: u32) -> vec4<f32> {
+    if count == 0u {
+        return vec4<f32>(0.0);
+    }
+    if can_use_vec_path(base, count) {
+        let vec_index = base >> 2u;
+        return input_tensor_vec.data[vec_index];
+    }
+    var value = vec4<f32>(0.0);
+    for (var i = 0u; i < count; i = i + 1u) {
+        value[i] = input_tensor.data[base + i];
+    }
+    return value;
+}
+
+fn store_batch_group(base: u32, count: u32, value: vec4<f32>) {
+    if count == 0u {
+        return;
+    }
+    if can_use_vec_path(base, count) {
+        let vec_index = base >> 2u;
+        output_tensor_vec.data[vec_index] = value;
+        return;
+    }
+    for (var i = 0u; i < count; i = i + 1u) {
+        output_tensor.data[base + i] = value[i];
+    }
+}
+
+@compute @workgroup_size(@WG@, @ST@, 1)
 fn main(
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(workgroup_id) wid: vec3<u32>,
 ) {
-    let batch = wid.x;
-    if batch >= params.batches {
+    let local_base_batch = wid.x * BATCH_TILE;
+    if local_base_batch >= params.batch_count {
         return;
     }
-    let lane = lid.x;
+    let active_batches = min(BATCH_TILE, params.batch_count - local_base_batch);
+    let base_batch = params.batch_offset + local_base_batch;
     let plane = params.plane;
     if plane == 0u {
         return;
     }
 
-    var mean = 0.0f;
-    var m2 = 0.0f;
-    var count: u32 = 0u;
-
-    var idx = lane;
+    let lane = lid.x;
+    let spatial_lane = lid.y;
+    let lane_index = spatial_lane * LANE_COUNT + lane;
+    let lane_stride = LANE_STRIDE * VALUES_PER_THREAD;
+    var idx = spatial_lane * (LANE_COUNT * VALUES_PER_THREAD) + lane * VALUES_PER_THREAD;
+    let total_groups = group_count(active_batches);
+    var sum: array<vec4<f32>, BATCH_GROUPS>;
+    var sum_sq: array<vec4<f32>, BATCH_GROUPS>;
+    for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+        sum[g] = vec4<f32>(0.0);
+        sum_sq[g] = vec4<f32>(0.0);
+    }
     loop {
         if idx >= plane {
             break;
         }
-        let offset = index_for(batch, idx);
-        let value = input_tensor.data[offset];
-        let new_count = count + 1u;
-        let delta = value - mean;
-        mean = mean + delta / f32(new_count);
-        let delta2 = value - mean;
-        m2 = m2 + delta * delta2;
-        count = new_count;
-        idx = idx + @WG@u;
-    }
-
-    partial_mean[lane] = mean;
-    partial_m2[lane] = m2;
-    partial_count[lane] = count;
-    workgroupBarrier();
-
-    if lane == 0u {
-        var agg_mean = 0.0f;
-        var agg_m2 = 0.0f;
-        var agg_count: u32 = 0u;
-        var i = 0u;
+        var inner = 0u;
         loop {
-            if i >= @WG@u {
+            if inner >= VALUES_PER_THREAD {
                 break;
             }
-            let c = partial_count[i];
-            if c != 0u {
-                let pm = partial_mean[i];
-                let pm2 = partial_m2[i];
-                if agg_count == 0u {
-                    agg_mean = pm;
-                    agg_m2 = pm2;
-                    agg_count = c;
-                } else {
-                    let delta = pm - agg_mean;
-                    let new_count = agg_count + c;
-                    let nf = f32(new_count);
-                    let cf = f32(c);
-                    agg_mean = agg_mean + delta * (cf / nf);
-                    agg_m2 = agg_m2 + pm2 + delta * delta * f32(agg_count) * cf / nf;
-                    agg_count = new_count;
-                }
+            let sample_idx = idx + inner;
+            if sample_idx >= plane {
+                break;
             }
-            i = i + 1u;
+            let sample_base = plane_offset(sample_idx) + base_batch;
+            var group = 0u;
+            loop {
+                if group >= total_groups {
+                    break;
+                }
+                let comp = group_component_count(active_batches, group);
+                let offset = sample_base + group * BATCH_VEC_WIDTH;
+                let value = load_batch_group(offset, comp);
+                sum[group] = sum[group] + value;
+                sum_sq[group] = sum_sq[group] + value * value;
+                group = group + 1u;
+            }
+            inner = inner + 1u;
         }
+        idx = idx + lane_stride;
+    }
 
-        shared_mean = agg_mean;
-        var variance = 0.0f;
-        if agg_count > 0u {
-            variance = agg_m2 / f32(agg_count);
+    let lane_base = lane_index * BATCH_GROUPS;
+    for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+        partial_sum[lane_base + g] = sum[g];
+        partial_sum_sq[lane_base + g] = sum_sq[g];
+    }
+    workgroupBarrier();
+
+    var stride = LANE_STRIDE / 2u;
+    loop {
+        if stride == 0u {
+            break;
         }
-        let sigma = sqrt(variance + params.epsilon);
-        var inv_sigma = 0.0f;
-        if sigma > 0.0f {
-            inv_sigma = 1.0f / sigma;
+        if lane_index < stride {
+            let dst = lane_index * BATCH_GROUPS;
+            let src = (lane_index + stride) * BATCH_GROUPS;
+            for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+                partial_sum[dst + g] = partial_sum[dst + g] + partial_sum[src + g];
+                partial_sum_sq[dst + g] =
+                    partial_sum_sq[dst + g] + partial_sum_sq[src + g];
+            }
         }
-        shared_inv_sigma = inv_sigma;
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+
+    if lane_index == 0u {
+        let inv_plane = 1.0f / f32(plane);
+        for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+            let mask = batch_group_mask(active_batches, g);
+            let total_sum = partial_sum[g];
+            let total_sq = partial_sum_sq[g];
+            let mean = total_sum * inv_plane;
+            var variance = total_sq * inv_plane - mean * mean;
+            variance = max(variance, vec4<f32>(0.0));
+            let sigma = sqrt(variance + vec4<f32>(params.epsilon));
+            var inv_sigma_vec = vec4<f32>(0.0);
+            inv_sigma_vec =
+                select(inv_sigma_vec, vec4<f32>(1.0) / sigma, sigma > vec4<f32>(0.0));
+            shared_mean[g] = mean * mask;
+            shared_inv_sigma[g] = inv_sigma_vec * mask;
+        }
     }
 
     workgroupBarrier();
 
-    let mean_val = shared_mean;
-    let inv_sigma = shared_inv_sigma;
     let apply_gain = has_flag(1u);
     let apply_bias = has_flag(2u);
     let apply_gamma = has_flag(4u);
 
-    var write_idx = lane;
+    var write_idx = spatial_lane * (LANE_COUNT * VALUES_PER_THREAD) + lane * VALUES_PER_THREAD;
     loop {
         if write_idx >= plane {
             break;
         }
-        let offset = index_for(batch, write_idx);
-        let value = input_tensor.data[offset];
-        var out_value = (value - mean_val) * inv_sigma;
-        if apply_gain {
-            out_value = out_value * params.gain;
+        var inner = 0u;
+        loop {
+            if inner >= VALUES_PER_THREAD {
+                break;
+            }
+            let sample_idx = write_idx + inner;
+            if sample_idx >= plane {
+                break;
+            }
+            let sample_base = plane_offset(sample_idx) + base_batch;
+            var group = 0u;
+            loop {
+                if group >= total_groups {
+                    break;
+                }
+                let comp = group_component_count(active_batches, group);
+                if comp == 0u {
+                    break;
+                }
+                let offset = sample_base + group * BATCH_VEC_WIDTH;
+                var out_value = load_batch_group(offset, comp);
+                var normalized = (out_value - shared_mean[group]) * shared_inv_sigma[group];
+                if apply_gain {
+                    normalized = normalized * vec4<f32>(params.gain);
+                }
+                if apply_bias {
+                    normalized = normalized + vec4<f32>(params.bias);
+                }
+                normalized = max(normalized, vec4<f32>(0.0));
+                if apply_gamma {
+                    normalized = pow(normalized, vec4<f32>(params.gamma));
+                }
+                store_batch_group(offset, comp, normalized);
+                group = group + 1u;
+            }
+            inner = inner + 1u;
         }
-        if apply_bias {
-            out_value = out_value + params.bias;
-        }
-        out_value = max(out_value, 0.0f);
-        if apply_gamma {
-            out_value = pow(out_value, params.gamma);
-        }
-        output_tensor.data[offset] = out_value;
-        write_idx = write_idx + @WG@u;
+        write_idx = write_idx + lane_stride;
     }
 }
 "#;

@@ -778,6 +778,8 @@ pub struct ProviderTelemetry {
     pub bind_group_cache_misses: u64,
     /// Optional per-layout bind group cache counters (layout tags and their hit/miss counts)
     pub bind_group_cache_by_layout: Option<Vec<BindGroupLayoutTelemetry>>,
+    /// Recent kernel launch metadata (bounded log; newest last)
+    pub kernel_launches: Vec<KernelLaunchTelemetry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -785,6 +787,20 @@ pub struct BindGroupLayoutTelemetry {
     pub tag: String,
     pub hits: u64,
     pub misses: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelAttrTelemetry {
+    pub key: String,
+    pub value: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KernelLaunchTelemetry {
+    pub kernel: String,
+    pub precision: Option<String>,
+    pub shape: Vec<KernelAttrTelemetry>,
+    pub tuning: Vec<KernelAttrTelemetry>,
 }
 
 /// Device/provider interface that backends implement and register into the runtime layer
@@ -1922,6 +1938,7 @@ pub trait AccelProvider: Send + Sync {
             bind_group_cache_hits: 0,
             bind_group_cache_misses: 0,
             bind_group_cache_by_layout: None,
+            kernel_launches: Vec::new(),
         }
     }
 

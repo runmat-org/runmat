@@ -1,5 +1,6 @@
 use crate::functions::UserFunction;
 use crate::instr::Instr;
+use once_cell::sync::OnceCell;
 use runmat_builtins::Type;
 use runmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
 use std::collections::HashMap;
@@ -37,6 +38,15 @@ fn parse_number(expr: &HirExpr) -> Option<f64> {
     } else {
         None
     }
+}
+
+fn stochastic_evolution_disabled() -> bool {
+    static DISABLE: OnceCell<bool> = OnceCell::new();
+    *DISABLE.get_or_init(|| {
+        std::env::var("RUNMAT_DISABLE_STOCHASTIC_EVOLUTION")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false)
+    })
 }
 
 fn is_randn_call(expr: &HirExpr) -> bool {
@@ -134,6 +144,9 @@ impl Compiler {
         expr: &'a HirExpr,
         body: &'a [HirStmt],
     ) -> Option<StochasticEvolutionPlan<'a>> {
+        if stochastic_evolution_disabled() {
+            return None;
+        }
         use runmat_hir::HirExprKind as EK;
         match &expr.kind {
             EK::Range(start, step, end) => {

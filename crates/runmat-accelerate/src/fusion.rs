@@ -11,7 +11,7 @@ use crate::graph::{
     AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin,
 };
-use crate::reduction_meta::{detect_reduction_signature, ReductionBehavior};
+use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, ReductionBehavior};
 use runmat_accelerate_api::CovNormalization;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,7 +59,7 @@ pub struct ImageNormalizePattern {
     pub epsilon: ImageScalar,
     pub gain: Option<ImageScalar>,
     pub bias: Option<ImageScalar>,
-    pub gamma: ImageScalar,
+    pub gamma: Option<ImageScalar>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +85,11 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
 
     for node in &graph.nodes {
         // Elementwise chains
-        if !node.is_elementwise() || assigned.contains(&node.id) {
+        if assigned.contains(&node.id) {
+            continue;
+        }
+        let elementwise_like = node.is_elementwise() || is_elementwise_max_min(graph, node);
+        if !elementwise_like {
             continue;
         }
         if node.outputs.is_empty() {
@@ -140,7 +144,10 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
 
     // Reduction singletons (basic grouping; future: include eligible producers)
     for node in &graph.nodes {
-        if !node.is_reduction() || assigned.contains(&node.id) {
+        if assigned.contains(&node.id) {
+            continue;
+        }
+        if !node.is_reduction() || is_elementwise_max_min(graph, node) {
             continue;
         }
         let span = InstrSpan {
@@ -269,7 +276,7 @@ fn find_next_elementwise(
             return None;
         }
         let next_node = graph.node(next_id)?;
-        if !next_node.is_elementwise() {
+        if !(next_node.is_elementwise() || is_elementwise_max_min(graph, next_node)) {
             return None;
         }
         // Ensure the edge we follow is actually used by next node
@@ -289,6 +296,38 @@ fn find_next_elementwise(
     }
 
     candidate
+}
+
+fn is_elementwise_max_min(graph: &AccelGraph, node: &AccelNode) -> bool {
+    match &node.label {
+        AccelNodeLabel::Builtin { name }
+            if name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min") =>
+        {
+            if node.inputs.len() < 2 {
+                return false;
+            }
+            !value_is_placeholder(graph, node.inputs[1])
+        }
+        _ => false,
+    }
+}
+
+fn value_is_placeholder(graph: &AccelGraph, vid: ValueId) -> bool {
+    let Some(info) = graph.value(vid) else {
+        return false;
+    };
+    let Some(constant) = &info.constant else {
+        return false;
+    };
+    match constant {
+        Value::Tensor(t) => t.data.is_empty(),
+        Value::LogicalArray(l) => l.data.is_empty(),
+        Value::StringArray(sa) => sa.data.is_empty(),
+        Value::CharArray(ca) => ca.data.is_empty(),
+        Value::Cell(cell) => cell.data.is_empty(),
+        Value::String(s) => s.is_empty(),
+        _ => false,
+    }
 }
 
 fn group_span(graph: &AccelGraph, nodes: &[NodeId]) -> InstrSpan {
@@ -328,6 +367,8 @@ pub struct FusionGroupPlan {
     pub reduction_dim: Option<ValueId>,
     // For reductions: flavor metadata (e.g., sum vs mean scaling)
     pub reduction_flavor: Option<ReductionFlavor>,
+    // For reductions: axis selection metadata (e.g., explicit dims vs 'all')
+    pub reduction_axes: Option<ReductionAxes>,
     pub pattern: Option<FusionPattern>,
 }
 
@@ -486,6 +527,45 @@ impl From<Vec<FusionGroupPlan>> for FusionPlan {
     }
 }
 
+fn log_plan_stack_pattern(stage: &str, plan: &FusionGroupPlan, graph: &AccelGraph) {
+    if !fusion_debug_enabled() || plan.stack_pattern.is_empty() {
+        return;
+    }
+    let mut pattern_meta: Vec<String> = Vec::with_capacity(plan.stack_pattern.len());
+    for (pos, input_idx) in plan.stack_pattern.iter().enumerate() {
+        let value_id = plan.inputs.get(*input_idx).copied();
+        if let Some(vid) = value_id {
+            if let Some(info) = graph.value(vid) {
+                let node_label = match info.origin {
+                    ValueOrigin::NodeOutput { node, .. } => graph
+                        .node(node)
+                        .map(|n| format!("{:?}", n.label))
+                        .unwrap_or_else(|| "<missing-node>".to_string()),
+                    _ => String::new(),
+                };
+                pattern_meta.push(format!(
+                    "#{}:input_idx={} vid={} origin={:?} label={}",
+                    pos, input_idx, vid, info.origin, node_label
+                ));
+            } else {
+                pattern_meta.push(format!(
+                    "#{}:input_idx={} vid={} origin=<missing>",
+                    pos, input_idx, vid
+                ));
+            }
+        } else {
+            pattern_meta.push(format!("#{}:input_idx={} vid=<missing>", pos, input_idx));
+        }
+    }
+    log::debug!(
+        "fusion plan {} {} stack_pattern={:?} meta={:?}",
+        plan.index,
+        stage,
+        plan.stack_pattern,
+        pattern_meta
+    );
+}
+
 impl FusionGroupPlan {
     fn new(index: usize, group: FusionGroup, graph: &AccelGraph) -> Self {
         let node_set: HashSet<NodeId> = group.nodes.iter().copied().collect();
@@ -496,6 +576,7 @@ impl FusionGroupPlan {
         let const_values: HashMap<ValueId, Value> = HashMap::new();
         let mut operations = Vec::new();
         let mut reduction_flavor: Option<ReductionFlavor> = None;
+        let mut reduction_axes: Option<ReductionAxes> = None;
         let mut reduction_data: Option<ValueId> = None;
         let mut reduction_dim: Option<ValueId> = None;
         let mut output: Option<ValueId> = None;
@@ -567,7 +648,25 @@ impl FusionGroupPlan {
                     if let Some(constant) = maybe_constant.clone() {
                         constants.insert(input_idx, constant);
                     } else if !is_variable && newly_added {
-                        stack_pattern.push(input_idx);
+                        let allow_stack = match graph.value(*input) {
+                            Some(info) => match info.origin {
+                                ValueOrigin::NodeOutput { node, .. } => graph
+                                    .node(node)
+                                    .map(|n| n.span.start <= group.span.start)
+                                    .unwrap_or(false),
+                                _ => true,
+                            },
+                            None => true,
+                        };
+                        if allow_stack {
+                            stack_pattern.push(input_idx);
+                        } else if fusion_debug_enabled() {
+                            log::debug!(
+                                "fusion plan {} skipping stack candidate vid={} origin_after_span",
+                                index,
+                                input
+                            );
+                        }
                     } else if !is_variable
                         && !newly_added
                         && matches!(
@@ -610,6 +709,7 @@ impl FusionGroupPlan {
                         ReductionBehavior::MeanLike => ReductionFlavor::Mean,
                         _ => ReductionFlavor::Sum,
                     });
+                    reduction_axes = Some(sig.axes.clone());
                 }
             }
         }
@@ -629,8 +729,11 @@ impl FusionGroupPlan {
             reduction_data,
             reduction_dim,
             reduction_flavor,
+            reduction_axes,
             pattern,
         };
+
+        log_plan_stack_pattern("initial", &plan, graph);
 
         // Record constant ValueIds for all groups for easier downstream analysis
         for node_id in &plan.group.nodes {
@@ -966,6 +1069,8 @@ impl FusionGroupPlan {
             plan.stack_pattern = centered_stack_idxs;
         }
 
+        log_plan_stack_pattern("final", &plan, graph);
+
         // If the plan requires any unsupported operations, mark kernel as unsupported
 
         plan
@@ -1170,7 +1275,7 @@ impl FusionGroupPlan {
                     if scalar_ty == "f64" {
                         format!("f64({})", n)
                     } else {
-                        format!("{}", *n as f32)
+                        format!("{:?}", *n as f32)
                     }
                 }
                 Value::Int(i) => {
@@ -1178,7 +1283,7 @@ impl FusionGroupPlan {
                     if scalar_ty == "f64" {
                         format!("f64({})", f)
                     } else {
-                        format!("{}", f as f32)
+                        format!("{:?}", f as f32)
                     }
                 }
                 Value::Tensor(t) if t.data.len() == 1 => {
@@ -1186,7 +1291,7 @@ impl FusionGroupPlan {
                     if scalar_ty == "f64" {
                         format!("f64({})", scalar)
                     } else {
-                        format!("{}", scalar as f32)
+                        format!("{:?}", scalar as f32)
                     }
                 }
                 _ => {
@@ -1684,10 +1789,10 @@ fn detect_image_normalize(
 
         let pattern = ImageNormalizePattern {
             input: match_info.input,
-            epsilon: ImageScalar::Constant(match_info.epsilon),
-            gain: match_info.gain.map(ImageScalar::Constant),
-            bias: match_info.bias.map(ImageScalar::Constant),
-            gamma: ImageScalar::Constant(match_info.gamma.unwrap_or(1.0)),
+            epsilon: match_info.epsilon.clone(),
+            gain: match_info.gain.clone(),
+            bias: match_info.bias.clone(),
+            gamma: match_info.gamma.clone(),
         };
 
         groups.push(FusionGroup {
@@ -1695,9 +1800,17 @@ fn detect_image_normalize(
             kind: FusionKind::ImageNormalize,
             nodes: match_info.nodes.clone(),
             shape,
-            span,
+            span: span.clone(),
             pattern: Some(FusionPattern::ImageNormalize(pattern)),
         });
+        if fusion_debug_enabled() {
+            log::debug!(
+                "fusion: detected image normalize group id={} span={:?} nodes={:?}",
+                next_group_id,
+                span,
+                match_info.nodes
+            );
+        }
         *next_group_id += 1;
         for node_id in match_info.nodes {
             assigned.insert(node_id);
@@ -2081,7 +2194,8 @@ fn collect_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<ConstantT
                 match &node_ref.label {
                     AccelNodeLabel::Builtin { name }
                         if name.eq_ignore_ascii_case("single")
-                            || name.eq_ignore_ascii_case("double") =>
+                            || name.eq_ignore_ascii_case("double")
+                            || name.eq_ignore_ascii_case("gpuarray") =>
                     {
                         if node_ref.inputs.len() != 1 {
                             return None;
@@ -2108,6 +2222,78 @@ fn collect_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<ConstantT
                 }
             }
             _ => return None,
+        }
+    }
+}
+
+fn scalar_shape_known_one(shape: &ShapeInfo) -> bool {
+    match shape {
+        ShapeInfo::Scalar => true,
+        ShapeInfo::Tensor(dims) => {
+            if dims.is_empty() {
+                return true;
+            }
+            dims.iter().all(|dim| matches!(dim, Some(1)))
+        }
+        ShapeInfo::Unknown => false,
+    }
+}
+
+fn capture_image_scalar(
+    graph: &AccelGraph,
+    vid: ValueId,
+    assigned: &HashSet<NodeId>,
+    _nodes: &mut Vec<NodeId>,
+) -> Option<ImageScalar> {
+    if let Some(trace) = collect_scalar_constant(graph, vid) {
+        if trace.nodes.iter().any(|id| assigned.contains(id)) {
+            return None;
+        }
+        return Some(ImageScalar::Constant(trace.value));
+    }
+    let info = graph.value(vid)?;
+    if scalar_shape_known_one(&info.shape) {
+        return Some(ImageScalar::Value(vid));
+    }
+    if log::log_enabled!(log::Level::Debug) {
+        log::debug!(
+            "capture_image_scalar: reject vid={vid:?} shape={:?} origin={:?}",
+            info.shape,
+            info.origin
+        );
+    }
+    None
+}
+
+fn peel_numeric_casts(
+    graph: &AccelGraph,
+    mut vid: ValueId,
+    assigned: &HashSet<NodeId>,
+    _nodes: &mut Vec<NodeId>,
+) -> Option<ValueId> {
+    loop {
+        let info = graph.value(vid)?;
+        match &info.origin {
+            ValueOrigin::NodeOutput { node, .. } => {
+                if assigned.contains(node) {
+                    return None;
+                }
+                let node_ref = graph.node(*node)?;
+                if let AccelNodeLabel::Builtin { name } = &node_ref.label {
+                    if name.eq_ignore_ascii_case("single")
+                        || name.eq_ignore_ascii_case("double")
+                        || name.eq_ignore_ascii_case("gpuarray")
+                    {
+                        if node_ref.inputs.len() != 1 {
+                            return None;
+                        }
+                        vid = node_ref.inputs[0];
+                        continue;
+                    }
+                }
+                return Some(vid);
+            }
+            _ => return Some(vid),
         }
     }
 }
@@ -2440,10 +2626,12 @@ mod tests {
     }
 }
 
-fn split_add_with_constant(
+fn split_add_with_scalar(
     graph: &AccelGraph,
     vid: ValueId,
-) -> Option<(NodeId, ValueId, ConstantTrace)> {
+    assigned: &HashSet<NodeId>,
+    nodes: &mut Vec<NodeId>,
+) -> Option<(NodeId, ValueId, ImageScalar)> {
     let (node_id, node) = node_from_value(graph, vid)?;
     match node.label {
         AccelNodeLabel::Primitive(PrimitiveOp::Add) => {
@@ -2452,11 +2640,11 @@ fn split_add_with_constant(
             }
             let lhs = node.inputs[0];
             let rhs = node.inputs[1];
-            if let Some(trace) = collect_scalar_constant(graph, rhs) {
-                return Some((node_id, lhs, trace));
+            if let Some(scalar) = capture_image_scalar(graph, rhs, assigned, nodes) {
+                return Some((node_id, lhs, scalar));
             }
-            if let Some(trace) = collect_scalar_constant(graph, lhs) {
-                return Some((node_id, rhs, trace));
+            if let Some(scalar) = capture_image_scalar(graph, lhs, assigned, nodes) {
+                return Some((node_id, rhs, scalar));
             }
             None
         }
@@ -2466,9 +2654,10 @@ fn split_add_with_constant(
             }
             let lhs = node.inputs[0];
             let rhs = node.inputs[1];
-            if let Some(mut trace) = collect_scalar_constant(graph, rhs) {
-                trace.value = -trace.value;
-                return Some((node_id, lhs, trace));
+            if let Some(ImageScalar::Constant(value)) =
+                capture_image_scalar(graph, rhs, assigned, nodes)
+            {
+                return Some((node_id, lhs, ImageScalar::Constant(-value)));
             }
             None
         }
@@ -2476,10 +2665,12 @@ fn split_add_with_constant(
     }
 }
 
-fn split_mul_with_constant(
+fn split_mul_with_scalar(
     graph: &AccelGraph,
     vid: ValueId,
-) -> Option<(NodeId, ValueId, ConstantTrace)> {
+    assigned: &HashSet<NodeId>,
+    nodes: &mut Vec<NodeId>,
+) -> Option<(NodeId, ValueId, ImageScalar)> {
     let (node_id, node) = node_from_value(graph, vid)?;
     match node.label {
         AccelNodeLabel::Primitive(PrimitiveOp::Mul)
@@ -2489,11 +2680,11 @@ fn split_mul_with_constant(
             }
             let lhs = node.inputs[0];
             let rhs = node.inputs[1];
-            if let Some(trace) = collect_scalar_constant(graph, rhs) {
-                return Some((node_id, lhs, trace));
+            if let Some(scalar) = capture_image_scalar(graph, rhs, assigned, nodes) {
+                return Some((node_id, lhs, scalar));
             }
-            if let Some(trace) = collect_scalar_constant(graph, lhs) {
-                return Some((node_id, rhs, trace));
+            if let Some(scalar) = capture_image_scalar(graph, lhs, assigned, nodes) {
+                return Some((node_id, rhs, scalar));
             }
             None
         }
@@ -2501,27 +2692,54 @@ fn split_mul_with_constant(
     }
 }
 
-fn split_max_with_constant_zero(
+fn split_max_with_zero_scalar(
     graph: &AccelGraph,
     vid: ValueId,
-) -> Option<(NodeId, ValueId, ConstantTrace)> {
+    assigned: &HashSet<NodeId>,
+    nodes: &mut Vec<NodeId>,
+) -> Option<(NodeId, ValueId)> {
     let (node_id, node) = node_from_value(graph, vid)?;
     match &node.label {
         AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("max") => {
             if node.inputs.len() != 2 {
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
+                        "split_max_with_zero_scalar: node {node_id:?} has {} inputs",
+                        node.inputs.len()
+                    );
+                }
                 return None;
             }
             let lhs = node.inputs[0];
             let rhs = node.inputs[1];
-            if let Some(trace) = collect_scalar_constant(graph, rhs) {
-                if approx_eq(trace.value, 0.0) {
-                    return Some((node_id, lhs, trace));
+            if let Some(ImageScalar::Constant(value)) =
+                capture_image_scalar(graph, rhs, assigned, nodes)
+            {
+                if approx_eq(value, 0.0) {
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!(
+                            "split_max_with_zero_scalar: rhs zero constant for node {node_id:?}"
+                        );
+                    }
+                    return Some((node_id, lhs));
                 }
             }
-            if let Some(trace) = collect_scalar_constant(graph, lhs) {
-                if approx_eq(trace.value, 0.0) {
-                    return Some((node_id, rhs, trace));
+            if let Some(ImageScalar::Constant(value)) =
+                capture_image_scalar(graph, lhs, assigned, nodes)
+            {
+                if approx_eq(value, 0.0) {
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!(
+                            "split_max_with_zero_scalar: lhs zero constant for node {node_id:?}"
+                        );
+                    }
+                    return Some((node_id, rhs));
                 }
+            }
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "split_max_with_zero_scalar: node {node_id:?} inputs not zero constants"
+                );
             }
             None
         }
@@ -2529,35 +2747,84 @@ fn split_max_with_constant_zero(
     }
 }
 
-fn match_mean_with_dim(
-    graph: &AccelGraph,
-    vid: ValueId,
-    expected_dim: f64,
-) -> Option<(NodeId, ValueId)> {
+fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<Vec<f64>> {
+    if let Some(scalar) = resolve_scalar_constant(graph, vid) {
+        return Some(vec![scalar]);
+    }
+    let info = graph.value(vid)?;
+    match &info.constant {
+        Some(Value::Tensor(tensor)) if !tensor.data.is_empty() => Some(tensor.data.clone()),
+        Some(Value::LogicalArray(arr)) if !arr.data.is_empty() => Some(
+            arr.data
+                .iter()
+                .map(|v| if *v == 0 { 0.0 } else { 1.0 })
+                .collect(),
+        ),
+        Some(Value::Bool(flag)) => Some(vec![if *flag { 1.0 } else { 0.0 }]),
+        Some(Value::Int(iv)) => Some(vec![iv.to_f64()]),
+        Some(Value::Num(num)) => Some(vec![*num]),
+        _ => None,
+    }
+}
+
+fn match_mean_axes(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId, Vec<f64>)> {
     let (node_id, node) = node_from_value(graph, vid)?;
     match &node.label {
         AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mean") => {}
         _ => return None,
     }
-    if node.inputs.len() != 2 {
+    if node.inputs.len() < 2 {
         return None;
     }
     let data_vid = node.inputs[0];
-    let dim_vid = node.inputs[1];
-    let dim = resolve_scalar_constant(graph, dim_vid)?;
-    if !approx_eq(dim, expected_dim) {
+    let dims_vid = node.inputs[1];
+    let dims = resolve_numeric_vector_constant(graph, dims_vid)?;
+    Some((node_id, data_vid, dims))
+}
+
+fn dims_match_unordered(found: &[f64], expected: &[f64]) -> bool {
+    if found.len() != expected.len() {
+        return false;
+    }
+    let mut a: Vec<i64> = found.iter().map(|d| d.round() as i64).collect();
+    let mut b: Vec<i64> = expected.iter().map(|d| d.round() as i64).collect();
+    a.sort_unstable();
+    b.sort_unstable();
+    a == b
+}
+
+fn peel_mean_dims(
+    graph: &AccelGraph,
+    vid: ValueId,
+    expected_dims: &[f64],
+    assigned: &HashSet<NodeId>,
+    nodes: &mut Vec<NodeId>,
+) -> Option<ValueId> {
+    if expected_dims.is_empty() {
+        return Some(vid);
+    }
+    let (node_id, data_vid, dims) = match_mean_axes(graph, vid)?;
+    if assigned.contains(&node_id) {
         return None;
     }
-    Some((node_id, data_vid))
+    if dims.len() == expected_dims.len() && dims_match_unordered(&dims, expected_dims) {
+        nodes.push(node_id);
+        return Some(data_vid);
+    }
+    if dims.len() == 1 && approx_eq(dims[0], expected_dims[0]) {
+        nodes.push(node_id);
+        return peel_mean_dims(graph, data_vid, &expected_dims[1..], assigned, nodes);
+    }
+    None
 }
 
 struct ImageNormalizeMatch {
     nodes: Vec<NodeId>,
     input: ValueId,
-    epsilon: f64,
-    gain: Option<f64>,
-    bias: Option<f64>,
-    gamma: Option<f64>,
+    epsilon: ImageScalar,
+    gain: Option<ImageScalar>,
+    bias: Option<ImageScalar>,
+    gamma: Option<ImageScalar>,
 }
 
 fn analyze_image_normalize(
@@ -2566,151 +2833,143 @@ fn analyze_image_normalize(
     assigned: &HashSet<NodeId>,
 ) -> Option<ImageNormalizeMatch> {
     let pow_node = graph.node(pow_node_id)?;
+    if log::log_enabled!(log::Level::Debug) {
+        log::debug!(
+            "image_normalize: inspect pow candidate node={pow_node_id:?} label={:?}",
+            pow_node.label
+        );
+    }
+    macro_rules! img_norm_fail {
+        ($reason:expr) => {{
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "image_normalize: reject node {pow_node_id:?} reason={}",
+                    $reason
+                );
+            }
+            return None;
+        }};
+    }
     if !matches!(
         pow_node.label,
         AccelNodeLabel::Primitive(PrimitiveOp::ElemPow)
     ) {
-        return None;
+        img_norm_fail!("not elem pow");
     }
     if pow_node.inputs.len() != 2 || pow_node.outputs.len() != 1 {
-        return None;
+        img_norm_fail!("unexpected pow arity");
     }
 
     let mut nodes: Vec<NodeId> = vec![pow_node_id];
 
-    let gamma_trace = collect_scalar_constant(graph, pow_node.inputs[1])?;
-    if gamma_trace.nodes.iter().any(|id| assigned.contains(id)) {
-        return None;
+    let gamma_scalar = capture_image_scalar(graph, pow_node.inputs[1], assigned, &mut nodes)?;
+    if log::log_enabled!(log::Level::Debug) {
+        log::debug!("image_normalize: node {pow_node_id:?} gamma scalar={gamma_scalar:?}");
     }
-    nodes.extend(gamma_trace.nodes.iter().copied());
-    let gamma_opt = if approx_eq(gamma_trace.value, 1.0) {
-        None
-    } else {
-        Some(gamma_trace.value)
+    let gamma_opt = match &gamma_scalar {
+        ImageScalar::Constant(value) if approx_eq(*value, 1.0) => None,
+        _ => Some(gamma_scalar),
     };
 
-    let (clamp_node_id, pre_bias_vid, zero_trace) =
-        split_max_with_constant_zero(graph, pow_node.inputs[0])?;
+    let (clamp_node_id, clamp_input_vid) =
+        split_max_with_zero_scalar(graph, pow_node.inputs[0], assigned, &mut nodes)?;
     if assigned.contains(&clamp_node_id) {
-        return None;
-    }
-    if zero_trace.nodes.iter().any(|id| assigned.contains(id)) {
-        return None;
+        img_norm_fail!("clamp node already assigned");
     }
     nodes.push(clamp_node_id);
-    nodes.extend(zero_trace.nodes.iter().copied());
 
-    let (pre_gain_vid, bias_opt) = if let Some((add_node_id, base_vid, bias_trace)) =
-        split_add_with_constant(graph, pre_bias_vid)
+    let pre_bias_vid = peel_numeric_casts(graph, clamp_input_vid, assigned, &mut nodes)?;
+    let (pre_gain_vid, bias_opt) = if let Some((add_node_id, base_vid, bias_scalar)) =
+        split_add_with_scalar(graph, pre_bias_vid, assigned, &mut nodes)
     {
         if assigned.contains(&add_node_id) {
-            return None;
-        }
-        if bias_trace.nodes.iter().any(|id| assigned.contains(id)) {
-            return None;
+            img_norm_fail!("bias add already assigned");
         }
         nodes.push(add_node_id);
-        nodes.extend(bias_trace.nodes.iter().copied());
-        let bias_value = bias_trace.value;
-        let bias = if approx_eq(bias_value, 0.0) {
-            None
-        } else {
-            Some(bias_value)
+        let bias = match &bias_scalar {
+            ImageScalar::Constant(value) if approx_eq(*value, 0.0) => None,
+            _ => Some(bias_scalar),
         };
+        let base_vid = peel_numeric_casts(graph, base_vid, assigned, &mut nodes)?;
         (base_vid, bias)
     } else {
         (pre_bias_vid, None)
     };
 
-    let (norm_vid, gain_opt) = if let Some((mul_node_id, base_vid, gain_trace)) =
-        split_mul_with_constant(graph, pre_gain_vid)
+    let (mut norm_vid, gain_opt) = if let Some((mul_node_id, base_vid, gain_scalar)) =
+        split_mul_with_scalar(graph, pre_gain_vid, assigned, &mut nodes)
     {
         if assigned.contains(&mul_node_id) {
-            return None;
-        }
-        if gain_trace.nodes.iter().any(|id| assigned.contains(id)) {
-            return None;
+            img_norm_fail!("gain mul already assigned");
         }
         nodes.push(mul_node_id);
-        nodes.extend(gain_trace.nodes.iter().copied());
-        let gain_value = gain_trace.value;
-        let gain = if approx_eq(gain_value, 1.0) {
-            None
-        } else {
-            Some(gain_value)
+        let gain = match &gain_scalar {
+            ImageScalar::Constant(value) if approx_eq(*value, 1.0) => None,
+            _ => Some(gain_scalar),
         };
+        let base_vid = peel_numeric_casts(graph, base_vid, assigned, &mut nodes)?;
         (base_vid, gain)
     } else {
         (pre_gain_vid, None)
     };
 
+    norm_vid = peel_numeric_casts(graph, norm_vid, assigned, &mut nodes)?;
+
     let (div_node_id, div_node) = node_from_value(graph, norm_vid)?;
     if assigned.contains(&div_node_id) {
-        return None;
+        img_norm_fail!("div node already assigned");
     }
     match div_node.label {
         AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
         | AccelNodeLabel::Primitive(PrimitiveOp::Div) => {}
-        _ => return None,
+        _ => img_norm_fail!("not div primitive"),
     }
     if div_node.inputs.len() != 2 {
-        return None;
+        img_norm_fail!("div arity");
     }
 
     let diff_vid = div_node.inputs[0];
-    let sigma_vid = div_node.inputs[1];
+    let sigma_vid = peel_numeric_casts(graph, div_node.inputs[1], assigned, &mut nodes)?;
     let (sigma_node_id, sigma_input_vid) = match is_sqrt_node(graph, sigma_vid) {
         Some(pair) => pair,
-        None => return None,
+        None => img_norm_fail!("sigma not sqrt"),
     };
     if assigned.contains(&sigma_node_id) {
-        return None;
+        img_norm_fail!("sqrt node already assigned");
     }
     nodes.push(div_node_id);
     nodes.push(sigma_node_id);
 
-    let (add_node_id, mean_sq_vid, epsilon_trace) =
-        split_add_with_constant(graph, sigma_input_vid)?;
+    let (add_node_id, mean_sq_vid, epsilon_scalar) =
+        split_add_with_scalar(graph, sigma_input_vid, assigned, &mut nodes)?;
     if assigned.contains(&add_node_id) {
-        return None;
-    }
-    if epsilon_trace.nodes.iter().any(|id| assigned.contains(id)) {
-        return None;
+        img_norm_fail!("epsilon add already assigned");
     }
     nodes.push(add_node_id);
-    nodes.extend(epsilon_trace.nodes.iter().copied());
-    let epsilon = epsilon_trace.value;
+    let epsilon = epsilon_scalar;
+    let mean_sq_vid = peel_numeric_casts(graph, mean_sq_vid, assigned, &mut nodes)?;
 
-    let (mean_sq_dim3_id, mean_sq_dim2_vid) = match_mean_with_dim(graph, mean_sq_vid, 3.0)?;
-    if assigned.contains(&mean_sq_dim3_id) {
-        return None;
-    }
-    let (mean_sq_dim2_id, squared_diff_vid) = match_mean_with_dim(graph, mean_sq_dim2_vid, 2.0)?;
-    if assigned.contains(&mean_sq_dim2_id) {
-        return None;
-    }
-    nodes.push(mean_sq_dim3_id);
-    nodes.push(mean_sq_dim2_id);
+    let squared_diff_vid = peel_mean_dims(graph, mean_sq_vid, &[3.0, 2.0], assigned, &mut nodes)?;
 
     let (square_pow_node_id, square_pow_node) = node_from_value(graph, squared_diff_vid)?;
     if assigned.contains(&square_pow_node_id) {
-        return None;
+        img_norm_fail!("square pow already assigned");
     }
     if !matches!(
         square_pow_node.label,
         AccelNodeLabel::Primitive(PrimitiveOp::ElemPow)
     ) {
-        return None;
+        img_norm_fail!("variance pow not elem pow");
     }
     if square_pow_node.inputs.len() != 2 {
-        return None;
+        img_norm_fail!("variance pow arity");
     }
     let exponent_trace = collect_scalar_constant(graph, square_pow_node.inputs[1])?;
     if !approx_eq(exponent_trace.value, 2.0) {
-        return None;
+        img_norm_fail!("variance exponent != 2");
     }
     if exponent_trace.nodes.iter().any(|id| assigned.contains(id)) {
-        return None;
+        img_norm_fail!("variance exponent nodes already assigned");
     }
     nodes.push(square_pow_node_id);
     nodes.extend(exponent_trace.nodes.iter().copied());
@@ -2718,57 +2977,55 @@ fn analyze_image_normalize(
     let diff_var_vid = square_pow_node.inputs[0];
     let (diff_var_node_id, diff_var_node) = node_from_value(graph, diff_var_vid)?;
     if assigned.contains(&diff_var_node_id) {
-        return None;
+        img_norm_fail!("diff variance node already assigned");
     }
     if !matches!(
         diff_var_node.label,
         AccelNodeLabel::Primitive(PrimitiveOp::Sub)
     ) {
-        return None;
+        img_norm_fail!("diff variance node not sub");
     }
     if diff_var_node.inputs.len() != 2 {
-        return None;
+        img_norm_fail!("diff variance arity");
     }
     let imgs_vid = diff_var_node.inputs[0];
-    let mu_vid = diff_var_node.inputs[1];
+    let mu_vid = peel_numeric_casts(graph, diff_var_node.inputs[1], assigned, &mut nodes)?;
     nodes.push(diff_var_node_id);
 
     let (diff_node_id, diff_node) = node_from_value(graph, diff_vid)?;
     if assigned.contains(&diff_node_id) {
-        return None;
+        img_norm_fail!("diff node already assigned");
     }
     if !matches!(diff_node.label, AccelNodeLabel::Primitive(PrimitiveOp::Sub)) {
-        return None;
+        img_norm_fail!("diff node not sub");
     }
     if diff_node.inputs.len() != 2 {
-        return None;
+        img_norm_fail!("diff node arity");
     }
-    if diff_node.inputs[0] != imgs_vid || diff_node.inputs[1] != mu_vid {
-        return None;
+    let diff_mu_vid = peel_numeric_casts(graph, diff_node.inputs[1], assigned, &mut nodes)?;
+    if diff_node.inputs[0] != imgs_vid || diff_mu_vid != mu_vid {
+        img_norm_fail!("diff inputs mismatch with variance pair");
     }
     nodes.push(diff_node_id);
 
-    let (mean_mu_dim3_id, mean_mu_dim2_vid) = match_mean_with_dim(graph, mu_vid, 3.0)?;
-    if assigned.contains(&mean_mu_dim3_id) {
-        return None;
-    }
-    let (mean_mu_dim2_id, mean_mu_input_vid) = match_mean_with_dim(graph, mean_mu_dim2_vid, 2.0)?;
-    if assigned.contains(&mean_mu_dim2_id) {
-        return None;
-    }
+    let mean_mu_input_vid = peel_mean_dims(graph, mu_vid, &[3.0, 2.0], assigned, &mut nodes)?;
     if mean_mu_input_vid != imgs_vid {
-        return None;
+        img_norm_fail!("mean mu input mismatch");
     }
-    nodes.push(mean_mu_dim3_id);
-    nodes.push(mean_mu_dim2_id);
 
     let input_info = graph.value(imgs_vid)?;
-    let dims = match &input_info.shape {
-        ShapeInfo::Tensor(dims) if dims.len() == 3 => dims,
-        _ => return None,
-    };
-    if dims.iter().any(|dim| dim.is_none()) {
-        return None;
+    match &input_info.shape {
+        ShapeInfo::Tensor(dims) if dims.len() == 3 => {}
+        ShapeInfo::Unknown => {}
+        other => {
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "image_normalize: node {pow_node_id:?} input shape {:?}",
+                    other
+                );
+            }
+            img_norm_fail!("input not 3-d tensor");
+        }
     }
 
     nodes.sort_unstable();

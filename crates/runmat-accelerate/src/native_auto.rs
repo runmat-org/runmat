@@ -1114,8 +1114,17 @@ impl NativeAutoOffload {
                 .iter()
                 .any(|tag| matches!(tag, AccelTag::Reduction))
             {
-                log_promotion(|| format!("Promoting builtin '{}' as reduction", name));
-                return self.promote_reduction(ReductionOp::Sum, args);
+                if (name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min"))
+                    && !max_or_min_reduction_call(args)
+                {
+                    trace!(
+                        "Skipping reduction promotion for builtin '{}' (detected elementwise form)",
+                        name
+                    );
+                } else {
+                    log_promotion(|| format!("Promoting builtin '{}' as reduction", name));
+                    return self.promote_reduction(reduction_op_hint(name), args);
+                }
             }
 
             if policy
@@ -1186,6 +1195,41 @@ fn tensor_rows_cols(value: &Value) -> Option<(usize, usize)> {
     }
 }
 
+#[allow(dead_code)]
+fn should_skip_reduction_promotion(name: &str, args: &[Value]) -> bool {
+    (name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min"))
+        && !max_or_min_reduction_call(args)
+}
+
+fn reduction_op_hint(name: &str) -> ReductionOp {
+    if name.eq_ignore_ascii_case("max") {
+        ReductionOp::Max
+    } else if name.eq_ignore_ascii_case("min") {
+        ReductionOp::Min
+    } else {
+        ReductionOp::Sum
+    }
+}
+
+fn max_or_min_reduction_call(args: &[Value]) -> bool {
+    if args.len() <= 1 {
+        return true;
+    }
+    args.get(1).map(is_empty_placeholder_value).unwrap_or(false)
+}
+
+fn is_empty_placeholder_value(value: &Value) -> bool {
+    match value {
+        Value::Tensor(t) => t.data.is_empty(),
+        Value::LogicalArray(l) => l.data.is_empty(),
+        Value::StringArray(sa) => sa.data.is_empty(),
+        Value::CharArray(ca) => ca.data.is_empty(),
+        Value::Cell(cell) => cell.data.is_empty(),
+        Value::String(s) => s.is_empty(),
+        _ => false,
+    }
+}
+
 fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
@@ -1195,6 +1239,27 @@ fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
         out.push(gather_if_needed(value).map_err(|e| anyhow!(e))?);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_detection_handles_placeholders() {
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let placeholder = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
+        let data = Value::Tensor(tensor);
+        let empty = Value::Tensor(placeholder);
+
+        assert!(max_or_min_reduction_call(&[data.clone()]));
+        assert!(max_or_min_reduction_call(&[
+            data.clone(),
+            empty.clone(),
+            Value::Num(1.0)
+        ]));
+        assert!(!max_or_min_reduction_call(&[data.clone(), Value::Num(0.0)]));
+    }
 }
 
 #[derive(Clone, Copy)]

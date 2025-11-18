@@ -251,9 +251,46 @@ fn detects_image_normalize_group() {
                 .as_ref()
                 .map(|s| matches!(s, runmat_accelerate::fusion::ImageScalar::Constant(_)))
                 .unwrap_or(true));
+            assert!(pattern
+                .gamma
+                .as_ref()
+                .map(|s| matches!(s, runmat_accelerate::fusion::ImageScalar::Constant(_)))
+                .unwrap_or(true));
         }
         _ => panic!("missing image normalize pattern"),
     }
+}
+
+#[test]
+fn detects_image_normalize_group_with_gpu_scalars() {
+    let source = r#"
+    seed = 0;
+    B = 4; H = 8; W = 12;
+    gain_default = single(1.0123);
+    bias_default = single(-0.02);
+    gamma_default = single(1.8);
+    eps0_default = single(1e-6);
+    gain = gpuArray(gain_default);
+    bias = gpuArray(bias_default);
+    gamma = gpuArray(gamma_default);
+    eps0 = gpuArray(eps0_default);
+    zero_proto = gpuArray(single(0));
+    imgs = rand(B, H, W, 'like', zero_proto);
+    mu = single(mean(imgs, [2 3], 'native'));
+    sigma = single(sqrt(mean((imgs - mu).^2, [2 3], 'native') + eps0));
+    out = single(((imgs - mu) ./ sigma) * gain + bias);
+    zero_scalar = gpuArray(single(0));
+    out = max(out, zero_scalar);
+    out = single(out .^ gamma);
+    "#;
+    let graph = compile_graph(source);
+    let groups = detect_fusion_groups(&graph);
+    assert!(
+        groups
+            .iter()
+            .any(|group| matches!(group.kind, FusionKind::ImageNormalize)),
+        "image normalize fusion group not detected for gpuArray scalars"
+    );
 }
 
 #[test]

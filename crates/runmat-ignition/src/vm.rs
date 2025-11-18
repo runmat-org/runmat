@@ -13,7 +13,10 @@ use runmat_accelerate::{
     set_current_pc,
 };
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::{active_group_plan_clone, FusionKind, ShapeInfo, ValueOrigin, VarKind};
+use runmat_accelerate::{
+    active_group_plan_clone, value_is_all_keyword, FusionKind, ReductionAxes, ShapeInfo,
+    ValueOrigin, VarKind,
+};
 use runmat_builtins::{Type, Value};
 use runmat_runtime::{
     builtins::common::tensor,
@@ -25,6 +28,8 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::sync::Once;
+#[cfg(feature = "native-accel")]
+use std::sync::OnceLock;
 
 #[cfg(feature = "native-accel")]
 struct FusionPlanGuard;
@@ -89,6 +94,68 @@ fn accel_prepare_args(_name: &str, args: &[Value]) -> Result<Vec<Value>, String>
 fn call_builtin_auto(name: &str, args: &[Value]) -> Result<Value, String> {
     let prepared = accel_prepare_args(name, args)?;
     runmat_runtime::call_builtin(name, &prepared)
+}
+
+#[cfg(feature = "native-accel")]
+#[inline]
+fn fusion_debug_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| match std::env::var("RUNMAT_DEBUG_FUSION") {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"),
+        Err(_) => false,
+    })
+}
+
+#[cfg(feature = "native-accel")]
+fn log_fusion_span_window(
+    plan: &runmat_accelerate::FusionGroupPlan,
+    bytecode: &Bytecode,
+    pc: usize,
+) {
+    if !fusion_debug_enabled() || !log::log_enabled!(log::Level::Debug) {
+        return;
+    }
+    if bytecode.instructions.is_empty() {
+        return;
+    }
+    let window = 3usize;
+    let span = plan.group.span.clone();
+    let total = bytecode.instructions.len();
+    let start = span.start.saturating_sub(window);
+    let mut end = span.end + window;
+    if end >= total {
+        end = total.saturating_sub(1);
+    }
+    if end < span.end {
+        end = span.end;
+    }
+    let mut ops: Vec<String> = Vec::new();
+    for idx in start..=end {
+        let instr = &bytecode.instructions[idx];
+        let mut tags: Vec<&'static str> = Vec::new();
+        if idx == pc {
+            tags.push("pc");
+        }
+        if idx == span.start {
+            tags.push("start");
+        }
+        if idx == span.end {
+            tags.push("end");
+        }
+        let tag_str = if tags.is_empty() {
+            String::new()
+        } else {
+            format!("<{}>", tags.join(","))
+        };
+        ops.push(format!("{}{} {:?}", idx, tag_str, instr));
+    }
+    log::debug!(
+        "fusion plan {} span window [{}..{}]: {}",
+        plan.index,
+        start,
+        end,
+        ops.join(" | ")
+    );
 }
 
 // Namespace used for error identifiers (e.g., "MATLAB:..." or "RunMat:...")
@@ -1116,6 +1183,8 @@ pub fn interpret_with_vars(
             (active_group_plan_clone(), bytecode.accel_graph.as_ref())
         {
             if plan.group.span.start == pc {
+                #[cfg(feature = "native-accel")]
+                log_fusion_span_window(&plan, bytecode, pc);
                 match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context) {
                     Ok(result) => {
                         stack.push(result);
@@ -10011,14 +10080,6 @@ fn try_execute_fusion_group(
         }
     }
 
-    #[inline]
-    fn fusion_debug_enabled() -> bool {
-        static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *FLAG.get_or_init(|| match std::env::var("RUNMAT_DEBUG_FUSION") {
-            Ok(v) => v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"),
-            Err(_) => false,
-        })
-    }
     if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
         let stack_needed_preview = plan.stack_pattern.len();
         let stack_snapshot: Vec<&Value> = stack
@@ -10189,7 +10250,12 @@ fn try_execute_fusion_group(
         // Determine reduction axis or 'all'. Prefer the builtin reduction op's dim argument (inputs[1]).
         // MATLAB dim is 1-based: dim=1 reduces rows (axis 0), dim=2 reduces cols (axis 1), 'all' reduces all elements.
         let mut axis = 0usize;
-        let mut reduce_all = false;
+        let mut reduce_all = matches!(plan.reduction_axes, Some(ReductionAxes::All));
+        if let Some(ReductionAxes::Explicit(dims)) = &plan.reduction_axes {
+            if let Some(first) = dims.first().copied() {
+                axis = first.saturating_sub(1);
+            }
+        }
         // Debug: show input origins for reduction
         if log::log_enabled!(log::Level::Debug) {
             let meta: Vec<String> = plan
@@ -10209,16 +10275,43 @@ fn try_execute_fusion_group(
             log::debug!("reduction gather meta: [{}]", meta.join(", "));
         }
         // Detect 'all' in constants or const_values
-        let has_all = plan
-            .constants
-            .values()
-            .any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")))
-            || plan
-                .const_values
-                .values()
-                .any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")));
+        let has_all = reduce_all
+            || plan.constants.values().any(value_is_all_keyword)
+            || plan.const_values.values().any(value_is_all_keyword);
         if has_all {
             reduce_all = true;
+        }
+        if reduce_all && fusion_debug_enabled() {
+            log::debug!(
+                "fusion reduction (all) meta: data_vid={:?} inputs={:?} stack_pattern={:?}",
+                plan.reduction_data,
+                plan.inputs,
+                plan.stack_pattern
+            );
+        }
+        if !reduce_all {
+            for node_id in &plan.group.nodes {
+                if let Some(node) = graph.node(*node_id) {
+                    if let runmat_accelerate::graph::AccelNodeLabel::Builtin { name } = &node.label
+                    {
+                        if name.eq_ignore_ascii_case("mean") {
+                            for input_vid in &node.inputs {
+                                if let Some(info) = graph.value(*input_vid) {
+                                    if let Some(constant) = &info.constant {
+                                        if value_is_all_keyword(constant) {
+                                            reduce_all = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if reduce_all {
+                    break;
+                }
+            }
         }
         // Prefer plan.reduction_dim if available
         if !reduce_all {
@@ -10469,12 +10562,14 @@ fn try_execute_fusion_group(
             let (r, c) = rows_cols.unwrap_or((1, 1));
             if reduce_all {
                 let mut total_elems: Option<usize> = None;
+                let mut total_from_operand = false;
                 // Prefer fully-known graph shape for the reduction operand
                 if let Some(shape) = plan.reduction_data_shape(graph) {
                     let prod = shape.into_iter().fold(1usize, |acc, dim| {
                         let d = dim.max(1);
                         acc.saturating_mul(d)
                     });
+                    total_from_operand = true;
                     total_elems = Some(prod.max(1));
                 }
                 // Fall back to runtime tensor shapes (consumed stack values first, then inputs)
@@ -10514,6 +10609,7 @@ fn try_execute_fusion_group(
                     };
                     for value in consumed.iter().filter_map(|v| v.as_ref()) {
                         if let Some(prod) = inspect_value(value) {
+                            total_from_operand = true;
                             total_elems = Some(prod.max(1));
                             break;
                         }
@@ -10521,6 +10617,7 @@ fn try_execute_fusion_group(
                     if total_elems.is_none() {
                         for value in &request.inputs {
                             if let Some(prod) = inspect_value(value) {
+                                total_from_operand = true;
                                 total_elems = Some(prod.max(1));
                                 break;
                             }
@@ -10533,7 +10630,19 @@ fn try_execute_fusion_group(
                         total_elems = Some(ec.max(1));
                     }
                 }
-                let total = total_elems.unwrap_or_else(|| r.saturating_mul(c).max(1));
+                if total_elems.is_none() || !total_from_operand {
+                    if fusion_debug_enabled() {
+                        log::debug!(
+                            "fusion reduction (all): operand extent unknown (source: {:?}); falling back to provider path",
+                            if total_from_operand { "runtime" } else { "output_shape" }
+                        );
+                    }
+                    for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
+                        stack.push(value.clone());
+                    }
+                    return Err("fusion: reduction all extent unknown".to_string());
+                }
+                let total = total_elems.unwrap();
                 if fusion_debug_enabled() {
                     log::debug!(
                         "fusion reduction (all): total_elems={} fallback_rows={} fallback_cols={}",

@@ -423,18 +423,21 @@ pub struct CenteredGramParamsF32 {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ImageNormalizeUniforms {
-    pub batches: u32,
+    pub batch_count: u32,
     pub height: u32,
     pub width: u32,
     pub plane: u32,
     pub stride_h: u32,
     pub stride_w: u32,
     pub flags: u32,
+    pub batch_stride: u32,
+    pub batch_offset: u32,
     pub _pad0: u32,
     pub epsilon: f32,
     pub gain: f32,
     pub bias: f32,
     pub gamma: f32,
+    pub _pad1: u32,
 }
 
 pub const IMAGE_NORMALIZE_FLAG_GAIN: u32 = 1 << 0;

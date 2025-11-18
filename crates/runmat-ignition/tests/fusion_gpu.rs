@@ -2180,6 +2180,50 @@ fn centered_gram_fusion_matches_cpu() {
 }
 
 #[test]
+fn mean_all_gpu_matches_cpu() {
+    gc_test_context(|| {
+        let source = r#"
+            A = gpuArray(single([1.0; 2.0; 3.0; 4.0]));
+            mu = mean(A, 'all');
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir).expect("compile");
+
+        let mu_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .last()
+            .expect("mu store index");
+
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+
+        ensure_provider_registered();
+        let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
+        let mu_gpu = vars_gpu.get(mu_index).expect("mu result");
+        let gathered = gather_if_needed(mu_gpu).expect("gather mu");
+        let scalar = match gathered {
+            Value::Tensor(t) => {
+                assert_eq!(t.data.len(), 1, "expected scalar tensor");
+                t.data[0]
+            }
+            Value::Num(n) => n,
+            other => panic!("expected numeric result, got {other:?}"),
+        };
+        let expected = (1.0 + 2.0 + 3.0 + 4.0) / 4.0;
+        assert!(
+            (scalar - expected).abs() <= 1e-6,
+            "mean(all) mismatch: lhs={scalar}, rhs={expected}"
+        );
+    });
+}
+
+#[test]
 fn power_step_normalization_matches_cpu() {
     gc_test_context(|| {
         use runmat_accelerate::FusionKind;

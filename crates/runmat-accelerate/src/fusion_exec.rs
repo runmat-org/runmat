@@ -643,6 +643,13 @@ pub fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Va
         Some(FusionPattern::ImageNormalize(p)) => p,
         _ => return Err(anyhow!("image normalize: missing pattern metadata")),
     };
+    if log::log_enabled!(log::Level::Debug) {
+        log::debug!(
+            "execute_image_normalize: plan inputs={:?} stack={:?}",
+            request.plan.inputs,
+            request.plan.stack_pattern
+        );
+    }
 
     let find_value = |vid: ValueId| -> Result<&Value> {
         if let Some(pos) = request.plan.inputs.iter().position(|id| *id == vid) {
@@ -681,7 +688,10 @@ pub fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Va
         Some(s) => Some(resolve_image_scalar_value(s, request.plan, &request)?),
         None => None,
     };
-    let gamma = resolve_image_scalar_value(&pattern.gamma, request.plan, &request)?;
+    let gamma = match &pattern.gamma {
+        Some(s) => Some(resolve_image_scalar_value(s, request.plan, &request)?),
+        None => None,
+    };
 
     let desc = ImageNormalizeDescriptor {
         batch,
@@ -690,8 +700,11 @@ pub fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Va
         epsilon,
         gain,
         bias,
-        gamma: Some(gamma),
+        gamma,
     };
+    if log::log_enabled!(log::Level::Debug) {
+        log::debug!("execute_image_normalize: desc {:?}", desc);
+    }
 
     let output = provider.image_normalize(&input_handle, &desc)?;
 

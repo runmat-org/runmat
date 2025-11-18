@@ -24,10 +24,8 @@ pub mod legacy {
     pub use crate::blas;
     pub use crate::comparison;
     pub use crate::concatenation;
-    pub use crate::constants;
     pub use crate::elementwise;
     pub use crate::indexing;
-    pub use crate::introspection;
     #[cfg(feature = "blas-lapack")]
     pub use crate::lapack;
     pub use crate::matrix;

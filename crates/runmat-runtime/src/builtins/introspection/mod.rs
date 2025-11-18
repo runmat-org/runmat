@@ -9,6 +9,4 @@ mod isstring;
 pub mod which;
 pub mod who;
 pub mod whos;
-
-pub use crate::introspection::*;
 pub use class::*;

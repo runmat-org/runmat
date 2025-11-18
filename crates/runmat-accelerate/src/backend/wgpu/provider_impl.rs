@@ -46,14 +46,17 @@ use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
 use runmat_runtime::builtins::math::reduction::compute_median_inplace;
 use rustfft::FftPlanner;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, Mutex};
-use std::{fs, path::Path};
+use std::time::{Duration, Instant};
+use std::{fs, path::Path, path::PathBuf};
 use wgpu::util::DeviceExt;
 
+use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::{
     bind_group::BindGroupCache, key as cache_key, persist as cache_persist,
 };
@@ -68,6 +71,9 @@ use crate::backend::wgpu::params::{
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::resources::{KernelResourceRegistry, UniformBufferKey};
+use crate::backend::wgpu::shaders::image_normalize::{
+    IMAGE_NORMALIZE_SHADER_F32, IMAGE_NORMALIZE_SHADER_F64,
+};
 use crate::backend::wgpu::types::NumericPrecision;
 const QR_DEVICE_MAX_COLS: usize = 64;
 const QR_DEVICE_MAX_ELEMS: usize = 1_000_000;
@@ -148,6 +154,13 @@ pub struct WgpuProvider {
     reduction_two_pass_threshold: usize,
     reduction_workgroup_size_default: u32,
     pipeline_cache_dir: Option<std::path::PathBuf>,
+    reduction_autotune: AutotuneController<ReductionAutotuneKey, ReductionTuning>,
+    image_norm_autotune: AutotuneController<ImageNormalizeKey, ImageNormalizeTuning>,
+    image_norm_pipeline_cache: Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
+    #[allow(dead_code)]
+    autotune_base_dir: Option<PathBuf>,
+    #[allow(dead_code)]
+    autotune_device_tag: String,
     // Optimization caches
     pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
     moments_cache: Mutex<HashMap<(u64, Vec<usize>), (GpuTensorHandle, GpuTensorHandle)>>, // (base_buffer_id, dims) -> (mean, ex2)
@@ -168,6 +181,79 @@ struct MatrixOperandView {
     cols: usize,
     lda: u32,
     transpose: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+enum ReductionMode {
+    SinglePass,
+    TwoPass { chunk_rows: u32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+struct ReductionTuning {
+    mode: ReductionMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+struct ReductionAutotuneKey {
+    precision: u8,
+    slices_bucket: u32,
+    reduce_bucket: u32,
+}
+
+impl ReductionAutotuneKey {
+    fn new(precision: NumericPrecision, num_slices: usize, reduce_len: usize) -> Self {
+        Self {
+            precision: match precision {
+                NumericPrecision::F64 => 64,
+                NumericPrecision::F32 => 32,
+            },
+            slices_bucket: bucketize_dimension(num_slices),
+            reduce_bucket: bucketize_dimension(reduce_len),
+        }
+    }
+}
+
+fn bucketize_dimension(value: usize) -> u32 {
+    if value == 0 {
+        return 0;
+    }
+    let mut bucket = 1u64;
+    let target = value as u64;
+    while bucket < target && bucket < u32::MAX as u64 {
+        bucket <<= 1;
+    }
+    bucket.min(u32::MAX as u64) as u32
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+struct ImageNormalizeTuning {
+    batch_tile: u32,
+    values_per_thread: u32,
+    lane_count: u32,
+    spatial_tile: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+struct ImageNormalizeKey {
+    version: u8,
+    precision: u8,
+    plane_bucket: u32,
+    batch_bucket: u32,
+}
+
+impl ImageNormalizeKey {
+    fn new(precision: NumericPrecision, batches: u32, plane: u32) -> Self {
+        Self {
+            version: WgpuProvider::IMAGE_NORMALIZE_AUTOTUNE_VERSION,
+            precision: match precision {
+                NumericPrecision::F64 => 64,
+                NumericPrecision::F32 => 32,
+            },
+            plane_bucket: bucketize_dimension(plane as usize),
+            batch_bucket: bucketize_dimension(batches as usize),
+        }
+    }
 }
 
 fn parse_two_pass_mode(raw: &str) -> Option<ReductionTwoPassMode> {
@@ -1659,6 +1745,10 @@ fn rng_state() -> &'static Mutex<u64> {
 }
 impl WgpuProvider {
     const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
+    const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
+    const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
+    const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
+    const IMAGE_NORMALIZE_TARGET_LOOP_ITERS_PER_LANE: f64 = 16.0;
 
     fn create_storage_buffer_checked_with_usage(
         &self,
@@ -1701,6 +1791,184 @@ impl WgpuProvider {
 
     fn create_storage_buffer_checked(&self, len: usize, label: &str) -> Result<Arc<wgpu::Buffer>> {
         self.create_storage_buffer_checked_with_usage(len, label, BufferUsageClass::Generic)
+    }
+
+    fn image_normalize_vector_width(&self) -> u32 {
+        match self.precision {
+            NumericPrecision::F64 => 2,
+            NumericPrecision::F32 => 4,
+        }
+    }
+
+    fn round_up_to_multiple(value: u32, mult: u32) -> u32 {
+        if mult <= 1 {
+            return value;
+        }
+        let remainder = value % mult;
+        if remainder == 0 {
+            value
+        } else {
+            value.saturating_add(mult - remainder).max(mult)
+        }
+    }
+
+    fn sanitize_image_normalize_tuning(
+        &self,
+        mut tuning: ImageNormalizeTuning,
+        batches: u32,
+    ) -> ImageNormalizeTuning {
+        let max_lane_dim = self.adapter_limits.max_compute_workgroup_size_x.max(32);
+        tuning.lane_count = tuning.lane_count.clamp(32, max_lane_dim).max(32);
+        tuning.lane_count = Self::round_up_to_multiple(tuning.lane_count, 32).min(max_lane_dim);
+        tuning.values_per_thread = tuning.values_per_thread.clamp(1, 8);
+        let max_spatial = self.adapter_limits.max_compute_workgroup_size_y.max(1);
+        tuning.spatial_tile = tuning.spatial_tile.clamp(1, max_spatial);
+        let max_invocations = self
+            .adapter_limits
+            .max_compute_invocations_per_workgroup
+            .max(64);
+        while tuning.lane_count.saturating_mul(tuning.spatial_tile) > max_invocations {
+            if tuning.lane_count > 32 {
+                tuning.lane_count -= 32;
+            } else if tuning.spatial_tile > 1 {
+                tuning.spatial_tile -= 1;
+            } else {
+                break;
+            }
+        }
+        tuning.batch_tile = tuning.batch_tile.clamp(1, batches.max(1));
+        tuning
+    }
+
+    fn select_image_normalize_tuning(&self, batches: u32, plane: u32) -> ImageNormalizeTuning {
+        let batches = batches.max(1);
+        let plane = plane.max(1);
+        let mut lane =
+            ((plane as f64) / Self::IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE).ceil() as u32;
+        lane = lane.max(32);
+        let max_lane_dim = self.adapter_limits.max_compute_workgroup_size_x.max(32);
+        lane = lane.min(max_lane_dim);
+        lane = Self::round_up_to_multiple(lane, 32).max(32);
+        let plane_per_lane = (plane as f64 / lane as f64).max(1.0);
+        let mut values_per_thread =
+            ((plane_per_lane / Self::IMAGE_NORMALIZE_TARGET_LOOP_ITERS_PER_LANE).ceil() as u32)
+                .clamp(1, 8);
+        if plane <= 512 {
+            values_per_thread = values_per_thread.min(4);
+        }
+        let spatial_tile = if plane <= 1024 {
+            1
+        } else if plane <= 4096 {
+            2
+        } else {
+            4
+        };
+        let mut batch_tile = if plane >= 8192 {
+            batches.min(16)
+        } else {
+            batches.min(32)
+        };
+        if batches <= 4 {
+            batch_tile = batches;
+        }
+        let tuning = ImageNormalizeTuning {
+            batch_tile: batch_tile.max(1),
+            values_per_thread,
+            lane_count: lane,
+            spatial_tile,
+        };
+        self.sanitize_image_normalize_tuning(tuning, batches)
+    }
+
+    fn resolve_image_normalize_tuning(
+        &self,
+        batches: u32,
+        plane: u32,
+    ) -> (ImageNormalizeTuning, bool) {
+        let key = ImageNormalizeKey::new(self.precision, batches, plane);
+        if self.image_norm_autotune.is_enabled() {
+            if let Some(tuning) = self.image_norm_autotune.get(&key) {
+                return (tuning, true);
+            }
+            let tuning = self.select_image_normalize_tuning(batches, plane);
+            self.image_norm_autotune.insert(key, tuning);
+            (tuning, false)
+        } else {
+            (self.select_image_normalize_tuning(batches, plane), false)
+        }
+    }
+
+    fn image_normalize_hot_stream_cap(&self, plane: u32, batches: u32) -> u32 {
+        if batches == 0 {
+            return 0;
+        }
+        let plane = plane.max(1);
+        let bytes_per_batch = plane as u64 * self.element_size as u64;
+        if bytes_per_batch == 0 {
+            return batches;
+        }
+        let target_bytes = self
+            .image_normalize_stream_target_bytes()
+            .max(bytes_per_batch);
+        let max_batches = target_bytes / bytes_per_batch;
+        max_batches
+            .clamp(1, batches as u64)
+            .try_into()
+            .unwrap_or(batches)
+    }
+
+    fn image_normalize_stream_target_bytes(&self) -> u64 {
+        if let Ok(raw) = std::env::var("RUNMAT_IMAGE_NORMALIZE_STREAM_TARGET_BYTES") {
+            if let Ok(parsed) = raw.parse::<u64>() {
+                return parsed.max(1);
+            }
+        }
+        let limit = self.adapter_limits.max_buffer_size as u64;
+        let default = 6u64 * 1024 * 1024 * 1024;
+        default.min(limit).max((self.element_size as u64) * 4)
+    }
+
+    fn image_normalize_pipeline(
+        &self,
+        tuning: &ImageNormalizeTuning,
+    ) -> Result<Arc<wgpu::ComputePipeline>> {
+        if let Ok(cache) = self.image_norm_pipeline_cache.lock() {
+            if let Some(existing) = cache.get(tuning) {
+                return Ok(existing.clone());
+            }
+        }
+        let template = match self.precision {
+            NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
+            NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
+        };
+        let shader_src = template
+            .replace("@BT@", &tuning.batch_tile.to_string())
+            .replace("@VP@", &tuning.values_per_thread.to_string())
+            .replace("@WG@", &tuning.lane_count.to_string())
+            .replace("@ST@", &tuning.spatial_tile.to_string())
+            .replace("@BV@", &self.image_normalize_vector_width().to_string());
+        let module = self
+            .device_ref()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("runmat-image-normalize-shader-dyn"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader_src)),
+            });
+        let pipeline_layout = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+            self.device_ref(),
+            "runmat-image-normalize-pipeline-dyn",
+            &self.pipelines.image_normalize.layout,
+        );
+        let pipeline = crate::backend::wgpu::cache::factory::create_compute_pipeline(
+            self.device_ref(),
+            "runmat-image-normalize-pipeline-dyn",
+            &pipeline_layout,
+            &module,
+        );
+        let arc = Arc::new(pipeline);
+        if let Ok(mut cache) = self.image_norm_pipeline_cache.lock() {
+            cache.insert(*tuning, arc.clone());
+        }
+        Ok(arc)
     }
     pub fn device_id(&self) -> u32 {
         self.cache_device_id
@@ -2067,6 +2335,48 @@ impl WgpuProvider {
                 .join(format!("wgpu-pipeline-cache-{}", cache_device_id))
         };
 
+        let autotune_base_dir = std::env::var("RUNMAT_AUTOTUNE_DIR")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| {
+                dirs::data_local_dir().map(|mut dir| {
+                    dir.push("runmat");
+                    dir
+                })
+            })
+            .or_else(|| Some(cache_dir.clone()));
+        let autotune_device_tag = format!(
+            "{}-{:08x}",
+            canonical_vendor_name(&adapter_info),
+            cache_device_id
+        );
+        if let Some(dir) = &autotune_base_dir {
+            let reduction_path = dir.join("autotune").join("fused_reduction");
+            info!(
+                "Reduction autotune cache dir {:?} (tag {})",
+                reduction_path, autotune_device_tag
+            );
+        }
+        let reduction_autotune = AutotuneController::new_from_env(
+            "RUNMAT_REDUCTION_AUTOTUNE",
+            "fused_reduction",
+            autotune_base_dir.clone(),
+            &autotune_device_tag,
+        );
+        if let Some(dir) = &autotune_base_dir {
+            let image_path = dir.join("autotune").join("image_normalize");
+            info!(
+                "ImageNormalize autotune cache dir {:?} (tag {})",
+                image_path, autotune_device_tag
+            );
+        }
+        let image_norm_autotune = AutotuneController::new_from_env(
+            "RUNMAT_IMAGE_NORMALIZE_AUTOTUNE",
+            "image_normalize",
+            autotune_base_dir.clone(),
+            &autotune_device_tag,
+        );
+
         info!(
             "Reduction two-pass mode={} threshold={} workgroup_size={}",
             reduction_two_pass_mode.as_str(),
@@ -2098,6 +2408,11 @@ impl WgpuProvider {
             reduction_two_pass_threshold: two_pass_threshold,
             reduction_workgroup_size_default: reduction_wg_default,
             pipeline_cache_dir: Some(cache_dir),
+            reduction_autotune,
+            image_norm_autotune,
+            image_norm_pipeline_cache: Mutex::new(HashMap::new()),
+            autotune_base_dir,
+            autotune_device_tag,
             pow2_of: Mutex::new(HashMap::new()),
             moments_cache: Mutex::new(HashMap::new()),
         })
@@ -2958,14 +3273,6 @@ impl WgpuProvider {
             BufferUsageClass::FusionOut,
         ))
     }
-    fn should_use_two_pass(&self, reduce_len: usize) -> bool {
-        match self.reduction_two_pass_mode {
-            ReductionTwoPassMode::ForceOn => true,
-            ReductionTwoPassMode::ForceOff => false,
-            ReductionTwoPassMode::Auto => reduce_len > self.two_pass_threshold(),
-        }
-    }
-
     pub(crate) fn fused_reduction_exec(
         &self,
         shader: &str,
@@ -2996,294 +3303,344 @@ impl WgpuProvider {
         } else {
             workgroup_size
         };
-        let two_pass = self.should_use_two_pass(reduce_len);
-        let scale_value = flavor.scale(reduce_len);
-        if !two_pass {
-            let layout_tag = &format!("runmat-reduction-layout-{}", inputs.len());
-            let module = crate::backend::wgpu::pipelines::create_shader_module(
-                self.device_ref(),
-                "runmat-fused-reduction-module",
+        let tuning_key = ReductionAutotuneKey::new(self.precision, num_slices, reduce_len);
+        if self.reduction_autotune.is_enabled() {
+            if let Some(tuning) = self.reduction_autotune.get(&tuning_key) {
+                return self.execute_reduction_with_strategy(
+                    &tuning,
+                    inputs,
+                    output_shape,
+                    shader,
+                    reduce_len,
+                    num_slices,
+                    workgroup_size,
+                    flavor,
+                );
+            }
+            if let Some(handle) = self.maybe_autotune_reduction(
+                &tuning_key,
+                inputs,
+                output_shape,
                 shader,
-            );
-            let bgl = self
-                .cached_bind_group_layout_for_tag(layout_tag)
-                .expect("reduction bgl");
-            let pl = crate::backend::wgpu::pipelines::create_pipeline_layout(
-                self.device_ref(),
-                "runmat-reduction-pl",
-                bgl.as_ref(),
-            );
-            if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
-                let out_len = num_slices.max(1);
-                let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
-                return Ok(self.register_existing_buffer(
-                    out_buffer,
-                    output_shape.to_vec(),
-                    out_len,
-                ));
+                reduce_len,
+                num_slices,
+                workgroup_size,
+                flavor,
+            )? {
+                return Ok(handle);
             }
-            let key = self.compute_pipeline_hash_bytes(
-                shader.as_bytes(),
-                layout_tag,
-                Some(workgroup_size),
-            );
-            let pipeline = self.get_or_create_pipeline(
-                key,
-                &pl,
-                &module,
-                "runmat-reduction-pipeline",
-                Some(shader.as_bytes()),
-                Some(layout_tag),
-                Some(workgroup_size),
-            );
-            crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-            );
-            self.device_ref().poll(wgpu::Maintain::Poll);
-            self.device_ref().poll(wgpu::Maintain::Poll);
-            let flush_enc =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-flush-single-pass-gap"),
-                    });
-            self.submit(flush_enc);
-            let out_len = num_slices.max(1);
-            // Output buffer selection: default to scratch (faster); allow forcing unique via env
-            let mut out_buffer = self
-                .create_storage_buffer_for_usage(
-                    BufferUsageClass::FusionOut,
-                    out_len,
-                    "runmat-reduction-out",
-                )
-                .0;
-            // Alias guard: ensure out_buffer is not identical to any input buffer
-            {
-                let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
-                let mut alias = false;
-                for h in inputs.iter() {
-                    let ptr = self.get_entry(h)?.buffer.as_ref() as *const wgpu::Buffer as usize;
-                    if ptr == out_ptr {
-                        alias = true;
-                        break;
-                    }
-                }
-                if alias {
-                    out_buffer = self
-                        .create_storage_buffer_for_usage(
-                            BufferUsageClass::FusionOut,
-                            out_len,
-                            "runmat-reduction-out-unique",
-                        )
-                        .0;
-                }
-            }
-            #[repr(C)]
-            #[derive(Clone, Copy, Pod, Zeroable)]
-            struct Params {
-                nrows: u32,
-                ncols: u32,
-                ld: u32,
-                flags: u32,
-            }
-            let flags = if shader.contains("const OMITNAN: bool = true") {
-                1u32
-            } else {
-                0u32
-            };
-            let params = Params {
-                nrows: reduce_len as u32,
-                ncols: num_slices as u32,
-                ld: reduce_len as u32,
-                flags,
-            };
-            let params_buffer = self.kernel_resources.uniform_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::UniformBufferKey::ReductionParams,
-                std::mem::size_of::<Params>() as u64,
-                "runmat-reduction-params",
-            );
-            self.queue
-                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-            // Build entries dynamically: N inputs, 1 output, 1 params
-            let mut entries_vec: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(inputs.len() + 2);
-            // Gather input buffers and (optionally) snapshot them to fresh buffers to isolate usage scopes
-            let mut input_bufs: Vec<(Arc<wgpu::Buffer>, u64)> = Vec::with_capacity(inputs.len());
-            for h in inputs.iter() {
-                let e = self.get_entry(h)?;
-                let bytes = (e.len * self.element_size) as u64;
-                input_bufs.push((e.buffer.clone(), bytes));
-            }
-            let snapshot_inputs = std::env::var("RUNMAT_FUSED_SNAPSHOT_INPUTS").is_ok();
-            let mut bind_input_bufs: Vec<Arc<wgpu::Buffer>> = Vec::with_capacity(inputs.len());
-            if snapshot_inputs {
-                for (buf, bytes) in input_bufs.iter() {
-                    let snap = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("runmat-fused-input-snapshot"),
-                        size: *bytes,
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_SRC
-                            | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    }));
-                    let mut enc =
-                        self.device_ref()
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-fused-input-snapshot-copy"),
-                            });
-                    enc.copy_buffer_to_buffer(buf.as_ref(), 0, snap.as_ref(), 0, *bytes);
-                    self.submit(enc);
-                    bind_input_bufs.push(snap);
-                }
-            } else {
-                for (buf, _bytes) in input_bufs.iter() {
-                    bind_input_bufs.push(buf.clone());
-                }
-            }
-            for (i, buf_arc) in bind_input_bufs.iter().enumerate() {
-                entries_vec.push(wgpu::BindGroupEntry {
-                    binding: i as u32,
-                    resource: buf_arc.as_ref().as_entire_binding(),
-                });
-            }
-            entries_vec.push(wgpu::BindGroupEntry {
-                binding: inputs.len() as u32,
-                resource: out_buffer.as_ref().as_entire_binding(),
-            });
-            entries_vec.push(wgpu::BindGroupEntry {
-                binding: (inputs.len() + 1) as u32,
-                resource: params_buffer.as_ref().as_entire_binding(),
-            });
-            // Hard check: input/output alias must never occur in fused single-pass (check bound inputs)
-            {
-                let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
-                let mut alias_found = false;
-                for (_i, b) in bind_input_bufs.iter().enumerate() {
-                    let in_ptr = b.as_ref() as *const wgpu::Buffer as usize;
-                    if in_ptr == out_ptr {
-                        alias_found = true;
-                        // Print all buffer pointers to aid minimal repro
-                        eprintln!("[fused-reduction single-pass] alias detected:");
-                        for (j, bin) in input_bufs.iter().enumerate() {
-                            eprintln!("  input[{}] ptr={:p}", j, bin.0.as_ref());
-                        }
-                        eprintln!("  output ptr={:p}", out_buffer.as_ref());
-                        eprintln!(
-                            "  context: reduce_len={} num_slices={} inputs={}",
-                            reduce_len,
-                            num_slices,
-                            inputs.len()
-                        );
-                        break;
-                    }
-                }
-                if alias_found {
-                    return Err(anyhow!("fused_reduction(single-pass): input/output alias"));
-                }
-            }
-            // Optional debug: print all binding pointers
-            if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-                // roles: inputs => STORAGE_READ, out => STORAGE_READ_WRITE, params => UNIFORM
-                for (i, buf) in input_bufs.iter().enumerate() {
-                    eprintln!(
-                        "[fused-reduction] binding={} role=read ptr={:p}",
-                        i,
-                        buf.0.as_ref()
-                    );
-                }
-                eprintln!(
-                    "[fused-reduction] binding={} role=read_write ptr={:p}",
-                    inputs.len(),
-                    out_buffer.as_ref()
-                );
-                eprintln!(
-                    "[fused-reduction] binding={} role=uniform ptr={:p}",
-                    inputs.len() + 1,
-                    params_buffer.as_ref()
-                );
-                // Also mirror to a debug file if provided to avoid truncation in harness
-                let debug_path = std::env::var("RUNMAT_DEBUG_FILE")
-                    .ok()
-                    .unwrap_or_else(|| "/tmp/runmat_fused_dbg.log".to_string());
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&debug_path)
-                {
-                    use std::io::Write;
-                    let _ = writeln!(
-                        f,
-                        "[fused-reduction] layout_tag={} reduce_len={} num_slices={} wg={}",
-                        layout_tag, reduce_len, num_slices, workgroup_size
-                    );
-                    for (i, buf) in input_bufs.iter().enumerate() {
-                        let _ = writeln!(
-                            f,
-                            "[fused-reduction] binding={} role=read ptr={:p}",
-                            i,
-                            buf.0.as_ref()
-                        );
-                    }
-                    let _ = writeln!(
-                        f,
-                        "[fused-reduction] binding={} role=read_write ptr={:p}",
-                        inputs.len(),
-                        out_buffer.as_ref()
-                    );
-                    let _ = writeln!(
-                        f,
-                        "[fused-reduction] binding={} role=uniform ptr={:p}",
-                        inputs.len() + 1,
-                        params_buffer.as_ref()
-                    );
-                }
-            }
-            // Allow bypassing bind-group cache for fused reduction to rule out cache-induced aliasing
-            let disable_bg_cache = std::env::var("RUNMAT_DISABLE_FUSED_BG_CACHE").is_ok();
-            let bg = if disable_bg_cache {
-                Arc::new(
-                    self.device_ref()
-                        .create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("runmat-reduction-bg-direct"),
-                            layout: bgl.as_ref(),
-                            entries: &entries_vec,
-                        }),
-                )
-            } else {
-                self.bind_group_cache
-                    .get_or_create(bgl.as_ref(), &entries_vec, || {
-                        Arc::new(
-                            self.device_ref()
-                                .create_bind_group(&wgpu::BindGroupDescriptor {
-                                    label: Some("runmat-reduction-bg"),
-                                    layout: bgl.as_ref(),
-                                    entries: &entries_vec,
-                                }),
-                        )
-                    })
-            };
-            let groups = (num_slices as u32).max(1);
-            if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-                for (i, (buf, _)) in input_bufs.iter().enumerate() {
-                    eprintln!("[fused-reduction] input{} ptr={:p}", i, buf.as_ref());
-                }
-                eprintln!(
-                    "[fused-reduction] out ptr={:p} groups={}",
-                    out_buffer.as_ref(),
-                    groups
+            if let Some(tuning) = self.reduction_autotune.get(&tuning_key) {
+                return self.execute_reduction_with_strategy(
+                    &tuning,
+                    inputs,
+                    output_shape,
+                    shader,
+                    reduce_len,
+                    num_slices,
+                    workgroup_size,
+                    flavor,
                 );
             }
-            crate::backend::wgpu::dispatch::reduction::run_single_pass(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-                bg.as_ref(),
-                groups,
-            );
-            return Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len));
         }
 
+        let fallback_tuning =
+            self.heuristic_reduction_tuning(reduce_len, num_slices, workgroup_size);
+        self.execute_reduction_with_strategy(
+            &fallback_tuning,
+            inputs,
+            output_shape,
+            shader,
+            reduce_len,
+            num_slices,
+            workgroup_size,
+            flavor,
+        )
+    }
+
+    fn execute_reduction_with_strategy(
+        &self,
+        tuning: &ReductionTuning,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        shader: &str,
+        reduce_len: usize,
+        num_slices: usize,
+        workgroup_size: u32,
+        flavor: ReductionFlavor,
+    ) -> Result<GpuTensorHandle> {
+        let mut prepared =
+            self.prepare_reduction_tuning(tuning, reduce_len, num_slices, workgroup_size);
+        if prepared.is_none()
+            && !matches!(tuning.mode, ReductionMode::SinglePass)
+            && self.can_use_single_pass(num_slices)
+        {
+            prepared = Some(ReductionTuning {
+                mode: ReductionMode::SinglePass,
+            });
+        }
+        let prepared = prepared.ok_or_else(|| {
+            anyhow!(
+                "fused_reduction: unable to schedule tuning {:?} for slices={} reduce_len={}",
+                tuning.mode,
+                num_slices,
+                reduce_len
+            )
+        })?;
+
+        match prepared.mode {
+            ReductionMode::SinglePass => self.run_reduction_single_pass(
+                inputs,
+                output_shape,
+                shader,
+                reduce_len,
+                num_slices,
+                workgroup_size,
+            ),
+            ReductionMode::TwoPass { chunk_rows } => self.run_reduction_two_pass(
+                inputs,
+                output_shape,
+                shader,
+                reduce_len,
+                num_slices,
+                workgroup_size,
+                chunk_rows,
+                flavor,
+            ),
+        }
+    }
+
+    fn run_reduction_single_pass(
+        &self,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        shader: &str,
+        reduce_len: usize,
+        num_slices: usize,
+        workgroup_size: u32,
+    ) -> Result<GpuTensorHandle> {
+        let layout_tag = &format!("runmat-reduction-layout-{}", inputs.len());
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-fused-reduction-module",
+            shader,
+        );
+        let bgl = self
+            .cached_bind_group_layout_for_tag(layout_tag)
+            .expect("reduction bgl");
+        let pl = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-reduction-pl",
+            bgl.as_ref(),
+        );
+        if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
+            let out_len = num_slices.max(1);
+            let out_buffer = self.create_storage_buffer(out_len, "runmat-reduction-out");
+            return Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len));
+        }
+        let key =
+            self.compute_pipeline_hash_bytes(shader.as_bytes(), layout_tag, Some(workgroup_size));
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pl,
+            &module,
+            "runmat-reduction-pipeline",
+            Some(shader.as_bytes()),
+            Some(layout_tag),
+            Some(workgroup_size),
+        );
+        crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+            self.device_ref(),
+            self.queue_ref(),
+            &pipeline,
+        );
+        self.device_ref().poll(wgpu::Maintain::Poll);
+        self.device_ref().poll(wgpu::Maintain::Poll);
+        let flush_enc = self
+            .device_ref()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-flush-single-pass-gap"),
+            });
+        self.submit(flush_enc);
+        let out_len = num_slices.max(1);
+        let mut out_buffer = self
+            .create_storage_buffer_for_usage(
+                BufferUsageClass::FusionOut,
+                out_len,
+                "runmat-reduction-out",
+            )
+            .0;
+        {
+            let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
+            let mut alias = false;
+            for h in inputs.iter() {
+                let ptr = self.get_entry(h)?.buffer.as_ref() as *const wgpu::Buffer as usize;
+                if ptr == out_ptr {
+                    alias = true;
+                    break;
+                }
+            }
+            if alias {
+                out_buffer = self
+                    .create_storage_buffer_for_usage(
+                        BufferUsageClass::FusionOut,
+                        out_len,
+                        "runmat-reduction-out-unique",
+                    )
+                    .0;
+            }
+        }
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Params {
+            nrows: u32,
+            ncols: u32,
+            ld: u32,
+            flags: u32,
+        }
+        let flags = if shader.contains("const OMITNAN: bool = true") {
+            1u32
+        } else {
+            0u32
+        };
+        let params = Params {
+            nrows: reduce_len as u32,
+            ncols: num_slices as u32,
+            ld: reduce_len as u32,
+            flags,
+        };
+        let params_buffer = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::UniformBufferKey::ReductionParams,
+            std::mem::size_of::<Params>() as u64,
+            "runmat-reduction-params",
+        );
+        self.queue
+            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+        let mut entries_vec: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(inputs.len() + 2);
+        let mut input_bufs: Vec<(Arc<wgpu::Buffer>, u64)> = Vec::with_capacity(inputs.len());
+        for h in inputs.iter() {
+            let e = self.get_entry(h)?;
+            let bytes = (e.len * self.element_size) as u64;
+            input_bufs.push((e.buffer.clone(), bytes));
+        }
+        let snapshot_inputs = std::env::var("RUNMAT_FUSED_SNAPSHOT_INPUTS").is_ok();
+        let mut bind_input_bufs: Vec<Arc<wgpu::Buffer>> = Vec::with_capacity(inputs.len());
+        if snapshot_inputs {
+            for (buf, bytes) in input_bufs.iter() {
+                let snap = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-fused-input-snapshot"),
+                    size: *bytes,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+                let mut enc =
+                    self.device_ref()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-fused-input-snapshot-copy"),
+                        });
+                enc.copy_buffer_to_buffer(buf.as_ref(), 0, snap.as_ref(), 0, *bytes);
+                self.submit(enc);
+                bind_input_bufs.push(snap);
+            }
+        } else {
+            for (buf, _bytes) in input_bufs.iter() {
+                bind_input_bufs.push(buf.clone());
+            }
+        }
+        for (i, buf_arc) in bind_input_bufs.iter().enumerate() {
+            entries_vec.push(wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: buf_arc.as_ref().as_entire_binding(),
+            });
+        }
+        entries_vec.push(wgpu::BindGroupEntry {
+            binding: inputs.len() as u32,
+            resource: out_buffer.as_ref().as_entire_binding(),
+        });
+        entries_vec.push(wgpu::BindGroupEntry {
+            binding: (inputs.len() + 1) as u32,
+            resource: params_buffer.as_ref().as_entire_binding(),
+        });
+        {
+            let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
+            let mut alias_found = false;
+            for b in bind_input_bufs.iter() {
+                let in_ptr = b.as_ref() as *const wgpu::Buffer as usize;
+                if in_ptr == out_ptr {
+                    alias_found = true;
+                    break;
+                }
+            }
+            if alias_found {
+                return Err(anyhow!("fused_reduction(single-pass): input/output alias"));
+            }
+        }
+        if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
+            for (i, buf) in input_bufs.iter().enumerate() {
+                eprintln!(
+                    "[fused-reduction] binding={} role=read ptr={:p}",
+                    i,
+                    buf.0.as_ref()
+                );
+            }
+            eprintln!(
+                "[fused-reduction] binding={} role=read_write ptr={:p}",
+                inputs.len(),
+                out_buffer.as_ref()
+            );
+            eprintln!(
+                "[fused-reduction] binding={} role=uniform ptr={:p}",
+                inputs.len() + 1,
+                params_buffer.as_ref()
+            );
+        }
+        let disable_bg_cache = std::env::var("RUNMAT_DISABLE_FUSED_BG_CACHE").is_ok();
+        let bg = if disable_bg_cache {
+            Arc::new(
+                self.device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-reduction-bg-direct"),
+                        layout: bgl.as_ref(),
+                        entries: &entries_vec,
+                    }),
+            )
+        } else {
+            self.bind_group_cache
+                .get_or_create(bgl.as_ref(), &entries_vec, || {
+                    Arc::new(
+                        self.device_ref()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-reduction-bg"),
+                                layout: bgl.as_ref(),
+                                entries: &entries_vec,
+                            }),
+                    )
+                })
+        };
+        let groups = (num_slices as u32).max(1);
+        crate::backend::wgpu::dispatch::reduction::run_single_pass(
+            self.device_ref(),
+            self.queue_ref(),
+            &pipeline,
+            bg.as_ref(),
+            groups,
+        );
+        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len))
+    }
+
+    fn run_reduction_two_pass(
+        &self,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        shader: &str,
+        reduce_len: usize,
+        num_slices: usize,
+        workgroup_size: u32,
+        chunk_rows: u32,
+        flavor: ReductionFlavor,
+    ) -> Result<GpuTensorHandle> {
         let scalar_ty = match self.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => "f64",
             _ => "f32",
@@ -3293,8 +3650,11 @@ impl WgpuProvider {
         } else {
             0u32
         };
-        let chunks = ((reduce_len as u32) + workgroup_size - 1) / workgroup_size;
-        let total_chunks = chunks.max(1);
+        let chunk_rows = chunk_rows.max(workgroup_size.max(1));
+        let chunk_rows_u32 = chunk_rows;
+        let total_chunks = ((reduce_len as u64) + chunk_rows as u64 - 1) / chunk_rows as u64;
+        let total_chunks_u32 =
+            u32::try_from(total_chunks).map_err(|_| anyhow!("reduction: too many chunks"))?;
         let partials_len = num_slices.max(1) * (total_chunks as usize);
         let (pass1, pass2) = crate::backend::wgpu::shaders::reduction::build_two_pass_shaders(
             scalar_ty,
@@ -3374,7 +3734,6 @@ impl WgpuProvider {
         );
         self.device_ref().poll(wgpu::Maintain::Poll);
         let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
-        // Optional snapshot of input for two-pass fused to isolate usage scopes
         let input_buf = if std::env::var("RUNMAT_FUSED_SNAPSHOT_INPUTS").is_ok() {
             let bytes = (reduce_len * num_slices.max(1) * self.element_size) as u64;
             let snap = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -3411,13 +3770,11 @@ impl WgpuProvider {
                 "runmat-reduction-out",
             )
             .0;
-        // Alias guards: partials/out must not alias input, and partials must not alias out
         {
             let in_ptr = input_buf.as_ref() as *const wgpu::Buffer as usize;
             let mut part_ptr = partials_buffer.as_ref() as *const wgpu::Buffer as usize;
             let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
             if part_ptr == in_ptr {
-                // allocate unique partials
                 let unique =
                     self.create_storage_buffer(partials_len, "runmat-reduction-partials-unique");
                 partials_buffer = unique;
@@ -3442,6 +3799,8 @@ impl WgpuProvider {
             flags: u32,
             chunks: u32,
             chunk_stride: u32,
+            chunk_rows: u32,
+            _pad: u32,
         }
         #[repr(C)]
         #[derive(Clone, Copy, Pod, Zeroable)]
@@ -3461,18 +3820,19 @@ impl WgpuProvider {
             scale: f64,
         }
         let max_dispatch = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as u32;
-        let mut chunk_stride = total_chunks.min(max_dispatch);
+        let mut chunk_stride = total_chunks_u32.min(max_dispatch).max(1);
         let mut chunk_tiles =
-            ((total_chunks as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
+            ((total_chunks_u32 as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
         if chunk_tiles > max_dispatch as u64 {
             let required_stride =
-                ((total_chunks as u64) + max_dispatch as u64 - 1) / (max_dispatch as u64);
+                ((total_chunks_u32 as u64) + max_dispatch as u64 - 1) / (max_dispatch as u64);
             chunk_stride = required_stride.max(1).min(max_dispatch as u64) as u32;
-            chunk_tiles = ((total_chunks as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
+            chunk_tiles =
+                ((total_chunks_u32 as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
             if chunk_tiles > max_dispatch as u64 {
                 return Err(anyhow!(
                     "fused_reduction: chunk grid {} exceeds dispatch limits (stride {}, tiles {})",
-                    total_chunks,
+                    total_chunks_u32,
                     chunk_stride,
                     chunk_tiles
                 ));
@@ -3483,8 +3843,10 @@ impl WgpuProvider {
             ncols: num_slices as u32,
             ld: reduce_len as u32,
             flags,
-            chunks: total_chunks,
+            chunks: total_chunks_u32,
             chunk_stride,
+            chunk_rows: chunk_rows_u32,
+            _pad: 0,
         };
         let p1_buf = self.kernel_resources.uniform_buffer(
             self.device_ref(),
@@ -3502,12 +3864,14 @@ impl WgpuProvider {
             p2_size,
             "runmat-reduction-p2-params",
         );
+
         self.queue.write_buffer(p1_buf.as_ref(), 0, bytes_of(&p1u));
+        let scale_value = flavor.scale(reduce_len);
         match self.precision {
             NumericPrecision::F64 => {
                 let p2u = P2F64 {
                     ncols: num_slices as u32,
-                    chunks: total_chunks,
+                    chunks: total_chunks_u32,
                     flags,
                     _pad: 0,
                     scale: scale_value,
@@ -3517,7 +3881,7 @@ impl WgpuProvider {
             NumericPrecision::F32 => {
                 let p2u = P2F32 {
                     ncols: num_slices as u32,
-                    chunks: total_chunks,
+                    chunks: total_chunks_u32,
                     flags,
                     scale: scale_value as f32,
                 };
@@ -3579,38 +3943,6 @@ impl WgpuProvider {
         let g0 = (num_slices as u32).max(1);
         let g1 = chunk_stride.max(1);
         let g2 = (chunk_tiles as u32).max(1);
-        if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-            eprintln!(
-                "[fused-reduction-2pass] in ptr={:p} partials ptr={:p} out ptr={:p} g0={} g1={} g2={}",
-                input_buf.as_ref(),
-                partials_buffer.as_ref(),
-                out_buffer.as_ref(),
-                g0,
-                g1,
-                g2
-            );
-            // Mirror to file as well for full capture
-            let debug_path = std::env::var("RUNMAT_DEBUG_FILE")
-                .ok()
-                .unwrap_or_else(|| "/tmp/runmat_fused_dbg.log".to_string());
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&debug_path)
-            {
-                use std::io::Write;
-                let _ = writeln!(
-                    f,
-                    "[fused-reduction-2pass] in ptr={:p} partials ptr={:p} out ptr={:p} g0={} g1={} g2={}",
-                    input_buf.as_ref(),
-                    partials_buffer.as_ref(),
-                    out_buffer.as_ref(),
-                    g0,
-                    g1,
-                    g2
-                );
-            }
-        }
         crate::backend::wgpu::dispatch::reduction::run_two_pass(
             self.device_ref(),
             self.queue_ref(),
@@ -3623,6 +3955,287 @@ impl WgpuProvider {
             g2,
         );
         Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), num_slices.max(1)))
+    }
+
+    fn reduction_partials_budget_bytes(&self) -> u64 {
+        if let Ok(raw) = std::env::var("RUNMAT_REDUCTION_PARTIALS_BUDGET_BYTES") {
+            if let Ok(parsed) = raw.parse::<u64>() {
+                if parsed > 0 {
+                    return parsed;
+                }
+            }
+        }
+        let fallback = 4u64 << 30;
+        let adapter_limit = if self.adapter_limits.max_buffer_size > 0 {
+            self.adapter_limits.max_buffer_size as u64
+        } else {
+            fallback
+        };
+        let mut budget = adapter_limit.saturating_mul(40) / 100;
+        if budget == 0 {
+            budget = adapter_limit;
+        }
+        let floor = 256u64 << 20;
+        if adapter_limit >= floor {
+            budget = budget.max(floor);
+        }
+        budget.min(adapter_limit)
+    }
+
+    fn sanitize_chunk_rows_for_limits(
+        &self,
+        chunk_rows: u32,
+        reduce_len: usize,
+        num_slices: usize,
+        workgroup_size: u32,
+    ) -> Option<u32> {
+        if reduce_len == 0 {
+            return None;
+        }
+        let wg = workgroup_size.max(1);
+        let reduce_cap = reduce_len.min(u32::MAX as usize) as u32;
+        let mut rows = chunk_rows.clamp(wg, reduce_cap.max(wg));
+        if rows % wg != 0 {
+            rows = ((rows + wg - 1) / wg) * wg;
+        }
+        let slices = num_slices.max(1) as u64;
+        let elem_bytes = self.element_size as u64;
+        if elem_bytes == 0 {
+            return None;
+        }
+        let per_chunk_bytes = slices.checked_mul(elem_bytes)?;
+        let budget = self.reduction_partials_budget_bytes();
+        if budget < per_chunk_bytes {
+            return None;
+        }
+        let max_chunks = (budget / per_chunk_bytes).max(1);
+        let mut required_chunk_rows = ((reduce_len as u64) + max_chunks - 1) / max_chunks;
+        required_chunk_rows = required_chunk_rows.max(wg as u64);
+        if required_chunk_rows > u32::MAX as u64 {
+            return None;
+        }
+        let mut rows_u64 = rows as u64;
+        if rows_u64 < required_chunk_rows {
+            rows_u64 = required_chunk_rows;
+        }
+        rows_u64 = rows_u64.min(reduce_len.min(u32::MAX as usize) as u64);
+        let mut rows_u32 = rows_u64 as u32;
+        if rows_u32 % wg != 0 {
+            rows_u32 = ((rows_u32 + wg - 1) / wg) * wg;
+        }
+        rows_u32 = rows_u32.min(reduce_cap.max(wg));
+        Some(rows_u32.max(wg))
+    }
+
+    fn prepare_reduction_tuning(
+        &self,
+        tuning: &ReductionTuning,
+        reduce_len: usize,
+        num_slices: usize,
+        workgroup_size: u32,
+    ) -> Option<ReductionTuning> {
+        match tuning.mode {
+            ReductionMode::SinglePass => Some(*tuning),
+            ReductionMode::TwoPass { chunk_rows } => {
+                let rows = self.sanitize_chunk_rows_for_limits(
+                    chunk_rows,
+                    reduce_len,
+                    num_slices,
+                    workgroup_size,
+                )?;
+                Some(ReductionTuning {
+                    mode: ReductionMode::TwoPass { chunk_rows: rows },
+                })
+            }
+        }
+    }
+
+    fn heuristic_reduction_tuning(
+        &self,
+        reduce_len: usize,
+        num_slices: usize,
+        workgroup_size: u32,
+    ) -> ReductionTuning {
+        let default_two_pass = ReductionTuning {
+            mode: ReductionMode::TwoPass {
+                chunk_rows: self.default_chunk_rows(reduce_len, workgroup_size),
+            },
+        };
+        let single = ReductionTuning {
+            mode: ReductionMode::SinglePass,
+        };
+        match self.reduction_two_pass_mode {
+            ReductionTwoPassMode::ForceOn => default_two_pass,
+            ReductionTwoPassMode::ForceOff => single,
+            ReductionTwoPassMode::Auto => {
+                if self.can_use_single_pass(num_slices) && reduce_len <= self.two_pass_threshold() {
+                    single
+                } else {
+                    default_two_pass
+                }
+            }
+        }
+    }
+
+    fn default_chunk_rows(&self, reduce_len: usize, workgroup_size: u32) -> u32 {
+        let wg = workgroup_size.max(1) as usize;
+        if reduce_len <= wg {
+            return reduce_len.min(u32::MAX as usize) as u32;
+        }
+        let max_dispatch = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
+        let target_chunks = max_dispatch.max(1);
+        let mut rows = ((reduce_len + target_chunks - 1) / target_chunks).max(wg);
+        rows = ((rows + wg - 1) / wg) * wg;
+        rows = rows.clamp(wg, reduce_len.max(wg));
+        rows.min(u32::MAX as usize) as u32
+    }
+
+    fn can_use_single_pass(&self, num_slices: usize) -> bool {
+        num_slices as u64 <= crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as u64
+    }
+
+    fn reduction_chunk_row_candidates(&self, reduce_len: usize, workgroup_size: u32) -> Vec<u32> {
+        let mut values = Vec::new();
+        let mut current = workgroup_size.max(1) as usize;
+        while current < reduce_len {
+            values.push(current.min(u32::MAX as usize) as u32);
+            current = current.saturating_mul(2);
+        }
+        values.push(reduce_len.min(u32::MAX as usize) as u32);
+        values.sort_unstable();
+        values.dedup();
+        values
+    }
+
+    fn reduction_strategy_candidates(
+        &self,
+        reduce_len: usize,
+        num_slices: usize,
+        workgroup_size: u32,
+    ) -> Vec<ReductionTuning> {
+        let mut strategies = Vec::new();
+        let chunk_candidates = self.reduction_chunk_row_candidates(reduce_len, workgroup_size);
+        let can_single = self.can_use_single_pass(num_slices);
+        match self.reduction_two_pass_mode {
+            ReductionTwoPassMode::ForceOff => {
+                if can_single {
+                    strategies.push(ReductionTuning {
+                        mode: ReductionMode::SinglePass,
+                    });
+                }
+            }
+            ReductionTwoPassMode::ForceOn => {
+                for chunk in &chunk_candidates {
+                    strategies.push(ReductionTuning {
+                        mode: ReductionMode::TwoPass { chunk_rows: *chunk },
+                    });
+                }
+            }
+            ReductionTwoPassMode::Auto => {
+                if can_single {
+                    strategies.push(ReductionTuning {
+                        mode: ReductionMode::SinglePass,
+                    });
+                }
+                for chunk in &chunk_candidates {
+                    strategies.push(ReductionTuning {
+                        mode: ReductionMode::TwoPass { chunk_rows: *chunk },
+                    });
+                }
+            }
+        }
+        if strategies.is_empty() {
+            strategies.push(ReductionTuning {
+                mode: ReductionMode::TwoPass {
+                    chunk_rows: self.default_chunk_rows(reduce_len, workgroup_size),
+                },
+            });
+        }
+        strategies
+    }
+
+    fn maybe_autotune_reduction(
+        &self,
+        key: &ReductionAutotuneKey,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        shader: &str,
+        reduce_len: usize,
+        num_slices: usize,
+        workgroup_size: u32,
+        flavor: ReductionFlavor,
+    ) -> Result<Option<GpuTensorHandle>> {
+        if !self.reduction_autotune.is_enabled() {
+            return Ok(None);
+        }
+        let candidates = self.reduction_strategy_candidates(reduce_len, num_slices, workgroup_size);
+        if candidates.len() <= 1 {
+            if let Some(tuning) = candidates.first() {
+                self.reduction_autotune.insert(key.clone(), *tuning);
+            }
+            return Ok(None);
+        }
+        let mut best_tuning: Option<ReductionTuning> = None;
+        let mut best_time: Option<Duration> = None;
+        let mut best_handle: Option<GpuTensorHandle> = None;
+        let mut tested = HashSet::new();
+        let mut last_err: Option<anyhow::Error> = None;
+        for tuning in candidates {
+            let sanitized = self
+                .prepare_reduction_tuning(&tuning, reduce_len, num_slices, workgroup_size)
+                .or_else(|| {
+                    if !matches!(tuning.mode, ReductionMode::SinglePass)
+                        && self.can_use_single_pass(num_slices)
+                    {
+                        Some(ReductionTuning {
+                            mode: ReductionMode::SinglePass,
+                        })
+                    } else {
+                        None
+                    }
+                });
+            let Some(sanitized) = sanitized else {
+                continue;
+            };
+            if !tested.insert(sanitized) {
+                continue;
+            }
+            let start = Instant::now();
+            match self.execute_reduction_with_strategy(
+                &sanitized,
+                inputs,
+                output_shape,
+                shader,
+                reduce_len,
+                num_slices,
+                workgroup_size,
+                flavor,
+            ) {
+                Ok(handle) => {
+                    let elapsed = start.elapsed();
+                    if best_time.map_or(true, |t| elapsed < t) {
+                        if let Some(existing) = best_handle.replace(handle) {
+                            let _ = self.free(&existing);
+                        }
+                        best_time = Some(elapsed);
+                        best_tuning = Some(sanitized);
+                    } else {
+                        let _ = self.free(&handle);
+                    }
+                }
+                Err(err) => {
+                    last_err = Some(err);
+                }
+            }
+        }
+        if let (Some(tuning), Some(handle)) = (best_tuning, best_handle) {
+            self.reduction_autotune.insert(key.clone(), tuning);
+            return Ok(Some(handle));
+        }
+        if let Some(err) = last_err {
+            return Err(err);
+        }
+        Ok(None)
     }
 
     pub(crate) fn scatter_column_exec(
@@ -13810,6 +14423,9 @@ impl AccelProvider for WgpuProvider {
                     .map_err(|_| anyhow!("image_normalize: stride_h too large"))?;
                 let stride_w_u32 = u32::try_from(stride_w)
                     .map_err(|_| anyhow!("image_normalize: stride_w too large"))?;
+                let (tuning, cache_hit) =
+                    self.resolve_image_normalize_tuning(batches_u32, plane_u32);
+                let pipeline = self.image_normalize_pipeline(&tuning)?;
 
                 let mut flags = 0u32;
                 if desc.gain.is_some() {
@@ -13822,19 +14438,22 @@ impl AccelProvider for WgpuProvider {
                     flags |= IMAGE_NORMALIZE_FLAG_GAMMA;
                 }
 
-                let uniforms = ImageNormalizeUniforms {
-                    batches: batches_u32,
+                let mut uniforms = ImageNormalizeUniforms {
+                    batch_count: 0,
                     height: height_u32,
                     width: width_u32,
                     plane: plane_u32,
                     stride_h: stride_h_u32,
                     stride_w: stride_w_u32,
                     flags,
+                    batch_stride: batches_u32,
+                    batch_offset: 0,
                     _pad0: 0,
                     epsilon: desc.epsilon as f32,
                     gain: desc.gain.unwrap_or(1.0) as f32,
                     bias: desc.bias.unwrap_or(0.0) as f32,
                     gamma: desc.gamma.unwrap_or(1.0) as f32,
+                    _pad1: 0,
                 };
 
                 let out_buffer = self.create_storage_buffer_checked_with_usage(
@@ -13848,8 +14467,16 @@ impl AccelProvider for WgpuProvider {
                     std::mem::size_of::<ImageNormalizeUniforms>() as u64,
                     "runmat-image-normalize-uniform",
                 );
-                self.queue
-                    .write_buffer(uniform_buf.as_ref(), 0, bytes_of(&uniforms));
+                let stream_hot_cap = self
+                    .image_normalize_hot_stream_cap(plane_u32, batches_u32)
+                    .max(1);
+                let cold_cap = stream_hot_cap.min((Self::IMAGE_NORMALIZE_STREAM_COLD_CAP).max(1));
+                let chunk_limit = if cache_hit {
+                    stream_hot_cap
+                } else {
+                    cold_cap.max(1)
+                };
+
                 let bind_entries = [
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -13862,6 +14489,14 @@ impl AccelProvider for WgpuProvider {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: uniform_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: out_buffer.as_ref().as_entire_binding(),
                     },
                 ];
                 let layout = &self.pipelines.image_normalize.layout;
@@ -13877,13 +14512,24 @@ impl AccelProvider for WgpuProvider {
                             ))
                         });
 
-                crate::backend::wgpu::dispatch::image_normalize::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &self.pipelines.image_normalize,
-                    bind_group.as_ref(),
-                    batches_u32,
-                );
+                let mut offset = 0u32;
+                while offset < batches_u32 {
+                    let remaining = batches_u32 - offset;
+                    let chunk = remaining.min(chunk_limit).max(1);
+                    uniforms.batch_count = chunk;
+                    uniforms.batch_offset = offset;
+                    self.queue
+                        .write_buffer(uniform_buf.as_ref(), 0, bytes_of(&uniforms));
+                    crate::backend::wgpu::dispatch::image_normalize::run(
+                        self.device_ref(),
+                        self.queue_ref(),
+                        pipeline.as_ref(),
+                        bind_group.as_ref(),
+                        chunk,
+                        tuning.batch_tile,
+                    );
+                    offset += chunk;
+                }
 
                 Ok(self.register_existing_buffer_with_usage(
                     out_buffer,

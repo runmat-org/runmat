@@ -74,12 +74,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         telemetry.matmul.count > 0,
         "expected matmul dispatch count > 0"
     );
+    assert!(
+        !telemetry.kernel_launches.is_empty(),
+        "expected at least one kernel launch to be recorded"
+    );
 
     provider.reset_telemetry();
     let reset = provider.telemetry_snapshot();
     assert_eq!(reset.upload_bytes, 0);
     assert_eq!(reset.fused_elementwise.count, 0);
     assert_eq!(reset.matmul.count, 0);
+    assert!(reset.kernel_launches.is_empty());
 }
 
 #[cfg(feature = "wgpu")]

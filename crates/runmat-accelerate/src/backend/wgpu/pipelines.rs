@@ -832,6 +832,31 @@ impl WgpuPipelines {
             },
         );
 
+        const IMAGE_NORMALIZE_BOOTSTRAP_BATCH_TILE: u32 = 4;
+        const IMAGE_NORMALIZE_BOOTSTRAP_VALUES_PER_THREAD: u32 = 4;
+        const IMAGE_NORMALIZE_BOOTSTRAP_LANE_COUNT: u32 = 256;
+        const IMAGE_NORMALIZE_BOOTSTRAP_SPATIAL_TILE: u32 = 4;
+
+        let image_norm_bt = IMAGE_NORMALIZE_BOOTSTRAP_BATCH_TILE.to_string();
+        let image_norm_vp = IMAGE_NORMALIZE_BOOTSTRAP_VALUES_PER_THREAD.to_string();
+        let image_norm_template = match precision {
+            NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
+            NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
+        };
+        let image_norm_lane = IMAGE_NORMALIZE_BOOTSTRAP_LANE_COUNT.to_string();
+        let image_norm_vec_width = match precision {
+            NumericPrecision::F64 => 2,
+            NumericPrecision::F32 => 4,
+        }
+        .to_string();
+        let image_norm_source = image_norm_template
+            .replace("@BT@", &image_norm_bt)
+            .replace("@VP@", &image_norm_vp)
+            .replace("@WG@", &image_norm_lane)
+            .replace("@BV@", &image_norm_vec_width);
+        let image_norm_spatial = IMAGE_NORMALIZE_BOOTSTRAP_SPATIAL_TILE.to_string();
+        let image_norm_source = image_norm_source.replace("@ST@", &image_norm_spatial);
+
         let image_normalize = create_pipeline(
             device,
             "runmat-image-normalize-layout",
@@ -841,11 +866,10 @@ impl WgpuPipelines {
                 storage_read_entry(0),
                 storage_read_write_entry(1),
                 uniform_entry(2),
+                storage_read_entry(3),
+                storage_read_write_entry(4),
             ],
-            match precision {
-                NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
-                NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
-            },
+            &image_norm_source,
         );
 
         let polyval = create_pipeline(

@@ -1,3 +1,4 @@
+pub mod autotune;
 pub mod bindings;
 pub mod cache;
 pub mod config;

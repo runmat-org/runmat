@@ -733,9 +733,26 @@ fn mean_gpu_try(
         }
         MeanAxes::All => {
             if handle.shape.is_empty() {
-                Some(handle.clone())
-            } else {
-                provider.reduce_mean(handle).ok()
+                return Some(handle.clone());
+            }
+            match provider.reduce_mean(handle) {
+                Ok(out) => Some(out),
+                Err(err) => {
+                    log::trace!("mean: provider reduce_mean fallback triggered: {err}");
+                    let rank = handle.shape.len();
+                    if rank == 0 {
+                        Some(handle.clone())
+                    } else {
+                        let dims: Vec<usize> = (1..=rank).collect();
+                        reduce_mean_vecdim_nd_gpu(provider, handle, &dims).or_else(|| {
+                            let mut result = handle.clone();
+                            for dim in 1..=rank {
+                                result = reduce_mean_dim_gpu(provider, result, dim)?;
+                            }
+                            Some(result)
+                        })
+                    }
+                }
             }
         }
     }

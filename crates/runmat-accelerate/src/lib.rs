@@ -32,6 +32,7 @@ pub use native_auto::{
     AutoOffloadDisposition, AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason,
     ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
 };
+pub use reduction_meta::{value_is_all_keyword, ReductionAxes};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;
 use serde::{Deserialize, Serialize};

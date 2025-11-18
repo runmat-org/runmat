@@ -142,6 +142,7 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
     total_fusion_misses = 0
     total_bind_hits = 0
     total_bind_misses = 0
+    kernel_launch_totals: Dict[str, int] = defaultdict(int)
 
     telemetry_error_counts: Dict[str, int] = defaultdict(int)
     missing_device_runs = 0
@@ -214,6 +215,12 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         median_ms = float(median_raw) if isinstance(median_raw, (int, float)) else 0.0
 
         status = "ok"
+        kernel_launches = telemetry.get("kernel_launches") or []
+        for launch in kernel_launches:
+            name = str(launch.get("kernel") or "").strip()
+            if name:
+                kernel_launch_totals[name] += 1
+
         point_entry: Dict[str, Any] = {
             "median_ms": median_raw,
             "upload_bytes": upload_bytes,
@@ -224,6 +231,8 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
             "fusion_cache": {"hits": fusion_hits, "misses": fusion_misses},
             "bind_group_cache": {"hits": bind_hits, "misses": bind_misses},
         }
+        if kernel_launches:
+            point_entry["kernel_launches"] = kernel_launches
         if error_msg:
             msg = str(error_msg)
             telemetry_error_counts[msg] += 1
@@ -396,6 +405,9 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         warnings.append(
             "no GPU device information recorded; verify WGPU-enabled build is in use"
         )
+    if kernel_launch_totals:
+        summary["kernel_launch_totals"] = dict(kernel_launch_totals)
+
     if warnings:
         summary["warnings"] = warnings
 
