@@ -107,7 +107,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                           strokeWidth={series.impl === data.highlightImpl ? 3 : 2}
                           strokeDasharray={dash}
                         />
-                        <Text x={10} y={4} fill="rgba(255,255,255,0.9)" fontSize={13}>
+                        <Text x={10} y={4} fill="rgba(255,255,255,0.9)" fontSize={14}>
                           {series.label}
                         </Text>
                       </g>
@@ -190,7 +190,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               tickFormat={(value) => `${Number(value).toFixed(1)}×`}
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.95)",
-                fontSize: 15,
+                fontSize: 14,
                 dx: -10,
                 dy: 4,
               })}
@@ -204,7 +204,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               tickFormat={(value) => formatNumber(Number(value))}
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.9)",
-                fontSize: 13,
+                fontSize: 14,
                 dy: 12,
               })}
             />
@@ -214,7 +214,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               transform="rotate(-90)"
               textAnchor="middle"
               fill="rgba(255,255,255,0.6)"
-              fontSize={16}
+                fontSize={14}
             >
               × faster than Python NumPy
             </Text>
@@ -223,7 +223,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               y={innerHeight + 54}
               textAnchor="middle"
               fill="rgba(255,255,255,0.6)"
-              fontSize={16}
+                fontSize={14}
             >
               {data.paramLabel ?? data.paramKey}
             </Text>

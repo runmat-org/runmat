@@ -84,24 +84,22 @@ export default function HeroBenchmarkClient({ slides }: HeroBenchmarkClientProps
       <div className="container mx-auto px-4 md:px-6">
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
           <div className="flex flex-col space-y-6 text-left items-start">
-            <Badge variant="secondary" className="rounded-lg px-1 py-1 text-sm">
+            <Badge variant="secondary" className="rounded-lg px-1 py-1 text-base">
               🚀 Open Source • MIT Licensed
             </Badge>
             <h1 className="font-heading text-left leading-tight whitespace-nowrap tracking-tight text-[clamp(2.75rem,5vw,4.75rem)] sm:text-[clamp(3.25rem,4.5vw,5.5rem)] lg:text-[clamp(3.5rem,4vw,6rem)]">
               Fastest runtime for
             </h1>
             <BenchmarkTicker slides={slides} activeIndex={activeIndex} onSelect={goToIndex} />
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-xl sm:leading-8">
-              We speak GPU so you don&apos;t have to. RunMat automatically fuses operations and intelligently
-              routes between CPU/GPU.
-              <br />
-              MATLAB syntax. No kernel code, no rewrites.
+            <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-base sm:text-lg">
+              RunMat automatically fuses operations and intelligently
+              routes between CPU/GPU. Write math in MATLAB, and RunMat will run it blazing fast.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
               <Button
                 size="lg"
                 asChild
-                className="h-12 px-8 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
+                className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
               >
                 <Link href="/download">Download</Link>
               </Button>
@@ -109,17 +107,9 @@ export default function HeroBenchmarkClient({ slides }: HeroBenchmarkClientProps
                 variant="outline"
                 size="lg"
                 asChild
-                className="h-12 px-8 text-lg bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
               >
                 <Link href="/docs/getting-started">Get Started</Link>
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                asChild
-                className="h-12 px-8 text-lg border-0 shadow-[inset_0_0_0_0.25px_rgb(255,255,255)] dark:shadow-[inset_0_0_0_0.25px_rgb(255,255,255)]"
-              >
-                <Link href="#benchmarks">Benchmarks</Link>
               </Button>
             </div>
           </div>

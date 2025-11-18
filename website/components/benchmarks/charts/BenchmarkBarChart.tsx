@@ -105,18 +105,18 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
               stroke="rgba(255,255,255,0.35)"
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.85)",
-                fontSize: 15,
+                fontSize: 14,
                 dx: -12,
                 dy: 4,
               })}
             />
             <Text
               x={-innerHeight / 2}
-              y={-40}
+                y={-42}
               transform="rotate(-90)"
               textAnchor="middle"
               fill="rgba(255,255,255,0.6)"
-              fontSize={16}
+                fontSize={14}
             >
               {axisLabel}
             </Text>
@@ -127,7 +127,7 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
               hideTicks
               tickLabelProps={(value) => ({
                 fill: "rgba(255,255,255,0.9)",
-                fontSize: 13,
+                fontSize: 14,
                 dy: 16,
                 textAnchor: "middle",
                 x: (xScale(value as string) ?? 0) + xScale.bandwidth() / 2,
