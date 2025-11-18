@@ -2,13 +2,20 @@
 import os
 import torch
 
-def main() -> None:
-    torch.manual_seed(0)
+def resolve_device() -> torch.device:
     override = os.environ.get("TORCH_DEVICE")
     if override:
-        device = torch.device(override)
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return torch.device(override)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def main() -> None:
+    torch.manual_seed(0)
+    device = resolve_device()
     M, T = 10_000_000, 256
     M = int(os.environ.get("MC_M", M))
     T = int(os.environ.get("MC_T", T))
@@ -26,7 +33,7 @@ def main() -> None:
 
     payoff = torch.clamp(S - K, min=0.0)
     price = payoff.mean() * torch.exp(torch.tensor(-mu * T * dt, device=device, dtype=torch.float32))
-    print(f"RESULT_ok PRICE={float(price):.6f} device={'cuda' if device.type=='cuda' else 'cpu'}")
+    print(f"RESULT_ok PRICE={float(price):.6f} device={device.type}")
 
 
 if __name__ == "__main__":

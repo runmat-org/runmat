@@ -31,7 +31,8 @@ if ~exist('eps0','var'), eps0 = eps0_default; else eps0 = single(eps0); end
 
 use_gpu = exist('gpuArray', 'builtin') || exist('gpuArray', 'file');
 if use_gpu
-  imgs = gpuArray(rand(B, H, W, 'single'));
+  zero_proto = gpuArray(single(0));
+  imgs = rand(B, H, W, 'like', zero_proto);
   gain = gpuArray(gain);
   bias = gpuArray(bias);
   gamma = gpuArray(gamma);
