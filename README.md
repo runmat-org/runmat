@@ -1,5 +1,5 @@
 # 🚀 RunMat: The fastest runtime for your math
-### RunMat automatically **fuses operations and intelligently routes between CPU/GPU.MATLAB syntax.** No kernel code, no rewrites.
+### RunMat automatically **fuses operations and intelligently routes between CPU and GPU**. MATLAB syntax. No kernel code, no rewrites.
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/runmat-org/runmat/ci.yml?branch=main)](https://github.com/runmat-org/runmat/actions)
 [![License](https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg)](LICENSE.md)
@@ -12,7 +12,7 @@
 
 ## What is RunMat?
 
-With RunMat you write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best place — CPU or GPU. On GPU, it can match or beat hand-tuned CUDA on many math-heavy workloads.
+With RunMat you write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best place — CPU or GPU. On GPU, it can often match or beat hand-tuned CUDA on many dense numerical workloads
 
 It runs on whatever GPU you have — NVIDIA, AMD, Apple Silicon, Intel — through native APIs (Metal / DirectX 12 / Vulkan). No device management. No vendor lock-in. No rewrites.
 
@@ -20,8 +20,7 @@ Core ideas:
 
 - **MATLAB syntax, not a new language**  
 - **Fast on CPU and GPU**, with one runtime  
-- **No device flags** — Fusion chooses CPU vs GPU for you, based on data size and cost  
-
+- **No device flags** — Fusion automatically chooses CPU vs GPU based on data size and transfer cost heuristics
 
 ## ✨ Features at a glance
 
@@ -66,9 +65,6 @@ Core ideas:
 These are large workloads where **Fusion chooses GPU**.  
 Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
 
-- **MATLAB syntax, not a new language**  
-- **Fast on CPU and GPU**, with one runtime  
-- **No device flags** — Fusion chooses CPU vs GPU for you, based on data size and cost  
 
 
 
@@ -380,7 +376,7 @@ runmat pkg install
 runmat pkg publish
 ```
 
-*Note: Package manager CLI is currently in development. See [Package Manager Documentation](docs/PACKAGE_MANAGER.md) for design details.*
+*Note: Package manager CLI is currently in beta. See [Package Manager Documentation](docs/PACKAGE_MANAGER.md) for design details.*
 
 ## 💡 Design Philosophy
 

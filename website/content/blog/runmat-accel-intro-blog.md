@@ -100,6 +100,9 @@ This is the same MATLAB-style code you saw above. RunMat’s fusion engine turns
 
 On smaller batches, RunMat keeps more of this work on the CPU JIT and BLAS paths so you still get low overhead and fast startup.
 
+Run this benchmark yourself: [4K image pipeline script](https://github.com/runmat-org/runmat/blob/main/benchmarks/4k-image-processing/runmat.m)
+
+See your workload accelerated: [Getting Started guide](/docs/getting-started)
 
 ### What RunMat does automatically:
 
@@ -233,7 +236,7 @@ A side-by-side of RunMat versus MATLAB+PCT, PyTorch, and Julia+CUDA.jl on six di
 
 RunMat covers the core numerical stack so you can keep MATLAB-style code and use the GPU when it helps. Elementwise chains, reductions, filters, and matmul epilogues are fused on GPU; large linear-algebra ops call optimized BLAS/LAPACK on CPU. 
 
-Full list and examples live in the library. \[ADD LINK\]
+Full list and examples live in the [`benchmarks/`](https://github.com/runmat-org/runmat/tree/main/benchmarks) library.
 
 #### Why MATLAB syntax, not a new language
 
@@ -264,7 +267,7 @@ An open-source MATLAB-compatible runtime focused on fast, portable numerical com
 macOS (Apple Silicon and supported AMD/NVIDIA cards), Windows, and Linux via the native GPU APIs above. If no compatible GPU is present, RunMat runs on CPU.
 
 **Do I need MATLAB installed or a MATLAB license?**  
-No. RunMat is a standalone runtime. It adheres to MATLAB semantics core language grammar, semantics and core builtins It is not associated or affiliated with MATHWORKS Matlab in any way, shape or form \[LINK Learn more grammar / semantics doc\] 
+No. RunMat is a standalone runtime. It adheres to MATLAB core language grammar and semantics. It is not associated or affiliated with MathWorks MATLAB in any way, shape or form. [Learn more in the grammar/semantics doc.](https://github.com/runmat-org/runmat/blob/main/docs/LANGUAGE_COVERAGE.md)
 
 **How compatible is it with MATLAB?**  
 Core array operations, elementwise math, reductions, common linear-algebra, FFT/signal/image, and statistics functions are covered. Check the function index for exact status. 
@@ -275,7 +278,7 @@ Install RunMat and run your script with the CLI or the Jupyter kernel.
 Yes. The planner chooses CPU JIT/BLAS or GPU per step. Fusion keeps GPU regions device-resident when beneficial.
 
 **Does it work offline? Any telemetry?**  
- It runs locally and does not require internet access for execution. See the repository for any optional diagnostics and how to disable them. \[Privacy/Telemetry\]
+ It runs locally and does not require internet access for execution. See the repository for any optional diagnostics and how to disable them. [Privacy/Telemetry](https://github.com/runmat-org/runmat/blob/main/docs/TELEMETRY.md)
 
 **How do I report an issue or contribute?**  
  Open an issue or PR in the repository. Include OS, GPU/CPU info, a minimal script, and steps to reproduce. [GitHub](https://github.com/runmat-org/runmat)

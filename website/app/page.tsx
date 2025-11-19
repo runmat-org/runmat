@@ -14,7 +14,7 @@ import BenchmarkSweepCarousel from "@/components/benchmarks/BenchmarkSweepCarous
 import { FusionGraphic } from "../content/svgs/fusion-graphic";
 
 export const metadata: Metadata = {
-  title: "RunMat - Blazing-Fast Runtime for Math",
+  title: "RunMat - The Fastest Runtime for Your Math",
   description:
     "RunMat fuses back-to-back ops into fewer GPU steps and intelligently manages memory. MATLAB-syntax; 200+ built-ins. No kernel code, no rewrites.",
   keywords: [
@@ -50,7 +50,7 @@ export const metadata: Metadata = {
     },
   },
   openGraph: {
-    title: "RunMat - The Blazing-Fast Runtime for Math",
+    title: "RunMat - The Fastest Runtime for Your Math",
     description:
       "RunMat fuses back-to-back ops into fewer GPU steps and keeps arrays on device. MATLAB syntax. No kernel code, no rewrites.",
     url: "/",
@@ -70,7 +70,7 @@ export default function HomePage() {
     <div className="flex flex-col min-h-screen">
       {/* SEO-optimized opening content */}
       <div className="sr-only">
-        <h1>RunMat - The Blazing-Fast Runtime for Math</h1>
+        <h1>RunMat - The Fastest Runtime for Your Math</h1>
        
        
         <p>
@@ -227,7 +227,7 @@ export default function HomePage() {
             <Card>
               <CardHeader className="items-center text-center">
                 <div className="mb-3 text-3xl">📦</div>
-                <CardTitle>Cross-Platform and Portable</CardTitle>
+                <CardTitle>Cross-Platform</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-center">
