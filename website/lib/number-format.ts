@@ -1,4 +1,5 @@
 export function formatNumber(value: number | string): string {
+  if (value === 0) return "";
   const num = typeof value === "number" ? value : Number(value);
   if (!Number.isNaN(num)) {
     if (Math.abs(num) >= 1_000_000) {

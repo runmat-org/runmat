@@ -10,11 +10,42 @@ interface BenchmarkTickerProps {
   onSelect: (index: number) => void;
 }
 
-function getVisibleIndexes(length: number, active: number): number[] {
+interface VisibleSlide {
+  index: number;
+  offset: number;
+}
+
+function getVisibleSlides(length: number, active: number): VisibleSlide[] {
   if (length >= 3) {
-    return [1, 0, -1].map((offset) => (active + offset + length) % length);
+    return [1, 0, -1].map((offset) => ({
+      offset,
+      index: (active + offset + length) % length,
+    }));
   }
-  return Array.from({ length }, (_, i) => i);
+
+  return Array.from({ length }, (_, index) => {
+    let offset = index - active;
+    if (offset > length / 2) {
+      offset -= length;
+    } else if (offset < -length / 2) {
+      offset += length;
+    }
+    return { index, offset };
+  });
+}
+
+function getDepthStyles(offset: number) {
+  if (offset === 0) {
+    return { scale: 1, opacity: 1, zIndex: 30 };
+  }
+
+  if (offset > 0) {
+    // Item rotating toward the back of the wheel
+    return { scale: 0.82, opacity: 0.35, zIndex: 5 };
+  }
+
+  // Item emerging toward the front
+  return { scale: 0.9, opacity: 0.6, zIndex: 15 };
 }
 
 export default function BenchmarkTicker({ slides, activeIndex, onSelect }: BenchmarkTickerProps) {
@@ -22,10 +53,11 @@ export default function BenchmarkTicker({ slides, activeIndex, onSelect }: Bench
     return null;
   }
 
-  const visible = getVisibleIndexes(slides.length, activeIndex).map((index) => ({
+  const visible = getVisibleSlides(slides.length, activeIndex).map(({ index, offset }) => ({
     slide: slides[index],
     index,
-    isActive: index === activeIndex,
+    offset,
+    isActive: offset === 0,
   }));
 
   return (
@@ -33,11 +65,19 @@ export default function BenchmarkTicker({ slides, activeIndex, onSelect }: Bench
       <div className="pointer-events-none absolute inset-x-0 top-1/2 z-0 -translate-y-1/2 px-1">
         <div className="h-14 rounded-2xl bg-white/10 blur-[1px]" />
       </div>
-      {visible.map(({ slide, index, isActive }) => (
+      {visible.map(({ slide, index, offset, isActive }) => {
+        const depth = getDepthStyles(offset);
+        return (
         <motion.div
           key={`${slide.caseId}-${index}`}
           layout
-          transition={{ type: "spring", stiffness: 400, damping: 40 }}
+            animate={{ scale: depth.scale, opacity: depth.opacity }}
+            style={{ zIndex: depth.zIndex }}
+            transition={{
+              layout: { type: "spring", stiffness: 400, damping: 40 },
+              scale: { duration: 0.3, ease: "easeOut" },
+              opacity: { duration: 0.3, ease: "easeOut" },
+            }}
           className="relative z-10"
         >
           <button
@@ -45,7 +85,7 @@ export default function BenchmarkTicker({ slides, activeIndex, onSelect }: Bench
             onClick={() => onSelect(index)}
             className={cn(
               "w-full rounded-2xl px-6 py-3 text-left transition-all duration-300",
-              isActive ? "scale-[1.02]" : "scale-100"
+              isActive ? "bg-transparent" : "bg-transparent"
             )}
           >
             <p
@@ -58,7 +98,8 @@ export default function BenchmarkTicker({ slides, activeIndex, onSelect }: Bench
             </p>
           </button>
         </motion.div>
-      ))}
+        );
+      })}
     </div>
   );
 }

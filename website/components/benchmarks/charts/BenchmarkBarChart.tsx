@@ -84,15 +84,17 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
                     strokeWidth={isHighlight ? 1.5 : 0}
                     opacity={isHighlight ? 1 : 0.85}
                   />
-                  <Text
-                    x={x + barWidth / 2}
-                    y={y - 8}
-                    textAnchor="middle"
-                    className="text-sm font-semibold"
-                    fill="white"
-                  >
-                    {entry.speedup >= 9 ? `${entry.speedup.toFixed(0)}×` : `${entry.speedup.toFixed(1)}×`}
-                  </Text>
+                  {isHighlight && (
+                    <Text
+                      x={x + barWidth / 2}
+                      y={y - 8}
+                      textAnchor="middle"
+                      className="text-sm font-semibold"
+                      fill="white"
+                    >
+                      {entry.speedup >= 9 ? `${entry.speedup.toFixed(0)}×` : `${entry.speedup.toFixed(1)}×`}
+                    </Text>
+                  )}
                 </Group>
               );
             })}

@@ -43,15 +43,17 @@ export function BenchmarkShowcaseCarousel({
         className="group block rounded-3xl border border-white/10 bg-gradient-to-b from-[#060910] to-[#020305] p-6 shadow-2xl transition-transform duration-400 hover:-translate-y-2 hover:shadow-[0_45px_75px_-15px_rgba(0,0,0,0.8)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
       >
         <div className="mb-5 space-y-1 text-center">
-          {activeSlide.description && (
-            <p className="text-base text-white/85">{activeSlide.description}</p>
-          )}
           {activeSlide.deviceLabel && (
             <p className="text-base text-white/75">{activeSlide.deviceLabel}</p>
           )}
+          {activeSlide.description && (
+            <p className="text-base text-white/85">{activeSlide.description}</p>
+          )}
           {activeSlide.headlineRange && (
             <p className="text-lg font-semibold text-white/90">
-              <span className="gradient-brand font-semibold">RunMat is {activeSlide.headlineRange}</span>
+              <span className="gradient-brand font-semibold">
+                RunMat is {activeSlide.headlineRange} faster than NumPy
+              </span>
             </p>
           )}
         </div>

@@ -7,7 +7,7 @@ import { Group } from "@visx/group";
 import { LinePath, AreaClosed } from "@visx/shape";
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { GridRows, GridColumns } from "@visx/grid";
-import { curveMonotoneX } from "@visx/curve";
+import { curveLinear } from "@visx/curve";
 import { Circle } from "@visx/shape";
 import { Text } from "@visx/text";
 
@@ -25,7 +25,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
   const gradientId = useId();
   const [ref, bounds] = useMeasure();
   const width = bounds.width;
-  const margin = { top: 48, right: 16, bottom: 68, left: 64 };
+  const margin = { top: 48, right: 0, bottom: 68, left: 64 };
   const innerWidth = Math.max(0, width - margin.left - margin.right);
   const innerHeight = Math.max(0, height - margin.top - margin.bottom);
 
@@ -150,7 +150,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                         x={(d) => xScale(d.param) ?? 0}
                         y={(d) => yScale(pointValue(d)) ?? 0}
                         yScale={yScale}
-                        curve={curveMonotoneX}
+                        curve={curveLinear}
                         fill={color}
                         opacity={0.45}
                       />
@@ -160,7 +160,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                     data={series.points}
                     x={(d) => xScale(d.param) ?? 0}
                     y={(d) => yScale(pointValue(d)) ?? 0}
-                    curve={curveMonotoneX}
+                    curve={curveLinear}
                     stroke={strokeColor}
                     strokeWidth={series.impl === data.highlightImpl ? 3 : 2}
                     strokeOpacity={series.impl === data.highlightImpl ? 1 : 0.6}
@@ -206,6 +206,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                 fill: "rgba(255,255,255,0.9)",
                 fontSize: 14,
                 dy: 12,
+                dx: -25,
               })}
             />
             <Text

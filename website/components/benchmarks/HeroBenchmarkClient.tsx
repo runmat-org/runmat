@@ -93,7 +93,7 @@ export default function HeroBenchmarkClient({ slides }: HeroBenchmarkClientProps
             <BenchmarkTicker slides={slides} activeIndex={activeIndex} onSelect={goToIndex} />
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-base sm:text-lg">
               RunMat automatically fuses operations and intelligently
-              routes between CPU/GPU. Write math in MATLAB, and RunMat will run it blazing fast.
+              routes between CPU/GPU. Write math in MATLAB syntax, and RunMat will run it blazing fast.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
               <Button

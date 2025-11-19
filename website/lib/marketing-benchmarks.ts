@@ -451,40 +451,43 @@ function formatDeviceLabel(provider?: ProviderInfo): string | undefined {
 }
 
 function computeHeadlineRange(chart: BenchmarkChartData): string | undefined {
+  const format = (value: number) => (value >= 9 ? value.toFixed(0) : value.toFixed(1));
+
+  if (chart.type === "bar") {
+    const highlight = chart.entries.find(
+      (entry) => entry.impl === chart.highlightImpl && entry.impl !== chart.baselineImpl
+    );
+    const fallback = chart.entries.find((entry) => entry.impl !== chart.baselineImpl);
+    const target = highlight ?? fallback;
+    if (!target || !(target.speedup > 0)) {
+      return undefined;
+    }
+    return `${format(target.speedup)}×`;
+  }
+
   let minSpeedup = Number.POSITIVE_INFINITY;
   let maxSpeedup = 0;
 
-  if (chart.type === "bar") {
-    chart.entries.forEach((entry) => {
-      if (entry.impl === chart.baselineImpl) {
-        return;
+  chart.series.forEach((series) => {
+    if (series.impl === chart.baselineImpl) {
+      return;
+    }
+    series.points.forEach((point) => {
+      if (typeof point.speedup === "number" && point.speedup > 0) {
+        minSpeedup = Math.min(minSpeedup, point.speedup);
+        maxSpeedup = Math.max(maxSpeedup, point.speedup);
       }
-      minSpeedup = Math.min(minSpeedup, entry.speedup);
-      maxSpeedup = Math.max(maxSpeedup, entry.speedup);
     });
-  } else {
-    chart.series.forEach((series) => {
-      if (series.impl === chart.baselineImpl) {
-        return;
-      }
-      series.points.forEach((point) => {
-        if (typeof point.speedup === "number" && point.speedup > 0) {
-          minSpeedup = Math.min(minSpeedup, point.speedup);
-          maxSpeedup = Math.max(maxSpeedup, point.speedup);
-        }
-      });
-    });
-  }
+  });
 
   if (!Number.isFinite(minSpeedup) || maxSpeedup <= 0) {
     return undefined;
   }
 
-  const format = (value: number) => (value >= 9 ? value.toFixed(0) : value.toFixed(1));
   if (Math.abs(maxSpeedup - minSpeedup) < 0.1) {
-    return `${format(maxSpeedup)}× faster`;
+    return `${format(maxSpeedup)}×`;
   }
-  return `${format(minSpeedup)}×–${format(maxSpeedup)}× faster`;
+  return `${format(minSpeedup)}×–${format(maxSpeedup)}×`;
 }
 
 
