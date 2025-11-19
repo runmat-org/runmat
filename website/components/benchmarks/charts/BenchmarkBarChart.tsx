@@ -117,7 +117,7 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
                 y={-42}
               transform="rotate(-90)"
               textAnchor="middle"
-              fill="rgba(255,255,255,0.6)"
+                fill="rgba(255,255,255,0.9)"
                 fontSize={14}
             >
               {axisLabel}

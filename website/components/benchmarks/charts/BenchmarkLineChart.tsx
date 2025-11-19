@@ -88,46 +88,34 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
       ) : (
         <svg width={width} height={height} role="img" aria-label="Benchmark line chart">
           <Group left={margin.left} top={margin.top}>
-              <Group top={-32} left={innerWidth / 2} className="legend-group">
-                {(() => {
-                  const itemWidth = 170;
-                  const totalWidth = itemWidth * data.series.length;
-                  return data.series.map((series, idx) => {
-                    const color = series.impl === data.highlightImpl ? "#a855f7" : SERIES_COLORS[idx % SERIES_COLORS.length];
+              <foreignObject x={0} y={-40} width={innerWidth} height={40}>
+                <div className="flex h-10 w-full items-center justify-center gap-8">
+                  {data.series.map((series, idx) => {
+                    const color =
+                      series.impl === data.highlightImpl ? "#a855f7" : SERIES_COLORS[idx % SERIES_COLORS.length];
                     const dash = series.impl === data.baselineImpl ? "4 4" : undefined;
-                    const offset = idx * itemWidth - totalWidth / 2;
+                    const lineStyle =
+                      dash !== undefined
+                        ? { borderBottom: `1px dashed ${color}` }
+                        : { borderBottom: `2px solid ${color}` };
                     return (
-                      <g key={series.impl} transform={`translate(${offset}, 0)`}>
-                        <line
-                          x1={-20}
-                          y1={0}
-                          x2={6}
-                          y2={0}
-                          stroke={color}
-                          strokeWidth={series.impl === data.highlightImpl ? 3 : 2}
-                          strokeDasharray={dash}
-                        />
-                        <Text x={10} y={4} fill="rgba(255,255,255,0.9)" fontSize={14}>
+                      <div key={series.impl} className="flex items-center justify-center gap-2 text-sm text-white/80">
+                        <span className="inline-block w-8" style={lineStyle} />
+                        <span className={series.impl === data.highlightImpl ? "text-white font-semibold" : undefined}>
                           {series.label}
-                        </Text>
-                      </g>
+                        </span>
+                      </div>
                     );
-                  });
-                })()}
-              </Group>
+                  })}
+                </div>
+              </foreignObject>
             <GridRows
               scale={yScale}
               width={innerWidth}
               stroke="rgba(255,255,255,0.08)"
               pointerEvents="none"
-            />
-            <GridColumns
-              scale={xScale}
-              height={innerHeight}
-              stroke="rgba(255,255,255,0.04)"
-              pointerEvents="none"
-              tickValues={xScale.ticks(4)}
-            />
+                tickValues={yScale.ticks(3)}
+              />
             {data.series.map((series, idx) => {
               const pointValue = (point: BenchmarkLinePoint) =>
                 series.impl === data.baselineImpl ? 1 : point.speedup ?? 0;
@@ -187,13 +175,14 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               tickStroke="rgba(255,255,255,0.25)"
               stroke="rgba(255,255,255,0.25)"
               numTicks={3}
-              tickFormat={(value) => `${Number(value).toFixed(1)}×`}
+                tickFormat={(value) => `${Number(value).toFixed(0)}×`}
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.95)",
                 fontSize: 14,
-                dx: -10,
-                dy: 4,
+                dx: -35,
+                dy: 5,
               })}
+                left={10}
             />
             <AxisBottom
               top={innerHeight}
@@ -205,25 +194,28 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.9)",
                 fontSize: 14,
-                dy: 12,
-                dx: -25,
+                dy: 5,
+                dx: -20,
               })}
+                tickTransform="translate(-10, 0)"
+                hideTicks
+                left={10}
             />
             <Text
               x={-innerHeight / 2}
-              y={-44}
+                y={-50}
               transform="rotate(-90)"
               textAnchor="middle"
-              fill="rgba(255,255,255,0.6)"
+                fill="rgba(255,255,255,0.9)"
                 fontSize={14}
             >
-              × faster than Python NumPy
+                x faster than NumPy
             </Text>
             <Text
               x={innerWidth / 2}
-              y={innerHeight + 54}
+                y={innerHeight + 60}
               textAnchor="middle"
-              fill="rgba(255,255,255,0.6)"
+                fill="rgba(255,255,255,0.9)"
                 fontSize={14}
             >
               {data.paramLabel ?? data.paramKey}

@@ -15,7 +15,7 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
       highlightImpl: "runmat",
       baselineImpl: "python-numpy",
       labelOverrides: {
-        "python-numpy": "Python NumPy",
+        "python-numpy": "Python NumPy (CPU)",
         "python-torch": "Python PyTorch (GPU)",
         runmat: "RunMat (GPU)",
       },
@@ -39,7 +39,7 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
       highlightImpl: "runmat",
       baselineImpl: "python-numpy",
       labelOverrides: {
-        "python-numpy": "Python NumPy",
+        "python-numpy": "Python NumPy (CPU)",
         "python-torch": "Python PyTorch (GPU)",
         runmat: "RunMat (GPU)",
       },
@@ -63,7 +63,7 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
       highlightImpl: "runmat",
       baselineImpl: "python-numpy",
       labelOverrides: {
-        "python-numpy": "Python NumPy",
+        "python-numpy": "Python NumPy (CPU)",
         "python-torch": "Python PyTorch (GPU)",
         runmat: "RunMat (GPU)",
       },
