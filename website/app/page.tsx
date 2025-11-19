@@ -9,7 +9,7 @@ import { OSInstallCommand } from "@/components/OSInstallCommand";
 import MatlabCodeCard from "@/components/MatlabCodeCard";
 
 import HeroBenchmarkShowcase from "@/components/benchmarks/HeroBenchmarkShowcase";
-import FourKImagePipelineSweep from "@/components/benchmarks/FourKImagePipelineSweep";
+import BenchmarkSweepCarousel from "@/components/benchmarks/BenchmarkSweepCarousel";
 
 import { FusionGraphic } from "../content/svgs/fusion-graphic";
 
@@ -170,24 +170,22 @@ export default function HomePage() {
               <h3 className="font-heading text-2xl leading-[1.1] sm:text-3xl md:text-4xl">
                 Real Workloads, Reproducible Results
               </h3>
-              <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-base sm:text-lg sm:leading-8">
+              <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-base">
                 Benchmarked on an <span className="font-semibold">Apple M2 Max, 32GB</span>.
                 Times are wall-clock <span className="font-semibold">milliseconds</span> for each configuration.
               </p>
             </div>
 
-            {/* 4K Image Pipeline Perf Sweep */}
-            <FourKImagePipelineSweep />
-            <div className="mx-auto max-w-[40rem] text-xs sm:text-sm text-muted-foreground mt-4 space-y-2">
-              <ul className="list-disc pl-5 space-y-1">
-                <li>
-                  <span className="font-semibold">4K image pipeline:</span> per-image mean/std, normalization, gain/bias, gamma, and MSE.
-                </li>
-                <li>
-                  <span className="font-semibold">Monte Carlo:</span> geometric Brownian motion with terminal PnL and risk stats.
-                </li>
-              </ul>
+            {/* Benchmark Sweeps Carousel */}
+            <BenchmarkSweepCarousel />
+            <div className="mx-auto max-w-[40rem] text-sm text-muted-foreground mt-4 space-y-3 text-center">
               <p>
+                <span className="font-semibold">4K image pipeline:</span> per-image mean/std, normalization, gain/bias, gamma, and MSE.
+              </p>
+              <p>
+                <span className="font-semibold">Monte Carlo:</span> geometric Brownian motion with terminal PnL and risk stats.
+              </p>
+              <p className="text-sm">
                 Each number is the mean of <span className="font-semibold">3 runs</span>. Full scripts live in the{" "}
                 <a
                   href="https://github.com/runmat-org/runmat/tree/main/benchmarks"

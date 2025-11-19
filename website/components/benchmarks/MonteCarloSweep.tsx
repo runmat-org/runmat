@@ -1,39 +1,36 @@
-type SweepRow = {
-  batchSize: number;
+type MonteCarloRow = {
+  paths: string;
   runMatMs: number;
   vsPyTorch: string;
   vsNumPy: string;
 };
 
-const SWEEP_ROWS: SweepRow[] = [
-  { batchSize: 4, runMatMs: 204, vsPyTorch: "4.5× faster", vsNumPy: "2.6× faster" },
-  { batchSize: 8, runMatMs: 265, vsPyTorch: "3.3× faster", vsNumPy: "3.5× faster" },
-  { batchSize: 16, runMatMs: 299, vsPyTorch: "3.3× faster", vsNumPy: "6.1× faster" },
-  { batchSize: 32, runMatMs: 493, vsPyTorch: "2.2× faster", vsNumPy: "7.6× faster" },
-  { batchSize: 64, runMatMs: 871, vsPyTorch: "1.5× faster", vsNumPy: "8.3× faster" },
+const MONTE_CARLO_ROWS: MonteCarloRow[] = [
+  { paths: "250k", runMatMs: 168, vsPyTorch: "5.1× faster", vsNumPy: "24.7× faster" },
+  { paths: "500k", runMatMs: 166, vsPyTorch: "5.3× faster", vsNumPy: "50.1× faster" },
+  { paths: "1M", runMatMs: 240, vsPyTorch: "4.0× faster", vsNumPy: "69.1× faster" },
+  { paths: "2M", runMatMs: 343, vsPyTorch: "3.3× faster", vsNumPy: "96.3× faster" },
+  { paths: "5M", runMatMs: 652, vsPyTorch: "2.8× faster", vsNumPy: "125.8× faster" },
 ];
 
-export default function FourKImagePipelineSweep() {
+export default function MonteCarloSweep() {
   return (
     <div className="mx-auto w-full max-w-[40rem] rounded-2xl border border-border/60 bg-background/60 overflow-hidden shadow-lg">
-      {/* Header */}
       <div className="bg-muted/70 px-4 sm:px-6 py-4 border-b border-border/60">
         <div className="text-sm sm:text-base font-semibold uppercase tracking-wide text-foreground">
-          4K Image Pipeline
+          Monte Carlo
         </div>
         <div className="mt-1 text-xs sm:text-sm text-muted-foreground">
-          Batch size sweep: 4 → 64 images
+          Path count sweep: 250k → 5M simulations
         </div>
       </div>
-
-      {/* Table */}
       <div className="bg-background">
         <div className="overflow-x-auto">
           <table className="w-full text-sm sm:text-base">
             <thead className="border-b border-border/60 bg-muted/40 text-center">
               <tr>
                 <th className="px-3 sm:px-6 py-2 sm:py-3 text-center text-muted-foreground font-medium">
-                  Batch size (images)
+                  Paths (simulations)
                 </th>
                 <th className="px-3 sm:px-6 py-2 sm:py-3 text-center font-medium text-muted-foreground">
                   RunMat (ms)
@@ -53,15 +50,10 @@ export default function FourKImagePipelineSweep() {
               </tr>
             </thead>
             <tbody className="bg-background">
-              {SWEEP_ROWS.map((row) => (
-                <tr
-                  key={row.batchSize}
-                  className="border-b border-border/40 last:border-b-0"
-                >
+              {MONTE_CARLO_ROWS.map((row) => (
+                <tr key={row.paths} className="border-b border-border/40 last:border-b-0">
                   <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                    <span className="font-mono text-sm sm:text-base">
-                      {row.batchSize}
-                    </span>
+                    <span className="font-mono text-sm sm:text-base">{row.paths}</span>
                   </td>
                   <td className="px-3 sm:px-6 py-2 sm:py-3 text-center font-mono text-sm sm:text-base">
                     {row.runMatMs}
@@ -71,7 +63,7 @@ export default function FourKImagePipelineSweep() {
                       {row.vsPyTorch}
                     </span>
                   </td>
-                  <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
+                    <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
                     <span className="inline-flex items-center justify-center rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1 text-sm sm:text-base text-blue-100">
                       {row.vsNumPy}
                     </span>
@@ -85,10 +77,10 @@ export default function FourKImagePipelineSweep() {
                   RunMat speedup range
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  1.5× – 4.5× vs PyTorch
+                  2.8× – 5.3× vs PyTorch
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  2.6× – 8.3× vs NumPy
+                  24.7× – 125.8× vs NumPy
                 </td>
               </tr>
             </tfoot>
