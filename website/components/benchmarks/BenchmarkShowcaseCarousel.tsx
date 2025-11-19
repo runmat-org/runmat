@@ -69,7 +69,7 @@ export function BenchmarkShowcaseCarousel({
         <div className="mt-4 flex items-center justify-center gap-2">
           {slides.map((slide, idx) => (
             <button
-              key={slide.caseId}
+              key={`${slide.caseId}-${idx}`}
               type="button"
               aria-label={`Go to ${slide.label}`}
               onClick={() => onNavigate(idx)}

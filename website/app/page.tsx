@@ -193,7 +193,7 @@ export default function HomePage() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  benchmarks/
+                  benchmarks
                 </a>{" "}
                 folder.
               </p>
