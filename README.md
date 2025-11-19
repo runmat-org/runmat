@@ -10,6 +10,11 @@
 
 ---
 
+### **Status: Pre-release (v0.2)**
+RunMat is an early build. The core runtime and GPU engine already pass thousands of tests, but some plotting features are still missing or buggy. Expect a few rough edges. Feedback and bug reports help us decide what to fix next.
+
+---
+
 ## What is RunMat?
 
 With RunMat you write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best place — CPU or GPU. On GPU, it can often match or beat hand-tuned CUDA on many dense numerical workloads
@@ -49,16 +54,20 @@ Core ideas:
   - Supports **Metal (macOS), DirectX 12 (Windows), Vulkan (Linux)**  
   - Falls back to CPU when workloads are too small for GPU to win  
 
-- **Plotting and tooling**
+- **Plotting and tooling (pre-release)**
 
-  - Basic 2D plotting today  
-  - 3D plotting engine **on the roadmap**  
-  - VS Code / Cursor extension **on the roadmap**  
+  - Simple 2D line and scatter plots work today  
+  - Plots that use filled shapes or meshes (box plots, violin plots, surfaces, many 3D views) are **not wired up yet**  
+  - 3D plots and better camera controls are **on the roadmap**  
+  - VS Code / Cursor extensions are also **on the roadmap**  
+
 
 - **Open source**
 
   - MIT License with attribution  
-  - Small binary, CLI-first design  
+  - Small binary, CLI-first design 
+
+--- 
 
 ## 📊 Performance highlights
 
@@ -186,10 +195,13 @@ fprintf('m=%.6f\n', double(m)); % Single download at sink
 
 ### Plotting
 ```matlab
-% Create a stunning 3D surface plot with GPU acceleration
-[X, Y] = meshgrid(-2:0.1:2, -2:0.1:2);
-Z = X .* exp(-X.^2 - Y.^2);
-surf(X, Y, Z);  % GPU-accelerated rendering
+% Simple 2D line plot (works in the pre-release)
+x = linspace(0, 2*pi, 1000);
+y = sin(x);
+
+plot(x, y);
+grid on;
+title("Sine wave");
 ```
 
 
@@ -207,7 +219,7 @@ RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks C
 | 🧠 runmat-gc         | High-performance memory management       | Generational GC with pointer compression                            |
 | 🚀 runmat-accelerate | GPU acceleration subsystem               | Fusion engine + auto-offload planner + `wgpu` backend               |
 | 🔥 Fusion engine       | Collapses op chains, chooses CPU vs GPU  | Builds op graph, fuses ops, estimates cost, keeps tensors on device |
-| 🎨 runmat-plot       | Plotting layer                           | GPU-accelerated plotting via `wgpu` (where available)               |
+| 🎨 runmat-plot       | Plotting layer (pre-release)                          | 2D line/scatter plots work today; 3D, filled shapes, and full GPU plotting are on the roadmap |
 | 📸 runmat-snapshot   | Fast startup snapshots                   | Binary blob serialization / restore                                 |
 | 🧰 runmat-runtime    | Core runtime + 200+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
 
@@ -288,7 +300,6 @@ Fusion pipeline cache: 45 hits, 2 misses
 ### First-Class Jupyter Support
 - Rich output formatting with LaTeX math rendering
 - Interactive widgets for parameter exploration  
-- Seamless plotting integration
 - Full debugging support with breakpoints
 
 ### Extensible Architecture

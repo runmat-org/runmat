@@ -33,8 +33,8 @@
   - Compile and cache compute pipelines for optimal performance
 
 ### Current state
-- Fully functional wgpu backend with cross-platform GPU support (Metal/DX12/Vulkan).
-- CPU fallback path fully functional; GPU path implemented and production-ready.
+- Fully functional wgpu backend powering the pre-release runtime with cross-platform GPU support (Metal/DX12/Vulkan).
+- CPU fallback path is exercised in production tests today; the GPU path already delivers the benchmarked speedups but is still evolving, so expect rough edges as we iterate.
 - Fusion engine operational, automatically detecting and fusing elementwise chains and reductions.
 - Native auto-offload heuristics working, transparently promoting operations to GPU when beneficial.
 

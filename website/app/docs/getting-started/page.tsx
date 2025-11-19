@@ -162,12 +162,12 @@ export default function GettingStartedPage() {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <span className="bg-purple-100 dark:bg-purple-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-purple-600 mr-3">5</span>
-                  Create Your First Plot
+                  Create Your First Plot (Pre-release)
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                Generate plots with your computed data:
+                  Generate simple 2D line or scatter plots. Advanced plot types are still in progress, so expect rough edges while we expand coverage.
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
                   <div className="text-blue-400">runmat&gt;</div> <span>x = [0, 1, 2, 3, 4, 5]</span>
@@ -175,11 +175,11 @@ export default function GettingStartedPage() {
                   <div className="text-blue-400 mt-1">runmat&gt;</div> <span>y = [0, 1, 4, 9, 16, 25]</span>
                   <div className="text-gray-400">ans = [0 1 4 9 16 25]</div>
                   <div className="text-blue-400 mt-1">runmat&gt;</div> <span>plot(x, y)</span>
-                  <div className="text-green-400 mt-1">[Interactive plot window opens]</div>
+                  <div className="text-green-400 mt-1">[Pre-release plot window opens for 2D line/scatter]</div>
                 </div>
                 <div className="flex items-center space-x-2 text-sm text-green-600 dark:text-green-400">
                   <CheckCircle className="h-4 w-4" />
-                  <span>Interactive window with zoom, pan, and rotate controls</span>
+                  <span>Basic zoom/pan controls ship today; rotate and richer tooling arrive with future plotting milestones.</span>
                 </div>
               </CardContent>
             </Card>

@@ -517,31 +517,26 @@ export default function HowItWorksPage() {
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
             <Monitor className="h-8 w-8 text-green-600 mr-3" />
-            Modern Plotting: Built for the GPU Era
+            Modern Plotting (Pre-release): Built for the GPU Era
           </h2>
           <p className="text-lg text-muted-foreground mb-6">
-            Traditional MATLAB plotting is CPU-bound and struggles with large datasets. We build a clean, GPU-accelerated plotting
-            system that&apos;s fast, beautiful and seamlessly integrates with the rest of the runtime:
+            Traditional MATLAB plotting is CPU-bound and struggles with large datasets. RunMat&apos;s plotting layer is still in pre-release: simple 2D line and scatter plots render on the GPU today, while filled shapes, 3D surfaces, and richer controls are actively being built:
           </p>
           
           <div className="grid md:grid-cols-2 gap-6">
             <Card>
               <CardContent className="p-6">
-                <h4 className="text-lg font-semibold mb-3">GPU-Accelerated Rendering</h4>
+                <h4 className="text-lg font-semibold mb-3">GPU-Accelerated Rendering (Today)</h4>
                 <p className="text-muted-foreground">
-                  Built on WebGPU (wgpu) with custom WGSL shaders. Designed to handle large datasets efficiently 
-                  by leveraging GPU acceleration for rendering, with smooth interaction for scatter plots, 
-                  line charts, and other visualizations.
+                  Built on WebGPU (wgpu) with custom WGSL shaders. Current builds handle simple 2D line and scatter datasets efficiently by keeping them on the GPU, and we&apos;re extending the renderer to handle filled shapes and larger plot families.
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-6">
-                <h4 className="text-lg font-semibold mb-3">Interactive by Default</h4>
+                <h4 className="text-lg font-semibold mb-3">Interactive by Default (Work in Progress)</h4>
                 <p className="text-muted-foreground">
-                  Zoom, pan, rotate — all built-in and responsive. Level-of-detail rendering means performance 
-                  stays smooth even when you&apos;re exploring huge datasets. Because the best insights often come 
-                  from interactive exploration.
+                  Basic zoom and pan controls ship today; more advanced rotation, camera presets, and LOD tricks are on the roadmap so that larger datasets feel smooth once the richer plot types land.
                 </p>
             </CardContent>
           </Card>

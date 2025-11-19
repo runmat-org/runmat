@@ -117,7 +117,7 @@ export default function DocsPage() {
                   <CardTitle>Built-in Functions</CardTitle>
                 </div>
                 <CardDescription>
-                  Complete reference of all mathematical and plotting functions
+                  Complete math builtin reference plus the pre-release plotting commands (current focus: 2D line/scatter)
                 </CardDescription>
               </CardHeader>
               <CardContent>
