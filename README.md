@@ -66,7 +66,9 @@ Core ideas:
 These are large workloads where **Fusion chooses GPU**.  
 Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
 
-### CPU Performance (JIT vs Octave)
+- **MATLAB syntax, not a new language**  
+- **Fast on CPU and GPU**, with one runtime  
+- **No device flags** — Fusion chooses CPU vs GPU for you, based on data size and cost  
 
 
 
@@ -95,30 +97,7 @@ On smaller arrays, Fusion keeps work on CPU so you still get low overhead and a 
 
 ---
 
-### Why Engineers and Scientists Love RunMat
 
-<table>
-<tr>
-<td width="50%">
-
-**🔬 For Researchers & Academics**
-- Run existing MATLAB scripts without expensive licenses
-- Reproducible science with open-source tools
-- Fast iteration cycles for algorithm development
-- Publication-quality plots that render beautifully
-
-</td>
-<td width="50%">
-
-**⚙️ For Engineers & Industry**
-- Embed scientific computing in production systems
-- No vendor lock-in or licensing audits
-- Deploy to cloud/containers without restrictions
-- Modern CI/CD integration out of the box
-
-</td>
-</tr>
-</table>
 
 ## 🎯 Quick Start
 
@@ -217,32 +196,33 @@ Z = X .* exp(-X.^2 - Y.^2);
 surf(X, Y, Z);  % GPU-accelerated rendering
 ```
 
-## 🏗️ Architecture: V8-Inspired Performance
 
-RunMat's **tiered execution engine** delivers both fast startup and blazing runtime performance. The architecture combines CPU JIT compilation with GPU acceleration through an intelligent fusion engine.
 
-### Key Components
+## 🧱 Architecture: CPU+GPU performance
 
-| Component | Purpose | Technology |
-|-----------|---------|------------|
-| **🎯 runmat-ignition** | Baseline interpreter for instant startup | HIR-to-bytecode compiler + stack-based interpreter |
-| **⚡ runmat-turbine** | Optimizing JIT compiler for hot code | Cranelift backend |
-| **🧠 runmat-gc** | High-performance memory management | Generational GC with pointer compression |
-| **🚀 runmat-accelerate** | GPU acceleration subsystem | Fusion engine + auto-offload planner + wgpu provider |
-| **🔥 Fusion Engine** | Collapses operation chains into single GPU dispatches | WGSL kernel generation + pipeline caching |
-| **🎨 runmat-plot** | Interactive plotting engine | GPU-accelerated via wgpu |
-| **📦 runmat-snapshot** | Fast startup system | Binary blob serialization |
-| **🔧 runmat-runtime** | 200+ builtin functions | BLAS/LAPACK integration + GPU-accelerated operations |
+RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks CPU or GPU for each chunk of math.
 
-### GPU Acceleration Architecture
+### Key components
 
-RunMat Accelerate provides cross-platform GPU support through a portable backend:
+| Component              | Purpose                                  | Technology / Notes                                                  |
+| ---------------------- | ---------------------------------------- | ------------------------------------------------------------------- |
+| ⚙️ runmat-ignition   | Baseline interpreter for instant startup | HIR → bytecode compiler, stack-based interpreter                    |
+| ⚡ runmat-turbine     | Optimizing JIT for hot code              | Cranelift backend, tuned for numeric workloads                      |
+| 🧠 runmat-gc         | High-performance memory management       | Generational GC with pointer compression                            |
+| 🚀 runmat-accelerate | GPU acceleration subsystem               | Fusion engine + auto-offload planner + `wgpu` backend               |
+| 🔥 Fusion engine       | Collapses op chains, chooses CPU vs GPU  | Builds op graph, fuses ops, estimates cost, keeps tensors on device |
+| 🎨 runmat-plot       | Plotting layer                           | GPU-accelerated plotting via `wgpu` (where available)               |
+| 📸 runmat-snapshot   | Fast startup snapshots                   | Binary blob serialization / restore                                 |
+| 🧰 runmat-runtime    | Core runtime + 200+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
 
-- **Cross-platform GPU support**: Metal (macOS), DirectX 12 (Windows), Vulkan (Linux) via wgpu
-- **Fusion engine**: Automatically detects and fuses elementwise operation chains and reductions
-- **Auto-offload planner**: Intelligently routes operations between CPU and GPU based on workload characteristics
-- **Residency management**: Keeps tensors on GPU to minimize host↔device transfers
-- **Pipeline caching**: Compiles WGSL shaders once and reuses them for subsequent runs
+
+### Why this matters
+
+- **Tiered CPU execution** gives quick startup and strong single-machine performance.  
+- **Fusion engine** removes most manual device management and kernel tuning.  
+- **GPU backend** runs on NVIDIA, AMD, Apple Silicon, and Intel through Metal / DirectX 12 / Vulkan, with no vendor lock-in.
+
+
 
 ## 🚀 GPU Acceleration: Fusion & Auto-Offload
 
@@ -533,7 +513,7 @@ See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.org/license](ht
 
 ⭐ **Star us on GitHub** if RunMat is useful to you.
 
-[**🚀 Get Started**](https://runmat.org/docs/getting-started) • [**🐦 Follow @dystr**](https://x.com/dystr_ai)
+[**🚀 Get Started**](https://runmat.org/docs/getting-started) • [**🐦 Follow @dystr**](https://x.com/dystrEng)
 
 ---
 

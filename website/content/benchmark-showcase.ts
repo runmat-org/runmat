@@ -50,4 +50,28 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
       param: "max",
     },
   },
+  {
+    caseId: "monte-carlo-analysis",
+    heroLabel: "Elementwise Matrix Math",
+    description: "Elementwise Matrix Math",
+    deviceLabel: "Apple M2 Max",
+    link: "/benchmarks/general-math",
+    chart: {
+      type: "line",
+      paramLabel: "Operations (M)",
+      includeImpls: ["python-numpy", "python-torch", "runmat"],
+      highlightImpl: "runmat",
+      baselineImpl: "python-numpy",
+      labelOverrides: {
+        "python-numpy": "Python NumPy",
+        "python-torch": "Python PyTorch (GPU)",
+        runmat: "RunMat (GPU)",
+      },
+    },
+    stat: {
+      compareImpl: "python-numpy",
+      referenceImpl: "runmat",
+      param: "max",
+    },
+  },
 ];

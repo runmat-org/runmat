@@ -25,7 +25,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
   const gradientId = useId();
   const [ref, bounds] = useMeasure();
   const width = bounds.width;
-  const margin = { top: 16, right: 16, bottom: 68, left: 64 };
+  const margin = { top: 48, right: 16, bottom: 68, left: 64 };
   const innerWidth = Math.max(0, width - margin.left - margin.right);
   const innerHeight = Math.max(0, height - margin.top - margin.bottom);
 
@@ -88,6 +88,33 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
       ) : (
         <svg width={width} height={height} role="img" aria-label="Benchmark line chart">
           <Group left={margin.left} top={margin.top}>
+              <Group top={-32} left={innerWidth / 2} className="legend-group">
+                {(() => {
+                  const itemWidth = 170;
+                  const totalWidth = itemWidth * data.series.length;
+                  return data.series.map((series, idx) => {
+                    const color = series.impl === data.highlightImpl ? "#a855f7" : SERIES_COLORS[idx % SERIES_COLORS.length];
+                    const dash = series.impl === data.baselineImpl ? "4 4" : undefined;
+                    const offset = idx * itemWidth - totalWidth / 2;
+                    return (
+                      <g key={series.impl} transform={`translate(${offset}, 0)`}>
+                        <line
+                          x1={-20}
+                          y1={0}
+                          x2={6}
+                          y2={0}
+                          stroke={color}
+                          strokeWidth={series.impl === data.highlightImpl ? 3 : 2}
+                          strokeDasharray={dash}
+                        />
+                        <Text x={10} y={4} fill="rgba(255,255,255,0.9)" fontSize={14}>
+                          {series.label}
+                        </Text>
+                      </g>
+                    );
+                  });
+                })()}
+              </Group>
             <GridRows
               scale={yScale}
               width={innerWidth}
@@ -163,7 +190,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               tickFormat={(value) => `${Number(value).toFixed(1)}×`}
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.95)",
-                fontSize: 15,
+                fontSize: 14,
                 dx: -10,
                 dy: 4,
               })}
@@ -177,7 +204,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               tickFormat={(value) => formatNumber(Number(value))}
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.9)",
-                fontSize: 13,
+                fontSize: 14,
                 dy: 12,
               })}
             />
@@ -187,7 +214,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               transform="rotate(-90)"
               textAnchor="middle"
               fill="rgba(255,255,255,0.6)"
-              fontSize={16}
+                fontSize={14}
             >
               × faster than Python NumPy
             </Text>
@@ -196,7 +223,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               y={innerHeight + 54}
               textAnchor="middle"
               fill="rgba(255,255,255,0.6)"
-              fontSize={16}
+                fontSize={14}
             >
               {data.paramLabel ?? data.paramKey}
             </Text>
