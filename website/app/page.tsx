@@ -9,6 +9,7 @@ import { OSInstallCommand } from "@/components/OSInstallCommand";
 import MatlabCodeCard from "@/components/MatlabCodeCard";
 
 import HeroBenchmarkShowcase from "@/components/benchmarks/HeroBenchmarkShowcase";
+import FourKImagePipelineSweep from "@/components/benchmarks/FourKImagePipelineSweep";
 
 import { FusionGraphic } from "../content/svgs/fusion-graphic";
 
@@ -162,42 +163,44 @@ export default function HomePage() {
       {/* Benchmarks Section */}
       <section id="benchmarks" className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
-          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">Real Workloads, Reproducible Results</h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground sm:text-lg sm:leading-7">
-              From per-pixel 4K image pipelines to PCA, NLMS, and Monte Carlo, see how RunMat stacks up against Python + PyTorch, NumPy, and Julia. Run them locally and compare on your machine.
-            </p>
-            <div className="w-full max-w-5xl flex justify-center mt-4">
-              <Image
-                src="https://web.runmatstatic.com/perf-container.svg"
-                alt="Benchmark Comparison"
-                width={1200}
-                height={600}
-                className="w-full h-auto"
-                unoptimized
-              />
+
+          {/* Benchmarks Summary Table */}
+          <div className="mt-12">
+            <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-8">
+              <h3 className="font-heading text-2xl leading-[1.1] sm:text-3xl md:text-4xl">
+                Real Workloads, Reproducible Results
+              </h3>
+              <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-base sm:text-lg sm:leading-8">
+                Benchmarked on an <span className="font-semibold">Apple M2 Max, 32GB</span>.
+                Times are wall-clock <span className="font-semibold">milliseconds</span> for each configuration.
+              </p>
             </div>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mt-8 flex-wrap">
-              <Link href="/benchmarks/4k-image-pipeline" className="underline">
-                4K image pipeline
-              </Link>
-              <span className="hidden sm:inline text-blue-500">·</span>
-              <Link href="/benchmarks/pca" className="underline">
-                PCA
-              </Link>
-              <span className="hidden sm:inline text-blue-500">·</span>
-              <Link href="/benchmarks/nlms" className="underline">
-                NLMS
-              </Link>
-              <span className="hidden sm:inline text-blue-500">·</span>
-              <Link href="/benchmarks/monte-carlo" className="underline">
-                Monte Carlo
-              </Link>
-              <span className="hidden sm:inline text-blue-500">·</span>
-              <Link href="/benchmarks" className="underline">
-                Full benchmark index
-              </Link>
+
+            {/* 4K Image Pipeline Perf Sweep */}
+            <FourKImagePipelineSweep />
+            <div className="mx-auto max-w-[40rem] text-xs sm:text-sm text-muted-foreground mt-4 space-y-2">
+              <ul className="list-disc pl-5 space-y-1">
+                <li>
+                  <span className="font-semibold">4K image pipeline:</span> per-image mean/std, normalization, gain/bias, gamma, and MSE.
+                </li>
+                <li>
+                  <span className="font-semibold">Monte Carlo:</span> geometric Brownian motion with terminal PnL and risk stats.
+                </li>
+              </ul>
+              <p>
+                Each number is the mean of <span className="font-semibold">3 runs</span>. Full scripts live in the{" "}
+                <a
+                  href="https://github.com/runmat-org/runmat/tree/main/benchmarks"
+                  className="underline"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  benchmarks/
+                </a>{" "}
+                folder.
+              </p>
             </div>
+
           </div>
         </div>
       </section>

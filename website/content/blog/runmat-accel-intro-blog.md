@@ -1,15 +1,14 @@
 ---
 title: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
 description: "RunMat Accelerate is an open-source MATLAB-style runtime that fuses your array math into fast CPU and GPU kernels, often beating MATLAB gpuArray, PyTorch, and Julia for dense numerical workloads."
-date: "2025-11-17"
+date: "2025-11-18"
 author: "Nabeel Allana"
 readTime: "8 min read"
 slug: "runmat-accelerate-fastest-runtime-for-your-math"
 tags: ["MATLAB", "Pytorch", "JIT", "Julia", "scientific computing", "numerical computing", "GPU Math", "open source"]
 keywords: "RunMat Accelerate, fastest runtime for your math, MATLAB runtime, MATLAB GPU, GPU accelerated array math, PyTorch vs MATLAB, Julia GPU, CUDA alternative, WGPU, Metal, DirectX 12, Vulkan"
-excerpt: "In this post we explain what “fastest runtime for your math” actually means, walk through a 4K image preprocessing pipeline, and compare RunMat Accelerate to MATLAB, PyTorch, and Julia for dense array workloads."
-image: "/images/blog/runmat-hero.png"
-imageAlt: "RunMat logo with performance charts"
+image: "https://web.runmatstatic.com/runmat-4k-image-performance.png"
+imageAlt: "RunMat performance visualization"
 ogType: "article"
 ogTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
 ogDescription: "RunMat Accelerate takes MATLAB-style array code and plans it across CPU JIT, BLAS, and fused GPU kernels, giving you GPU-level speed for the math you already write—no CUDA, no device flags, one code path."
@@ -19,13 +18,13 @@ twitterDescription: "See how RunMat Accelerate turns a real 4K image pipeline in
 canonical: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math"
 ---
 
-## The Fastest Runtime for your Math
-
 ### Why a faster way to do math
 
 Your mathematical code is elegant. It's also 50x slower than it should be. You know GPUs could fix this, but the path there is absurd: rewrite everything in CUDA, manage device memory explicitly, accept vendor lock-in, or pay thousands per seat for accelerators that still require code changes. The gap between "math as we think it" and "math as GPUs want it" has become so normalized that we've forgotten to question why  (A \- mean(A)) / std(A) should require anything more than writing exactly that. 
 
-RunMat eliminates this gap entirely. Write your mathematical operations in clean, readable syntax. RunMat automatically fuses them into optimized GPU kernels that match or exceed hand-tuned CUDA performance. It runs on whatever GPU you have—NVIDIA, AMD, Apple Silicon, Intel—through native APIs (Metal/DirectX/Vulkan). No device management. No vendor lock-in. No rewrites. If you're tired of choosing between mathematical clarity and computational speed, this is for you.
+RunMat eliminates this gap entirely. You write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best place — CPU or GPU. On GPU, it can often match or beat hand-tuned CUDA pipelines on many math-heavy workloads.
+
+It runs on whatever GPU you have — NVIDIA, AMD, Apple Silicon, Intel — through native APIs (Metal / DirectX 12 / Vulkan). No device flags. No vendor lock-in. No rewrites.
 
 ### The performance tradeoff (until now)
 
@@ -37,7 +36,8 @@ You have two choices today:
 
 **Option 2:** Write `y = sin(x)` and leave it at that. This is what RunMat is designed for.
 
-RunMat detects operations that can run on GPUs, fuses elementwise math and reductions into single GPU programs, and runs them on whatever GPU hardware you have - Mac Metal, NVIDIA CUDA, or Vulkan via ARM.
+RunMat detects operations that can run well on GPUs, and keeps smaller or awkward workloads on its CPU JIT and BLAS paths. You write one script; it decides what runs where.
+
 
 If you want to write CUDA/GPU code yourself, you might write a marginally faster GPU pipeline. [Note: this mainly applies to specialized pre-written PyTorch pipelines, particularly around ML tasks]
 
@@ -74,11 +74,31 @@ mse = mean((out - imgs).^2, 'all');  % Reduction stays on GPU until...
 fprintf('Done. MSE=%.6e\n', mse);    % Only here does data return to CPU for printing
 ```
 
-| Implementation           | Expected speedup vs loops | Expected speedup vs NumPy |
-|--------------------------|---------------------------|---------------------------|
-| Python + PyTorch (CUDA)  | 8–12×                     | 3–8×                      |
-| RunMat With Fusion       | 10–15×                    | 4–10×                     |
+### 4K image pipeline: real benchmark numbers
 
+
+
+We ran this exact pipeline on an **Apple M2 Max** using the Metal backend, averaged over **3 runs** per point. Each batch size `B` is `B × 2160 × 3840` single-precision pixels.
+
+| B (images) | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|-----------:|------------:|-------------:|-----------:|---------------:|-----------------:|
+| 4          | 204.2       | 915.0        | 522.4      | 2.56×          | 4.48×            |
+| 8          | 265.1       | 869.1        | 939.1      | 3.54×          | 3.28×            |
+| 16         | 299.2       | 990.5        | 1,821.3    | 6.09×          | 3.31×            |
+| 32         | 493.2       | 1,065.1      | 3,736.3    | 7.58×          | 2.16×            |
+| 64         | 871.1       | 1,278.8      | 7,255.1    | 8.33×          | 1.47×            |
+
+At the high end (**B = 64**, 64 4K images ≈ 133M pixels):
+
+- RunMat: **0.87 s**  
+- NumPy: **7.26 s** → about **8.3× slower**  
+- PyTorch: **1.28 s** → about **1.5× slower**
+
+![RunMat 4K image pipeline benchmark](https://web.runmatstatic.com/runmat-4k-image-performance.png)
+
+This is the same MATLAB-style code you saw above. RunMat’s fusion engine turns that code into a small number of GPU kernels, keeps tensors resident on the device, and only brings data back to CPU when you actually need it (for example, when printing the final MSE).
+
+On smaller batches, RunMat keeps more of this work on the CPU JIT and BLAS paths so you still get low overhead and fast startup.
 
 
 ### What RunMat does automatically:
