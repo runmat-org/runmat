@@ -3,7 +3,14 @@ use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOri
 use runmat_hir::lower;
 use runmat_ignition::compile;
 use runmat_parser::parse;
+use std::sync::Once;
 
+fn init_logger() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let _ = env_logger::builder().is_test(true).try_init();
+    });
+}
 fn compile_graph(source: &str) -> AccelGraph {
     let trimmed = source.trim_start_matches(|c: char| c.is_whitespace());
     let ast = parse(trimmed).expect("parse");
@@ -95,6 +102,22 @@ fn signal_power_spectrum_pattern() {
     assert!(has_builtin(&graph, "sum"));
     assert!(has_builtin(&graph, "sqrt"));
     assert!(has_builtin(&graph, "diag"));
+}
+
+#[test]
+#[ignore]
+fn accel_graph_records_node_bindings() {
+    let source = r#"
+        pts = 8;
+        x = rand(pts, 1);
+        y = tanh(x);
+        z = y + single(0.1) .* y;
+    "#;
+    let graph = compile_graph(source);
+    assert!(
+        !graph.node_bindings.is_empty(),
+        "expected node_bindings to capture StoreVar writes"
+    );
 }
 
 #[test]
@@ -263,6 +286,7 @@ fn detects_image_normalize_group() {
 
 #[test]
 fn detects_image_normalize_group_with_gpu_scalars() {
+    init_logger();
     let source = r#"
     seed = 0;
     B = 4; H = 8; W = 12;

@@ -126,6 +126,14 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
         }
 
         if chain.len() > 1 {
+            expand_group_with_fanout(graph, &mut chain, &assigned, &consumer_map);
+            chain.sort_unstable_by_key(|id| {
+                graph
+                    .node(*id)
+                    .map(|node| node.span.start)
+                    .unwrap_or_default()
+            });
+            chain.dedup();
             for id in &chain {
                 assigned.insert(*id);
             }
@@ -228,7 +236,93 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
         }
     }
 
+    merge_downstream_fanout(graph, &mut groups, &consumer_map);
     groups
+}
+
+fn expand_group_with_fanout(
+    graph: &AccelGraph,
+    chain: &mut Vec<NodeId>,
+    assigned: &HashSet<NodeId>,
+    consumer_map: &HashMap<ValueId, HashSet<NodeId>>,
+) {
+    let base_start = chain
+        .iter()
+        .filter_map(|id| graph.node(*id).map(|node| node.span.start))
+        .min()
+        .unwrap_or(0);
+    let mut node_set: HashSet<NodeId> = chain.iter().copied().collect();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for node in &graph.nodes {
+            if node_set.contains(&node.id) {
+                continue;
+            }
+            if node.span.start < base_start {
+                continue;
+            }
+            if assigned.contains(&node.id) {
+                continue;
+            }
+            if !(node.is_elementwise() || is_elementwise_max_min(graph, node)) {
+                continue;
+            }
+            if node.outputs.is_empty() {
+                continue;
+            }
+            let mut feeds_group = false;
+            let mut all_consumers_ok = true;
+            for &out in &node.outputs {
+                if let Some(consumers) = consumer_map.get(&out) {
+                    let mut consumer_in_group = false;
+                    for consumer in consumers {
+                        if node_set.contains(consumer) {
+                            consumer_in_group = true;
+                        } else {
+                            all_consumers_ok = false;
+                            break;
+                        }
+                    }
+                    if !all_consumers_ok {
+                        break;
+                    }
+                    if consumer_in_group {
+                        feeds_group = true;
+                    }
+                } else {
+                    all_consumers_ok = false;
+                    break;
+                }
+            }
+            if !feeds_group || !all_consumers_ok {
+                continue;
+            }
+            let mut inputs_ok = true;
+            for &input in &node.inputs {
+                if let Some(info) = graph.value(input) {
+                    if let ValueOrigin::NodeOutput { node: producer, .. } = info.origin {
+                        if !node_set.contains(&producer) {
+                            if let Some(prod_node) = graph.node(producer) {
+                                if prod_node.span.start >= base_start {
+                                    inputs_ok = false;
+                                    break;
+                                }
+                            } else {
+                                inputs_ok = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if inputs_ok {
+                node_set.insert(node.id);
+                chain.push(node.id);
+                changed = true;
+            }
+        }
+    }
 }
 
 fn build_consumer_map(graph: &AccelGraph) -> HashMap<ValueId, HashSet<NodeId>> {
@@ -243,6 +337,111 @@ fn build_consumer_map(graph: &AccelGraph) -> HashMap<ValueId, HashSet<NodeId>> {
         }
     }
     map
+}
+
+fn merge_downstream_fanout(
+    graph: &AccelGraph,
+    groups: &mut Vec<FusionGroup>,
+    consumer_map: &HashMap<ValueId, HashSet<NodeId>>,
+) {
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let mut node_group: HashMap<NodeId, usize> = HashMap::new();
+        for (idx, group) in groups.iter().enumerate() {
+            if group.kind.is_elementwise() {
+                for &node in &group.nodes {
+                    node_group.insert(node, idx);
+                }
+            }
+        }
+        'outer: for target_idx in 0..groups.len() {
+            if !groups[target_idx].kind.is_elementwise() {
+                continue;
+            }
+            let base_start = groups[target_idx].span.start;
+            let mut merge_indices: Vec<usize> = Vec::new();
+            for &node_id in &groups[target_idx].nodes {
+                let Some(node) = graph.node(node_id) else {
+                    continue;
+                };
+                for &input in &node.inputs {
+                    if let Some(info) = graph.value(input) {
+                        if let ValueOrigin::NodeOutput { node: producer, .. } = info.origin {
+                            if let Some(&source_idx) = node_group.get(&producer) {
+                                if source_idx == target_idx {
+                                    continue;
+                                }
+                                let source_group = &groups[source_idx];
+                                if !source_group.kind.is_elementwise() {
+                                    continue;
+                                }
+                                if source_group.span.start < base_start {
+                                    continue;
+                                }
+                                if !group_consumers_subset(
+                                    source_group,
+                                    target_idx,
+                                    groups,
+                                    consumer_map,
+                                    graph,
+                                ) {
+                                    continue;
+                                }
+                                merge_indices.push(source_idx);
+                            }
+                        }
+                    }
+                }
+            }
+            if merge_indices.is_empty() {
+                continue;
+            }
+            merge_indices.sort_unstable();
+            merge_indices.dedup();
+            for idx in &merge_indices {
+                let nodes = groups[*idx].nodes.clone();
+                groups[target_idx].nodes.extend(nodes);
+                groups[*idx].nodes.clear();
+            }
+            groups[target_idx]
+                .nodes
+                .sort_unstable_by_key(|id| graph.node(*id).map(|n| n.span.start).unwrap_or(0));
+            groups[target_idx].nodes.dedup();
+            groups[target_idx].span = group_span(graph, &groups[target_idx].nodes);
+            changed = true;
+            break 'outer;
+        }
+        if changed {
+            groups.retain(|group| !group.nodes.is_empty());
+        }
+    }
+}
+
+fn group_consumers_subset(
+    source_group: &FusionGroup,
+    target_idx: usize,
+    groups: &[FusionGroup],
+    consumer_map: &HashMap<ValueId, HashSet<NodeId>>,
+    graph: &AccelGraph,
+) -> bool {
+    let target_nodes: HashSet<NodeId> = groups[target_idx].nodes.iter().copied().collect();
+    let source_nodes: HashSet<NodeId> = source_group.nodes.iter().copied().collect();
+    for &node_id in &source_group.nodes {
+        let Some(node) = graph.node(node_id) else {
+            continue;
+        };
+        for &out in &node.outputs {
+            if let Some(consumers) = consumer_map.get(&out) {
+                for consumer in consumers {
+                    if !source_nodes.contains(consumer) && !target_nodes.contains(consumer) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    true
 }
 
 fn node_output_shape(graph: &AccelGraph, node: &AccelNode) -> ShapeInfo {
@@ -2370,6 +2569,7 @@ fn builtin_expr(
         "isfinite" => return builtin_unary_call("isFinite", inputs, exprs),
         "isinf" => return builtin_unary_call("isInf", inputs, exprs),
         "isnan" => return builtin_unary_call("isNan", inputs, exprs),
+        "single" | "double" | "gpuarray" => return builtin_identity(inputs, exprs),
         "sin" => "sin",
         "cos" => "cos",
         "tan" => "tan",
@@ -2434,6 +2634,10 @@ fn builtin_unary_call(
 ) -> Option<String> {
     let arg = exprs.get(inputs.get(0)?).cloned()?;
     Some(format!("{func}({arg})"))
+}
+
+fn builtin_identity(inputs: &[ValueId], exprs: &HashMap<ValueId, String>) -> Option<String> {
+    exprs.get(inputs.get(0)?).cloned()
 }
 
 fn cast_literal(scalar_ty: &str, literal: &str) -> String {
@@ -2507,6 +2711,7 @@ mod tests {
             nodes: vec![node0, node1],
             values,
             var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
         }
     }
 
@@ -2591,6 +2796,7 @@ mod tests {
             nodes: vec![node0, node1],
             values,
             var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
         };
 
         let groups = detect_fusion_groups(&graph);
@@ -2623,6 +2829,128 @@ mod tests {
 
         let atan2 = super::builtin_expr("atan2", &[0, 1], &exprs, "f32");
         assert_eq!(atan2.unwrap(), "atan2(v0, v1)");
+
+        let single = super::builtin_expr("single", &[0], &exprs, "f32");
+        assert_eq!(single.unwrap(), "v0");
+
+        let double = super::builtin_expr("double", &[0], &exprs, "f64");
+        assert_eq!(double.unwrap(), "v0");
+    }
+
+    #[test]
+    fn fanout_chain_with_casts_supported() {
+        let mut values = Vec::new();
+        // Base input tensor
+        values.push(ValueInfo {
+            id: 0,
+            origin: ValueOrigin::Variable {
+                kind: VarKind::Global,
+                index: 0,
+            },
+            ty: Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(8)]),
+            constant: None,
+        });
+        // tanh(x) output
+        values.push(ValueInfo {
+            id: 1,
+            origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+            ty: Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(8)]),
+            constant: None,
+        });
+        // constant scale before casting
+        values.push(ValueInfo {
+            id: 2,
+            origin: ValueOrigin::Constant,
+            ty: Type::Num,
+            shape: ShapeInfo::Scalar,
+            constant: Some(Value::Num(0.1)),
+        });
+        // single(0.1) output
+        values.push(ValueInfo {
+            id: 3,
+            origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
+            ty: Type::Num,
+            shape: ShapeInfo::Scalar,
+            constant: None,
+        });
+        // scaled branch output
+        values.push(ValueInfo {
+            id: 4,
+            origin: ValueOrigin::NodeOutput { node: 2, output: 0 },
+            ty: Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(8)]),
+            constant: None,
+        });
+        // final add output
+        values.push(ValueInfo {
+            id: 5,
+            origin: ValueOrigin::NodeOutput { node: 3, output: 0 },
+            ty: Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(8)]),
+            constant: None,
+        });
+
+        let tanh_node = AccelNode {
+            id: 0,
+            label: AccelNodeLabel::Builtin {
+                name: "tanh".to_string(),
+            },
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![0],
+            outputs: vec![1],
+            span: InstrSpan { start: 10, end: 10 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        let single_node = AccelNode {
+            id: 1,
+            label: AccelNodeLabel::Builtin {
+                name: "single".to_string(),
+            },
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![2],
+            outputs: vec![3],
+            span: InstrSpan { start: 11, end: 11 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        let mul_node = AccelNode {
+            id: 2,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![3, 0],
+            outputs: vec![4],
+            span: InstrSpan { start: 12, end: 12 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        let add_node = AccelNode {
+            id: 3,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::Add),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![1, 4],
+            outputs: vec![5],
+            span: InstrSpan { start: 13, end: 13 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+
+        let graph = AccelGraph {
+            nodes: vec![tanh_node, single_node, mul_node, add_node],
+            values,
+            var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
+        };
+
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        let group_plan = &plan.groups[0];
+        assert!(group_plan.kernel.supported);
+        let shader = group_plan.generate_wgsl("f32");
+        assert!(shader
+            .as_ref()
+            .map(|wgsl| wgsl.contains("tanh") && wgsl.contains("output.data"))
+            .unwrap_or(false));
     }
 }
 
@@ -3015,7 +3343,7 @@ fn analyze_image_normalize(
 
     let input_info = graph.value(imgs_vid)?;
     match &input_info.shape {
-        ShapeInfo::Tensor(dims) if dims.len() == 3 => {}
+        ShapeInfo::Tensor(dims) if dims.len() >= 2 => {}
         ShapeInfo::Unknown => {}
         other => {
             if log::log_enabled!(log::Level::Debug) {

@@ -24,6 +24,7 @@ struct GraphBuilder<'a> {
     local_types: HashMap<usize, Type>,
     builtin_cache: HashMap<String, BuiltinInfo>,
     var_bindings: HashMap<ValueId, VarBinding>,
+    node_bindings: HashMap<NodeId, VarBinding>,
 }
 
 #[derive(Clone)]
@@ -70,6 +71,7 @@ impl<'a> GraphBuilder<'a> {
             local_types: HashMap::new(),
             builtin_cache,
             var_bindings: HashMap::new(),
+            node_bindings: HashMap::new(),
         }
     }
 
@@ -81,6 +83,7 @@ impl<'a> GraphBuilder<'a> {
             nodes: self.nodes,
             values: self.values,
             var_bindings: self.var_bindings,
+            node_bindings: self.node_bindings,
         }
     }
 
@@ -243,6 +246,7 @@ impl<'a> GraphBuilder<'a> {
                     index: idx,
                 },
             );
+            self.record_node_binding(value_id, VarKind::Global, idx);
         } else {
             self.reset_stack();
         }
@@ -288,8 +292,17 @@ impl<'a> GraphBuilder<'a> {
                     index: idx,
                 },
             );
+            self.record_node_binding(value_id, VarKind::Local, idx);
         } else {
             self.reset_stack();
+        }
+    }
+
+    fn record_node_binding(&mut self, value_id: ValueId, kind: VarKind, index: usize) {
+        if let Some(info) = self.values.get(value_id as usize) {
+            if let ValueOrigin::NodeOutput { node, .. } = info.origin {
+                self.node_bindings.insert(node, VarBinding { kind, index });
+            }
         }
     }
 
@@ -473,6 +486,7 @@ impl<'a> GraphBuilder<'a> {
         node.outputs.push(out_value);
         self.nodes.push(node);
         self.stack.push(out_value);
+        self.maybe_fold_builtin_constant(name, &inputs, out_value);
     }
 
     fn infer_array_constructor_from_tags(&self, inputs: &[ValueId]) -> Option<Type> {
@@ -664,6 +678,32 @@ impl<'a> GraphBuilder<'a> {
 
     fn reset_stack(&mut self) {
         self.stack.clear();
+    }
+
+    fn maybe_fold_builtin_constant(&mut self, name: &str, inputs: &[ValueId], out_value: ValueId) {
+        if !name.eq_ignore_ascii_case("single") {
+            return;
+        }
+        if inputs.len() != 1 {
+            return;
+        }
+        let Some(input_info) = self.values.get(inputs[0] as usize) else {
+            return;
+        };
+        let Some(constant) = &input_info.constant else {
+            return;
+        };
+        let folded = match constant {
+            Value::Num(n) => Some(Value::Num((*n as f32) as f64)),
+            Value::Int(i) => Some(Value::Num((i.to_f64() as f32) as f64)),
+            Value::Bool(flag) => Some(Value::Num(if *flag { 1.0f32 } else { 0.0f32 } as f64)),
+            _ => None,
+        };
+        if let Some(value) = folded {
+            if let Some(out_info) = self.values.get_mut(out_value as usize) {
+                out_info.constant = Some(value);
+            }
+        }
     }
 }
 

@@ -5,7 +5,6 @@ use runmat_accelerate_api::{AccelProvider, HostTensorView};
 
 #[cfg(feature = "wgpu")]
 fn register_provider() -> &'static dyn AccelProvider {
-    std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
     // Registration is idempotent; ignore duplicate registrations from other tests.
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default());
     runmat_accelerate_api::provider().expect("wgpu provider registered")

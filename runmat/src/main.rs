@@ -19,6 +19,7 @@ use runmat_repl::ReplEngine;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -546,6 +547,7 @@ async fn main() -> Result<()> {
 
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .filter_level(log_level)
+        .format(format_log_record)
         .init();
 
     // Initialize acceleration provider based on unified configuration
@@ -1146,15 +1148,11 @@ async fn execute_script_with_args(
         error!("Script execution failed: {error}");
         std::process::exit(1);
     } else {
-        info!(
-            "Script executed successfully in {:?} ({})",
-            execution_time,
-            if result.used_jit {
-                "JIT"
-            } else {
-                "interpreter"
-            }
-        );
+        if result.used_jit {
+            info!("Script executed successfully in {:?} (JIT)", execution_time);
+        } else {
+            info!("Script executed successfully in {:?}", execution_time);
+        }
         if let Some(value) = result.value {
             // For script execution, suppress implicit value printing unless verbose is enabled.
             // Scripts should print their own outputs (e.g., RESULT_ok ...).
@@ -2343,4 +2341,19 @@ fn create_kernel_logos(kernel_dir: &std::path::Path) -> Result<()> {
     .context("Failed to create logo info file")?;
 
     Ok(())
+}
+
+fn format_log_record(
+    buf: &mut env_logger::fmt::Formatter,
+    record: &log::Record,
+) -> std::io::Result<()> {
+    let timestamp = buf.timestamp_nanos();
+    writeln!(
+        buf,
+        "[{} {:>5} {}] {}",
+        timestamp,
+        record.level(),
+        record.target(),
+        record.args()
+    )
 }

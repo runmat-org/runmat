@@ -11,6 +11,7 @@ use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
+use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{Type, Value};
 use std::collections::HashMap;
@@ -124,6 +125,7 @@ fn nlms_two_fused_reductions_integration() {
             nodes: vec![mul_node, sum_node],
             values,
             var_bindings,
+            node_bindings: HashMap::new(),
         };
         let groups = detect_fusion_groups(&graph);
         let red_group = groups
@@ -166,6 +168,7 @@ fn nlms_two_fused_reductions_integration() {
             reduction_data: Some(v_mul),
             reduction_dim: Some(v_dim),
             reduction_flavor: None,
+            reduction_axes: Some(ReductionAxes::Explicit(vec![1])),
             pattern: None,
         };
         let req = FusionExecutionRequest {
@@ -266,6 +269,7 @@ fn nlms_two_fused_reductions_integration() {
             nodes: vec![mul_node, sum_node],
             values,
             var_bindings,
+            node_bindings: HashMap::new(),
         };
         let groups = detect_fusion_groups(&graph);
         let red_group = groups
@@ -308,6 +312,7 @@ fn nlms_two_fused_reductions_integration() {
             reduction_data: Some(v_mul),
             reduction_dim: Some(v_dim),
             reduction_flavor: None,
+            reduction_axes: Some(ReductionAxes::Explicit(vec![1])),
             pattern: None,
         };
         assert_eq!(plan.inputs.len(), 2, "two-input fused plan required");
@@ -356,6 +361,7 @@ fn nlms_two_fused_reductions_integration() {
             reduction_data: None,
             reduction_dim: None,
             reduction_flavor: None,
+            reduction_axes: None,
             pattern: None,
         };
         let req = FusionExecutionRequest {
@@ -443,6 +449,7 @@ fn nlms_two_fused_reductions_integration() {
             nodes: vec![pow_node, mean_node],
             values,
             var_bindings,
+            node_bindings: HashMap::new(),
         };
         let groups = detect_fusion_groups(&graph);
         let red_group = groups
@@ -481,6 +488,7 @@ fn nlms_two_fused_reductions_integration() {
             reduction_data: Some(v_sq),
             reduction_dim: None,
             reduction_flavor: None,
+            reduction_axes: Some(ReductionAxes::All),
             pattern: None,
         };
         // Reduce all elements: reduce_len=c, num_slices=1

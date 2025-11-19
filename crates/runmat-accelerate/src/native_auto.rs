@@ -1729,6 +1729,13 @@ pub fn auto_offload_report() -> Option<AutoOffloadReport> {
     })
 }
 
+pub fn sequence_threshold_hint() -> Option<usize> {
+    AUTO_STATE
+        .get()
+        .and_then(|state| state.lock().ok())
+        .map(|state| state.thresholds.unary_min_elems)
+}
+
 pub fn reset_auto_offload_log() {
     clear_decisions();
 }

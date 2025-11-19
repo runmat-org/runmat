@@ -24,12 +24,26 @@ use runmat_runtime::{
     call_builtin, gather_if_needed,
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::sync::Once;
 #[cfg(feature = "native-accel")]
 use std::sync::OnceLock;
+
+thread_local! {
+    static CURRENT_PC: Cell<usize> = const { Cell::new(0) };
+}
+
+#[inline]
+fn set_vm_pc(pc: usize) {
+    CURRENT_PC.with(|cell| cell.set(pc));
+}
+
+#[inline]
+fn current_pc() -> usize {
+    CURRENT_PC.with(|cell| cell.get())
+}
 
 #[cfg(feature = "native-accel")]
 struct FusionPlanGuard;
@@ -38,6 +52,84 @@ struct FusionPlanGuard;
 impl Drop for FusionPlanGuard {
     fn drop(&mut self) {
         deactivate_fusion_plan();
+    }
+}
+
+struct InterpreterTiming {
+    enabled: bool,
+    host_span_start: Option<(std::time::Instant, usize)>,
+    host_span_last_pc: Option<usize>,
+    host_span_instrs: u64,
+    seq: u64,
+}
+
+impl InterpreterTiming {
+    fn new() -> Self {
+        let enabled = std::env::var("RUNMAT_INTERPRETER_TIMING")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+            .unwrap_or(false);
+        Self {
+            enabled,
+            host_span_start: None,
+            host_span_last_pc: None,
+            host_span_instrs: 0,
+            seq: 0,
+        }
+    }
+
+    fn note_host_instr(&mut self, pc: usize) {
+        if !self.enabled {
+            return;
+        }
+        if self.host_span_start.is_none() {
+            self.host_span_start = Some((std::time::Instant::now(), pc));
+            self.host_span_instrs = 0;
+        }
+        self.host_span_instrs += 1;
+        self.host_span_last_pc = Some(pc);
+    }
+
+    fn flush_host_span(&mut self, reason: &str, detail: Option<&str>) {
+        if !self.enabled {
+            return;
+        }
+        let Some((start, start_pc)) = self.host_span_start.take() else {
+            return;
+        };
+        let duration = start.elapsed();
+        let end_pc = self.host_span_last_pc.unwrap_or(start_pc);
+        let instrs = self.host_span_instrs.max(1);
+        if let Some(extra) = detail {
+            log::debug!(
+                "interpreter_host_span seq={} reason={} detail={} pc_span=[{}..{}] instrs={} duration_ns={}",
+                self.seq,
+                reason,
+                extra,
+                start_pc,
+                end_pc,
+                instrs,
+                duration.as_nanos()
+            );
+        } else {
+            log::debug!(
+                "interpreter_host_span seq={} reason={} pc_span=[{}..{}] instrs={} duration_ns={}",
+                self.seq,
+                reason,
+                start_pc,
+                end_pc,
+                instrs,
+                duration.as_nanos()
+            );
+        }
+        self.seq += 1;
+        self.host_span_last_pc = None;
+        self.host_span_instrs = 0;
+    }
+}
+
+impl Drop for InterpreterTiming {
+    fn drop(&mut self) {
+        self.flush_host_span("drop", None);
     }
 }
 
@@ -170,7 +262,8 @@ fn mex(id: &str, msg: &str) -> String {
         None => id,
     };
     let ident = format!("{ERROR_NAMESPACE}:{suffix}");
-    format!("{ident}: {msg}")
+    let pc = current_pc();
+    format!("{ident} (pc={pc}): {msg}")
 }
 
 #[derive(Clone)]
@@ -1155,6 +1248,10 @@ pub fn interpret_with_vars(
     }
     #[inline]
     fn bench_end(_label: &str, _start: Option<std::time::Instant>) {}
+    let debug_stack = std::env::var("RUNMAT_DEBUG_STACK")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let mut interpreter_timing = InterpreterTiming::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
             let e: String = $err.to_string();
@@ -1176,6 +1273,7 @@ pub fn interpret_with_vars(
         }};
     }
     while pc < bytecode.instructions.len() {
+        set_vm_pc(pc);
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
         #[cfg(feature = "native-accel")]
@@ -1183,6 +1281,14 @@ pub fn interpret_with_vars(
             (active_group_plan_clone(), bytecode.accel_graph.as_ref())
         {
             if plan.group.span.start == pc {
+                #[cfg(feature = "native-accel")]
+                {
+                    let detail = format!(
+                        "plan={} kind={:?} span=[{}..{}]",
+                        plan.index, plan.group.kind, plan.group.span.start, plan.group.span.end
+                    );
+                    interpreter_timing.flush_host_span("before_fusion", Some(detail.as_str()));
+                }
                 #[cfg(feature = "native-accel")]
                 log_fusion_span_window(&plan, bytecode, pc);
                 match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context) {
@@ -1196,6 +1302,15 @@ pub fn interpret_with_vars(
                     }
                 }
             }
+        }
+        interpreter_timing.note_host_instr(pc);
+        if debug_stack {
+            eprintln!(
+                "Instr pc={} {:?} stack_len={}",
+                pc,
+                &bytecode.instructions[pc],
+                stack.len()
+            );
         }
         match bytecode.instructions[pc].clone() {
             Instr::AndAnd(target) => {
@@ -1400,7 +1515,12 @@ pub fn interpret_with_vars(
             Instr::CallFevalExpandMulti(_specs) => {
                 vm_bail!("feval expand not supported in this execution mode".to_string());
             }
-            Instr::LoadConst(c) => stack.push(Value::Num(c)),
+            Instr::LoadConst(c) => {
+                stack.push(Value::Num(c));
+                if debug_stack {
+                    eprintln!("  -> LoadConst pushed {}, new_len={}", c, stack.len());
+                }
+            }
             Instr::LoadBool(b) => stack.push(Value::Bool(b)),
             Instr::LoadString(s) => stack.push(Value::String(s)),
             Instr::LoadCharRow(s) => {
@@ -1430,6 +1550,18 @@ pub fn interpret_with_vars(
                 let val = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                if let Ok(filter) = std::env::var("RUNMAT_DEBUG_STORE_VAR") {
+                    let log_this = if filter.trim().eq_ignore_ascii_case("*") {
+                        true
+                    } else if let Ok(target) = filter.trim().parse::<usize>() {
+                        target == i
+                    } else {
+                        false
+                    };
+                    if log_this {
+                        eprintln!("StoreVar pc={} var={} value={:?}", pc, i, val);
+                    }
+                }
                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                     match &val {
                         Value::GpuTensor(h) => {
@@ -2560,6 +2692,16 @@ pub fn interpret_with_vars(
                 stack.push(evolved);
             }
             Instr::CallBuiltin(name, arg_count) => {
+                if debug_stack {
+                    eprintln!(
+                        "CallBuiltin pc={} name={} arg_count={} stack_len={} top={:?}",
+                        pc,
+                        name,
+                        arg_count,
+                        stack.len(),
+                        stack.last()
+                    );
+                }
                 if name == "nargin" {
                     if arg_count != 0 {
                         vm_bail!(mex("TooManyInputs", "nargin takes no arguments").to_string());
@@ -5111,9 +5253,24 @@ pub fn interpret_with_vars(
                     );
                 }
                 numeric.reverse();
-                let base = stack
+                let mut base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let mut logical_base = false;
+                base = match base {
+                    Value::LogicalArray(la) => {
+                        logical_base = true;
+                        let data: Vec<f64> = la
+                            .data
+                            .iter()
+                            .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                            .collect();
+                        let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+                            .map_err(|e| format!("slice: {e}"))?;
+                        Value::Tensor(tensor)
+                    }
+                    other => other,
+                };
                 match base {
                     Value::Object(obj) => {
                         let cell =
@@ -5822,9 +5979,38 @@ pub fn interpret_with_vars(
                                 )),
                             };
                             stack.push(v);
+                        } else {
+                            vm_bail!(mex("SliceNonTensor", "Slicing only supported on tensors"));
                         }
-                        vm_bail!(mex("SliceNonTensor", "Slicing only supported on tensors"));
                     }
+                }
+                if logical_base {
+                    let result = stack
+                        .pop()
+                        .ok_or(mex("SliceNonTensor", "logical slice missing result"))?;
+                    let converted = match result {
+                        Value::Tensor(t) => {
+                            let logical_data: Vec<u8> = t
+                                .data
+                                .iter()
+                                .map(|&v| if v != 0.0 { 1 } else { 0 })
+                                .collect();
+                            if logical_data.len() <= 1 {
+                                Value::Bool(logical_data.first().copied().unwrap_or(0) != 0)
+                            } else {
+                                let logical = runmat_builtins::LogicalArray::new(
+                                    logical_data,
+                                    t.shape.clone(),
+                                )
+                                .map_err(|e| mex("SliceNonTensor", &format!("slice: {e}")))?;
+                                Value::LogicalArray(logical)
+                            }
+                        }
+                        Value::Num(n) => Value::Bool(n != 0.0),
+                        Value::Bool(_) | Value::LogicalArray(_) => result,
+                        other => other,
+                    };
+                    stack.push(converted);
                 }
                 bench_end("IndexSlice", __b);
             }
@@ -8863,9 +9049,11 @@ pub fn interpret_with_vars(
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 stack.push(return_value);
+                interpreter_timing.flush_host_span("return_value", None);
                 break;
             }
             Instr::Return => {
+                interpreter_timing.flush_host_span("return", None);
                 break;
             }
             Instr::StoreIndex(num_indices) => {
@@ -9867,8 +10055,12 @@ pub fn interpret_with_vars(
                 runmat_builtins::register_class(def);
             }
         }
+        if debug_stack {
+            eprintln!("After exec pc={} stack_len={}", pc, stack.len());
+        }
         pc += 1;
     }
+    interpreter_timing.flush_host_span("loop_complete", None);
     for (i, var) in vars.iter().enumerate() {
         if i < initial_vars.len() {
             initial_vars[i] = var.clone();
@@ -10026,6 +10218,44 @@ fn summarize_value(i: usize, v: &Value) -> String {
     }
 }
 #[cfg(feature = "native-accel")]
+struct StackSliceGuard<'a> {
+    stack: *mut Vec<Value>,
+    slice: Option<Vec<Value>>,
+    _marker: std::marker::PhantomData<&'a mut Vec<Value>>,
+}
+
+#[cfg(feature = "native-accel")]
+impl<'a> StackSliceGuard<'a> {
+    fn new(stack: &'a mut Vec<Value>, slice_start: usize) -> Self {
+        let slice = stack.split_off(slice_start);
+        Self {
+            stack,
+            slice: Some(slice),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn slice(&self) -> &[Value] {
+        self.slice.as_ref().expect("stack slice missing").as_slice()
+    }
+
+    fn commit(mut self) {
+        self.slice = None;
+    }
+}
+
+#[cfg(feature = "native-accel")]
+impl Drop for StackSliceGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(slice) = self.slice.take() {
+            unsafe {
+                (&mut *self.stack).extend(slice);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "native-accel")]
 fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
@@ -10128,8 +10358,8 @@ fn try_execute_fusion_group(
     }
     let available = pattern_len;
     let slice_start = stack.len() - available;
-    let slice = stack[slice_start..].to_vec();
-    stack.truncate(slice_start);
+    let stack_guard = StackSliceGuard::new(stack, slice_start);
+    let slice = stack_guard.slice().to_vec();
     let mut consumed: Vec<Option<Value>> = vec![None; pattern_len];
     let skip = 0;
 
@@ -10161,7 +10391,8 @@ fn try_execute_fusion_group(
             continue;
         }
         let vid = plan.inputs[idx];
-        if let Some(info) = graph.value(vid) {
+        let info = graph.value(vid);
+        if let Some(info) = info {
             match &info.origin {
                 ValueOrigin::Variable { kind, index } => {
                     let value_opt = match kind {
@@ -10209,6 +10440,29 @@ fn try_execute_fusion_group(
             }
         }
         if slot.is_none() {
+            if let Some(info) = info {
+                if let ValueOrigin::NodeOutput { node, .. } = info.origin {
+                    if let Some(binding) = graph.node_binding(node) {
+                        let value_opt = match binding.kind {
+                            VarKind::Global => vars.get(binding.index).cloned(),
+                            VarKind::Local => {
+                                if let Some(frame) = context.call_stack.last() {
+                                    let absolute = frame.locals_start + binding.index;
+                                    context.locals.get(absolute).cloned()
+                                } else {
+                                    vars.get(binding.index).cloned()
+                                }
+                            }
+                        };
+                        if let Some(value) = value_opt {
+                            *slot = Some(value);
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        if slot.is_none() {
             if let Some(value) = plan.const_values.get(&vid) {
                 *slot = Some(value.clone());
             }
@@ -10238,13 +10492,11 @@ fn try_execute_fusion_group(
     );
     if plan.group.kind.is_elementwise() {
         match execute_elementwise(request) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                    stack.push(value.clone());
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else if plan.group.kind.is_reduction() {
         // Determine reduction axis or 'all'. Prefer the builtin reduction op's dim argument (inputs[1]).
@@ -10637,9 +10889,6 @@ fn try_execute_fusion_group(
                             if total_from_operand { "runtime" } else { "output_shape" }
                         );
                     }
-                    for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                        stack.push(value.clone());
-                    }
                     return Err("fusion: reduction all extent unknown".to_string());
                 }
                 let total = total_elems.unwrap();
@@ -10656,17 +10905,17 @@ fn try_execute_fusion_group(
                 if fusion_debug_enabled() {
                     if r == 1 && c == 1 {
                         log::debug!(
-                        "fusion reduction: unresolved shape (defaulted to 1x1); axis={}, constants={:?}",
-                        axis, plan.constants
-                    );
+                    "fusion reduction: unresolved shape (defaulted to 1x1); axis={}, constants={:?}",
+                    axis, plan.constants
+                );
                     } else {
                         log::debug!(
-                        "fusion reduction: resolved shape rows={} cols={} axis={} constants={:?}",
-                        r,
-                        c,
-                        axis,
-                        plan.constants
-                    );
+                    "fusion reduction: resolved shape rows={} cols={} axis={} constants={:?}",
+                    r,
+                    c,
+                    axis,
+                    plan.constants
+                );
                     }
                 }
                 if axis == 0 {
@@ -10739,9 +10988,6 @@ fn try_execute_fusion_group(
             log::debug!(
                 "fusion reduction: skipping fusion due to unresolved shape; falling back to provider path"
             );
-            for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                stack.push(value.clone());
-            }
             return Err("fusion: reduction shape unresolved".to_string());
         }
 
@@ -10751,9 +10997,6 @@ fn try_execute_fusion_group(
             .as_deref()
             == Some("1")
         {
-            for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                stack.push(value.clone());
-            }
             return Err("fusion: fused reductions disabled".to_string());
         }
         let workgroup_size = 256u32;
@@ -10786,71 +11029,58 @@ fn try_execute_fusion_group(
             );
         }
         match execute_reduction(request, reduce_len, num_slices, workgroup_size) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                    stack.push(value.clone());
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else if plan.group.kind == FusionKind::CenteredGram {
         match execute_centered_gram(request) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                    stack.push(value.clone());
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else if plan.group.kind == FusionKind::PowerStepNormalize {
         match execute_power_step_normalize(request) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                    stack.push(value.clone());
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else if plan.group.kind == FusionKind::ExplainedVariance {
         log::debug!("explained variance plan inputs {:?}", plan.inputs);
         match execute_explained_variance(request) {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
+            }
             Err(err) => {
                 log::debug!("explained variance fusion fallback: {}", err);
-                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                    stack.push(value.clone());
-                }
                 Err(err.to_string())
             }
         }
     } else if plan.group.kind == FusionKind::MatmulEpilogue {
         match execute_matmul_epilogue(request) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                    stack.push(value.clone());
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else if plan.group.kind == FusionKind::ImageNormalize {
         match execute_image_normalize(request) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-                    stack.push(value.clone());
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else {
         // Unknown fusion kind; restore stack and report
-        for value in consumed.iter().rev().filter_map(|v| v.as_ref()) {
-            stack.push(value.clone());
-        }
         Err("fusion: unsupported fusion kind".to_string())
     }
 }

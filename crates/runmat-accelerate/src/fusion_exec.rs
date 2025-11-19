@@ -5,12 +5,15 @@ use crate::fusion_residency;
 use crate::graph;
 use crate::graph::{ShapeInfo, ValueId};
 use crate::precision::ensure_provider_supports_dtype;
+use log;
 use runmat_accelerate_api::{
     provider, AccelProvider, CovRows, CovarianceOptions, GpuTensorHandle, HostTensorView,
     ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision, ReductionFlavor,
 };
 use runmat_builtins::{NumericDType, Value};
 use runmat_runtime::gather_if_needed;
+use std::sync::OnceLock;
+use std::time::Instant;
 
 struct PreparedInput {
     handle: GpuTensorHandle,
@@ -20,6 +23,80 @@ struct PreparedInput {
 pub struct FusionExecutionRequest<'a> {
     pub plan: &'a FusionGroupPlan,
     pub inputs: Vec<Value>,
+}
+
+#[inline]
+fn fusion_timing_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| match std::env::var("RUNMAT_FUSION_TIMING") {
+        Ok(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => false,
+    })
+}
+
+struct FusionStageTimer {
+    inner: Option<FusionStageTimerInner>,
+}
+
+struct FusionStageTimerInner {
+    plan_index: usize,
+    kind: &'static str,
+    len: usize,
+    start: Instant,
+    last: Instant,
+    stages: Vec<(&'static str, f64)>,
+}
+
+impl FusionStageTimer {
+    fn new(kind: &'static str, plan_index: usize, len: usize) -> Self {
+        if fusion_timing_enabled() && log::log_enabled!(log::Level::Debug) {
+            let now = Instant::now();
+            Self {
+                inner: Some(FusionStageTimerInner {
+                    plan_index,
+                    kind,
+                    len,
+                    start: now,
+                    last: now,
+                    stages: Vec::new(),
+                }),
+            }
+        } else {
+            Self { inner: None }
+        }
+    }
+
+    fn mark(&mut self, label: &'static str) {
+        if let Some(inner) = &mut self.inner {
+            let now = Instant::now();
+            let delta = now.duration_since(inner.last).as_secs_f64() * 1000.0;
+            inner.stages.push((label, delta));
+            inner.last = now;
+        }
+    }
+
+    fn finish(self) {
+        if let Some(inner) = self.inner {
+            let total = inner.start.elapsed().as_secs_f64() * 1000.0;
+            let summary = inner
+                .stages
+                .into_iter()
+                .map(|(label, ms)| format!("{label}={ms:.3}ms"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            log::debug!(
+                "fusion timing plan={} kind={} len={} {} total={:.3}ms",
+                inner.plan_index,
+                inner.kind,
+                inner.len,
+                summary,
+                total
+            );
+        }
+    }
 }
 
 fn ensure_gpu_tensor(
@@ -37,6 +114,13 @@ fn ensure_gpu_tensor(
             Ok((handle.clone(), Some(handle)))
         }
         _ => Err(anyhow!("fusion: expected tensor input")),
+    }
+}
+
+fn scalar_upload_dtype(provider: &dyn AccelProvider) -> NumericDType {
+    match provider.precision() {
+        ProviderPrecision::F32 => NumericDType::F32,
+        ProviderPrecision::F64 => NumericDType::F64,
     }
 }
 
@@ -148,7 +232,7 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
         Some(out)
     }
     // Determine output shape from the fusion plan and derive the element count from it.
-    let output_shape = match &request.plan.group.shape {
+    let mut output_shape = match &request.plan.group.shape {
         ShapeInfo::Tensor(dims) if !dims.is_empty() => {
             let resolved: Vec<usize> = dims.iter().map(|d| d.unwrap_or(1)).collect();
             resolved
@@ -159,10 +243,17 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 .ok_or_else(|| anyhow!("fusion: unknown output shape"))?
         }
     };
-    let len: usize = output_shape.iter().copied().product();
+    let mut len: usize = output_shape.iter().copied().product();
     if len == 0 {
-        return Err(anyhow!("fusion: zero-length execution not supported"));
+        if let Some(rt_shape) = runtime_broadcast_shape(&request.inputs) {
+            output_shape = rt_shape;
+            len = output_shape.iter().copied().product();
+        }
+        if len == 0 {
+            return Err(anyhow!("fusion: zero-length execution not supported"));
+        }
     }
+    let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
     let scalar_shape: Vec<usize> = if output_shape.is_empty() {
         vec![1]
     } else {
@@ -170,6 +261,7 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
     };
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
+    let scalar_dtype = scalar_upload_dtype(provider);
     for value in &request.inputs {
         match value {
             Value::GpuTensor(handle) => prepared.push(PreparedInput {
@@ -193,12 +285,16 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 });
             }
             Value::Num(n) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, NumericDType::F64) {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
                     return Err(anyhow!(
                         "fusion: scalar input requires unsupported precision ({msg})"
                     ));
                 }
-                temp_scalars.push(vec![*n]);
+                let scalar = match provider.precision() {
+                    ProviderPrecision::F32 => (*n as f32) as f64,
+                    ProviderPrecision::F64 => *n,
+                };
+                temp_scalars.push(vec![scalar]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
                     data,
@@ -211,12 +307,16 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
                 });
             }
             Value::Int(i) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, NumericDType::F64) {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
                     return Err(anyhow!(
                         "fusion: scalar input requires unsupported precision ({msg})"
                     ));
                 }
-                temp_scalars.push(vec![i.to_f64()]);
+                let scalar = match provider.precision() {
+                    ProviderPrecision::F32 => (i.to_f64() as f32) as f64,
+                    ProviderPrecision::F64 => i.to_f64(),
+                };
+                temp_scalars.push(vec![scalar]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
                     data,
@@ -233,6 +333,7 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
             }
         }
     }
+    timer.mark("prepare_inputs");
 
     let scalar_ty = match provider.precision() {
         ProviderPrecision::F32 => "f32",
@@ -242,9 +343,11 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
         .plan
         .generate_wgsl(scalar_ty)
         .ok_or_else(|| anyhow!("fusion: WGSL generation failed"))?;
+    timer.mark("generate_wgsl");
 
     let handles: Vec<GpuTensorHandle> = prepared.iter().map(|p| p.handle.clone()).collect();
     let output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
+    timer.mark("dispatch");
     fusion_residency::mark(&output);
 
     // Clean up temporary uploads
@@ -253,6 +356,8 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
             let _ = provider.free(&handle);
         }
     }
+    timer.mark("cleanup");
+    timer.finish();
 
     Ok(Value::GpuTensor(output))
 }
@@ -293,8 +398,10 @@ pub fn execute_reduction(
             vec![1; constant_shape.len()]
         }
     };
+    let mut timer = FusionStageTimer::new("reduction", request.plan.index, len);
     let mut prepared = Vec::with_capacity(request.inputs.len());
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
+    let scalar_dtype = scalar_upload_dtype(provider);
     for value in &request.inputs {
         match value {
             Value::GpuTensor(handle) => prepared.push(PreparedInput {
@@ -318,12 +425,16 @@ pub fn execute_reduction(
                 });
             }
             Value::Num(n) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, NumericDType::F64) {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
                     return Err(anyhow!(
                         "fusion: scalar input requires unsupported precision ({msg})"
                     ));
                 }
-                temp_scalars.push(vec![*n]);
+                let scalar = match provider.precision() {
+                    ProviderPrecision::F32 => (*n as f32) as f64,
+                    ProviderPrecision::F64 => *n,
+                };
+                temp_scalars.push(vec![scalar]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
                     data,
@@ -336,12 +447,16 @@ pub fn execute_reduction(
                 });
             }
             Value::Int(i) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, NumericDType::F64) {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
                     return Err(anyhow!(
                         "fusion: scalar input requires unsupported precision ({msg})"
                     ));
                 }
-                temp_scalars.push(vec![i.to_f64()]);
+                let scalar = match provider.precision() {
+                    ProviderPrecision::F32 => (i.to_f64() as f32) as f64,
+                    ProviderPrecision::F64 => i.to_f64(),
+                };
+                temp_scalars.push(vec![scalar]);
                 let data = temp_scalars.last().unwrap();
                 let view = HostTensorView {
                     data,
@@ -356,6 +471,7 @@ pub fn execute_reduction(
             _ => return Err(anyhow!("fusion: unsupported value type")),
         }
     }
+    timer.mark("prepare_inputs");
 
     let handles: Vec<GpuTensorHandle> = prepared.iter().map(|p| p.handle.clone()).collect();
     let output_shape = vec![num_slices];
@@ -368,6 +484,7 @@ pub fn execute_reduction(
         .plan
         .generate_reduction_wgsl(scalar_ty)
         .ok_or_else(|| anyhow!("fusion: reduction WGSL generation failed"))?;
+    timer.mark("generate_wgsl");
 
     let wg = if workgroup_size == 0 {
         provider.default_reduction_workgroup_size()
@@ -387,6 +504,7 @@ pub fn execute_reduction(
         wg,
         flavor,
     )?;
+    timer.mark("dispatch");
     fusion_residency::mark(&output);
 
     for input in prepared {
@@ -394,6 +512,8 @@ pub fn execute_reduction(
             let _ = provider.free(&handle);
         }
     }
+    timer.mark("cleanup");
+    timer.finish();
 
     Ok(Value::GpuTensor(output))
 }

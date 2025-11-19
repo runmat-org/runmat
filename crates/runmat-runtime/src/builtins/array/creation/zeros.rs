@@ -377,19 +377,27 @@ fn build_output(parsed: ParsedZeros) -> Result<Value, String> {
 }
 
 fn zeros_double(shape: &[usize]) -> Result<Value, String> {
-    if let Some(value) = zeros_gpu_alloc(shape, NumericDType::F64)? {
-        return Ok(value);
+    if !force_host_allocation(shape) {
+        if let Some(value) = zeros_gpu_alloc(shape, NumericDType::F64)? {
+            return Ok(value);
+        }
     }
     let tensor = tensor::zeros(shape)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn zeros_single(shape: &[usize]) -> Result<Value, String> {
-    if let Some(value) = zeros_gpu_alloc(shape, NumericDType::F32)? {
-        return Ok(value);
+    if !force_host_allocation(shape) {
+        if let Some(value) = zeros_gpu_alloc(shape, NumericDType::F32)? {
+            return Ok(value);
+        }
     }
     let tensor = tensor::zeros_with_dtype(shape, NumericDType::F32)?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn force_host_allocation(shape: &[usize]) -> bool {
+    tensor::element_count(shape) <= 1
 }
 
 fn zeros_logical(shape: &[usize]) -> Result<Value, String> {

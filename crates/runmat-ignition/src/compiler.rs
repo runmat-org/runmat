@@ -1776,22 +1776,22 @@ impl Compiler {
                     BinOp::BitAnd => {
                         self.compile_expr(a)?;
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         self.compile_expr(b)?;
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         self.emit(Instr::ElemMul);
                     }
                     BinOp::BitOr => {
                         self.compile_expr(a)?;
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         self.compile_expr(b)?;
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         self.emit(Instr::Add);
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         // Stay element-wise by folding through elementwise ops
                     }
                     _ => {

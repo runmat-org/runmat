@@ -1750,6 +1750,39 @@ impl WgpuProvider {
     const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
     const IMAGE_NORMALIZE_TARGET_LOOP_ITERS_PER_LANE: f64 = 16.0;
 
+    fn precision_tag(&self) -> &'static str {
+        match self.precision {
+            NumericPrecision::F64 => "f64",
+            NumericPrecision::F32 => "f32",
+        }
+    }
+
+    fn record_kernel_launch_basic(
+        &self,
+        kernel: &'static str,
+        shape: &[(&'static str, u64)],
+        tuning: &[(&'static str, u64)],
+    ) {
+        self.telemetry
+            .record_kernel_launch(kernel, Some(self.precision_tag()), shape, tuning);
+    }
+
+    fn record_matmul_kernel_launch(
+        &self,
+        m: usize,
+        n: usize,
+        k: usize,
+        use_vec4: bool,
+        chunked: bool,
+    ) {
+        let shape = [("m", m as u64), ("n", n as u64), ("k", k as u64)];
+        let tuning = [
+            ("vec4", if use_vec4 { 1 } else { 0 }),
+            ("chunked", if chunked { 1 } else { 0 }),
+        ];
+        self.record_kernel_launch_basic("matmul", &shape, &tuning);
+    }
+
     fn create_storage_buffer_checked_with_usage(
         &self,
         len: usize,
@@ -7157,6 +7190,7 @@ impl WgpuProvider {
             self.remember_matmul_sources(&handle, a, b);
             self.mark_buffer_usage(&handle, out_usage);
             self.telemetry.record_matmul_duration(start.elapsed());
+            self.record_matmul_kernel_launch(m, n, k, use_vec4, true);
             return Ok(handle);
         }
 
@@ -7284,6 +7318,7 @@ impl WgpuProvider {
         }
         self.remember_matmul_sources(&handle, a, b);
         self.telemetry.record_matmul_duration(start.elapsed());
+        self.record_matmul_kernel_launch(m, n, k, use_vec4, false);
         Ok(handle)
     }
     pub(crate) fn pagefun_exec(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
@@ -15415,6 +15450,14 @@ impl AccelProvider for WgpuProvider {
         if result.is_ok() {
             let elapsed = start.elapsed();
             self.telemetry.record_fused_elementwise_duration(elapsed);
+            let shape = [
+                ("len", len as u64),
+                ("inputs", inputs.len() as u64),
+                ("rank", output_shape.len() as u64),
+            ];
+            let wg = crate::backend::wgpu::config::effective_workgroup_size() as u64;
+            let tuning = [("wg", wg)];
+            self.record_kernel_launch_basic("fused_elementwise", &shape, &tuning);
         }
         result
     }
@@ -15469,6 +15512,23 @@ impl AccelProvider for WgpuProvider {
         if result.is_ok() {
             let elapsed = start.elapsed();
             self.telemetry.record_fused_reduction_duration(elapsed);
+            let actual_wg = if workgroup_size == 0 {
+                self.default_reduction_workgroup_size()
+            } else {
+                workgroup_size
+            } as u64;
+            let flavor_tag = match flavor {
+                ReductionFlavor::Sum => 0,
+                ReductionFlavor::Mean => 1,
+                ReductionFlavor::CustomScale(_) => 2,
+            };
+            let shape = [
+                ("reduce_len", reduce_len as u64),
+                ("slices", num_slices as u64),
+                ("rank", output_shape.len() as u64),
+            ];
+            let tuning = [("wg", actual_wg), ("flavor", flavor_tag)];
+            self.record_kernel_launch_basic("fused_reduction", &shape, &tuning);
         }
         result
     }

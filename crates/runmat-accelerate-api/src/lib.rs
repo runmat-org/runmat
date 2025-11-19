@@ -7,8 +7,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
 
 type ResidencyClearFn = fn(&GpuTensorHandle);
+type SequenceThresholdFn = fn() -> Option<usize>;
 
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
+static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
 
 static LOGICAL_HANDLES: Lazy<RwLock<HashSet<u64>>> = Lazy::new(|| RwLock::new(HashSet::new()));
 static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<u64, u64>>> =
@@ -38,6 +40,20 @@ pub fn clear_residency(handle: &GpuTensorHandle) {
     if let Some(handler) = RESIDENCY_CLEAR.get() {
         handler(handle);
     }
+}
+
+/// Register a callback that exposes the current sequence length threshold
+/// derived from the auto-offload planner. Array constructors can use this hint
+/// to decide when to prefer GPU residency automatically.
+pub fn register_sequence_threshold_provider(provider: SequenceThresholdFn) {
+    let _ = SEQUENCE_THRESHOLD_PROVIDER.set(provider);
+}
+
+/// Query the currently registered sequence threshold hint, if any.
+pub fn sequence_threshold_hint() -> Option<usize> {
+    SEQUENCE_THRESHOLD_PROVIDER
+        .get()
+        .and_then(|provider| provider())
 }
 
 /// Record the precision associated with a GPU tensor handle so host operations can

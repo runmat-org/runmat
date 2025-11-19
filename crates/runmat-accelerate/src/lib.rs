@@ -109,12 +109,17 @@ impl Default for AutoOffloadOptions {
 static AUTO_OFFLOAD_OPTIONS: Lazy<RwLock<AutoOffloadOptions>> =
     Lazy::new(|| RwLock::new(AutoOffloadOptions::default()));
 
-static RESIDENCY_HOOKS: Lazy<()> = Lazy::new(|| {
+static API_HOOKS: Lazy<()> = Lazy::new(|| {
     runmat_accelerate_api::register_residency_clear(fusion_residency::clear);
+    runmat_accelerate_api::register_sequence_threshold_provider(sequence_threshold_hint_bridge);
 });
 
 pub(crate) fn ensure_residency_hooks() {
-    Lazy::force(&RESIDENCY_HOOKS);
+    Lazy::force(&API_HOOKS);
+}
+
+fn sequence_threshold_hint_bridge() -> Option<usize> {
+    native_auto::sequence_threshold_hint()
 }
 
 pub fn configure_auto_offload(options: AutoOffloadOptions) {

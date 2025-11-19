@@ -8,6 +8,7 @@ use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{
     InstrSpan, PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarKind,
 };
+use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, HostTensorView};
 use runmat_builtins::{Type, Value};
 use std::collections::HashMap;
@@ -140,6 +141,7 @@ fn fused_single_pass_sum_mul_no_alias() {
         reduction_data: Some(v_mul),
         reduction_dim: Some(v_dim),
         reduction_flavor: None,
+        reduction_axes: Some(ReductionAxes::Explicit(vec![1])),
         pattern: None,
     };
 

@@ -9,6 +9,7 @@ use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
+use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
 use runmat_builtins::{Type, Value};
 use std::collections::HashMap;
@@ -142,6 +143,7 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
             nodes: vec![mul_node, sum_node],
             values,
             var_bindings,
+            node_bindings: HashMap::new(),
         };
         let groups = detect_fusion_groups(&graph);
         let red_group = groups
@@ -181,6 +183,7 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
             reduction_data: Some(v_mul),
             reduction_dim: Some(v_dim),
             reduction_flavor: Some(ReductionFlavor::Sum),
+            reduction_axes: Some(ReductionAxes::Explicit(vec![dim_val as usize])),
             pattern: None,
         };
 

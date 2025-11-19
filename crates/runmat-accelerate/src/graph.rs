@@ -12,6 +12,7 @@ pub struct AccelGraph {
     pub nodes: Vec<AccelNode>,
     pub values: Vec<ValueInfo>,
     pub var_bindings: HashMap<ValueId, VarBinding>,
+    pub node_bindings: HashMap<NodeId, VarBinding>,
 }
 
 impl AccelGraph {
@@ -29,6 +30,10 @@ impl AccelGraph {
 
     pub fn var_binding(&self, id: ValueId) -> Option<&VarBinding> {
         self.var_bindings.get(&id)
+    }
+
+    pub fn node_binding(&self, id: NodeId) -> Option<&VarBinding> {
+        self.node_bindings.get(&id)
     }
 
     pub fn detect_fusion_groups(&self) -> Vec<crate::fusion::FusionGroup> {

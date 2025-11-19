@@ -99,6 +99,7 @@ fn sum_native_graph() -> AccelGraph {
         nodes: vec![mul_node, sum_node],
         values,
         var_bindings,
+        node_bindings: HashMap::new(),
     }
 }
 

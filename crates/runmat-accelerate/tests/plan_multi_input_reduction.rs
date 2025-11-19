@@ -128,6 +128,7 @@ fn plan_collects_two_parents_for_mul_before_sum_dim1() {
         nodes: vec![mul_node, sum_node],
         values,
         var_bindings,
+        node_bindings: HashMap::new(),
     };
 
     let groups = detect_fusion_groups(&graph);

@@ -4,6 +4,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -254,7 +255,7 @@ fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<V
         let step = default_step(start_scalar.value, stop_scalar.value);
         let char_mode =
             start_scalar.origin == ScalarOrigin::Char && stop_scalar.origin == ScalarOrigin::Char;
-        let prefer_gpu = if char_mode {
+        let explicit_gpu = if char_mode {
             false
         } else {
             start_scalar.prefer_gpu || stop_scalar.prefer_gpu
@@ -263,7 +264,7 @@ fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<V
             start_scalar.value,
             step,
             stop_scalar.value,
-            prefer_gpu,
+            explicit_gpu,
             char_mode,
         )
     } else {
@@ -274,7 +275,7 @@ fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<V
         let stop_scalar = parse_real_scalar("colon", rest[0].clone())?;
         let char_mode =
             start_scalar.origin == ScalarOrigin::Char && stop_scalar.origin == ScalarOrigin::Char;
-        let prefer_gpu = if char_mode {
+        let explicit_gpu = if char_mode {
             false
         } else {
             start_scalar.prefer_gpu || step_scalar.prefer_gpu || stop_scalar.prefer_gpu
@@ -283,7 +284,7 @@ fn colon_builtin(start: Value, step_or_end: Value, rest: Vec<Value>) -> Result<V
             start_scalar.value,
             step_scalar.value,
             stop_scalar.value,
-            prefer_gpu,
+            explicit_gpu,
             char_mode,
         )
     }
@@ -293,7 +294,7 @@ fn build_sequence(
     start: f64,
     step: f64,
     stop: f64,
-    prefer_gpu: bool,
+    explicit_gpu: bool,
     char_mode: bool,
 ) -> Result<Value, String> {
     if !start.is_finite() || !step.is_finite() || !stop.is_finite() {
@@ -303,12 +304,39 @@ fn build_sequence(
         return Err("colon: increment must be nonzero".to_string());
     }
 
-    let (data, final_end) = generate_progression(start, step, stop)?;
+    let plan = plan_progression(start, step, stop)?;
 
     if char_mode {
+        let data = materialize_progression(&plan, start, step);
         return build_char_sequence(data);
     }
 
+    if plan.count == 0 {
+        return finalize_numeric_sequence(Vec::new(), explicit_gpu);
+    }
+
+    let prefer_gpu =
+        sequence_gpu_preference(plan.count, SequenceIntent::Colon, explicit_gpu).prefer_gpu;
+
+    if prefer_gpu {
+        #[cfg(all(test, feature = "wgpu"))]
+        {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            if let Ok(handle) = provider.linspace(start, plan.final_end, plan.count) {
+                return Ok(Value::GpuTensor(handle));
+            }
+        }
+    }
+
+    let data = materialize_progression(&plan, start, step);
+    finalize_numeric_sequence(data, prefer_gpu)
+}
+
+fn finalize_numeric_sequence(data: Vec<f64>, prefer_gpu: bool) -> Result<Value, String> {
     let len = data.len();
     let shape = vec![1usize, len];
 
@@ -320,11 +348,6 @@ fn build_sequence(
             );
         }
         if let Some(provider) = runmat_accelerate_api::provider() {
-            if len > 1 {
-                if let Ok(handle) = provider.linspace(start, final_end, len) {
-                    return Ok(Value::GpuTensor(handle));
-                }
-            }
             let view = HostTensorView {
                 data: &data,
                 shape: &shape,
@@ -340,15 +363,26 @@ fn build_sequence(
         .map_err(|e| format!("colon: {e}"))
 }
 
-fn generate_progression(start: f64, step: f64, stop: f64) -> Result<(Vec<f64>, f64), String> {
+struct ProgressionPlan {
+    count: usize,
+    final_end: f64,
+}
+
+fn plan_progression(start: f64, step: f64, stop: f64) -> Result<ProgressionPlan, String> {
     let tol = tolerance(start, step, stop);
     let step_abs = step.abs();
 
     if step > 0.0 && start > stop + tol {
-        return Ok((Vec::new(), start));
+        return Ok(ProgressionPlan {
+            count: 0,
+            final_end: start,
+        });
     }
     if step < 0.0 && start < stop - tol {
-        return Ok((Vec::new(), start));
+        return Ok(ProgressionPlan {
+            count: 0,
+            final_end: start,
+        });
     }
 
     let diff = (stop - start) / step;
@@ -367,7 +401,10 @@ fn generate_progression(start: f64, step: f64, stop: f64) -> Result<(Vec<f64>, f
         if approx.abs() <= ratio_tol {
             approx = 0.0;
         } else {
-            return Ok((Vec::new(), start));
+            return Ok(ProgressionPlan {
+                count: 0,
+                final_end: start,
+            });
         }
     }
 
@@ -382,12 +419,10 @@ fn generate_progression(start: f64, step: f64, stop: f64) -> Result<(Vec<f64>, f
         .ok_or_else(|| "colon: sequence length exceeds platform limits".to_string())?;
 
     if count == 0 {
-        return Ok((Vec::new(), start));
-    }
-
-    let mut data = Vec::with_capacity(count);
-    for idx in 0..count {
-        data.push(start + step * (idx as f64));
+        return Ok(ProgressionPlan {
+            count: 0,
+            final_end: start,
+        });
     }
 
     let computed_end = start + step * ((count - 1) as f64);
@@ -396,11 +431,22 @@ fn generate_progression(start: f64, step: f64, stop: f64) -> Result<(Vec<f64>, f
     } else {
         computed_end
     };
-    if let Some(last) = data.last_mut() {
-        *last = final_end;
-    }
 
-    Ok((data, final_end))
+    Ok(ProgressionPlan { count, final_end })
+}
+
+fn materialize_progression(plan: &ProgressionPlan, start: f64, step: f64) -> Vec<f64> {
+    if plan.count == 0 {
+        return Vec::new();
+    }
+    let mut data = Vec::with_capacity(plan.count);
+    for idx in 0..plan.count {
+        data.push(start + step * (idx as f64));
+    }
+    if let Some(last) = data.last_mut() {
+        *last = plan.final_end;
+    }
+    data
 }
 
 fn default_step(start: f64, stop: f64) -> f64 {

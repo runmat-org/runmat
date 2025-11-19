@@ -6,6 +6,7 @@ use runmat_accelerate::fusion::{
 };
 use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{InstrSpan, ShapeInfo, ValueId};
+use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
 use runmat_builtins::Value;
 use std::collections::HashMap;
@@ -83,6 +84,7 @@ fn fused_sum_square_dim0_matches_manual() {
         reduction_data: Some(vid_mul),
         reduction_dim: None,
         reduction_flavor: Some(ReductionFlavor::Sum),
+        reduction_axes: Some(ReductionAxes::Explicit(vec![1])),
         pattern: None,
     };
 
