@@ -36,16 +36,10 @@ export default function MonteCarloSweep() {
                   RunMat (ms)
                 </th>
                 <th className="px-3 sm:px-6 py-2 sm:py-3 text-center font-medium text-muted-foreground">
-                  <span className="inline-flex items-center justify-center gap-2 text-sm sm:text-base text-purple-100">
-                    <span className="h-2 w-2 rounded-full bg-purple-400" />
-                    <span>vs PyTorch</span>
-                  </span>
+                  RunMat vs PyTorch
                 </th>
                 <th className="px-3 sm:px-6 py-2 sm:py-3 text-center font-medium text-muted-foreground">
-                  <span className="inline-flex items-center justify-center gap-2 text-sm sm:text-base text-blue-100">
-                    <span className="h-2 w-2 rounded-full bg-blue-400" />
-                    <span>vs NumPy</span>
-                  </span>
+                  RunMat vs NumPy
                 </th>
               </tr>
             </thead>

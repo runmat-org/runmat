@@ -6,11 +6,11 @@ type ElementwiseRow = {
 };
 
 const ELEMENTWISE_ROWS: ElementwiseRow[] = [
-  { points: "1M", runMatMs: 197, vsPyTorch: "4.2× faster", vsNumPy: "0.35× as fast" },
-  { points: "5M", runMatMs: 208, vsPyTorch: "5.3× faster", vsNumPy: "0.54× as fast" },
-  { points: "10M", runMatMs: 174, vsPyTorch: "8.2× faster", vsNumPy: "0.96× as fast" },
-  { points: "100M", runMatMs: 171, vsPyTorch: "98.8× faster", vsNumPy: "6.4× faster" },
-  { points: "1B", runMatMs: 199, vsPyTorch: "113.6× faster", vsNumPy: "63.0× faster" },
+  { points: "10M", runMatMs: 174, vsPyTorch: "8× faster", vsNumPy: "≈ same speed" },
+  { points: "100M", runMatMs: 171, vsPyTorch: "99× faster", vsNumPy: "6× faster" },
+  { points: "200M", runMatMs: 203, vsPyTorch: "86× faster", vsNumPy: "11× faster" },
+  { points: "500M", runMatMs: 172, vsPyTorch: "110× faster", vsNumPy: "35× faster" },
+  { points: "1B", runMatMs: 199, vsPyTorch: "114× faster", vsNumPy: "63× faster" },
 ];
 
 export default function ElementwiseMathSweep() {
@@ -21,7 +21,7 @@ export default function ElementwiseMathSweep() {
           Elementwise Math
         </div>
         <div className="mt-1 text-xs sm:text-sm text-muted-foreground">
-          Problem size sweep: 1M → 1B points
+          Problem size sweep: 10M → 1B points
         </div>
       </div>
       <div className="bg-background">
@@ -36,16 +36,10 @@ export default function ElementwiseMathSweep() {
                   RunMat (ms)
                 </th>
                 <th className="px-3 sm:px-6 py-2 sm:py-3 text-center font-medium text-muted-foreground">
-                  <span className="inline-flex items-center justify-center gap-2 text-sm sm:text-base text-purple-100">
-                    <span className="h-2 w-2 rounded-full bg-purple-400" />
-                    <span>vs PyTorch</span>
-                  </span>
+                  RunMat vs PyTorch
                 </th>
                 <th className="px-3 sm:px-6 py-2 sm:py-3 text-center font-medium text-muted-foreground">
-                  <span className="inline-flex items-center justify-center gap-2 text-sm sm:text-base text-blue-100">
-                    <span className="h-2 w-2 rounded-full bg-blue-400" />
-                    <span>vs NumPy</span>
-                  </span>
+                  RunMat vs NumPy
                 </th>
               </tr>
             </thead>
@@ -77,10 +71,10 @@ export default function ElementwiseMathSweep() {
                   RunMat speedup range
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  4.2× – 113.6× vs PyTorch
+                  8× – 114× vs PyTorch
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  0.35× – 63.0× vs NumPy
+                  6× – 63× vs NumPy
                 </td>
               </tr>
             </tfoot>
