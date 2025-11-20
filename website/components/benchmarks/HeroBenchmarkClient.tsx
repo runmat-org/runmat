@@ -85,7 +85,7 @@ export default function HeroBenchmarkClient({ slides }: HeroBenchmarkClientProps
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
           <div className="flex flex-col space-y-6 text-left items-start">
             <Badge variant="secondary" className="rounded-lg px-1 py-1 text-base">
-              🚀 Open Source • MIT Licensed
+              🚀 Open Source • MIT Licensed • Pre-Release
             </Badge>
             <h1 className="font-heading text-left leading-tight whitespace-nowrap tracking-tight text-[clamp(2.75rem,5vw,4.75rem)] sm:text-[clamp(3.25rem,4.5vw,5.5rem)] lg:text-[clamp(3.5rem,4vw,6rem)]">
               Fastest runtime for
@@ -101,7 +101,7 @@ export default function HeroBenchmarkClient({ slides }: HeroBenchmarkClientProps
                 asChild
                 className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
               >
-                <Link href="/download">Download</Link>
+                <Link href="/download">Download Beta</Link>
               </Button>
               <Button
                 variant="outline"

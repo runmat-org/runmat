@@ -2,11 +2,11 @@
 
 import { useId, useMemo } from "react";
 import useMeasure from "react-use-measure";
-import { scaleLinear } from "@visx/scale";
+import { scaleLinear, scaleLog } from "@visx/scale";
 import { Group } from "@visx/group";
 import { LinePath, AreaClosed } from "@visx/shape";
 import { AxisBottom, AxisLeft } from "@visx/axis";
-import { GridRows, GridColumns } from "@visx/grid";
+import { GridRows } from "@visx/grid";
 import { curveLinear } from "@visx/curve";
 import { Circle } from "@visx/shape";
 import { Text } from "@visx/text";
@@ -29,18 +29,34 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
   const innerWidth = Math.max(0, width - margin.left - margin.right);
   const innerHeight = Math.max(0, height - margin.top - margin.bottom);
 
+  const isLogX = data.logX ?? false;
+  const logXMin = data.logXMin;
+
   const allPoints = useMemo(
     () => data.series.flatMap((series) => series.points),
     [data.series]
   );
+  const uniqueParams = useMemo(() => {
+    const values = Array.from(new Set(allPoints.map((pt) => pt.param)));
+    return values.sort((a, b) => a - b);
+  }, [allPoints]);
 
-  const xDomain = useMemo(() => {
+  const rawXDomain = useMemo(() => {
     if (!allPoints.length) {
       return [0, 1];
     }
     const values = allPoints.map((pt) => pt.param);
     return [Math.min(...values), Math.max(...values)];
   }, [allPoints]);
+
+  const xDomain = useMemo(() => {
+    if (!isLogX) {
+      return rawXDomain;
+    }
+    const minCandidate = logXMin ?? rawXDomain[0];
+    const safeMin = Math.max(minCandidate, 1e-6);
+    return [safeMin, rawXDomain[1]];
+  }, [isLogX, logXMin, rawXDomain]);
 
   const yDomain = useMemo(() => {
     if (!data.series.length) {
@@ -53,15 +69,22 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
     return [0, Math.max(1.1, max * 1.15)];
   }, [data.series, data.baselineImpl]);
 
-  const xScale = useMemo(
-    () =>
-      scaleLinear({
-        domain: xDomain,
+  const xScale = useMemo(() => {
+    if (isLogX) {
+      return scaleLog({
+        domain: xDomain as [number, number],
         range: [0, innerWidth],
         nice: true,
-      }),
-    [xDomain, innerWidth]
-  );
+        clamp: true,
+      });
+    }
+    return scaleLinear({
+      domain: xDomain,
+      range: [0, innerWidth],
+      nice: true,
+    });
+  }, [isLogX, xDomain, innerWidth]);
+  const xTickValues = isLogX ? uniqueParams : undefined;
   const yScale = useMemo(
     () =>
       scaleLinear({
@@ -189,7 +212,8 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               scale={xScale}
               tickStroke="rgba(255,255,255,0.2)"
               stroke="rgba(255,255,255,0.2)"
-              numTicks={5}
+                numTicks={xTickValues ? undefined : 5}
+                tickValues={xTickValues}
               tickFormat={(value) => formatNumber(Number(value))}
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.9)",
@@ -219,40 +243,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                 fontSize={14}
             >
               {data.paramLabel ?? data.paramKey}
-            </Text>
-
-            {highlightPoint && annotationText && (
-              <Group>
-                <line
-                  x1={xScale(highlightPoint.param)}
-                  y1={yScale(highlightSpeed)}
-                  x2={(xScale(highlightPoint.param) ?? 0) + 80}
-                  y2={(yScale(highlightSpeed) ?? 0) - 40}
-                  stroke="#a855f7"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 4"
-                />
-                <Circle
-                  cx={(xScale(highlightPoint.param) ?? 0) + 80}
-                  cy={(yScale(highlightSpeed) ?? 0) - 40}
-                  r={4}
-                  fill="#a855f7"
-                />
-                <foreignObject
-                  x={(xScale(highlightPoint.param) ?? 0) + 88}
-                  y={(yScale(highlightSpeed) ?? 0) - 64}
-                  width={140}
-                  height={64}
-                >
-                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white shadow-lg backdrop-blur">
-                    <p className="font-semibold">{annotationText}</p>
-                    <p className="text-[11px] text-white/70">
-                      {formatNumber(highlightPoint.rawParam)} {data.paramLabel ?? data.paramKey}
-                    </p>
-                  </div>
-                </foreignObject>
-              </Group>
-            )}
+              </Text>
           </Group>
         </svg>
       )}

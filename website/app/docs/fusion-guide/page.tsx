@@ -67,19 +67,48 @@ export default function FusionGuidePage() {
               </div>
               <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-3xl">
                 RunMat&apos;s acceleration layer recognises multiple flavours of fusible graphs and hands them to your GPU
-                provider as single kernels. Use this guide to learn what will fuse, how GPU work is shaped, and where to dig
-                deeper.
+                provider as single kernels.
               </p>
             </header>
 
-            <section id="documents" className="space-y-4 scroll-mt-28">
-              <div>
-                <h2 className="text-3xl font-bold text-foreground">Documents in This Folder</h2>
-                <p className="text-muted-foreground mt-2 max-w-2xl">
-                  Jump directly to the fusion topic that matches your workload. Each page details the instruction patterns
-                  we detect, prerequisites, and the operations that stay on device.
-                </p>
-              </div>
+
+            <section id="why-groups" className="space-y-4 scroll-mt-16">
+              <p className="text-muted-foreground">
+                RunMat fuses common patterns that show up across linear algebra, signal processing, imaging, and solver workloads into single GPU programs. Keeping them
+                fused prevents redundant memory traffic and lets us re-use provider kernels to ship quickly.
+              </p>
+              <ul className="list-disc pl-6 space-y-3 marker:text-blue-500">
+                <li className="text-muted-foreground">
+                  <strong>Elementwise &amp; reductions:</strong> Collapse dozens of scalar operations into one dispatch and
+                  prevent repeated reads/writes of the same tensor.
+                </li>
+                <li className="text-muted-foreground">
+                  <strong>Matmul epilogues:</strong> Fusing scale, bias, and activation work avoids launching a second kernel
+                  that touches the full matrix again and delivers RunMat&apos;s matmul + activation parity goals.
+                </li>
+                <li className="text-muted-foreground">
+                  <strong>Covariance / Gram / power-step / explained-variance chains:</strong> Iterative factorizations spend
+                  most of their time in repeated &quot;multiply, renormalize, measure&quot; loops. Treating each stage as a fusion kind
+                  keeps eigensolvers and Krylov methods resident on the GPU.
+                </li>
+                <li className="text-muted-foreground">
+                  <strong>Image normalisation:</strong> Imaging and sensor pipelines often start with per-frame whitening plus
+                  gain/bias adjustments. Folding statistics and affine transforms into one kernel removes several launches per
+                  frame.
+                </li>
+              </ul>
+              <p className="text-muted-foreground">
+                We prioritised these groups because they appear across domains, keep chatty host/device traffic off PCIe, and
+                benefit greatly from fusion. We&apos;ll be adding more fusion groups in the future to cover more workloads.
+              </p>
+              <p className="text-muted-foreground">
+                Have a new fusion flavour in mind? Open an issue or submit a pull request so we can explore it together.
+              </p>
+            </section>
+
+            <section id="documents" className="space-y-4 scroll-mt-16">
+              <h2 className="text-3xl font-bold text-foreground">RunMat Currently Fuses the Following Patterns</h2>
+
               <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {fusionTopics.map((topic) => (
                   <Link key={topic.href} href={topic.href} className="block h-full">
@@ -121,67 +150,6 @@ export default function FusionGuidePage() {
               </ol>
             </section>
 
-            <section id="why-groups" className="space-y-4 scroll-mt-28">
-              <h2 className="text-3xl font-bold text-foreground">Why These Fusion Groups Exist</h2>
-              <p className="text-muted-foreground">
-                These fusion kinds show up across linear algebra, signal processing, imaging, and solver workloads. Keeping them
-                fused prevents redundant memory traffic and lets us re-use provider kernels to ship quickly.
-              </p>
-              <ul className="list-disc pl-6 space-y-3 marker:text-blue-500">
-                <li className="text-muted-foreground">
-                  <strong>Elementwise &amp; reductions:</strong> Collapse dozens of scalar operations into one dispatch and
-                  prevent repeated reads/writes of the same tensor.
-                </li>
-                <li className="text-muted-foreground">
-                  <strong>Matmul epilogues:</strong> Fusing scale, bias, and activation work avoids launching a second kernel
-                  that touches the full matrix again and delivers RunMat&apos;s matmul + activation parity goals.
-                </li>
-                <li className="text-muted-foreground">
-                  <strong>Covariance / Gram / power-step / explained-variance chains:</strong> Iterative factorizations spend
-                  most of their time in repeated &quot;multiply, renormalize, measure&quot; loops. Treating each stage as a fusion kind
-                  keeps eigensolvers and Krylov methods resident on the GPU.
-                </li>
-                <li className="text-muted-foreground">
-                  <strong>Image normalisation:</strong> Imaging and sensor pipelines often start with per-frame whitening plus
-                  gain/bias adjustments. Folding statistics and affine transforms into one kernel removes several launches per
-                  frame.
-                </li>
-              </ul>
-              <p className="text-muted-foreground">
-                We prioritised these groups because they appear across domains, keep chatty host/device traffic off PCIe, and
-                re-use existing provider kernels.
-              </p>
-            </section>
-
-            <section id="next-targets" className="space-y-4 scroll-mt-28">
-              <h2 className="text-3xl font-bold text-foreground">Next Fusion &amp; Kernel Targets</h2>
-              <ol className="list-decimal pl-6 space-y-3 marker:text-blue-500">
-                <li className="text-muted-foreground">
-                  <strong>Broaden GPU kernel coverage:</strong> Add missing <code>AccelProvider</code> hooks so FFT/conv, RNG,
-                  sorting, scans, specialised signal-processing kernels, and the remaining MATLAB builtins can stay on device.
-                </li>
-                <li className="text-muted-foreground">
-                  <strong>Smarter chain planning:</strong> Feed auto-offload cost models with telemetry so fusion can safely grab
-                  marginal chains without regressing latency.
-                </li>
-                <li className="text-muted-foreground">
-                  <strong>Full end-to-end GPU paths:</strong> Close the remaining host fallbacks in the Accelerate roadmap so
-                  &quot;GPU mode&quot; truly means zero CPU detours for supported types.
-                </li>
-                <li className="text-muted-foreground">
-                  <strong>JIT parity for CPU fallbacks:</strong> Finish the CraneLift tier for constructs that still spill to the
-                  interpreter; even GPU-ready kernels need equally covered callers to avoid sync points.
-                </li>
-                <li className="text-muted-foreground">
-                  <strong>Additional domain groups:</strong> FFT→pointwise→IFFT pipelines, convolution + activation blocks,
-                  sliding-window statistics, and RNG-heavy Monte Carlo payoffs are candidates to keep entire measurement loops
-                  resident.
-                </li>
-              </ol>
-              <p className="text-muted-foreground">
-                Have a new fusion flavour in mind? Open an issue or submit a pull request so we can explore it together.
-              </p>
-            </section>
           </div>
 
           <aside className="hidden lg:block">
