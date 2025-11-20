@@ -824,7 +824,7 @@ unsafe fn platform_snprintf(
     libc::snprintf(buffer, size, fmt, value)
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, target_env = "msvc"))]
 unsafe fn platform_snprintf(
     buffer: *mut c_char,
     size: size_t,
@@ -832,6 +832,16 @@ unsafe fn platform_snprintf(
     value: f64,
 ) -> libc::c_int {
     libc::_snprintf(buffer, size, fmt, value)
+}
+
+#[cfg(all(windows, target_env = "gnu"))]
+unsafe fn platform_snprintf(
+    buffer: *mut c_char,
+    size: size_t,
+    fmt: *const c_char,
+    value: f64,
+) -> libc::c_int {
+    libc::snprintf(buffer, size, fmt, value)
 }
 
 #[cfg(test)]
