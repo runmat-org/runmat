@@ -4,10 +4,12 @@ import { useState } from "react";
 
 import FourKImagePipelineSweep from "./FourKImagePipelineSweep";
 import MonteCarloSweep from "./MonteCarloSweep";
+import ElementwiseMathSweep from "./ElementwiseMathSweep";
 
 const slides = [
   { id: "4k", component: FourKImagePipelineSweep },
   { id: "monte-carlo", component: MonteCarloSweep },
+  { id: "elementwise", component: ElementwiseMathSweep },
 ];
 
 export default function BenchmarkSweepCarousel() {

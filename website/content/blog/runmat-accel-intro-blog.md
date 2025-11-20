@@ -80,19 +80,22 @@ fprintf('Done. MSE=%.6e\n', mse);    % Only here does data return to CPU for pri
 
 We ran this exact pipeline on an **Apple M2 Max** using the Metal backend, averaged over **3 runs** per point. Each batch size `B` is `B × 2160 × 3840` single-precision pixels.
 
-| B (images) | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
-|-----------:|------------:|-------------:|-----------:|---------------:|-----------------:|
-| 4          | 204.2       | 915.0        | 522.4      | 2.56×          | 4.48×            |
-| 8          | 265.1       | 869.1        | 939.1      | 3.54×          | 3.28×            |
-| 16         | 299.2       | 990.5        | 1,821.3    | 6.09×          | 3.31×            |
-| 32         | 493.2       | 1,065.1      | 3,736.3    | 7.58×          | 2.16×            |
-| 64         | 871.1       | 1,278.8      | 7,255.1    | 8.33×          | 1.47×            |
+### 4K Image Pipeline Perf Sweep (B = image batch size)
+| B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|---|-------------|--------------|------------|----------------|------------------|
+| 4 | 217.9 | 922.9 | 548.4 | 2.52x | 4.23x |
+| 8 | 270.3 | 960.1 | 989.6 | 3.66x | 3.55x |
+| 16 | 317.4 | 1,040.7 | 1,859.1 | 5.86x | 3.28x |
+| 32 | 520.5 | 1,178.3 | 3,698.6 | 7.11x | 2.26x |
+| 64 | 893.8 | 1,379.6 | 7,434.6 | 8.32x | 1.54x |
 
 At the high end (**B = 64**, 64 4K images ≈ 133M pixels):
 
-- RunMat: **0.87 s**  
-- NumPy: **7.26 s** → about **8.3× slower**  
-- PyTorch: **1.28 s** → about **1.5× slower**
+- RunMat: **0.89 s**  
+- NumPy: **7.43 s** → about **8.3× slower**  
+- PyTorch: **1.38 s** → about **1.5× slower**
+
+
 
 ![RunMat 4K image pipeline benchmark](https://web.runmatstatic.com/runmat-4k-image-performance.png)
 
