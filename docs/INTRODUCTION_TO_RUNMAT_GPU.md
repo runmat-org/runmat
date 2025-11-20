@@ -1,4 +1,4 @@
-# Introduction to RunMat on the GPU
+# Introduction to RunMat Fusion
 
 This guide explains how RunMat turns ordinary MATLAB-syntax scripts into GPU-accelerated workloads without asking you to write kernels, pick drivers, or think in CUDA. It is written for engineers who already understand vectors, matrices, and throughput bottlenecks, but may not live in Rust or GPU SDKs.
 

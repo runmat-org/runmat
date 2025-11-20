@@ -1,4 +1,4 @@
-# Deep Dive: RunMat Accelerate Architecture
+# RunMat Accelerate Architecture
 
 This document explains how RunMat routes high-level MATLAB-compatible builtins onto GPU hardware through the **RunMat Accelerate** subsystem. The focus is on the provider abstraction, auto-offload planner, and how new-style runtime builtins cooperate with the acceleration layer.
 

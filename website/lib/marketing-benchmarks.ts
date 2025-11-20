@@ -42,6 +42,10 @@ type BenchmarkCase = {
     param: string;
     values?: Array<number | string>;
   };
+  plot?: {
+    log_x?: boolean;
+    log_x_min?: number;
+  };
   results: BenchmarkResult[];
 };
 
@@ -58,6 +62,7 @@ export interface BenchmarkShowcaseConfig {
   deviceLabel?: string;
   link?: string;
   chart: BenchmarkBarChartConfig | BenchmarkLineChartConfig;
+  headlineOverride?: string;
   stat?: {
     referenceImpl?: string;
     compareImpl: string;
@@ -81,6 +86,8 @@ export interface BenchmarkBarChartConfig extends BaseChartConfig {
 
 export interface BenchmarkLineChartConfig extends BaseChartConfig {
   type: "line";
+  logX?: boolean;
+  logXMin?: number;
 }
 
 export type BenchmarkChartData = BenchmarkBarChartData | BenchmarkLineChartData;
@@ -109,6 +116,8 @@ export interface BenchmarkLineChartData {
   paramKey: string;
   paramLabel?: string;
   series: BenchmarkLineSeries[];
+  logX?: boolean;
+  logXMin?: number;
 }
 
 interface BenchmarkLineSeries {
@@ -144,6 +153,7 @@ export interface BenchmarkShowcaseSlide {
   chart: BenchmarkChartData;
   stat?: BenchmarkSlideStat;
   headlineRange?: string;
+  headlineText?: string;
 }
 
 const readSuite = cache(async (): Promise<RawBenchmarkSuite> => {
@@ -171,6 +181,11 @@ function buildSlide(config: BenchmarkShowcaseConfig, suite: RawBenchmarkSuite): 
       ? buildBarChart(targetCase, config.chart)
       : buildLineChart(targetCase, config.chart);
 
+  const headlineRange = computeHeadlineRange(chart);
+  const headlineText =
+    config.headlineOverride ??
+    (headlineRange ? `RunMat is ${headlineRange} faster than NumPy` : undefined);
+
   return {
     caseId: targetCase.id,
     label: targetCase.label,
@@ -183,7 +198,8 @@ function buildSlide(config: BenchmarkShowcaseConfig, suite: RawBenchmarkSuite): 
     link: config.link,
     chart,
     stat: config.stat ? deriveStat(chart, config.stat, config.chart.labelOverrides) : undefined,
-    headlineRange: computeHeadlineRange(chart),
+    headlineRange,
+    headlineText,
   };
 }
 
@@ -251,6 +267,8 @@ function buildLineChart(caseData: BenchmarkCase, chartConfig: BenchmarkLineChart
   const includeImpls = chartConfig.includeImpls ?? collectImpls(caseData.results);
   const baselineImpl = chartConfig.baselineImpl ?? "python-numpy";
   const highlightImpl = chartConfig.highlightImpl ?? "runmat";
+  const logX = chartConfig.logX ?? caseData.plot?.log_x ?? false;
+  const logXMin = chartConfig.logXMin ?? caseData.plot?.log_x_min;
 
   const grouped = new Map<string, BenchmarkLinePoint[]>();
 
@@ -271,6 +289,9 @@ function buildLineChart(caseData: BenchmarkCase, chartConfig: BenchmarkLineChart
     const rawParam = rawValue;
     const paramValue = typeof rawParam === "number" ? rawParam : Number(rawParam);
     if (Number.isNaN(paramValue)) {
+      return;
+    }
+    if (logX && paramValue <= 0) {
       return;
     }
     const points = grouped.get(result.impl) ?? [];
@@ -321,6 +342,8 @@ function buildLineChart(caseData: BenchmarkCase, chartConfig: BenchmarkLineChart
     paramKey,
     paramLabel: chartConfig.paramLabel ?? paramKey,
     series,
+    logX,
+    logXMin,
   };
 }
 
@@ -462,7 +485,7 @@ function computeHeadlineRange(chart: BenchmarkChartData): string | undefined {
     if (!target || !(target.speedup > 0)) {
       return undefined;
     }
-    return `${format(target.speedup)}×`;
+    return `${format(target.speedup)}x`;
   }
 
   let minSpeedup = Number.POSITIVE_INFINITY;
@@ -485,9 +508,9 @@ function computeHeadlineRange(chart: BenchmarkChartData): string | undefined {
   }
 
   if (Math.abs(maxSpeedup - minSpeedup) < 0.1) {
-    return `${format(maxSpeedup)}×`;
+    return `${format(maxSpeedup)}x`;
   }
-  return `${format(minSpeedup)}×–${format(maxSpeedup)}×`;
+  return `${format(minSpeedup)}x-${format(maxSpeedup)}x`;
 }
 
 

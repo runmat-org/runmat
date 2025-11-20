@@ -41,7 +41,7 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
     nice: true,
   });
 
-  const axisLabel = "× faster than Python NumPy";
+  const axisLabel = "x faster than NumPy";
 
   return (
     <div ref={ref} className="w-full">

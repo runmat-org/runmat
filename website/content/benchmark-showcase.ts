@@ -51,14 +51,14 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
     },
   },
   {
-    caseId: "monte-carlo-analysis",
+    caseId: "elementwise-math",
     heroLabel: "Elementwise Matrix Math",
     description: "Elementwise Matrix Math",
     deviceLabel: "Apple M2 Max",
-    link: "/benchmarks/general-math",
+    link: "/benchmarks/elementwise-math",
     chart: {
       type: "line",
-      paramLabel: "Operations (M)",
+      paramLabel: "Points",
       includeImpls: ["python-numpy", "python-torch", "runmat"],
       highlightImpl: "runmat",
       baselineImpl: "python-numpy",
@@ -68,6 +68,7 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
         runmat: "RunMat (GPU)",
       },
     },
+    headlineOverride: "RunMat is 10-100x faster than NumPy and PyTorch at scale",
     stat: {
       compareImpl: "python-numpy",
       referenceImpl: "runmat",

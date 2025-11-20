@@ -7,8 +7,8 @@ import "prismjs/components/prism-matlab";
 import { useEffect, useState } from "react";
 
 const sampleCode = `
-x = 0:0.001:4*pi;           % colon-style range (MATLAB syntax)
-y = sin(x) .* exp(-x/10);   % straight-forward math
+x = 0:0.001:4*pi;           % 0 to 4π in steps of 0.001
+y = sin(x) .* exp(-x/10);   % regular MATLAB language math
 `.trim();
 
 interface MatlabCodeCardProps {

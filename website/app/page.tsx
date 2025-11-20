@@ -122,10 +122,7 @@ export default function HomePage() {
               </div>
           </div>
            
-           
-           
-            
-            <p className="text-center text-muted-foreground mt-8 mb-0">Want more detail?</p>
+
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center">
               <Link 
                 href="/docs/accelerate/how-it-works" 
