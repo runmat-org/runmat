@@ -382,6 +382,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::approx_constant,
+        reason = "Test ensures literal 3.14 text stays 3.14, not π"
+    )]
     fn str2double_cell_array_of_text() {
         let cell = CellArray::new(
             vec![
