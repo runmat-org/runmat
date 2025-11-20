@@ -382,7 +382,7 @@ fn parse_mode_flag(value: &Value) -> Result<Option<HermitianMode>, String> {
 }
 
 fn parse_single_tolerance(arg: &Value) -> Result<f64, String> {
-    match parse_tolerance_arg("ishermitian", &[arg.clone()])? {
+    match parse_tolerance_arg("ishermitian", std::slice::from_ref(arg))? {
         Some(value) => Ok(value),
         None => Err("ishermitian: tolerance must be a real scalar".to_string()),
     }
@@ -399,10 +399,8 @@ fn is_hermitian_real(tensor: &Tensor, mode: HermitianMode, tol: f64) -> bool {
         if diag.is_nan() {
             return false;
         }
-        if matches!(mode, HermitianMode::Skew) {
-            if !real_within(diag, 0.0, tol) {
-                return false;
-            }
+        if matches!(mode, HermitianMode::Skew) && !real_within(diag, 0.0, tol) {
+            return false;
         }
         for row in 0..col {
             let a = data[row + col * rows];

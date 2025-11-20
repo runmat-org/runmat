@@ -500,10 +500,7 @@ fn char_array_rows_as_strings(ca: &runmat_builtins::CharArray) -> Vec<String> {
             let idx = r * ca.cols + c;
             row.push(ca.data[idx]);
         }
-        rows.push(
-            row.trim_end_matches(|ch| ch == ' ' || ch == '\0')
-                .to_string(),
-        );
+        rows.push(row.trim_end_matches([' ', '\0']).to_string());
     }
     rows
 }

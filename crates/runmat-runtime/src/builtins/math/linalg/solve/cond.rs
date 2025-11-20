@@ -235,10 +235,8 @@ fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> Result<Value, String> {
     let maybe_provider = runmat_accelerate_api::provider();
 
     if let Some(provider) = maybe_provider {
-        if let Ok(uploaded) = cond_gpu_via_provider(provider, &handle, norm) {
-            if let Some(value) = uploaded {
-                return Ok(value);
-            }
+        if let Ok(Some(value)) = cond_gpu_via_provider(provider, &handle, norm) {
+            return Ok(value);
         }
     }
 

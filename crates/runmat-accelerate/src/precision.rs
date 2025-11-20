@@ -55,23 +55,21 @@ pub fn ensure_provider_supports_dtype(
 ) -> Result<(), String> {
     if provider_supports_dtype(provider, dtype) {
         Ok(())
+    } else if downcast_permitted_for(dtype) {
+        DOWNCAST_WARNING.get_or_init(|| {
+            log::warn!(
+                "RUNMAT_ALLOW_PRECISION_DOWNCAST enabled: implicitly converting double inputs to the provider's native precision"
+            );
+        });
+        Ok(())
     } else {
-        if downcast_permitted_for(dtype) {
-            DOWNCAST_WARNING.get_or_init(|| {
-                log::warn!(
-                    "RUNMAT_ALLOW_PRECISION_DOWNCAST enabled: implicitly converting double inputs to the provider's native precision"
-                );
-            });
-            Ok(())
-        } else {
-            Err(match dtype {
-                NumericDType::F64 => {
-                    "active provider does not advertise f64 kernels; refusing implicit downcast"
-                        .to_string()
-                }
-                NumericDType::F32 => "active provider does not support f32 kernels".to_string(),
-            })
-        }
+        Err(match dtype {
+            NumericDType::F64 => {
+                "active provider does not advertise f64 kernels; refusing implicit downcast"
+                    .to_string()
+            }
+            NumericDType::F32 => "active provider does not support f32 kernels".to_string(),
+        })
     }
 }
 

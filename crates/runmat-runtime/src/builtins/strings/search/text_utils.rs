@@ -112,7 +112,7 @@ impl TextCollection {
         for col in 0..cols {
             for row in 0..rows {
                 let idx = row * cols + col;
-                let value = &*data[idx];
+                let value = &data[idx];
                 let element = cell_value_to_text(fn_name, value)?;
                 elements.push(element);
             }
@@ -151,7 +151,7 @@ pub(crate) fn parse_ignore_case(fn_name: &str, rest: &[Value]) -> Result<bool, S
         return parse_logical_value(fn_name, &rest[0]);
     }
 
-    if rest.len() % 2 != 0 {
+    if !rest.len().is_multiple_of(2) {
         return Err(format!(
             "{}: expected name-value pairs after the pattern argument (e.g., 'IgnoreCase', true)",
             fn_name

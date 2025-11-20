@@ -210,7 +210,7 @@ pub struct FopenEval {
 enum FopenEvalKind {
     Open(OpenOutputs),
     Query(QueryOutputs),
-    List(ListOutputs),
+    List(Box<ListOutputs>),
 }
 
 #[derive(Clone)]
@@ -252,7 +252,7 @@ impl FopenEval {
 
     fn list(outputs: ListOutputs) -> Self {
         Self {
-            kind: FopenEvalKind::List(outputs),
+            kind: FopenEvalKind::List(Box::new(outputs)),
         }
     }
 
@@ -551,9 +551,10 @@ fn handle_open(path_value: &Value, rest: &[Value]) -> Result<FopenEval, String> 
     }
 
     let path = value_to_path(path_value)?;
-    let permission = Permission::parse(rest.get(0))?;
-    let machinefmt = parse_machinefmt(rest.get(1))?;
-    let encoding = parse_encoding(rest.get(2), &permission)?;
+    let mut args = rest.iter();
+    let permission = Permission::parse(args.next())?;
+    let machinefmt = parse_machinefmt(args.next())?;
+    let encoding = parse_encoding(args.next(), &permission)?;
 
     let mut options = OpenOptions::new();
     options.read(permission.read);
@@ -597,7 +598,7 @@ fn handle_all(rest: &[Value]) -> Result<FopenEval, String> {
     if rest.len() > 1 {
         return Err("fopen: too many input arguments".to_string());
     }
-    let machinefmt_filter = if let Some(value) = rest.get(0) {
+    let machinefmt_filter = if let Some(value) = rest.first() {
         Some(parse_machinefmt(Some(value))?)
     } else {
         None
@@ -689,12 +690,10 @@ fn parse_machinefmt(value: Option<&Value>) -> Result<String, String> {
             if matches!(collapsed.as_str(), "vaxd" | "vaxg" | "cray") {
                 return Ok(collapsed);
             }
-            if lower.starts_with("ieee-le") {
-                let suffix = &lower["ieee-le".len()..];
+            if let Some(suffix) = lower.strip_prefix("ieee-le") {
                 return Ok(format!("ieee-le{suffix}"));
             }
-            if lower.starts_with("ieee-be") {
-                let suffix = &lower["ieee-be".len()..];
+            if let Some(suffix) = lower.strip_prefix("ieee-be") {
                 return Ok(format!("ieee-be{suffix}"));
             }
             Err(format!("fopen: unsupported machine format '{trimmed}'"))

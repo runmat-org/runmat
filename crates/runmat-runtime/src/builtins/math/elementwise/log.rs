@@ -211,7 +211,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             Ok(format!("log({input})"))
         },
     }),
@@ -301,9 +304,7 @@ fn log_tensor_real(tensor: Tensor) -> Result<Value, String> {
         if real_part.is_finite() && real_part.abs() < IMAG_EPS {
             real_part = 0.0;
         }
-        if !imag_part.is_finite() {
-            imag_part = 0.0;
-        } else if imag_part.abs() < IMAG_EPS {
+        if !imag_part.is_finite() || imag_part.abs() < IMAG_EPS {
             imag_part = 0.0;
         }
         if imag_part != 0.0 {

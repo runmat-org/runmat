@@ -308,7 +308,7 @@ fn getenv_from_string_array(array: StringArray) -> Result<Value, String> {
 fn getenv_from_cell_array(array: runmat_builtins::CellArray) -> Result<Value, String> {
     let mut values: Vec<Value> = Vec::with_capacity(array.data.len());
     for cell in &array.data {
-        let gathered = gather_if_needed(&**cell).map_err(|err| format!("getenv: {err}"))?;
+        let gathered = gather_if_needed(cell).map_err(|err| format!("getenv: {err}"))?;
         let resolved = match gathered {
             Value::CharArray(ca) => {
                 if ca.rows != 1 {
@@ -572,7 +572,8 @@ mod tests {
     #[test]
     fn getenv_invalid_input_errors() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let err = getenv_builtin(vec![Value::Num(3.14)]).expect_err("expected error");
+        let err =
+            getenv_builtin(vec![Value::Num(std::f64::consts::PI)]).expect_err("expected error");
         assert!(
             err.contains("NAME must be"),
             "unexpected error message: {err}"

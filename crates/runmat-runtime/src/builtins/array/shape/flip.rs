@@ -507,7 +507,7 @@ pub(crate) fn flip_gpu(handle: GpuTensorHandle, dims: &[usize]) -> Result<Value,
     if dims.is_empty() {
         return Ok(Value::GpuTensor(handle));
     }
-    if dims.iter().any(|&dim| dim == 0) {
+    if dims.contains(&0) {
         return Err("flip: dimension indices must be >= 1".to_string());
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
@@ -532,7 +532,7 @@ pub(crate) fn flip_gpu(handle: GpuTensorHandle, dims: &[usize]) -> Result<Value,
 }
 
 fn flip_generic<T: Clone>(data: &[T], shape: &[usize], dims: &[usize]) -> Result<Vec<T>, String> {
-    if dims.iter().any(|&dim| dim == 0) {
+    if dims.contains(&0) {
         return Err("flip: dimension indices must be >= 1".to_string());
     }
     if data.is_empty() {
@@ -541,7 +541,7 @@ fn flip_generic<T: Clone>(data: &[T], shape: &[usize], dims: &[usize]) -> Result
     let max_dim = dims.iter().copied().max().unwrap_or(0);
     let mut ext_shape = shape.to_vec();
     if max_dim > ext_shape.len() {
-        ext_shape.extend(std::iter::repeat(1).take(max_dim - ext_shape.len()));
+        ext_shape.extend(std::iter::repeat_n(1, max_dim - ext_shape.len()));
     }
     let total: usize = ext_shape.iter().product();
     if total != data.len() {

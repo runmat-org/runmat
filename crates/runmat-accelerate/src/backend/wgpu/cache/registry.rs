@@ -5,6 +5,12 @@ pub struct PipelineRegistry {
     inner: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
 }
 
+impl Default for PipelineRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PipelineRegistry {
     pub fn new() -> Self {
         Self {

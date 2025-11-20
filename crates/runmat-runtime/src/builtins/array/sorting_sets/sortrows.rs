@@ -908,7 +908,7 @@ fn parse_single_column_i64(value: i64, num_cols: usize) -> Result<ColumnSpec, St
     if value == 0 {
         return Err("sortrows: column indices must be non-zero".to_string());
     }
-    let abs = value.abs() as usize;
+    let abs = value.unsigned_abs() as usize;
     if abs == 0 {
         return Err("sortrows: column indices must be >= 1".to_string());
     }

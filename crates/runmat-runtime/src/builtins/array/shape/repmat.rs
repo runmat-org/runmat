@@ -563,7 +563,10 @@ fn compute_2d_reps(reps: &[usize]) -> Result<(usize, usize), String> {
                     .to_string(),
             );
         }
-        Ok((*reps.get(0).unwrap_or(&1), *reps.get(1).unwrap_or(&1)))
+        Ok((
+            reps.first().copied().unwrap_or(1),
+            reps.get(1).copied().unwrap_or(1),
+        ))
     }
 }
 

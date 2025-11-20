@@ -41,10 +41,10 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
     let rows = n;
     let cols = 1usize;
     let mut data = vec![0.0f64; n];
-    for i in 0..n {
-        data[i] = (i as f64 + 1.0) * 0.01;
+    for (i, value) in data.iter_mut().enumerate().take(n) {
+        *value = (i as f64 + 1.0) * 0.01;
     }
-    let e = upload(&provider, rows, cols, &data);
+    let e = upload(provider, rows, cols, &data);
 
     // Graph: sq = e .* e; mse = mean(sq, 'all')
     let v_e: ValueId = 0;

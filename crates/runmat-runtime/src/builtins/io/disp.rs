@@ -316,12 +316,12 @@ fn format_numeric_tensor(tensor: &Tensor) -> Vec<String> {
         if shape.len() == 2 && shape[0] == 0 && shape[1] == 0 {
             return vec!["[]".to_string()];
         }
-        if shape.iter().any(|&d| d == 0) {
+        if shape.contains(&0) {
             return vec![format!("Empty matrix: {}", dims_to_by_string(&shape))];
         }
         return vec!["[]".to_string()];
     }
-    if shape.iter().any(|&d| d == 0) {
+    if shape.contains(&0) {
         if shape.len() == 2 && shape[0] == 0 && shape[1] == 0 {
             return vec!["[]".to_string()];
         }
@@ -399,7 +399,7 @@ fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
     if tensor.data.is_empty() {
         return vec!["[]".to_string()];
     }
-    if shape.iter().any(|&d| d == 0) {
+    if shape.contains(&0) {
         if shape.len() == 2 && shape[0] == 0 && shape[1] == 0 {
             return vec!["[]".to_string()];
         }
@@ -656,7 +656,7 @@ fn summarize_for_cell(value: &Value) -> String {
             } else if array.rows == 1 {
                 format!("'{}'", char_row_to_string(array, 0).replace('\'', "''"))
             } else {
-                format!("[{} char]", dims_to_string(&vec![array.rows, array.cols]))
+                format!("[{} char]", dims_to_string(&[array.rows, array.cols]))
             }
         }
         Value::StringArray(array) => {
@@ -695,32 +695,31 @@ where
     let mut grid = vec![vec![String::new(); cols]; rows];
     let mut widths = vec![0usize; cols];
 
-    for c in 0..cols {
-        for r in 0..rows {
+    for (c, column_width) in widths.iter_mut().enumerate().take(cols) {
+        for (r, row) in grid.iter_mut().enumerate().take(rows) {
             let cell = value_at(r, c);
             let width = cell.chars().count();
-            if width > widths[c] {
-                widths[c] = width;
+            if width > *column_width {
+                *column_width = width;
             }
-            grid[r][c] = cell;
+            row[c] = cell;
         }
-        if widths[c] < min_width {
-            widths[c] = min_width;
+        if *column_width < min_width {
+            *column_width = min_width;
         }
     }
 
     let mut lines = Vec::with_capacity(rows);
-    for r in 0..rows {
+    for row in grid.iter().take(rows) {
         let mut line = String::new();
         if indent > 0 {
-            line.extend(std::iter::repeat(' ').take(indent));
+            line.extend(std::iter::repeat_n(' ', indent));
         }
-        for c in 0..cols {
+        for (c, cell) in row.iter().enumerate().take(cols) {
             if c > 0 {
                 line.push_str("  ");
             }
-            let cell = &grid[r][c];
-            let width = widths[c];
+            let width = widths.get(c).copied().unwrap_or(min_width);
             match align {
                 Align::Left => line.push_str(&format!("{:<width$}", cell, width = width)),
                 Align::Right => line.push_str(&format!("{:>width$}", cell, width = width)),

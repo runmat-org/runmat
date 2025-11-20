@@ -4,6 +4,7 @@ use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 use runmat_accelerate_api::{HostTensorView, ImageNormalizeDescriptor};
 
 #[cfg(feature = "wgpu")]
+#[allow(clippy::too_many_arguments)]
 fn cpu_image_normalize(
     data: &[f64],
     batch: usize,

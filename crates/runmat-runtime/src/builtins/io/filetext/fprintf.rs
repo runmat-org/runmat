@@ -271,18 +271,15 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
     // Locate the first valid formatSpec anywhere in the list
     let mut fmt_idx: Option<usize> = None;
     let mut format_string_val: Option<String> = None;
-    for i in 0..all.len() {
+    for (i, value) in all.iter().enumerate() {
         // Never interpret a stream label ('stdout'/'stderr') as the format string
-        if match_stream_label(&all[i]).is_some() {
+        if match_stream_label(value).is_some() {
             continue;
         }
-        match coerce_to_format_string(&all[i])? {
-            Some(Value::String(s)) => {
-                fmt_idx = Some(i);
-                format_string_val = Some(s);
-                break;
-            }
-            _ => {}
+        if let Some(Value::String(s)) = coerce_to_format_string(value)? {
+            fmt_idx = Some(i);
+            format_string_val = Some(s);
+            break;
         }
     }
     let fmt_idx = fmt_idx.ok_or_else(|| MISSING_FORMAT_MESSAGE.to_string())?;
@@ -293,8 +290,8 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
     let mut target: OutputTarget = OutputTarget::Stdout;
     // Prefer explicit stream labels over numeric fids if both appear
     let mut first_stream: Option<(usize, SpecialStream)> = None;
-    for i in 0..fmt_idx {
-        if let Some(stream) = match_stream_label(&all[i]) {
+    for (i, value) in all.iter().enumerate().take(fmt_idx) {
+        if let Some(stream) = match_stream_label(value) {
             first_stream = Some((i, stream));
             break;
         }
@@ -307,9 +304,9 @@ pub fn evaluate(args: &[Value]) -> Result<FprintfEval, String> {
         };
     } else {
         // Try to parse a numeric fid that appears before the format
-        for i in 0..fmt_idx {
-            if matches!(all[i], Value::Num(_) | Value::Int(_) | Value::Tensor(_)) {
-                if let Ok(fid) = parse_fid(&all[i]) {
+        for (i, value) in all.iter().enumerate().take(fmt_idx) {
+            if matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_)) {
+                if let Ok(fid) = parse_fid(value) {
                     target_idx = Some(i);
                     target = target_from_fid(fid)?;
                     break;
@@ -510,10 +507,10 @@ fn resolve_target<'a>(
     }
 }
 
-fn resolve_fid_target<'a>(
+fn resolve_fid_target(
     fid: i32,
-    rest: &'a [Value],
-) -> Result<(OutputTarget, &'a Value, &'a [Value]), String> {
+    rest: &[Value],
+) -> Result<(OutputTarget, &Value, &[Value]), String> {
     if rest.is_empty() {
         return Err(MISSING_FORMAT_MESSAGE.to_string());
     }
@@ -615,8 +612,7 @@ fn format_with_repetition(format: &str, args: &[Value]) -> Result<String, String
     let mut cursor = ArgCursor::new(args);
     let mut out = String::new();
     loop {
-        let step = format_variadic_with_cursor(format, &mut cursor)
-            .map_err(|err| remap_format_error(err))?;
+        let step = format_variadic_with_cursor(format, &mut cursor).map_err(remap_format_error)?;
         out.push_str(&step.output);
         if step.consumed == 0 {
             if cursor.remaining() > 0 {
@@ -660,8 +656,6 @@ fn encode_output(text: &str, encoding: Option<&str>) -> Result<Vec<u8>, String> 
         "latin1" | "latin-1" | "latin_1" | "iso-8859-1" | "iso8859-1" | "iso88591"
     ) {
         encode_latin1(text, label)
-    } else if matches!(lower.as_str(), "raw" | "bytes" | "byte" | "binary") {
-        Ok(text.as_bytes().to_vec())
     } else {
         Ok(text.as_bytes().to_vec())
     }

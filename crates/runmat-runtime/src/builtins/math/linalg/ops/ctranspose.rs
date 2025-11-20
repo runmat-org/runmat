@@ -310,7 +310,7 @@ fn ctranspose_logical_array(la: LogicalArray) -> Result<LogicalArray, String> {
         return Ok(la);
     }
     if rank <= 2 {
-        let rows = la.shape.get(0).copied().unwrap_or(1);
+        let rows = la.shape.first().copied().unwrap_or(1);
         let cols = if rank >= 2 {
             la.shape.get(1).copied().unwrap_or(1)
         } else {
@@ -682,8 +682,8 @@ mod tests {
     #[test]
     fn ctranspose_scalar_types_identity() {
         assert_eq!(
-            ctranspose_builtin(Value::Num(3.14)).unwrap(),
-            Value::Num(3.14)
+            ctranspose_builtin(Value::Num(std::f64::consts::PI)).unwrap(),
+            Value::Num(std::f64::consts::PI)
         );
         assert_eq!(
             ctranspose_builtin(Value::Int(IntValue::I32(5))).unwrap(),

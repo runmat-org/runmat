@@ -574,8 +574,8 @@ fn hex_digit(nibble: u8) -> char {
 }
 
 fn encode_json_payload(value: &Value) -> Result<Vec<u8>, String> {
-    let encoded =
-        call_builtin("jsonencode", &[value.clone()]).map_err(|e| format!("webwrite: {e}"))?;
+    let encoded = call_builtin("jsonencode", std::slice::from_ref(value))
+        .map_err(|e| format!("webwrite: {e}"))?;
     let text = expect_string_scalar(
         &encoded,
         "webwrite: jsonencode returned unexpected value; expected text scalar",
@@ -927,8 +927,6 @@ fn infer_request_format(media_type: &str) -> RequestFormat {
         RequestFormat::Text
     } else if lower == "application/x-www-form-urlencoded" {
         RequestFormat::Form
-    } else if lower == "application/octet-stream" || lower.starts_with("application/") {
-        RequestFormat::Binary
     } else {
         RequestFormat::Binary
     }

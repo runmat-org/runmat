@@ -240,9 +240,9 @@ fn path_to_char_array(path: &Path) -> Value {
 
 fn ends_with_separator(text: &str) -> bool {
     let sep = std::path::MAIN_SEPARATOR;
-    text.chars().rev().next().map_or(false, |ch| {
-        ch == sep || (cfg!(windows) && (ch == '/' || ch == '\\'))
-    })
+    text.chars()
+        .next_back()
+        .is_some_and(|ch| ch == sep || (cfg!(windows) && (ch == '/' || ch == '\\')))
 }
 
 #[cfg(test)]

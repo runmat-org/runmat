@@ -434,7 +434,7 @@ impl DiagOptions {
                     "diag: size specification must contain at most two elements".to_string()
                 );
             }
-            let rows = *dims.get(0).unwrap_or(&0);
+            let rows = dims.first().copied().unwrap_or(0);
             let cols = if dims.len() == 1 { rows } else { dims[1] };
             Some(MatrixDims { rows, cols })
         };
@@ -705,7 +705,7 @@ fn diag_complex_value(ct: ComplexTensor, options: &DiagOptions) -> Result<Value,
 fn diag_logical_value(logical: LogicalArray, options: &DiagOptions) -> Result<Value, String> {
     let LogicalArray { data, shape } = logical;
     ensure_matrix_shape("diag", &shape)?;
-    let rows = shape.get(0).copied().unwrap_or(0);
+    let rows = shape.first().copied().unwrap_or(0);
     let cols = shape
         .get(1)
         .copied()

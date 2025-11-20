@@ -208,7 +208,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             let one = match ctx.scalar_ty {
                 ScalarType::F32 => "1.0".to_string(),
                 ScalarType::F64 => "f64(1.0)".to_string(),
@@ -419,7 +422,7 @@ mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 2]);
-                let expected = vec![
+                let expected = [
                     (0.0, 0.0),
                     ((0.5f64).ln(), 0.0),
                     (0.0, PI),
@@ -527,7 +530,7 @@ mod tests {
             match result {
                 Value::ComplexTensor(ct) => {
                     assert_eq!(ct.shape, vec![2, 1]);
-                    let expected = vec![(0.0, PI), ((2.0f64).ln(), PI)];
+                    let expected = [(0.0, PI), ((2.0f64).ln(), PI)];
                     for ((re, im), (er, ei)) in ct.data.iter().zip(expected.iter()) {
                         assert!((re - er).abs() < 1e-12);
                         assert!((im - ei).abs() < 1e-12);

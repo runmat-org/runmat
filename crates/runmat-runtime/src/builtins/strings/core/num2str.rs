@@ -424,10 +424,7 @@ fn detect_decimal_separator(local: bool) -> char {
         "is", "it", "lt", "lv", "nb", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sr", "sv", "tr",
         "uk", "vi",
     ];
-    let locale_prefix = locale
-        .split(|c| matches!(c, '.' | '_' | '@'))
-        .next()
-        .unwrap_or(&locale);
+    let locale_prefix = locale.split(['.', '_', '@']).next().unwrap_or(&locale);
     for prefix in &comma_locales {
         if locale_prefix.starts_with(prefix) {
             return ',';
@@ -627,15 +624,18 @@ fn format_real_matrix(
     ];
     let mut col_widths = vec![0usize; cols];
 
-    for col in 0..cols {
-        for row in 0..rows {
+    for (col, width) in col_widths.iter_mut().enumerate() {
+        for (row, row_entries) in entries.iter_mut().enumerate() {
             let idx = row + col * rows;
             let value = data.get(idx).copied().unwrap_or(0.0);
             let text = format_real(value, &options.spec, options.decimal);
-            let width = text.chars().count();
-            entries[row][col] = CellEntry { text, width };
-            if width > col_widths[col] {
-                col_widths[col] = width;
+            let entry_width = text.chars().count();
+            row_entries[col] = CellEntry {
+                text,
+                width: entry_width,
+            };
+            if entry_width > *width {
+                *width = entry_width;
             }
         }
     }
@@ -677,15 +677,18 @@ fn format_complex_matrix(
     ];
     let mut col_widths = vec![0usize; cols];
 
-    for col in 0..cols {
-        for row in 0..rows {
+    for (col, width) in col_widths.iter_mut().enumerate() {
+        for (row, row_entries) in entries.iter_mut().enumerate() {
             let idx = row + col * rows;
             let (re, im) = data.get(idx).copied().unwrap_or((0.0, 0.0));
             let text = format_complex(re, im, &options.spec, options.decimal);
-            let width = text.chars().count();
-            entries[row][col] = CellEntry { text, width };
-            if width > col_widths[col] {
-                col_widths[col] = width;
+            let entry_width = text.chars().count();
+            row_entries[col] = CellEntry {
+                text,
+                width: entry_width,
+            };
+            if entry_width > *width {
+                *width = entry_width;
             }
         }
     }
@@ -703,28 +706,24 @@ fn format_complex_matrix(
 }
 
 fn assemble_rows(entries: Vec<Vec<CellEntry>>, col_widths: Vec<usize>) -> Vec<String> {
-    let rows = entries.len();
-    let cols = if rows == 0 { 0 } else { entries[0].len() };
-    let mut rows_out = Vec::with_capacity(rows);
-
-    for row in 0..rows {
-        let mut row_str = String::new();
-        for col in 0..cols {
-            if col > 0 {
-                row_str.push(' ');
-            }
-            let entry = &entries[row][col];
-            let target = col_widths[col];
-            let pad = target.saturating_sub(entry.width);
-            for _ in 0..pad {
-                row_str.push(' ');
-            }
-            row_str.push_str(&entry.text);
-        }
-        rows_out.push(row_str);
-    }
-
-    rows_out
+    entries
+        .into_iter()
+        .map(|row_entries| {
+            row_entries
+                .into_iter()
+                .enumerate()
+                .fold(String::new(), |mut acc, (col, entry)| {
+                    if col > 0 {
+                        acc.push(' ');
+                    }
+                    let target = col_widths[col];
+                    let pad = target.saturating_sub(entry.width);
+                    acc.extend(std::iter::repeat_n(' ', pad));
+                    acc.push_str(&entry.text);
+                    acc
+                })
+        })
+        .collect()
 }
 
 fn rows_to_char_array(rows: Vec<String>) -> Result<CharArray, String> {
@@ -742,7 +741,7 @@ fn rows_to_char_array(rows: Vec<String>) -> Result<CharArray, String> {
     for row in rows {
         let mut chars: Vec<char> = row.chars().collect();
         if chars.len() < col_count {
-            chars.extend(std::iter::repeat(' ').take(col_count - chars.len()));
+            chars.extend(std::iter::repeat_n(' ', col_count - chars.len()));
         }
         data.extend(chars);
     }
@@ -842,7 +841,7 @@ fn trim_trailing_zeros(text: &mut String) {
         while end > dot_pos + 1 && text.as_bytes()[end - 1] == b'0' {
             end -= 1;
         }
-        if end > dot_pos && text.as_bytes()[end - 1] == b'.' as u8 {
+        if end > dot_pos && text.as_bytes()[end - 1] == b'.' {
             end -= 1;
         }
         text.truncate(end);
@@ -850,10 +849,8 @@ fn trim_trailing_zeros(text: &mut String) {
 }
 
 fn normalize_negative_zero(text: &mut String) {
-    if text.starts_with('-') {
-        if text.chars().skip(1).all(|ch| ch == '0') {
-            *text = "0".to_string();
-        }
+    if text.starts_with('-') && text.chars().skip(1).all(|ch| ch == '0') {
+        *text = "0".to_string();
     }
 }
 
@@ -935,7 +932,7 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
 
     if fmt.left_align {
         let mut result = text.clone();
-        result.extend(std::iter::repeat(' ').take(pad_count));
+        result.extend(std::iter::repeat_n(' ', pad_count));
         return result;
     }
 
@@ -945,13 +942,13 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
         let remainder: String = chars.collect();
         let mut result = String::with_capacity(width);
         result.push(sign);
-        result.extend(std::iter::repeat('0').take(pad_count));
+        result.extend(std::iter::repeat_n('0', pad_count));
         result.push_str(&remainder);
         return result;
     }
 
     let mut result = String::with_capacity(width);
-    result.extend(std::iter::repeat(' ').take(pad_count));
+    result.extend(std::iter::repeat_n(' ', pad_count));
     result.push_str(&text);
     result
 }

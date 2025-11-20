@@ -393,8 +393,7 @@ fn plan_progression(start: f64, step: f64, stop: f64) -> Result<ProgressionPlan,
     let ratio_raw = (tol / step_abs).abs();
     let ratio_tol = ratio_raw
         .max(MIN_RATIO_TOL)
-        .min(MAX_RATIO_TOL)
-        .max(f64::EPSILON);
+        .clamp(f64::EPSILON, MAX_RATIO_TOL);
     let mut approx = diff + ratio_tol;
 
     if approx < 0.0 {

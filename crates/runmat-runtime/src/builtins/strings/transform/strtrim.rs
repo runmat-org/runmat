@@ -274,8 +274,8 @@ fn strtrim_cell_array(cell: CellArray) -> Result<Value, String> {
         data, rows, cols, ..
     } = cell;
     let mut trimmed_values = Vec::with_capacity(rows * cols);
-    for idx in 0..data.len() {
-        let trimmed = strtrim_cell_element(&data[idx])?;
+    for value in &data {
+        let trimmed = strtrim_cell_element(value)?;
         trimmed_values.push(trimmed);
     }
     make_cell(trimmed_values, rows, cols).map_err(|e| format!("strtrim: {e}"))

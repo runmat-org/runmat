@@ -923,8 +923,8 @@ fn solve_row_against_upper(row: &[Complex64], matrix: &Matrix) -> Result<Vec<Com
     let mut result = vec![Complex64::new(0.0, 0.0); n];
     for j in (0..n).rev() {
         let mut acc = row[j];
-        for k in (j + 1)..n {
-            acc -= result[k] * matrix.get(k, j);
+        for (k, value) in result.iter().enumerate().skip(j + 1) {
+            acc -= *value * matrix.get(k, j);
         }
         let diag = matrix.get(j, j);
         if diag.norm() <= EPS {

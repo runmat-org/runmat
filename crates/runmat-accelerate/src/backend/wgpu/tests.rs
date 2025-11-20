@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use super::provider_impl::{host_tensor_from_value, invert_upper_triangular};
 use runmat_builtins::{NumericDType, Tensor, Value};
 

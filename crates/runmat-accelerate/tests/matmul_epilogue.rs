@@ -84,18 +84,15 @@ fn matmul_epilogue_row_col_alpha_beta() {
     // CPU reference: (alpha * (A*B) + beta) .* row .* col
     let base = cpu_matmul(&a, ar, ac, &b, br, bc);
     let mut expected = vec![0.0; ar * bc];
-    for j in 0..bc {
-        for i in 0..ar {
+    for (j, col) in col_scale.iter().enumerate().take(bc) {
+        for (i, row) in row_scale.iter().enumerate().take(ar) {
             let idx = i + j * ar;
             let v = base[idx] * ep.alpha + ep.beta;
-            let v = v * row_scale[i] * col_scale[j];
-            expected[idx] = v;
+            expected[idx] = v * row * col;
         }
     }
 
-    for idx in 0..expected.len() {
-        let got = host.data[idx];
-        let want = expected[idx];
+    for (idx, (got, want)) in host.data.iter().zip(expected.iter()).enumerate() {
         let diff = (got - want).abs();
         assert!(
             diff < 1e-9,
@@ -150,9 +147,9 @@ fn matmul_epilogue_col_divide() {
     let hc = p.matmul_epilogue(&ha, &hb, &ep).expect("matmul_epilogue");
     let host = p.download(&hc).expect("download");
     // Expected: identity matmul gives A, then divide each column by denom
-    let expected: Vec<f64> = vec![a[0] / 2.0, a[1] / 2.0, a[2] / 4.0, a[3] / 4.0];
-    for i in 0..expected.len() {
-        assert!((host.data[i] - expected[i]).abs() < 1e-9);
+    let expected = [a[0] / 2.0, a[1] / 2.0, a[2] / 4.0, a[3] / 4.0];
+    for (got, want) in host.data.iter().zip(expected.iter()) {
+        assert!((got - want).abs() < 1e-9);
     }
 }
 
@@ -193,12 +190,9 @@ fn matmul_epilogue_clamp_pow() {
     let base = cpu_matmul(&a, 2, 2, &b, 2, 2);
     let mut expected = vec![0.0; base.len()];
     for (idx, val) in base.iter().enumerate() {
-        let clamped = val.max(4.0).min(10.0);
-        expected[idx] = clamped.powf(2.0);
+        expected[idx] = val.clamp(4.0, 10.0).powf(2.0);
     }
-    for idx in 0..expected.len() {
-        let got = host.data[idx];
-        let want = expected[idx];
+    for (idx, (got, want)) in host.data.iter().zip(expected.iter()).enumerate() {
         let diff = (got - want).abs();
         assert!(
             diff < 5e-5,

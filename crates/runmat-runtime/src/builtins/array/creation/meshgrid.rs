@@ -317,7 +317,7 @@ pub fn evaluate(args: &[Value]) -> Result<MeshgridEval, String> {
         if let Some(provider) = runmat_accelerate_api::provider() {
             let x_real = axis_real_values(&x_axis);
             let y_real = axis_real_values(&y_axis);
-            let z_real = z_axis.as_ref().map(|axis| axis_real_values(axis));
+            let z_real = z_axis.as_ref().map(axis_real_values);
             let mut axis_views: Vec<MeshgridAxisView<'_>> =
                 Vec::with_capacity(if z_real.is_some() { 3 } else { 2 });
             axis_views.push(MeshgridAxisView { data: &x_real });

@@ -44,7 +44,7 @@ fn fused_sum_square_dim0_matches_manual() {
             xh[r + c * rows] = (r as f64) + (c as f64) + 1.0;
         }
     }
-    let x = upload(&provider, rows, cols, &xh);
+    let x = upload(provider, rows, cols, &xh);
 
     let vid_x: ValueId = 0;
     let vid_mul: ValueId = 1;

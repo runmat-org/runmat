@@ -271,7 +271,7 @@ fn extract_between_builtin(
         return Err(BOUNDARY_TYPE_ERROR.to_string());
     }
     let boundary_kind = start_boundary.kind();
-    let effective_mode = mode_override.unwrap_or_else(|| match boundary_kind {
+    let effective_mode = mode_override.unwrap_or(match boundary_kind {
         BoundaryKind::Text => BoundariesMode::Exclusive,
         BoundaryKind::Position => BoundariesMode::Inclusive,
     });
@@ -326,7 +326,7 @@ fn parse_boundaries_option(args: &[Value]) -> Result<Option<BoundariesMode>, Str
     if args.is_empty() {
         return Ok(None);
     }
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return Err(OPTION_PAIR_ERROR.to_string());
     }
 

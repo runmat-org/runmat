@@ -264,7 +264,7 @@ struct IsMemberOptions {
 }
 
 impl IsMemberOptions {
-    fn to_provider_options(&self) -> ProviderIsMemberOptions {
+    fn into_provider_options(self) -> ProviderIsMemberOptions {
         ProviderIsMemberOptions { rows: self.rows }
     }
 }
@@ -292,7 +292,7 @@ fn ismember_gpu_pair(
     opts: &IsMemberOptions,
 ) -> Result<IsMemberEvaluation, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let provider_opts = opts.to_provider_options();
+        let provider_opts = opts.into_provider_options();
         match provider.ismember(&handle_a, &handle_b, &provider_opts) {
             Ok(result) => return IsMemberEvaluation::from_provider_result(result),
             Err(_) => {

@@ -50,8 +50,8 @@ fn nlms_two_fused_reductions_integration() {
             wh[row + col * rows] = (col as f64 + 1.0) * 0.01;
         }
     }
-    let x = upload(&provider, rows, cols, &xh);
-    let w = upload(&provider, rows, cols, &wh);
+    let x = upload(provider, rows, cols, &xh);
+    let w = upload(provider, rows, cols, &wh);
 
     // 1) d = sum(x .* x, 1)  (columns)
     {
@@ -60,38 +60,39 @@ fn nlms_two_fused_reductions_integration() {
         let v_dim: ValueId = 2;
         let v_sum: ValueId = 3;
 
-        let mut values: Vec<ValueInfo> = Vec::new();
-        values.push(ValueInfo {
-            id: v_x,
-            origin: ValueOrigin::Variable {
-                kind: VarKind::Global,
-                index: 0,
+        let mut values = vec![
+            ValueInfo {
+                id: v_x,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 0,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
+                constant: None,
             },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
-            constant: None,
-        });
-        values.push(ValueInfo {
-            id: v_mul,
-            origin: ValueOrigin::Unknown,
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
-            constant: None,
-        });
-        values.push(ValueInfo {
-            id: v_dim,
-            origin: ValueOrigin::Constant,
-            ty: Type::Num,
-            shape: ShapeInfo::Scalar,
-            constant: Some(Value::Num(1.0)),
-        });
-        values.push(ValueInfo {
-            id: v_sum,
-            origin: ValueOrigin::Unknown,
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(c)]),
-            constant: None,
-        });
+            ValueInfo {
+                id: v_mul,
+                origin: ValueOrigin::Unknown,
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
+                constant: None,
+            },
+            ValueInfo {
+                id: v_dim,
+                origin: ValueOrigin::Constant,
+                ty: Type::Num,
+                shape: ShapeInfo::Scalar,
+                constant: Some(Value::Num(1.0)),
+            },
+            ValueInfo {
+                id: v_sum,
+                origin: ValueOrigin::Unknown,
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(c)]),
+                constant: None,
+            },
+        ];
 
         let mul_node = AccelNode {
             id: 0,
@@ -186,48 +187,49 @@ fn nlms_two_fused_reductions_integration() {
         let v_dim: ValueId = 3;
         let v_sum: ValueId = 4;
 
-        let mut values: Vec<ValueInfo> = Vec::new();
-        values.push(ValueInfo {
-            id: v_x,
-            origin: ValueOrigin::Variable {
-                kind: VarKind::Global,
-                index: 0,
+        let mut values = vec![
+            ValueInfo {
+                id: v_x,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 0,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
+                constant: None,
             },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
-            constant: None,
-        });
-        values.push(ValueInfo {
-            id: v_w,
-            origin: ValueOrigin::Variable {
-                kind: VarKind::Global,
-                index: 1,
+            ValueInfo {
+                id: v_w,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 1,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
+                constant: None,
             },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
-            constant: None,
-        });
-        values.push(ValueInfo {
-            id: v_mul,
-            origin: ValueOrigin::Unknown,
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
-            constant: None,
-        });
-        values.push(ValueInfo {
-            id: v_dim,
-            origin: ValueOrigin::Constant,
-            ty: Type::Num,
-            shape: ShapeInfo::Scalar,
-            constant: Some(Value::Num(1.0)),
-        });
-        values.push(ValueInfo {
-            id: v_sum,
-            origin: ValueOrigin::Unknown,
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(c)]),
-            constant: None,
-        });
+            ValueInfo {
+                id: v_mul,
+                origin: ValueOrigin::Unknown,
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(p), Some(c)]),
+                constant: None,
+            },
+            ValueInfo {
+                id: v_dim,
+                origin: ValueOrigin::Constant,
+                ty: Type::Num,
+                shape: ShapeInfo::Scalar,
+                constant: Some(Value::Num(1.0)),
+            },
+            ValueInfo {
+                id: v_sum,
+                origin: ValueOrigin::Unknown,
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(c)]),
+                constant: None,
+            },
+        ];
 
         let mul_node = AccelNode {
             id: 0,
@@ -247,7 +249,6 @@ fn nlms_two_fused_reductions_integration() {
             span: InstrSpan { start: 1, end: 1 },
             tags: vec![AccelGraphTag::Reduction],
         };
-        let mut values = values;
         values[v_mul as usize].origin = ValueOrigin::NodeOutput { node: 0, output: 0 };
         values[v_sum as usize].origin = ValueOrigin::NodeOutput { node: 1, output: 0 };
         let mut var_bindings = HashMap::new();
@@ -384,38 +385,39 @@ fn nlms_two_fused_reductions_integration() {
         let v_sq: ValueId = 1;
         let v_all: ValueId = 2;
         let v_mean: ValueId = 3;
-        let mut values: Vec<ValueInfo> = Vec::new();
-        values.push(ValueInfo {
-            id: v_e,
-            origin: ValueOrigin::Variable {
-                kind: VarKind::Global,
-                index: 0,
+        let values = vec![
+            ValueInfo {
+                id: v_e,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 0,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(c)]),
+                constant: None,
             },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(c)]),
-            constant: None,
-        });
-        values.push(ValueInfo {
-            id: v_sq,
-            origin: ValueOrigin::Unknown,
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(c)]),
-            constant: None,
-        });
-        values.push(ValueInfo {
-            id: v_all,
-            origin: ValueOrigin::Constant,
-            ty: Type::String,
-            shape: ShapeInfo::Scalar,
-            constant: Some(Value::String("all".to_string())),
-        });
-        values.push(ValueInfo {
-            id: v_mean,
-            origin: ValueOrigin::Unknown,
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(1)]),
-            constant: None,
-        });
+            ValueInfo {
+                id: v_sq,
+                origin: ValueOrigin::Unknown,
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(c)]),
+                constant: None,
+            },
+            ValueInfo {
+                id: v_all,
+                origin: ValueOrigin::Constant,
+                ty: Type::String,
+                shape: ShapeInfo::Scalar,
+                constant: Some(Value::String("all".to_string())),
+            },
+            ValueInfo {
+                id: v_mean,
+                origin: ValueOrigin::Unknown,
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(1)]),
+                constant: None,
+            },
+        ];
         let pow_node = AccelNode {
             id: 0,
             label: AccelNodeLabel::Primitive(PrimitiveOp::ElemPow),
@@ -444,7 +446,6 @@ fn nlms_two_fused_reductions_integration() {
                 index: 0,
             },
         );
-        let values = values;
         let graph = AccelGraph {
             nodes: vec![pow_node, mean_node],
             values,

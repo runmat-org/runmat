@@ -499,12 +499,11 @@ impl ReplEngine {
                                     }
                                 }
                             }
-                        } else {
-                            if !is_expression_stmt && !results.is_empty() {
-                                if !is_semicolon_suppressed {
-                                    result_value = Some(results[0].clone());
-                                }
-                            }
+                        } else if !is_expression_stmt
+                            && !results.is_empty()
+                            && !is_semicolon_suppressed
+                        {
+                            result_value = Some(results[0].clone());
                         }
                     }
 

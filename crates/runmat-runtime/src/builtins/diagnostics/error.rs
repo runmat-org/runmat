@@ -182,7 +182,7 @@ fn error_builtin(args: Vec<Value>) -> Result<Value, String> {
                     "error: additional arguments are not allowed when passing an MException",
                 ));
             }
-            return Err(build_error(&mex.identifier, &mex.message));
+            Err(build_error(&mex.identifier, &mex.message))
         }
         Value::Struct(ref st) => {
             if !rest.is_empty() {
@@ -192,9 +192,9 @@ fn error_builtin(args: Vec<Value>) -> Result<Value, String> {
                 ));
             }
             let (identifier, message) = extract_struct_error_fields(st)?;
-            return Err(build_error(&identifier, &message));
+            Err(build_error(&identifier, &message))
         }
-        other => return handle_message_arguments(other, rest),
+        other => handle_message_arguments(other, rest),
     }
 }
 
@@ -209,12 +209,10 @@ fn handle_message_arguments(first: Value, rest: Vec<Value>) -> Result<Value, Str
     let mut format_string = first_string;
     let mut format_args: &[Value] = &rest;
 
-    if is_message_identifier(&format_string) && !rest.is_empty() {
-        identifier = normalize_identifier(&format_string);
-        let (message_value, extra_args) = rest.split_first().expect("rest not empty");
-        format_string = value_to_string("error", message_value)?;
-        format_args = extra_args;
-    } else if looks_like_unqualified_identifier(&format_string) && !rest.is_empty() {
+    if !rest.is_empty()
+        && (is_message_identifier(&format_string)
+            || looks_like_unqualified_identifier(&format_string))
+    {
         identifier = normalize_identifier(&format_string);
         let (message_value, extra_args) = rest.split_first().expect("rest not empty");
         format_string = value_to_string("error", message_value)?;

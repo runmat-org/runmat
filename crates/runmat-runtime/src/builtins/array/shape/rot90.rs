@@ -245,7 +245,7 @@ fn rot90_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
         return Err("rot90: too many input arguments".to_string());
     }
-    let steps = parse_rotation_steps(rest.get(0))?;
+    let steps = parse_rotation_steps(rest.first())?;
     match value {
         Value::Tensor(tensor) => rot90_tensor(tensor, steps).map(tensor::tensor_into_value),
         Value::LogicalArray(logical) => rot90_logical(logical, steps).map(Value::LogicalArray),

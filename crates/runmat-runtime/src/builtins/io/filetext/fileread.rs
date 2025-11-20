@@ -538,7 +538,7 @@ mod tests {
     fn fileread_supports_single_encoding_argument() {
         let path = unique_path("fileread_latin1");
         let bytes = [0xC0u8, 0x20, 0x41];
-        fs::write(&path, &bytes).expect("write latin1 data");
+        fs::write(&path, bytes).expect("write latin1 data");
 
         let result = fileread_builtin(
             Value::from(path.to_string_lossy().to_string()),
@@ -560,7 +560,7 @@ mod tests {
     fn fileread_raw_encoding_returns_bytes() {
         let path = unique_path("fileread_raw_encoding");
         let bytes = [0x01u8, 0xFF, 0x7F];
-        fs::write(&path, &bytes).expect("write raw bytes");
+        fs::write(&path, bytes).expect("write raw bytes");
 
         let result = fileread_builtin(
             Value::from(path.to_string_lossy().to_string()),
@@ -581,7 +581,7 @@ mod tests {
     #[test]
     fn fileread_ascii_encoding_errors_on_invalid_bytes() {
         let path = unique_path("fileread_ascii_error");
-        fs::write(&path, &[0x41, 0x80]).expect("write bytes");
+        fs::write(&path, [0x41, 0x80]).expect("write bytes");
 
         let err = fileread_builtin(
             Value::from(path.to_string_lossy().to_string()),

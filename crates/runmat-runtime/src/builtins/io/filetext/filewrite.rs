@@ -270,7 +270,7 @@ fn parse_options(args: &[Value]) -> Result<FilewriteOptions, String> {
     let mut encoding_specified = false;
     let mut write_mode_specified = false;
 
-    if args.len() >= 1 && !is_keyword(&args[0])? {
+    if !args.is_empty() && !is_keyword(&args[0])? {
         match encoding_from_value(&args[0]) {
             Ok(enc) => {
                 options.encoding = enc;
@@ -285,7 +285,7 @@ fn parse_options(args: &[Value]) -> Result<FilewriteOptions, String> {
         }
     }
 
-    if (args.len() - idx) % 2 != 0 {
+    if !(args.len() - idx).is_multiple_of(2) {
         return Err("filewrite: expected keyword/value argument pairs".to_string());
     }
 
@@ -648,7 +648,7 @@ mod tests {
         .expect("filewrite");
 
         match result {
-            Value::Num(n) => assert_eq!(n as usize, contents.as_bytes().len()),
+            Value::Num(n) => assert_eq!(n as usize, contents.len()),
             other => panic!("expected numeric byte count, got {other:?}"),
         }
 
@@ -783,7 +783,7 @@ mod tests {
         let path = unique_path("filewrite_non_integer");
         let err = filewrite_builtin(
             Value::from(path.to_string_lossy().to_string()),
-            Value::Num(3.14),
+            Value::Num(std::f64::consts::PI),
             Vec::new(),
         )
         .expect_err("should reject non-integer");

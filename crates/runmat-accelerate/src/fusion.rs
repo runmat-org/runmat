@@ -881,22 +881,22 @@ impl FusionGroupPlan {
                 AccelNodeLabel::Primitive(p) => FusionOp::Primitive {
                     op: *p,
                     inputs: node.inputs.clone(),
-                    output: node.outputs.get(0).copied(),
+                    output: node.outputs.first().copied(),
                 },
                 AccelNodeLabel::Builtin { name } => FusionOp::Builtin {
                     name: name.clone(),
                     inputs: node.inputs.clone(),
-                    output: node.outputs.get(0).copied(),
+                    output: node.outputs.first().copied(),
                 },
                 AccelNodeLabel::Unknown => FusionOp::Primitive {
                     op: PrimitiveOp::UPlus,
                     inputs: node.inputs.clone(),
-                    output: node.outputs.get(0).copied(),
+                    output: node.outputs.first().copied(),
                 },
             };
             operations.push(op);
 
-            if let Some(out) = node.outputs.get(0).copied() {
+            if let Some(out) = node.outputs.first().copied() {
                 output = Some(out);
             }
             // Generic reduction signature (no name checks)
@@ -1033,7 +1033,7 @@ impl FusionGroupPlan {
                                             _ => PrimitiveOp::UPlus,
                                         },
                                         inputs: node.inputs.clone(),
-                                        output: node.outputs.get(0).copied(),
+                                        output: node.outputs.first().copied(),
                                     });
                                 }
                                 for &p in &node.inputs {
@@ -1050,7 +1050,7 @@ impl FusionGroupPlan {
                                                 extra_ops.push(FusionOp::Primitive {
                                                     op: PrimitiveOp::ElemPow,
                                                     inputs: node.inputs.clone(),
-                                                    output: node.outputs.get(0).copied(),
+                                                    output: node.outputs.first().copied(),
                                                 });
                                             }
                                             stack.push(node.inputs[0]);
@@ -1064,13 +1064,12 @@ impl FusionGroupPlan {
                             }
                             AccelNodeLabel::Builtin { name } => {
                                 // Allow simple casts to flow through (single/double)
-                                if name.eq_ignore_ascii_case("single")
-                                    || name.eq_ignore_ascii_case("double")
+                                if (name.eq_ignore_ascii_case("single")
+                                    || name.eq_ignore_ascii_case("double"))
+                                    && node.inputs.len() == 1
                                 {
-                                    if node.inputs.len() == 1 {
-                                        stack.push(node.inputs[0]);
-                                        continue;
-                                    }
+                                    stack.push(node.inputs[0]);
+                                    continue;
                                 }
                                 // Unknown builtin: treat as leaf
                             }
@@ -1085,7 +1084,7 @@ impl FusionGroupPlan {
                     for &p in parents {
                         if !deps.contains(&p) {
                             // Skip trivial constants embedded in const_values; those are handled separately
-                            let is_const = plan.const_values.get(&p).is_some()
+                            let is_const = plan.const_values.contains_key(&p)
                                 || graph.value(p).and_then(|vi| vi.constant.as_ref()).is_some();
                             if !is_const {
                                 deps.push(p);
@@ -1098,8 +1097,8 @@ impl FusionGroupPlan {
                 if !extra_ops.is_empty() {
                     // Ensure a stable order: extra ops first
                     let mut new_ops = Vec::with_capacity(extra_ops.len() + plan.operations.len());
-                    new_ops.extend(extra_ops.into_iter());
-                    new_ops.extend(plan.operations.drain(..));
+                    new_ops.extend(extra_ops);
+                    new_ops.append(&mut plan.operations);
                     plan.operations = new_ops;
                 }
                 plan.inputs = deps;
@@ -1416,39 +1415,37 @@ impl FusionGroupPlan {
         if reduce_all {
             // We'll flatten in VM by setting nrows = total and ncols = 1; axis=0 works with that.
             axis = 0;
-        } else {
-            if let Some(dim_vid) = self.reduction_dim {
-                if let Some(v) = self.const_values.get(&dim_vid) {
-                    match v {
-                        Value::Num(n) if *n >= 1.0 => {
-                            axis = (*n as usize).saturating_sub(1);
-                        }
-                        Value::Int(i) => {
-                            let val = i.to_f64();
-                            if val >= 1.0 {
-                                axis = (val as usize).saturating_sub(1);
-                            }
-                        }
-                        _ => {}
+        } else if let Some(dim_vid) = self.reduction_dim {
+            if let Some(v) = self.const_values.get(&dim_vid) {
+                match v {
+                    Value::Num(n) if *n >= 1.0 => {
+                        axis = (*n as usize).saturating_sub(1);
                     }
+                    Value::Int(i) => {
+                        let val = i.to_f64();
+                        if val >= 1.0 {
+                            axis = (val as usize).saturating_sub(1);
+                        }
+                    }
+                    _ => {}
                 }
-            } else {
-                // Fallback: scan constant table for a plausible dim
-                for v in self.constants.values() {
-                    match v {
-                        Value::Num(n) if *n >= 1.0 => {
-                            axis = (*n as usize).saturating_sub(1);
+            }
+        } else {
+            // Fallback: scan constant table for a plausible dim
+            for v in self.constants.values() {
+                match v {
+                    Value::Num(n) if *n >= 1.0 => {
+                        axis = (*n as usize).saturating_sub(1);
+                        break;
+                    }
+                    Value::Int(i) => {
+                        let val = i.to_f64();
+                        if val >= 1.0 {
+                            axis = (val as usize).saturating_sub(1);
                             break;
                         }
-                        Value::Int(i) => {
-                            let val = i.to_f64();
-                            if val >= 1.0 {
-                                axis = (val as usize).saturating_sub(1);
-                                break;
-                            }
-                        }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
         }
@@ -1587,25 +1584,20 @@ impl FusionGroupPlan {
         // Determine mean semantics from planner-populated reduction flavor
         let is_mean = matches!(self.reduction_flavor, Some(ReductionFlavor::Mean));
         let post_scale = if is_mean {
-            if axis == 0 {
-                if scalar_ty == "f64" {
-                    "(1.0 / f64(f32(params.nrows)))".to_string()
-                } else {
-                    "(1.0 / f32(params.nrows))".to_string()
-                }
+            let dim = if axis == 0 {
+                "params.nrows"
             } else {
-                if scalar_ty == "f64" {
-                    "(1.0 / f64(f32(params.ncols)))".to_string()
-                } else {
-                    "(1.0 / f32(params.ncols))".to_string()
-                }
-            }
-        } else {
+                "params.ncols"
+            };
             if scalar_ty == "f64" {
-                "f64(1.0)".to_string()
+                format!("(1.0 / f64(f32({dim})))")
             } else {
-                "1.0".to_string()
+                format!("(1.0 / f32({dim}))")
             }
+        } else if scalar_ty == "f64" {
+            "f64(1.0)".to_string()
+        } else {
+            "1.0".to_string()
         };
         // Helper(s) at module scope
         shader.push_str(&format!(
@@ -1727,13 +1719,9 @@ impl FusionGroup {
     pub fn element_count(&self) -> Option<usize> {
         match &self.shape {
             ShapeInfo::Scalar => Some(1),
-            ShapeInfo::Tensor(dims) => dims.iter().try_fold(1usize, |acc, dim| {
-                if let Some(size) = dim.and_then(|d| acc.checked_mul(d)) {
-                    Some(size)
-                } else {
-                    None
-                }
-            }),
+            ShapeInfo::Tensor(dims) => dims
+                .iter()
+                .try_fold(1usize, |acc, dim| dim.and_then(|d| acc.checked_mul(d))),
             ShapeInfo::Unknown => None,
         }
     }
@@ -1826,7 +1814,7 @@ fn detect_centered_gram(
                     trans_node.label,
                     AccelNodeLabel::Primitive(PrimitiveOp::Transpose)
                 ) {
-                    if let Some(centered) = trans_node.inputs.get(0).copied() {
+                    if let Some(centered) = trans_node.inputs.first().copied() {
                         transpose_node_id = Some(candidate_node_id);
                         centered_val_id = Some(centered);
                         break;
@@ -2299,7 +2287,7 @@ fn analyze_power_step_denominator(
     })
 }
 
-fn node_from_value<'a>(graph: &'a AccelGraph, vid: ValueId) -> Option<(NodeId, &'a AccelNode)> {
+fn node_from_value(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, &AccelNode)> {
     let info = graph.value(vid)?;
     match info.origin {
         ValueOrigin::NodeOutput { node, .. } => graph.node(node).map(|n| (node, n)),
@@ -2311,7 +2299,7 @@ fn is_sqrt_node(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId)> {
     let (node_id, node) = node_from_value(graph, vid)?;
     match &node.label {
         AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("sqrt") => {
-            let input = node.inputs.get(0).copied()?;
+            let input = node.inputs.first().copied()?;
             Some((node_id, input))
         }
         _ => None,
@@ -2322,7 +2310,7 @@ fn is_transpose_node(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueI
     let (node_id, node) = node_from_value(graph, vid)?;
     match &node.label {
         AccelNodeLabel::Primitive(PrimitiveOp::Transpose) => {
-            let input = node.inputs.get(0).copied()?;
+            let input = node.inputs.first().copied()?;
             Some((node_id, input))
         }
         _ => None,
@@ -2522,7 +2510,7 @@ fn primitive_expr(
     exprs: &HashMap<ValueId, String>,
 ) -> Option<String> {
     let binary = |exprs: &HashMap<ValueId, String>| -> Option<(String, String)> {
-        let lhs = exprs.get(inputs.get(0)?).cloned()?;
+        let lhs = exprs.get(inputs.first()?).cloned()?;
         let rhs = exprs.get(inputs.get(1)?).cloned()?;
         Some((lhs, rhs))
     };
@@ -2548,11 +2536,11 @@ fn primitive_expr(
             Some(format!("pow({lhs}, {rhs})"))
         }
         PrimitiveOp::Neg => {
-            let arg = exprs.get(inputs.get(0)?).cloned()?;
+            let arg = exprs.get(inputs.first()?).cloned()?;
             Some(format!("(-{arg})"))
         }
         PrimitiveOp::UPlus => {
-            let arg = exprs.get(inputs.get(0)?).cloned()?;
+            let arg = exprs.get(inputs.first()?).cloned()?;
             Some(format!("(+{arg})"))
         }
         _ => None,
@@ -2595,17 +2583,17 @@ fn builtin_expr(
         _ => {
             return match name.to_ascii_lowercase().as_str() {
                 "log10" => {
-                    let arg = exprs.get(inputs.get(0)?).cloned()?;
+                    let arg = exprs.get(inputs.first()?).cloned()?;
                     let constant = cast_literal(scalar_ty, "0.4342944819032518");
                     Some(format!("(log({arg}) * {constant})"))
                 }
                 "log1p" => {
-                    let arg = exprs.get(inputs.get(0)?).cloned()?;
+                    let arg = exprs.get(inputs.first()?).cloned()?;
                     let one = cast_literal(scalar_ty, "1.0");
                     Some(format!("log({arg} + {one})"))
                 }
                 "expm1" => {
-                    let arg = exprs.get(inputs.get(0)?).cloned()?;
+                    let arg = exprs.get(inputs.first()?).cloned()?;
                     let one = cast_literal(scalar_ty, "1.0");
                     Some(format!("(exp({arg}) - {one})"))
                 }
@@ -2613,7 +2601,7 @@ fn builtin_expr(
             }
         }
     };
-    let arg = exprs.get(inputs.get(0)?).cloned()?;
+    let arg = exprs.get(inputs.first()?).cloned()?;
     Some(format!("{func}({arg})"))
 }
 
@@ -2622,7 +2610,7 @@ fn builtin_binary(
     inputs: &[ValueId],
     exprs: &HashMap<ValueId, String>,
 ) -> Option<String> {
-    let lhs = exprs.get(inputs.get(0)?).cloned()?;
+    let lhs = exprs.get(inputs.first()?).cloned()?;
     let rhs = exprs.get(inputs.get(1)?).cloned()?;
     Some(format!("{func}({lhs}, {rhs})"))
 }
@@ -2632,12 +2620,12 @@ fn builtin_unary_call(
     inputs: &[ValueId],
     exprs: &HashMap<ValueId, String>,
 ) -> Option<String> {
-    let arg = exprs.get(inputs.get(0)?).cloned()?;
+    let arg = exprs.get(inputs.first()?).cloned()?;
     Some(format!("{func}({arg})"))
 }
 
 fn builtin_identity(inputs: &[ValueId], exprs: &HashMap<ValueId, String>) -> Option<String> {
-    exprs.get(inputs.get(0)?).cloned()
+    exprs.get(inputs.first()?).cloned()
 }
 
 fn cast_literal(scalar_ty: &str, literal: &str) -> String {
@@ -2645,312 +2633,6 @@ fn cast_literal(scalar_ty: &str, literal: &str) -> String {
         format!("{scalar_ty}({literal})")
     } else {
         literal.to_string()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::graph::{
-        AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan,
-        PrimitiveOp, ValueId, ValueInfo, ValueOrigin, VarKind,
-    };
-    use runmat_builtins::{Type, Value};
-    use std::collections::HashMap as StdHashMap;
-
-    fn simple_elementwise_graph() -> AccelGraph {
-        let mut values = Vec::new();
-        // Value 0: input tensor
-        values.push(ValueInfo {
-            id: 0,
-            origin: ValueOrigin::Variable {
-                kind: VarKind::Global,
-                index: 0,
-            },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
-            constant: None,
-        });
-        // Node 0 output value (value id 1)
-        values.push(ValueInfo {
-            id: 1,
-            origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
-            constant: None,
-        });
-        // Node 1 output value (value id 2)
-        values.push(ValueInfo {
-            id: 2,
-            origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
-            constant: None,
-        });
-
-        let node0 = AccelNode {
-            id: 0,
-            label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
-            category: AccelOpCategory::Elementwise,
-            inputs: vec![0, 0],
-            outputs: vec![1],
-            span: InstrSpan { start: 10, end: 10 },
-            tags: vec![AccelGraphTag::Elementwise],
-        };
-        let node1 = AccelNode {
-            id: 1,
-            label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
-            category: AccelOpCategory::Elementwise,
-            inputs: vec![1, 0],
-            outputs: vec![2],
-            span: InstrSpan { start: 11, end: 11 },
-            tags: vec![AccelGraphTag::Elementwise],
-        };
-
-        AccelGraph {
-            nodes: vec![node0, node1],
-            values,
-            var_bindings: StdHashMap::new(),
-            node_bindings: StdHashMap::new(),
-        }
-    }
-
-    #[test]
-    fn detects_chain() {
-        let graph = simple_elementwise_graph();
-        let groups = detect_fusion_groups(&graph);
-        assert_eq!(groups.len(), 1);
-        let group = &groups[0];
-        assert_eq!(group.nodes, vec![0, 1]);
-        assert_eq!(group.kind, FusionKind::ElementwiseChain);
-    }
-
-    #[test]
-    fn builds_plan_and_template() {
-        let graph = simple_elementwise_graph();
-        let groups = detect_fusion_groups(&graph);
-        let plan = FusionPlan::from_graph(&graph, &groups);
-        assert_eq!(plan.groups.len(), 1);
-        let group_plan = &plan.groups[0];
-        assert!(group_plan.kernel.supported);
-        let wgsl = group_plan.generate_wgsl("f32").expect("wgsl");
-        assert!(wgsl.contains("@compute"));
-        assert!(group_plan.group.element_count().is_some());
-    }
-
-    #[test]
-    fn stack_pattern_tracks_repeated_constants() {
-        let mut values = Vec::new();
-        values.push(ValueInfo {
-            id: 0,
-            origin: ValueOrigin::Variable {
-                kind: VarKind::Global,
-                index: 0,
-            },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(4)]),
-            constant: None,
-        });
-        values.push(ValueInfo {
-            id: 1,
-            origin: ValueOrigin::Constant,
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(4)]),
-            constant: Some(Value::Num(1.0)),
-        });
-        values.push(ValueInfo {
-            id: 2,
-            origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(4)]),
-            constant: None,
-        });
-        values.push(ValueInfo {
-            id: 3,
-            origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(4)]),
-            constant: None,
-        });
-
-        let node0 = AccelNode {
-            id: 0,
-            label: AccelNodeLabel::Primitive(PrimitiveOp::Add),
-            category: AccelOpCategory::Elementwise,
-            inputs: vec![0, 1],
-            outputs: vec![2],
-            span: InstrSpan { start: 5, end: 5 },
-            tags: vec![AccelGraphTag::Elementwise],
-        };
-        let node1 = AccelNode {
-            id: 1,
-            label: AccelNodeLabel::Primitive(PrimitiveOp::Add),
-            category: AccelOpCategory::Elementwise,
-            inputs: vec![2, 1],
-            outputs: vec![3],
-            span: InstrSpan { start: 6, end: 6 },
-            tags: vec![AccelGraphTag::Elementwise],
-        };
-
-        let graph = AccelGraph {
-            nodes: vec![node0, node1],
-            values,
-            var_bindings: StdHashMap::new(),
-            node_bindings: StdHashMap::new(),
-        };
-
-        let groups = detect_fusion_groups(&graph);
-        assert_eq!(groups.len(), 1);
-        let plan = FusionPlan::from_graph(&graph, &groups);
-        let group_plan = &plan.groups[0];
-        assert_eq!(group_plan.inputs.len(), 2);
-        assert!(group_plan.stack_pattern.is_empty());
-        assert!(group_plan.constants.get(&1).is_some());
-        assert!(group_plan.const_values.contains_key(&1));
-    }
-
-    #[test]
-    fn builtin_expr_supports_extended_set() {
-        let mut exprs: StdHashMap<ValueId, String> = StdHashMap::new();
-        exprs.insert(0, "v0".to_string());
-        exprs.insert(1, "v1".to_string());
-
-        let log1p = super::builtin_expr("log1p", &[0], &exprs, "f32");
-        assert!(log1p.is_some());
-
-        let log10 = super::builtin_expr("log10", &[0], &exprs, "f64");
-        assert!(log10.unwrap().contains("log"));
-
-        let expm1 = super::builtin_expr("expm1", &[0], &exprs, "f32");
-        assert!(expm1.unwrap().contains("exp"));
-
-        let floor = super::builtin_expr("floor", &[0], &exprs, "f32");
-        assert_eq!(floor.unwrap(), "floor(v0)");
-
-        let atan2 = super::builtin_expr("atan2", &[0, 1], &exprs, "f32");
-        assert_eq!(atan2.unwrap(), "atan2(v0, v1)");
-
-        let single = super::builtin_expr("single", &[0], &exprs, "f32");
-        assert_eq!(single.unwrap(), "v0");
-
-        let double = super::builtin_expr("double", &[0], &exprs, "f64");
-        assert_eq!(double.unwrap(), "v0");
-    }
-
-    #[test]
-    fn fanout_chain_with_casts_supported() {
-        let mut values = Vec::new();
-        // Base input tensor
-        values.push(ValueInfo {
-            id: 0,
-            origin: ValueOrigin::Variable {
-                kind: VarKind::Global,
-                index: 0,
-            },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(8)]),
-            constant: None,
-        });
-        // tanh(x) output
-        values.push(ValueInfo {
-            id: 1,
-            origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(8)]),
-            constant: None,
-        });
-        // constant scale before casting
-        values.push(ValueInfo {
-            id: 2,
-            origin: ValueOrigin::Constant,
-            ty: Type::Num,
-            shape: ShapeInfo::Scalar,
-            constant: Some(Value::Num(0.1)),
-        });
-        // single(0.1) output
-        values.push(ValueInfo {
-            id: 3,
-            origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
-            ty: Type::Num,
-            shape: ShapeInfo::Scalar,
-            constant: None,
-        });
-        // scaled branch output
-        values.push(ValueInfo {
-            id: 4,
-            origin: ValueOrigin::NodeOutput { node: 2, output: 0 },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(8)]),
-            constant: None,
-        });
-        // final add output
-        values.push(ValueInfo {
-            id: 5,
-            origin: ValueOrigin::NodeOutput { node: 3, output: 0 },
-            ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(8)]),
-            constant: None,
-        });
-
-        let tanh_node = AccelNode {
-            id: 0,
-            label: AccelNodeLabel::Builtin {
-                name: "tanh".to_string(),
-            },
-            category: AccelOpCategory::Elementwise,
-            inputs: vec![0],
-            outputs: vec![1],
-            span: InstrSpan { start: 10, end: 10 },
-            tags: vec![AccelGraphTag::Elementwise],
-        };
-        let single_node = AccelNode {
-            id: 1,
-            label: AccelNodeLabel::Builtin {
-                name: "single".to_string(),
-            },
-            category: AccelOpCategory::Elementwise,
-            inputs: vec![2],
-            outputs: vec![3],
-            span: InstrSpan { start: 11, end: 11 },
-            tags: vec![AccelGraphTag::Elementwise],
-        };
-        let mul_node = AccelNode {
-            id: 2,
-            label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
-            category: AccelOpCategory::Elementwise,
-            inputs: vec![3, 0],
-            outputs: vec![4],
-            span: InstrSpan { start: 12, end: 12 },
-            tags: vec![AccelGraphTag::Elementwise],
-        };
-        let add_node = AccelNode {
-            id: 3,
-            label: AccelNodeLabel::Primitive(PrimitiveOp::Add),
-            category: AccelOpCategory::Elementwise,
-            inputs: vec![1, 4],
-            outputs: vec![5],
-            span: InstrSpan { start: 13, end: 13 },
-            tags: vec![AccelGraphTag::Elementwise],
-        };
-
-        let graph = AccelGraph {
-            nodes: vec![tanh_node, single_node, mul_node, add_node],
-            values,
-            var_bindings: StdHashMap::new(),
-            node_bindings: StdHashMap::new(),
-        };
-
-        let groups = detect_fusion_groups(&graph);
-        assert_eq!(groups.len(), 1);
-
-        let plan = FusionPlan::from_graph(&graph, &groups);
-        let group_plan = &plan.groups[0];
-        assert!(group_plan.kernel.supported);
-        let shader = group_plan.generate_wgsl("f32");
-        assert!(shader
-            .as_ref()
-            .map(|wgsl| wgsl.contains("tanh") && wgsl.contains("output.data"))
-            .unwrap_or(false));
     }
 }
 
@@ -3367,4 +3049,313 @@ fn analyze_image_normalize(
         bias: bias_opt,
         gamma: gamma_opt,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{
+        AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan,
+        PrimitiveOp, ValueId, ValueInfo, ValueOrigin, VarKind,
+    };
+    use runmat_builtins::{Type, Value};
+    use std::collections::HashMap as StdHashMap;
+
+    fn simple_elementwise_graph() -> AccelGraph {
+        let values = vec![
+            // Value 0: input tensor
+            ValueInfo {
+                id: 0,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 0,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+                constant: None,
+            },
+            // Node 0 output value (value id 1)
+            ValueInfo {
+                id: 1,
+                origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+                constant: None,
+            },
+            // Node 1 output value (value id 2)
+            ValueInfo {
+                id: 2,
+                origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+                constant: None,
+            },
+        ];
+
+        let node0 = AccelNode {
+            id: 0,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![0, 0],
+            outputs: vec![1],
+            span: InstrSpan { start: 10, end: 10 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        let node1 = AccelNode {
+            id: 1,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![1, 0],
+            outputs: vec![2],
+            span: InstrSpan { start: 11, end: 11 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+
+        AccelGraph {
+            nodes: vec![node0, node1],
+            values,
+            var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
+        }
+    }
+
+    #[test]
+    fn detects_chain() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+        let group = &groups[0];
+        assert_eq!(group.nodes, vec![0, 1]);
+        assert_eq!(group.kind, FusionKind::ElementwiseChain);
+    }
+
+    #[test]
+    fn builds_plan_and_template() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        assert_eq!(plan.groups.len(), 1);
+        let group_plan = &plan.groups[0];
+        assert!(group_plan.kernel.supported);
+        let wgsl = group_plan.generate_wgsl("f32").expect("wgsl");
+        assert!(wgsl.contains("@compute"));
+        assert!(group_plan.group.element_count().is_some());
+    }
+
+    #[test]
+    fn stack_pattern_tracks_repeated_constants() {
+        let values = vec![
+            ValueInfo {
+                id: 0,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 0,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4)]),
+                constant: None,
+            },
+            ValueInfo {
+                id: 1,
+                origin: ValueOrigin::Constant,
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4)]),
+                constant: Some(Value::Num(1.0)),
+            },
+            ValueInfo {
+                id: 2,
+                origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4)]),
+                constant: None,
+            },
+            ValueInfo {
+                id: 3,
+                origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4)]),
+                constant: None,
+            },
+        ];
+
+        let node0 = AccelNode {
+            id: 0,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::Add),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![0, 1],
+            outputs: vec![2],
+            span: InstrSpan { start: 5, end: 5 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        let node1 = AccelNode {
+            id: 1,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::Add),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![2, 1],
+            outputs: vec![3],
+            span: InstrSpan { start: 6, end: 6 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+
+        let graph = AccelGraph {
+            nodes: vec![node0, node1],
+            values,
+            var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
+        };
+
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        let group_plan = &plan.groups[0];
+        assert_eq!(group_plan.inputs.len(), 2);
+        assert!(group_plan.stack_pattern.is_empty());
+        assert!(group_plan.constants.contains_key(&1));
+        assert!(group_plan.const_values.contains_key(&1));
+    }
+
+    #[test]
+    fn builtin_expr_supports_extended_set() {
+        let mut exprs: StdHashMap<ValueId, String> = StdHashMap::new();
+        exprs.insert(0, "v0".to_string());
+        exprs.insert(1, "v1".to_string());
+
+        let log1p = super::builtin_expr("log1p", &[0], &exprs, "f32");
+        assert!(log1p.is_some());
+
+        let log10 = super::builtin_expr("log10", &[0], &exprs, "f64");
+        assert!(log10.unwrap().contains("log"));
+
+        let expm1 = super::builtin_expr("expm1", &[0], &exprs, "f32");
+        assert!(expm1.unwrap().contains("exp"));
+
+        let floor = super::builtin_expr("floor", &[0], &exprs, "f32");
+        assert_eq!(floor.unwrap(), "floor(v0)");
+
+        let atan2 = super::builtin_expr("atan2", &[0, 1], &exprs, "f32");
+        assert_eq!(atan2.unwrap(), "atan2(v0, v1)");
+
+        let single = super::builtin_expr("single", &[0], &exprs, "f32");
+        assert_eq!(single.unwrap(), "v0");
+
+        let double = super::builtin_expr("double", &[0], &exprs, "f64");
+        assert_eq!(double.unwrap(), "v0");
+    }
+
+    #[test]
+    fn fanout_chain_with_casts_supported() {
+        let values = vec![
+            // Base input tensor
+            ValueInfo {
+                id: 0,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 0,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(8)]),
+                constant: None,
+            },
+            // tanh(x) output
+            ValueInfo {
+                id: 1,
+                origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(8)]),
+                constant: None,
+            },
+            // constant scale before casting
+            ValueInfo {
+                id: 2,
+                origin: ValueOrigin::Constant,
+                ty: Type::Num,
+                shape: ShapeInfo::Scalar,
+                constant: Some(Value::Num(0.1)),
+            },
+            // single(0.1) output
+            ValueInfo {
+                id: 3,
+                origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
+                ty: Type::Num,
+                shape: ShapeInfo::Scalar,
+                constant: None,
+            },
+            // scaled branch output
+            ValueInfo {
+                id: 4,
+                origin: ValueOrigin::NodeOutput { node: 2, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(8)]),
+                constant: None,
+            },
+            // final add output
+            ValueInfo {
+                id: 5,
+                origin: ValueOrigin::NodeOutput { node: 3, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(8)]),
+                constant: None,
+            },
+        ];
+
+        let tanh_node = AccelNode {
+            id: 0,
+            label: AccelNodeLabel::Builtin {
+                name: "tanh".to_string(),
+            },
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![0],
+            outputs: vec![1],
+            span: InstrSpan { start: 10, end: 10 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        let single_node = AccelNode {
+            id: 1,
+            label: AccelNodeLabel::Builtin {
+                name: "single".to_string(),
+            },
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![2],
+            outputs: vec![3],
+            span: InstrSpan { start: 11, end: 11 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        let mul_node = AccelNode {
+            id: 2,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![3, 0],
+            outputs: vec![4],
+            span: InstrSpan { start: 12, end: 12 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        let add_node = AccelNode {
+            id: 3,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::Add),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![1, 4],
+            outputs: vec![5],
+            span: InstrSpan { start: 13, end: 13 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+
+        let graph = AccelGraph {
+            nodes: vec![tanh_node, single_node, mul_node, add_node],
+            values,
+            var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
+        };
+
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        let group_plan = &plan.groups[0];
+        assert!(group_plan.kernel.supported);
+        let shader = group_plan.generate_wgsl("f32");
+        assert!(shader
+            .as_ref()
+            .map(|wgsl| wgsl.contains("tanh") && wgsl.contains("output.data"))
+            .unwrap_or(false));
+    }
 }

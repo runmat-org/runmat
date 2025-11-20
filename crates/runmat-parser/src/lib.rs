@@ -1242,10 +1242,7 @@ impl Parser {
             }
             // Fast-path: handle multi-assign LHS at statement start inside blocks reliably
             let stmt = if self.peek_token() == Some(&Token::LBracket) {
-                match self.try_parse_multi_assign() {
-                    Ok(stmt) => stmt,
-                    Err(msg) => return Err(msg),
-                }
+                self.try_parse_multi_assign()?
             } else {
                 self.parse_stmt().map_err(|e| e.message)?
             };

@@ -33,53 +33,54 @@ fn plan_collects_two_parents_for_mul_before_sum_dim1() {
     let v_sum: ValueId = 4;
 
     // Build values table
-    let mut values: Vec<ValueInfo> = Vec::new();
-    // x variable
-    values.push(ValueInfo {
-        id: v_x,
-        origin: ValueOrigin::Variable {
-            kind: VarKind::Global,
-            index: 0,
+    let mut values = vec![
+        // x variable
+        ValueInfo {
+            id: v_x,
+            origin: ValueOrigin::Variable {
+                kind: VarKind::Global,
+                index: 0,
+            },
+            ty: runmat_builtins::Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(8), Some(16)]), // rows=8, cols=16 (example)
+            constant: None,
         },
-        ty: runmat_builtins::Type::tensor(),
-        shape: ShapeInfo::Tensor(vec![Some(8), Some(16)]), // rows=8, cols=16 (example)
-        constant: None,
-    });
-    // w variable
-    values.push(ValueInfo {
-        id: v_w,
-        origin: ValueOrigin::Variable {
-            kind: VarKind::Global,
-            index: 1,
+        // w variable
+        ValueInfo {
+            id: v_w,
+            origin: ValueOrigin::Variable {
+                kind: VarKind::Global,
+                index: 1,
+            },
+            ty: runmat_builtins::Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(8), Some(16)]),
+            constant: None,
         },
-        ty: runmat_builtins::Type::tensor(),
-        shape: ShapeInfo::Tensor(vec![Some(8), Some(16)]),
-        constant: None,
-    });
-    // mul output placeholder (origin NodeOutput filled by node)
-    values.push(ValueInfo {
-        id: v_mul,
-        origin: ValueOrigin::Unknown,
-        ty: runmat_builtins::Type::tensor(),
-        shape: ShapeInfo::Tensor(vec![Some(8), Some(16)]),
-        constant: None,
-    });
-    // dim constant 1.0
-    values.push(ValueInfo {
-        id: v_dim,
-        origin: ValueOrigin::Constant,
-        ty: runmat_builtins::Type::Num,
-        shape: ShapeInfo::Scalar,
-        constant: Some(Value::Num(1.0)),
-    });
-    // sum output placeholder
-    values.push(ValueInfo {
-        id: v_sum,
-        origin: ValueOrigin::Unknown,
-        ty: runmat_builtins::Type::tensor(),
-        shape: ShapeInfo::Tensor(vec![Some(16)]), // sum over rows -> vector of cols
-        constant: None,
-    });
+        // mul output placeholder (origin NodeOutput filled by node)
+        ValueInfo {
+            id: v_mul,
+            origin: ValueOrigin::Unknown,
+            ty: runmat_builtins::Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(8), Some(16)]),
+            constant: None,
+        },
+        // dim constant 1.0
+        ValueInfo {
+            id: v_dim,
+            origin: ValueOrigin::Constant,
+            ty: runmat_builtins::Type::Num,
+            shape: ShapeInfo::Scalar,
+            constant: Some(Value::Num(1.0)),
+        },
+        // sum output placeholder
+        ValueInfo {
+            id: v_sum,
+            origin: ValueOrigin::Unknown,
+            ty: runmat_builtins::Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(16)]), // sum over rows -> vector of cols
+            constant: None,
+        },
+    ];
 
     // Nodes
     let mul_node = AccelNode {

@@ -216,7 +216,7 @@ fn exist_builtin(name: Value, rest: Vec<Value>) -> Result<Value, String> {
 
     let name_host = gather_if_needed(&name).map_err(|err| format!("exist: {err}"))?;
     let type_value = rest
-        .get(0)
+        .first()
         .map(|value| gather_if_needed(value).map_err(|err| format!("exist: {err}")))
         .transpose()?;
 

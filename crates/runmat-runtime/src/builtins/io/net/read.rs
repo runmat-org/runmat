@@ -503,7 +503,7 @@ fn numeric_from_bytes(
     if size == 0 {
         return Ok(Vec::new());
     }
-    if bytes.len() % size != 0 {
+    if !bytes.len().is_multiple_of(size) {
         return Err(runtime_error(
             MESSAGE_ID_INTERNAL,
             "read: received byte count does not align with datatype size",

@@ -270,26 +270,24 @@ impl SplitOptions {
         let mut index = 0usize;
         let mut delimiters = DelimiterSpec::Whitespace;
 
-        if index < args.len() {
-            if !is_name_key(&args[index]) {
-                let list = extract_delimiters(&args[index])?;
-                if list.is_empty() {
+        if index < args.len() && !is_name_key(&args[index]) {
+            let list = extract_delimiters(&args[index])?;
+            if list.is_empty() {
+                return Err(EMPTY_DELIMITER_ERROR.to_string());
+            }
+            let mut seen = HashSet::new();
+            let mut patterns: Vec<String> = Vec::new();
+            for pattern in list {
+                if pattern.is_empty() {
                     return Err(EMPTY_DELIMITER_ERROR.to_string());
                 }
-                let mut seen = HashSet::new();
-                let mut patterns: Vec<String> = Vec::new();
-                for pattern in list {
-                    if pattern.is_empty() {
-                        return Err(EMPTY_DELIMITER_ERROR.to_string());
-                    }
-                    if seen.insert(pattern.clone()) {
-                        patterns.push(pattern);
-                    }
+                if seen.insert(pattern.clone()) {
+                    patterns.push(pattern);
                 }
-                patterns.sort_by(|a, b| b.len().cmp(&a.len()));
-                delimiters = DelimiterSpec::Patterns(patterns);
-                index += 1;
             }
+            patterns.sort_by_key(|pat| std::cmp::Reverse(pat.len()));
+            delimiters = DelimiterSpec::Patterns(patterns);
+            index += 1;
         }
 
         let mut collapse = match delimiters {
@@ -382,7 +380,7 @@ impl TextMatrix {
         for col in 0..cols {
             for row in 0..rows {
                 let idx = row * cols + col;
-                let value_ref: &Value = &*data[idx];
+                let value_ref: &Value = &data[idx];
                 strings.push(
                     cell_element_to_string(value_ref)
                         .ok_or_else(|| CELL_ELEMENT_ERROR.to_string())?,

@@ -391,14 +391,13 @@ impl Matrix {
 }
 
 fn extract_mode(extras: &mut Vec<Value>) -> Result<Conv2Mode, String> {
-    if let Some(last) = extras.last() {
-        match parse_mode_value(last)? {
-            Some(mode) => {
-                extras.pop();
-                return Ok(mode);
-            }
-            None => {}
-        }
+    if let Some(mode) = extras
+        .last()
+        .and_then(|last| parse_mode_value(last).transpose())
+        .transpose()?
+    {
+        extras.pop();
+        return Ok(mode);
     }
     Ok(Conv2Mode::Full)
 }

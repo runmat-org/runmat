@@ -232,7 +232,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let base = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let base = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             let exp = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
             Ok(format!("pow({base}, {exp})"))
         },
@@ -310,7 +313,7 @@ fn power_host(lhs: Value, rhs: Value) -> Result<Value, String> {
 
 fn power_real_real(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("power: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("power: {e}"))?;
         return Ok(tensor::tensor_into_value(tensor));
@@ -345,7 +348,7 @@ fn power_real_real(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
 
 fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("power: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("power: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -363,7 +366,7 @@ fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Val
 
 fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("power: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("power: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -381,7 +384,7 @@ fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> Result<Value, String
 
 fn power_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("power: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("power: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -825,7 +828,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                let expected = vec![1.0, 2.0, 3.0, 1.0, 4.0, 9.0, 1.0, 8.0, 27.0];
+                let expected = [1.0, 2.0, 3.0, 1.0, 4.0, 9.0, 1.0, 8.0, 27.0];
                 for (got, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((got - exp).abs() < 1e-12);
                 }
@@ -863,7 +866,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                let expected = vec![4225.0, 8100.0];
+                let expected = [4225.0, 8100.0];
                 for (got, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((got - exp).abs() < 1e-9);
                 }
@@ -884,7 +887,7 @@ mod tests {
         match result {
             Value::Complex(re, im) => {
                 assert!(re.abs() < 1e-8);
-                assert!((im - 1.4142135623730951).abs() < 1e-8);
+                assert!((im - std::f64::consts::SQRT_2).abs() < 1e-8);
             }
             other => panic!("expected complex result, got {other:?}"),
         }
@@ -909,7 +912,7 @@ mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    let expected = vec![1.0, 8.0, 81.0];
+                    let expected = [1.0, 8.0, 81.0];
                     for (got, exp) in gathered.data.iter().zip(expected.iter()) {
                         assert!((got - exp).abs() < 1e-9);
                     }
@@ -938,7 +941,7 @@ mod tests {
             let result = power_builtin(Value::GpuTensor(hb), Value::GpuTensor(he), Vec::new())
                 .expect("power");
             let gathered = test_support::gather(result).expect("gather");
-            let expected = vec![1.0, 8.0, 81.0];
+            let expected = [1.0, 8.0, 81.0];
             for (got, exp) in gathered.data.iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < 1e-9);
             }

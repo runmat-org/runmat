@@ -49,8 +49,8 @@ fn fused_sum_mul_dim0_matches_manual() {
             wh[r + c * rows] = (c as f64) + 1.0;
         }
     }
-    let x = upload_matrix(&provider, rows, cols, &xh);
-    let w = upload_matrix(&provider, rows, cols, &wh);
+    let x = upload_matrix(provider, rows, cols, &xh);
+    let w = upload_matrix(provider, rows, cols, &wh);
 
     // Build a minimal FusionGroupPlan for reduction of (X .* W) along dim=1 (MATLAB '1' => reduce rows)
     // Inputs: v = X, v1 = W
@@ -149,8 +149,8 @@ fn fused_mean_mul_dim0_matches_manual() {
             wh[r + c * rows] = (c as f64) + 1.0;
         }
     }
-    let x = upload_matrix(&provider, rows, cols, &xh);
-    let w = upload_matrix(&provider, rows, cols, &wh);
+    let x = upload_matrix(provider, rows, cols, &xh);
+    let w = upload_matrix(provider, rows, cols, &wh);
 
     let vid_x: ValueId = 0;
     let vid_w: ValueId = 1;
@@ -234,8 +234,8 @@ fn fused_sum_mul_dim1_matches_manual() {
             wh[r + c * rows] = (c as f64) + 1.0;
         }
     }
-    let x = upload_matrix(&provider, rows, cols, &xh);
-    let w = upload_matrix(&provider, rows, cols, &wh);
+    let x = upload_matrix(provider, rows, cols, &xh);
+    let w = upload_matrix(provider, rows, cols, &wh);
 
     // Reduce (X .* W) over columns (MATLAB dim=2 => axis=1 in generator)
     let vid_x: ValueId = 0;

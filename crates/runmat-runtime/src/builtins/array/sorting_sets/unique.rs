@@ -601,9 +601,9 @@ fn unique_numeric_rows(tensor: Tensor, opts: &UniqueOptions) -> Result<UniqueEva
     let mut values = vec![0.0f64; unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
-        for col in 0..cols {
+        for (col, value) in row.iter().enumerate().take(cols) {
             let dest = row_pos + col * unique_rows_count;
-            values[dest] = row[col];
+            values[dest] = *value;
         }
     }
 
@@ -795,9 +795,9 @@ fn unique_complex_rows(
     let mut values = vec![(0.0, 0.0); unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
-        for col in 0..cols {
+        for (col, value) in row.iter().enumerate().take(cols) {
             let dest = row_pos + col * unique_rows_count;
-            values[dest] = row[col];
+            values[dest] = *value;
         }
     }
 
@@ -1156,9 +1156,9 @@ fn unique_string_rows(
     let mut values = vec![String::new(); unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
-        for col in 0..cols {
+        for (col, value) in row.iter().enumerate().take(cols) {
             let dest = row_pos + col * unique_rows_count;
-            values[dest] = row[col].clone();
+            values[dest] = value.clone();
         }
     }
 

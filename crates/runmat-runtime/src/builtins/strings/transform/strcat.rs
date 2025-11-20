@@ -267,7 +267,7 @@ impl TextOperand {
         let data = array
             .data
             .into_iter()
-            .zip(missing_flags.into_iter())
+            .zip(missing_flags)
             .map(|(text, missing)| TextElement { text, missing })
             .collect();
         let shape = array.shape.clone();
@@ -306,7 +306,7 @@ impl TextOperand {
         let total = array.data.len();
         let mut elements = Vec::with_capacity(total);
         for handle in &array.data {
-            let text_element = cell_element_to_text(&**handle)?;
+            let text_element = cell_element_to_text(handle)?;
             elements.push(text_element);
         }
         let shape = array.shape.clone();

@@ -233,31 +233,17 @@ impl QrEval {
 }
 
 /// Size mode for QR outputs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum QrMode {
+    #[default]
     Full,
     Economy,
 }
 
-impl Default for QrMode {
-    fn default() -> Self {
-        QrMode::Full
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 struct QrOptions {
     mode: QrMode,
     pivot: PivotMode,
-}
-
-impl Default for QrOptions {
-    fn default() -> Self {
-        Self {
-            mode: QrMode::Full,
-            pivot: PivotMode::Matrix,
-        }
-    }
 }
 
 /// Evaluate the builtin with full access to multiple outputs.
@@ -547,7 +533,7 @@ fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
         .map(|j| column_norm_sq_from(&matrix, j, 0))
         .collect();
 
-    for k in 0..min_dim {
+    for (k, tau_slot) in taus.iter_mut().enumerate().take(min_dim) {
         let pivot = select_pivot(&col_norms, k);
         if pivot != k {
             matrix.swap_columns(k, pivot);
@@ -559,7 +545,7 @@ fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
             let column_slice = matrix.column_segment_mut(k, k);
             householder(column_slice)
         };
-        taus[k] = tau;
+        *tau_slot = tau;
         if tau.norm() != 0.0 {
             let v = householder_vector(&matrix, k);
             for j in (k + 1)..cols {
@@ -567,8 +553,8 @@ fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
             }
         }
 
-        for j in (k + 1)..cols {
-            col_norms[j] = column_norm_sq_from(&matrix, j, k + 1);
+        for (j, norm) in col_norms.iter_mut().enumerate().skip(k + 1) {
+            *norm = column_norm_sq_from(&matrix, j, k + 1);
         }
     }
 
@@ -580,15 +566,15 @@ fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
 }
 
 fn select_pivot(col_norms: &[f64], start: usize) -> usize {
-    let mut pivot = start;
-    let mut max_norm = 0.0;
-    for (offset, &norm) in col_norms.iter().enumerate().skip(start) {
-        if norm > max_norm {
-            max_norm = norm;
-            pivot = offset;
-        }
-    }
-    pivot
+    use std::cmp::Ordering;
+
+    col_norms
+        .iter()
+        .enumerate()
+        .skip(start)
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+        .map(|(idx, _)| idx)
+        .unwrap_or(start)
 }
 
 fn column_norm_sq_from(matrix: &ColMajorMatrix, col: usize, start_row: usize) -> f64 {
@@ -683,9 +669,7 @@ fn apply_householder(
 fn build_q(reflectors: &ColMajorMatrix, taus: &[Complex64]) -> ColMajorMatrix {
     let rows = reflectors.rows;
     let mut q = ColMajorMatrix::identity(rows);
-    let min_dim = taus.len();
-    for k in (0..min_dim).rev() {
-        let tau = taus[k];
+    for (k, &tau) in taus.iter().enumerate().rev() {
         if tau.norm() == 0.0 {
             continue;
         }

@@ -46,9 +46,15 @@ fn reduce_sum_dim_semantics() {
         .map(|c| (0..rows).map(|r| host[r + c * rows]).sum::<f64>())
         .collect();
     assert_eq!(sum_dim0_host.shape, vec![1, cols]);
-    for c in 0..cols {
-        let got = sum_dim0_host.data[c];
-        let exp = expected_dim0[c];
+    for (c, (got, exp)) in sum_dim0_host
+        .data
+        .iter()
+        .zip(expected_dim0.iter())
+        .enumerate()
+        .take(cols)
+    {
+        let got = *got;
+        let exp = *exp;
         assert!((got - exp).abs() < 1e-6, "dim0 c={c} got={got} exp={exp}");
     }
 
@@ -59,9 +65,15 @@ fn reduce_sum_dim_semantics() {
         .map(|r| (0..cols).map(|c| host[r + c * rows]).sum::<f64>())
         .collect();
     assert_eq!(sum_dim1_host.shape, vec![rows, 1]);
-    for r in 0..rows {
-        let got = sum_dim1_host.data[r];
-        let exp = expected_dim1[r];
+    for (r, (got, exp)) in sum_dim1_host
+        .data
+        .iter()
+        .zip(expected_dim1.iter())
+        .enumerate()
+        .take(rows)
+    {
+        let got = *got;
+        let exp = *exp;
         assert!((got - exp).abs() < 1e-6, "dim1 r={r} got={got} exp={exp}");
     }
 }
@@ -82,8 +94,8 @@ fn elementwise_broadcast_pxc_times_1xc() {
     let x = upload_matrix(&provider, rows, cols, &xh);
     // S[1,c] = 2*c
     let mut sh = vec![0.0f64; cols];
-    for c in 0..cols {
-        sh[c] = (2 * c) as f64;
+    for (c, value) in sh.iter_mut().enumerate().take(cols) {
+        *value = (2 * c) as f64;
     }
     let s = provider
         .upload(&HostTensorView {

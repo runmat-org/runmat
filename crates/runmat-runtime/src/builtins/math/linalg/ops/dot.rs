@@ -218,7 +218,7 @@ fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> Result<Value, String
         return Err("dot: too many input arguments".to_string());
     }
     let dim = rest
-        .get(0)
+        .first()
         .map(|value| tensor::parse_dimension(value, DOT_NAME))
         .transpose()?;
 

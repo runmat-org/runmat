@@ -176,7 +176,7 @@ register_builtin_fusion_spec!(FUSION_SPEC);
 #[cfg(feature = "doc_export")]
 register_builtin_doc_text!("tic", DOC_MD);
 
-static MONOTONIC_ORIGIN: Lazy<Instant> = Lazy::new(|| Instant::now());
+static MONOTONIC_ORIGIN: Lazy<Instant> = Lazy::new(Instant::now);
 static STOPWATCH: Lazy<Mutex<StopwatchState>> = Lazy::new(|| Mutex::new(StopwatchState::default()));
 
 #[cfg(test)]

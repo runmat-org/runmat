@@ -129,6 +129,10 @@ impl Default for WgpuProviderOptions {
     }
 }
 
+type MomentsKey = (u64, Vec<usize>);
+type MomentsValue = (GpuTensorHandle, GpuTensorHandle);
+type MomentsCache = HashMap<MomentsKey, MomentsValue>;
+
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
     device: wgpu::Device,
@@ -163,7 +167,7 @@ pub struct WgpuProvider {
     autotune_device_tag: String,
     // Optimization caches
     pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
-    moments_cache: Mutex<HashMap<(u64, Vec<usize>), (GpuTensorHandle, GpuTensorHandle)>>, // (base_buffer_id, dims) -> (mean, ex2)
+    moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
 }
 
 #[derive(Clone)]
@@ -1354,7 +1358,7 @@ fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
 
 fn filter_state_shape(mut base: Vec<usize>, dim_idx: usize, state_len: usize) -> Vec<usize> {
     if base.len() <= dim_idx {
-        base.extend(std::iter::repeat(1).take(dim_idx + 1 - base.len()));
+        base.extend(std::iter::repeat_n(1, dim_idx + 1 - base.len()));
     }
     if !base.is_empty() {
         base[dim_idx] = state_len;
@@ -1791,7 +1795,7 @@ impl WgpuProvider {
     ) -> Result<Arc<wgpu::Buffer>> {
         // Centralised guard + warning for oversized allocations
         let size_bytes = (len as u64) * self.element_size as u64;
-        if size_bytes > (self.adapter_limits.max_buffer_size as u64) {
+        if size_bytes > self.adapter_limits.max_buffer_size {
             return Err(anyhow!(
                 "{}: requested {} bytes exceeds device max {}",
                 label,
@@ -1800,16 +1804,14 @@ impl WgpuProvider {
             ));
         }
         let (buffer, reused) = self.create_storage_buffer_for_usage(usage, len, label);
-        if reused {
-            if std::env::var("RUNMAT_DEBUG_RESIDENCY").is_ok() {
-                eprintln!(
-                    "[residency_debug] reused buffer label={} usage={:?} len={} ptr={:p}",
-                    label,
-                    usage,
-                    len,
-                    buffer.as_ref()
-                );
-            }
+        if reused && std::env::var("RUNMAT_DEBUG_RESIDENCY").is_ok() {
+            eprintln!(
+                "[residency_debug] reused buffer label={} usage={:?} len={} ptr={:p}",
+                label,
+                usage,
+                len,
+                buffer.as_ref()
+            );
         }
         if !reused && size_bytes >= (256u64 << 20) {
             log::warn!(
@@ -1956,7 +1958,7 @@ impl WgpuProvider {
                 return parsed.max(1);
             }
         }
-        let limit = self.adapter_limits.max_buffer_size as u64;
+        let limit = self.adapter_limits.max_buffer_size;
         let default = 6u64 * 1024 * 1024 * 1024;
         default.min(limit).max((self.element_size as u64) * 4)
     }
@@ -2186,6 +2188,7 @@ impl WgpuProvider {
     }
 
     /// Get or create a compute pipeline from cache using a caller-provided hash key.
+    #[allow(clippy::too_many_arguments)]
     fn get_or_create_pipeline(
         &self,
         hash_key: u64,
@@ -3071,7 +3074,7 @@ impl WgpuProvider {
             .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
         let mapped = slice.get_mapped_range();
         let words: &[u32] = cast_slice(&mapped);
-        let lower = words.get(0).copied().unwrap_or(0);
+        let lower = words.first().copied().unwrap_or(0);
         let upper = words.get(1).copied().unwrap_or(0);
         drop(mapped);
         staging.unmap();
@@ -3306,6 +3309,7 @@ impl WgpuProvider {
             BufferUsageClass::FusionOut,
         ))
     }
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn fused_reduction_exec(
         &self,
         shader: &str,
@@ -3390,6 +3394,7 @@ impl WgpuProvider {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn execute_reduction_with_strategy(
         &self,
         tuning: &ReductionTuning,
@@ -3663,6 +3668,7 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_reduction_two_pass(
         &self,
         inputs: &[GpuTensorHandle],
@@ -3685,7 +3691,7 @@ impl WgpuProvider {
         };
         let chunk_rows = chunk_rows.max(workgroup_size.max(1));
         let chunk_rows_u32 = chunk_rows;
-        let total_chunks = ((reduce_len as u64) + chunk_rows as u64 - 1) / chunk_rows as u64;
+        let total_chunks = (reduce_len as u64).div_ceil(chunk_rows as u64);
         let total_chunks_u32 =
             u32::try_from(total_chunks).map_err(|_| anyhow!("reduction: too many chunks"))?;
         let partials_len = num_slices.max(1) * (total_chunks as usize);
@@ -3852,16 +3858,13 @@ impl WgpuProvider {
             _pad: u32,
             scale: f64,
         }
-        let max_dispatch = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as u32;
+        let max_dispatch = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS;
         let mut chunk_stride = total_chunks_u32.min(max_dispatch).max(1);
-        let mut chunk_tiles =
-            ((total_chunks_u32 as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
+        let mut chunk_tiles = (total_chunks_u32 as u64).div_ceil(chunk_stride as u64);
         if chunk_tiles > max_dispatch as u64 {
-            let required_stride =
-                ((total_chunks_u32 as u64) + max_dispatch as u64 - 1) / (max_dispatch as u64);
+            let required_stride = (total_chunks_u32 as u64).div_ceil(max_dispatch as u64);
             chunk_stride = required_stride.max(1).min(max_dispatch as u64) as u32;
-            chunk_tiles =
-                ((total_chunks_u32 as u64) + chunk_stride as u64 - 1) / chunk_stride as u64;
+            chunk_tiles = (total_chunks_u32 as u64).div_ceil(chunk_stride as u64);
             if chunk_tiles > max_dispatch as u64 {
                 return Err(anyhow!(
                     "fused_reduction: chunk grid {} exceeds dispatch limits (stride {}, tiles {})",
@@ -4000,7 +4003,7 @@ impl WgpuProvider {
         }
         let fallback = 4u64 << 30;
         let adapter_limit = if self.adapter_limits.max_buffer_size > 0 {
-            self.adapter_limits.max_buffer_size as u64
+            self.adapter_limits.max_buffer_size
         } else {
             fallback
         };
@@ -4028,8 +4031,8 @@ impl WgpuProvider {
         let wg = workgroup_size.max(1);
         let reduce_cap = reduce_len.min(u32::MAX as usize) as u32;
         let mut rows = chunk_rows.clamp(wg, reduce_cap.max(wg));
-        if rows % wg != 0 {
-            rows = ((rows + wg - 1) / wg) * wg;
+        if !rows.is_multiple_of(wg) {
+            rows = rows.div_ceil(wg) * wg;
         }
         let slices = num_slices.max(1) as u64;
         let elem_bytes = self.element_size as u64;
@@ -4042,7 +4045,7 @@ impl WgpuProvider {
             return None;
         }
         let max_chunks = (budget / per_chunk_bytes).max(1);
-        let mut required_chunk_rows = ((reduce_len as u64) + max_chunks - 1) / max_chunks;
+        let mut required_chunk_rows = (reduce_len as u64).div_ceil(max_chunks);
         required_chunk_rows = required_chunk_rows.max(wg as u64);
         if required_chunk_rows > u32::MAX as u64 {
             return None;
@@ -4053,8 +4056,8 @@ impl WgpuProvider {
         }
         rows_u64 = rows_u64.min(reduce_len.min(u32::MAX as usize) as u64);
         let mut rows_u32 = rows_u64 as u32;
-        if rows_u32 % wg != 0 {
-            rows_u32 = ((rows_u32 + wg - 1) / wg) * wg;
+        if !rows_u32.is_multiple_of(wg) {
+            rows_u32 = rows_u32.div_ceil(wg) * wg;
         }
         rows_u32 = rows_u32.min(reduce_cap.max(wg));
         Some(rows_u32.max(wg))
@@ -4117,8 +4120,8 @@ impl WgpuProvider {
         }
         let max_dispatch = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
         let target_chunks = max_dispatch.max(1);
-        let mut rows = ((reduce_len + target_chunks - 1) / target_chunks).max(wg);
-        rows = ((rows + wg - 1) / wg) * wg;
+        let mut rows = reduce_len.div_ceil(target_chunks).max(wg);
+        rows = rows.div_ceil(wg) * wg;
         rows = rows.clamp(wg, reduce_len.max(wg));
         rows.min(u32::MAX as usize) as u32
     }
@@ -4187,6 +4190,7 @@ impl WgpuProvider {
         strategies
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn maybe_autotune_reduction(
         &self,
         key: &ReductionAutotuneKey,
@@ -4246,7 +4250,7 @@ impl WgpuProvider {
             ) {
                 Ok(handle) => {
                     let elapsed = start.elapsed();
-                    if best_time.map_or(true, |t| elapsed < t) {
+                    if best_time.is_none_or(|t| elapsed < t) {
                         if let Some(existing) = best_handle.replace(handle) {
                             let _ = self.free(&existing);
                         }
@@ -4287,12 +4291,11 @@ impl WgpuProvider {
             return Err(anyhow!("scatter_column: column index out of bounds"));
         }
         let v_entry = self.get_entry(values)?;
-        let v_rows = if v_entry.shape.len() == 1 {
-            v_entry.shape[0]
-        } else if v_entry.shape.len() == 2 {
-            v_entry.shape[0]
-        } else {
-            return Err(anyhow!("scatter_column: values must be vector or [rows,1]"));
+        let v_rows = match v_entry.shape.len() {
+            1 | 2 => v_entry.shape[0],
+            _ => {
+                return Err(anyhow!("scatter_column: values must be vector or [rows,1]"));
+            }
         };
         if v_rows != rows {
             return Err(anyhow!("scatter_column: length mismatch"));
@@ -4559,7 +4562,7 @@ impl WgpuProvider {
             .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
         let mapped = slice.get_mapped_range();
         let words: &[u32] = cast_slice(&mapped);
-        let code = words.get(0).copied().unwrap_or(0);
+        let code = words.first().copied().unwrap_or(0);
         let dim_word = words.get(1).copied().unwrap_or(0);
         let extra = words.get(2).copied().unwrap_or(0);
         drop(mapped);
@@ -4769,13 +4772,13 @@ impl WgpuProvider {
             .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
         let mapped = slice.get_mapped_range();
         let words: &[u32] = cast_slice(&mapped);
-        let code = words.get(0).copied().unwrap_or(0);
+        let code = words.first().copied().unwrap_or(0);
         drop(mapped);
         staging.unmap();
 
         if code != 0 {
             let err = match code {
-                1 | 2 | 3 => anyhow!("Linear indices must be positive integers."),
+                1..=3 => anyhow!("Linear indices must be positive integers."),
                 4 => anyhow!(
                     "Index exceeds number of array elements. Index must not exceed {}.",
                     total
@@ -4935,7 +4938,7 @@ impl WgpuProvider {
 
         let mut src_shape = entry.shape.clone();
         if src_shape.len() < rank {
-            src_shape.extend(std::iter::repeat(1usize).take(rank - src_shape.len()));
+            src_shape.extend(std::iter::repeat_n(1usize, rank - src_shape.len()));
         }
 
         let total: usize = src_shape.iter().copied().product();
@@ -5105,7 +5108,7 @@ impl WgpuProvider {
         };
 
         if shifts.len() > ext_shape.len() {
-            ext_shape.extend(std::iter::repeat(1usize).take(shifts.len() - ext_shape.len()));
+            ext_shape.extend(std::iter::repeat_n(1usize, shifts.len() - ext_shape.len()));
         }
 
         let rank = ext_shape.len();
@@ -5311,7 +5314,7 @@ impl WgpuProvider {
         let diag_offset = if offset > i32::MAX as isize {
             i32::MAX
         } else if offset < -(i32::MAX as isize) {
-            -(i32::MAX as i32)
+            -i32::MAX
         } else {
             offset as i32
         };
@@ -5451,7 +5454,7 @@ impl WgpuProvider {
         let diag_offset = if offset > i32::MAX as isize {
             i32::MAX
         } else if offset < -(i32::MAX as isize) {
-            -(i32::MAX as i32)
+            -i32::MAX
         } else {
             offset as i32
         };
@@ -5578,7 +5581,7 @@ impl WgpuProvider {
         if let Some(&max_axis) = axes.iter().max() {
             let needed = max_axis + 1;
             if needed > ext_shape.len() {
-                ext_shape.extend(std::iter::repeat(1usize).take(needed - ext_shape.len()));
+                ext_shape.extend(std::iter::repeat_n(1usize, needed - ext_shape.len()));
             }
         }
 
@@ -5885,7 +5888,7 @@ impl WgpuProvider {
 
         let mut shape_ext = entry_x.shape.clone();
         if dim >= shape_ext.len() {
-            shape_ext.extend(std::iter::repeat(1).take(dim + 1 - shape_ext.len()));
+            shape_ext.extend(std::iter::repeat_n(1, dim + 1 - shape_ext.len()));
         }
         ensure!(
             dim < shape_ext.len(),
@@ -7609,6 +7612,7 @@ impl WgpuProvider {
 
         Ok(handle)
     }
+    #[allow(clippy::too_many_arguments)]
     fn debug_centered_gram(
         &self,
         matrix: &GpuTensorHandle,
@@ -7631,18 +7635,18 @@ impl WgpuProvider {
         }
 
         let mut mean_ref = vec![0.0f64; cols];
-        for col in 0..cols {
+        for (col, mean_slot) in mean_ref.iter_mut().enumerate().take(cols) {
             let mut sum = 0.0f64;
             let base = col * rows;
             for row in 0..rows {
                 sum += matrix_host.data[base + row];
             }
-            mean_ref[col] = sum / (rows as f64);
+            *mean_slot = sum / (rows as f64);
         }
 
         let mut max_mean_diff = 0.0f64;
-        for col in 0..cols.min(means_gpu.data.len()) {
-            let diff = (mean_ref[col] - means_gpu.data[col]).abs();
+        for (mean, gpu_mean) in mean_ref.iter().zip(means_gpu.data.iter()) {
+            let diff = (*mean - *gpu_mean).abs();
             if diff > max_mean_diff {
                 max_mean_diff = diff;
             }
@@ -7705,7 +7709,7 @@ impl WgpuProvider {
         }
 
         let sample_preview: Vec<usize> = indices.iter().copied().take(16).collect();
-        let rows_out = output_gpu.shape.get(0).copied().unwrap_or(cols);
+        let rows_out = output_gpu.shape.first().copied().unwrap_or(cols);
         let diag_len = cols.min(rows_out);
         let mut trace = 0.0f64;
         for d in 0..diag_len {
@@ -7738,6 +7742,7 @@ impl WgpuProvider {
 
         Ok(())
     }
+    #[allow(clippy::too_many_arguments)]
     fn debug_qr_power_iter(
         &self,
         product: &GpuTensorHandle,
@@ -7787,7 +7792,7 @@ impl WgpuProvider {
             let _ = self.free(&gram_tmp);
             Cow::Owned(owned)
         };
-        let gram_view: &HostTensorOwned = &*gram_cow;
+        let gram_view: &HostTensorOwned = gram_cow.as_ref();
 
         if gram_view.data.len() != cols * cols {
             return Err(anyhow!(
@@ -7828,9 +7833,14 @@ impl WgpuProvider {
         let mut max_q_abs = 0.0f64;
         let mut min_q_abs = f64::MAX;
         let mut non_zero_q = false;
-        for idx in 0..(rows * cols).min(q_gpu_host.data.len()) {
-            let val = q_gpu_host.data[idx];
-            let diff = (val - q_ref[idx]).abs();
+        for (idx, (val, ref_val)) in q_gpu_host
+            .data
+            .iter()
+            .zip(q_ref.iter())
+            .enumerate()
+            .take(rows * cols)
+        {
+            let diff = (*val - *ref_val).abs();
             if diff > max_q_diff {
                 max_q_diff = diff;
                 max_q_diff_idx = idx;
@@ -9261,7 +9271,7 @@ impl WgpuProvider {
         );
 
         let x_axis = axes
-            .get(0)
+            .first()
             .ok_or_else(|| anyhow!("meshgrid: missing X axis"))?
             .data;
         let y_axis = axes
@@ -9287,16 +9297,23 @@ impl WgpuProvider {
         let mut y_data = Vec::with_capacity(total);
         let mut z_data = z_axis.map(|_| Vec::with_capacity(total));
 
-        for k in 0..nz {
-            let z_value = z_axis.map(|axis| axis[k]);
-            for col in 0..nx {
-                let x_value = x_axis[col];
-                for row in 0..ny {
-                    x_data.push(x_value);
-                    y_data.push(y_axis[row]);
-                    if let (Some(ref mut z_vec), Some(val)) = (z_data.as_mut(), z_value) {
-                        z_vec.push(val);
+        if let Some(axis) = z_axis {
+            for &z_value in axis.iter().take(nz) {
+                for &x_value in x_axis.iter().take(nx) {
+                    for &y_value in y_axis.iter().take(ny) {
+                        x_data.push(x_value);
+                        y_data.push(y_value);
+                        if let Some(ref mut z_vec) = z_data {
+                            z_vec.push(z_value);
+                        }
                     }
+                }
+            }
+        } else {
+            for &x_value in x_axis.iter().take(nx) {
+                for &y_value in y_axis.iter().take(ny) {
+                    x_data.push(x_value);
+                    y_data.push(y_value);
                 }
             }
         }
@@ -9361,8 +9378,8 @@ impl WgpuProvider {
         {
             // Debug-only CPU fallback: fill with deterministic values in [0,1)
             let mut out = vec![0.0f64; total_len];
-            for i in 0..total_len {
-                out[i] = ((i as u64).wrapping_mul(1664525).wrapping_add(1013904223) % (1u64 << 32))
+            for (i, value) in out.iter_mut().enumerate().take(total_len) {
+                *value = ((i as u64).wrapping_mul(1664525).wrapping_add(1013904223) % (1u64 << 32))
                     as f64
                     / 4294967296.0f64;
             }
@@ -10709,7 +10726,7 @@ impl WgpuProvider {
             indices.len() <= u32::MAX as usize,
             "gather_linear: index count exceeds GPU limits"
         );
-        let indices_len_bytes = (indices.len() * std::mem::size_of::<u32>()) as u64;
+        let indices_len_bytes = std::mem::size_of_val(indices) as u64;
         let indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("runmat-gather-linear-indices"),
             size: indices_len_bytes.max(4),
@@ -10794,7 +10811,7 @@ impl WgpuProvider {
             indices.iter().all(|&idx| (idx as usize) < target_entry.len),
             "scatter_linear: index out of bounds for target tensor"
         );
-        let indices_len_bytes = (indices.len() * std::mem::size_of::<u32>()) as u64;
+        let indices_len_bytes = std::mem::size_of_val(indices) as u64;
         let indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("runmat-scatter-linear-indices"),
             size: indices_len_bytes.max(4),
@@ -10863,33 +10880,45 @@ impl WgpuProvider {
             let mut out = vec![0.0f64; len];
             match op {
                 crate::backend::wgpu::types::BinaryOpCode::Add => {
-                    for i in 0..len {
-                        out[i] = ha.data[i] + hb.data[i];
+                    for ((out_val, lhs), rhs) in
+                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
+                    {
+                        *out_val = *lhs + *rhs;
                     }
                 }
                 crate::backend::wgpu::types::BinaryOpCode::Sub => {
-                    for i in 0..len {
-                        out[i] = ha.data[i] - hb.data[i];
+                    for ((out_val, lhs), rhs) in
+                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
+                    {
+                        *out_val = *lhs - *rhs;
                     }
                 }
                 crate::backend::wgpu::types::BinaryOpCode::Mul => {
-                    for i in 0..len {
-                        out[i] = ha.data[i] * hb.data[i];
+                    for ((out_val, lhs), rhs) in
+                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
+                    {
+                        *out_val = *lhs * *rhs;
                     }
                 }
                 crate::backend::wgpu::types::BinaryOpCode::Div => {
-                    for i in 0..len {
-                        out[i] = ha.data[i] / hb.data[i];
+                    for ((out_val, lhs), rhs) in
+                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
+                    {
+                        *out_val = *lhs / *rhs;
                     }
                 }
                 crate::backend::wgpu::types::BinaryOpCode::Max => {
-                    for i in 0..len {
-                        out[i] = ha.data[i].max(hb.data[i]);
+                    for ((out_val, lhs), rhs) in
+                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
+                    {
+                        *out_val = lhs.max(*rhs);
                     }
                 }
                 crate::backend::wgpu::types::BinaryOpCode::Min => {
-                    for i in 0..len {
-                        out[i] = ha.data[i].min(hb.data[i]);
+                    for ((out_val, lhs), rhs) in
+                        out.iter_mut().zip(ha.data.iter()).zip(hb.data.iter())
+                    {
+                        *out_val = lhs.min(*rhs);
                     }
                 }
                 _ => {
@@ -11478,7 +11507,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_NOT_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_NOT_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)?
+            self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -11495,7 +11524,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_ISFINITE_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_ISFINITE_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)?
+            self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -11512,7 +11541,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_ISNAN_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_ISNAN_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)?
+            self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -11529,7 +11558,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_ISINF_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_ISINF_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)?
+            self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -11546,20 +11575,20 @@ impl WgpuProvider {
             let mut out = vec![0.0f64; len];
             let handled = match op {
                 crate::backend::wgpu::types::UnaryOpCode::Exp => {
-                    for i in 0..len {
-                        out[i] = ha.data[i].exp();
+                    for (out_val, input) in out.iter_mut().zip(ha.data.iter()) {
+                        *out_val = input.exp();
                     }
                     true
                 }
                 crate::backend::wgpu::types::UnaryOpCode::Sqrt => {
-                    for i in 0..len {
-                        out[i] = ha.data[i].sqrt();
+                    for (out_val, input) in out.iter_mut().zip(ha.data.iter()) {
+                        *out_val = input.sqrt();
                     }
                     true
                 }
                 crate::backend::wgpu::types::UnaryOpCode::Abs => {
-                    for i in 0..len {
-                        out[i] = ha.data[i].abs();
+                    for (out_val, input) in out.iter_mut().zip(ha.data.iter()) {
+                        *out_val = input.abs();
                     }
                     true
                 }
@@ -11852,7 +11881,7 @@ impl WgpuProvider {
             let elems_per_group = 2 * wg;
             let max_input_per_pass = max_groups * elems_per_group;
 
-            let output_len_total = ((current_len + elems_per_group - 1) / elems_per_group).max(1);
+            let output_len_total = current_len.div_ceil(elems_per_group).max(1);
             // Metal-safe (opt-in): snapshot input buffer for this pass to avoid any SR/SRW conflicts
             // Enabled only if RUNMAT_FORCE_REDUCE_SNAPSHOT is set to avoid perf impact by default.
             let mut input_for_pass = current.clone();
@@ -11879,9 +11908,7 @@ impl WgpuProvider {
             }
             let mut out_buffer = self.create_storage_buffer(output_len_total, "runmat-reduce-pass");
             // Prevent aliasing: output buffer must not be the same as input buffer
-            if (out_buffer.as_ref() as *const wgpu::Buffer)
-                == (input_for_pass.as_ref() as *const wgpu::Buffer)
-            {
+            if std::ptr::eq(out_buffer.as_ref(), input_for_pass.as_ref()) {
                 if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
                     log::debug!(
                         "reduce_global_exec: alias detected; current_ptr={:p} out_ptr={:p} len={} out_total={}",
@@ -11914,7 +11941,7 @@ impl WgpuProvider {
             while in_offset_elems < current_len {
                 let remain = current_len - in_offset_elems;
                 let chunk_in = remain.min(max_input_per_pass);
-                let chunk_out = ((chunk_in + elems_per_group - 1) / elems_per_group).max(1);
+                let chunk_out = chunk_in.div_ceil(elems_per_group).max(1);
 
                 let params = crate::backend::wgpu::params::ReduceGlobalParams {
                     len: chunk_in as u32,
@@ -12008,22 +12035,23 @@ impl WgpuProvider {
                 0 => {
                     // Reduce over rows -> [1, cols]
                     out = vec![0.0; cols];
-                    for c in 0..cols {
+                    for (c, out_value) in out.iter_mut().enumerate().take(cols) {
                         let mut acc = 0.0;
+                        let base = c * rows;
                         for r in 0..rows {
-                            acc += host.data[r + c * rows];
+                            acc += host.data[r + base];
                         }
                         if matches!(op, crate::backend::wgpu::types::DimReduceOp::Mean) {
                             acc /= rows as f64;
                         }
-                        out[c] = acc;
+                        *out_value = acc;
                     }
                     out_shape = vec![1, cols];
                 }
                 1 => {
                     // Reduce over cols -> [rows, 1]
                     out = vec![0.0; rows];
-                    for r in 0..rows {
+                    for (r, out_value) in out.iter_mut().enumerate().take(rows) {
                         let mut acc = 0.0;
                         for c in 0..cols {
                             acc += host.data[r + c * rows];
@@ -12031,7 +12059,7 @@ impl WgpuProvider {
                         if matches!(op, crate::backend::wgpu::types::DimReduceOp::Mean) {
                             acc /= cols as f64;
                         }
-                        out[r] = acc;
+                        *out_value = acc;
                     }
                     out_shape = vec![rows, 1];
                 }
@@ -12091,9 +12119,7 @@ impl WgpuProvider {
         };
         let mut out_buffer = self.create_storage_buffer(out_len, "runmat-reduce-dim-out");
         // Prevent aliasing: output must not be identical to input buffer
-        if (out_buffer.as_ref() as *const wgpu::Buffer)
-            == (entry.buffer.as_ref() as *const wgpu::Buffer)
-        {
+        if std::ptr::eq(out_buffer.as_ref(), entry.buffer.as_ref()) {
             if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
                 log::debug!(
                     "reduce_dim_sum_mean_exec: alias detected; in_ptr={:p} out_ptr={:p} rows={} cols={} out_len={}",
@@ -12195,9 +12221,7 @@ impl WgpuProvider {
         let mut indices_buffer =
             self.create_storage_buffer(out_len, "runmat-reduce-dim-ext-indices");
         // Prevent aliasing either output with input buffer
-        if (values_buffer.as_ref() as *const wgpu::Buffer)
-            == (entry.buffer.as_ref() as *const wgpu::Buffer)
-        {
+        if std::ptr::eq(values_buffer.as_ref(), entry.buffer.as_ref()) {
             let size_bytes = (out_len * self.element_size) as u64;
             values_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-ext-values-unique"),
@@ -12208,9 +12232,7 @@ impl WgpuProvider {
                 mapped_at_creation: false,
             }));
         }
-        if (indices_buffer.as_ref() as *const wgpu::Buffer)
-            == (entry.buffer.as_ref() as *const wgpu::Buffer)
-        {
+        if std::ptr::eq(indices_buffer.as_ref(), entry.buffer.as_ref()) {
             let size_bytes = (out_len * self.element_size) as u64;
             indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-ext-indices-unique"),
@@ -12590,19 +12612,19 @@ impl WgpuProvider {
             let base_out = outer.saturating_mul(target_len.saturating_mul(inner_stride));
             for inner in 0..inner_stride {
                 buffer_line.fill(Complex::new(0.0, 0.0));
-                for k in 0..copy_len {
+                for (k, slot) in buffer_line.iter_mut().enumerate().take(copy_len) {
                     let src_idx = base_in + inner + k * inner_stride;
                     if src_idx < input.len() {
-                        buffer_line[k] = input[src_idx];
+                        *slot = input[src_idx];
                     }
                 }
                 if let Some(plan) = &fft_plan {
                     plan.process(&mut buffer_line);
                 }
-                for k in 0..target_len {
+                for (k, value) in buffer_line.iter().enumerate().take(target_len) {
                     let dst_idx = base_out + inner + k * inner_stride;
                     if dst_idx < output.len() {
-                        output[dst_idx] = buffer_line[k];
+                        output[dst_idx] = *value;
                     }
                 }
             }
@@ -12713,19 +12735,19 @@ impl WgpuProvider {
             let base_out = outer.saturating_mul(target_len.saturating_mul(inner_stride));
             for inner in 0..inner_stride {
                 buffer_line.fill(Complex::new(0.0, 0.0));
-                for k in 0..copy_len {
+                for (k, slot) in buffer_line.iter_mut().enumerate().take(copy_len) {
                     let src_idx = base_in + inner + k * inner_stride;
                     if src_idx < input.len() {
-                        buffer_line[k] = input[src_idx];
+                        *slot = input[src_idx];
                     }
                 }
                 if let Some(plan) = &plan {
                     plan.process(&mut buffer_line);
                 }
-                for k in 0..target_len {
+                for (k, value) in buffer_line.iter().enumerate().take(target_len) {
                     let dst_idx = base_out + inner + k * inner_stride;
                     if dst_idx < output.len() {
-                        output[dst_idx] = buffer_line[k] * scale;
+                        output[dst_idx] = *value * scale;
                     }
                 }
             }
@@ -12910,7 +12932,7 @@ impl WgpuProvider {
             .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
         let mapped = slice.get_mapped_range();
         let counts: &[u32] = cast_slice(&mapped);
-        let count = counts.get(0).copied().unwrap_or(0) as usize;
+        let count = counts.first().copied().unwrap_or(0) as usize;
         drop(mapped);
         count_staging.unmap();
 
@@ -13824,9 +13846,9 @@ impl AccelProvider for WgpuProvider {
                 if let Some(lhs_handle) = product_lhs {
                     match (self.download(lhs_handle), self.download(q_handle)) {
                         (Ok(lhs_host), Ok(q_host)) => {
-                            let lhs_rows = lhs_host.shape.get(0).copied().unwrap_or(0);
+                            let lhs_rows = lhs_host.shape.first().copied().unwrap_or(0);
                             let lhs_cols = lhs_host.shape.get(1).copied().unwrap_or(0);
-                            let q_rows = q_host.shape.get(0).copied().unwrap_or(0);
+                            let q_rows = q_host.shape.first().copied().unwrap_or(0);
                             let q_cols = q_host.shape.get(1).copied().unwrap_or(0);
                             if lhs_rows == q_rows
                                 && lhs_cols == q_rows
@@ -14720,10 +14742,10 @@ impl AccelProvider for WgpuProvider {
             None
         };
 
-        let result = (|| {
+        let result = {
             let source = combined.as_ref().unwrap_or(matrix);
             self.covariance_exec(source, options)
-        })();
+        };
 
         if let Some(handle) = combined {
             let _ = self.free(&handle);
@@ -15081,7 +15103,7 @@ impl AccelProvider for WgpuProvider {
         let mut scratch = Vec::<f64>::with_capacity(rows.max(cols));
         let (out, shape) = if dim <= 1 {
             let mut values = vec![f64::NAN; cols];
-            for c in 0..cols {
+            for (c, value) in values.iter_mut().enumerate().take(cols) {
                 scratch.clear();
                 let mut saw_nan = false;
                 for r in 0..rows {
@@ -15093,7 +15115,7 @@ impl AccelProvider for WgpuProvider {
                     }
                     scratch.push(v);
                 }
-                values[c] = if saw_nan || scratch.is_empty() {
+                *value = if saw_nan || scratch.is_empty() {
                     f64::NAN
                 } else {
                     compute_median_inplace(&mut scratch)
@@ -15102,7 +15124,7 @@ impl AccelProvider for WgpuProvider {
             (values, vec![1usize, cols])
         } else {
             let mut values = vec![f64::NAN; rows];
-            for r in 0..rows {
+            for (r, value) in values.iter_mut().enumerate().take(rows) {
                 scratch.clear();
                 let mut saw_nan = false;
                 for c in 0..cols {
@@ -15114,7 +15136,7 @@ impl AccelProvider for WgpuProvider {
                     }
                     scratch.push(v);
                 }
-                values[r] = if saw_nan || scratch.is_empty() {
+                *value = if saw_nan || scratch.is_empty() {
                     f64::NAN
                 } else {
                     compute_median_inplace(&mut scratch)
@@ -15353,7 +15375,7 @@ impl AccelProvider for WgpuProvider {
             .map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
         let mapped = slice.get_mapped_range();
         let words: &[u32] = cast_slice(&mapped);
-        let flag = words.get(0).copied().unwrap_or(0);
+        let flag = words.first().copied().unwrap_or(0);
         drop(mapped);
         staging.unmap();
 
@@ -15426,11 +15448,11 @@ impl AccelProvider for WgpuProvider {
         let value = match entry.precision {
             NumericPrecision::F64 => {
                 let words: &[f64] = cast_slice(&mapped);
-                words.get(0).copied().unwrap_or(0.0)
+                words.first().copied().unwrap_or(0.0)
             }
             NumericPrecision::F32 => {
                 let words: &[f32] = cast_slice(&mapped);
-                words.get(0).copied().unwrap_or(0.0) as f64
+                words.first().copied().unwrap_or(0.0) as f64
             }
         };
         drop(mapped);
@@ -15473,7 +15495,7 @@ impl AccelProvider for WgpuProvider {
             NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F64,
             NumericPrecision::F32 => crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F32,
         };
-        self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)
+        self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)
     }
     fn not_nan_mask(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
@@ -15486,7 +15508,7 @@ impl AccelProvider for WgpuProvider {
             NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NOT_NAN_MASK_SHADER_F64,
             NumericPrecision::F32 => crate::backend::wgpu::shaders::nan::NOT_NAN_MASK_SHADER_F32,
         };
-        self.fused_elementwise(shader, &[a.clone()], &entry.shape, len)
+        self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)
     }
 
     fn fused_reduction(
@@ -15947,8 +15969,8 @@ impl WgpuProvider {
         // Compute strides (MATLAB/column-major)
         let mut strides: Vec<usize> = vec![0; rank];
         let mut s = 1usize;
-        for i in 0..rank {
-            strides[i] = s;
+        for (i, stride_slot) in strides.iter_mut().enumerate().take(rank) {
+            *stride_slot = s;
             s = s
                 .checked_mul(entry.shape[i])
                 .ok_or_else(|| anyhow!("reduce_mean_nd: shape too large"))?;
@@ -15987,9 +16009,7 @@ impl WgpuProvider {
 
         let mut out_buffer = self.create_storage_buffer(cols, "runmat-reduce-nd-mean-out");
         // Prevent aliasing: output must not be the same as input buffer
-        if (out_buffer.as_ref() as *const wgpu::Buffer)
-            == (entry.buffer.as_ref() as *const wgpu::Buffer)
-        {
+        if std::ptr::eq(out_buffer.as_ref(), entry.buffer.as_ref()) {
             let size_bytes = (cols * self.element_size) as u64;
             out_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-nd-mean-out-unique"),
@@ -16171,8 +16191,8 @@ impl WgpuProvider {
         // Strides in column-major
         let mut strides: Vec<usize> = vec![0; rank];
         let mut s = 1usize;
-        for i in 0..rank {
-            strides[i] = s;
+        for (i, stride_slot) in strides.iter_mut().enumerate().take(rank) {
+            *stride_slot = s;
             s = s
                 .checked_mul(entry.shape[i])
                 .ok_or_else(|| anyhow!("reduce_moments_nd: shape too large"))?;

@@ -330,7 +330,7 @@ fn read_line(stream: &mut TcpStream, buffer: &mut Vec<u8>) -> Result<LineReadRes
                 if buffer.is_empty() {
                     return Ok(LineReadResult::Closed(Vec::new()));
                 }
-                let bytes: Vec<u8> = buffer.drain(..).collect();
+                let bytes = std::mem::take(buffer);
                 return Ok(LineReadResult::Closed(bytes));
             }
             Ok(_) => {

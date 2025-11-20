@@ -227,7 +227,7 @@ fn shift_amount(size: usize, kind: ShiftKind) -> usize {
     }
     match kind {
         ShiftKind::Fft => size / 2,
-        ShiftKind::Ifft => (size + 1) / 2,
+        ShiftKind::Ifft => size.div_ceil(2),
     }
 }
 
@@ -256,31 +256,33 @@ pub fn apply_shift<T: Clone>(
     let mut result = vec![data[0].clone(); total];
     let mut coords = vec![0usize; shape.len()];
 
-    for dest_idx in 0..total {
+    for (dest_idx, dest_slot) in result.iter_mut().enumerate() {
         let mut remainder = dest_idx;
-        for axis in 0..shape.len() {
-            let size = shape[axis];
-            coords[axis] = if size == 0 { 0 } else { remainder % size };
+        for (coord, &size) in coords.iter_mut().zip(shape.iter()) {
+            *coord = if size == 0 { 0 } else { remainder % size };
             if size > 0 {
                 remainder /= size;
             }
         }
         let mut src_idx = 0usize;
-        for axis in 0..shape.len() {
-            let size = shape[axis];
+        for (axis, ((&coord, &size), &stride)) in coords
+            .iter()
+            .zip(shape.iter())
+            .zip(strides.iter())
+            .enumerate()
+        {
             if size == 0 {
                 continue;
             }
-            let stride = strides[axis];
             if size <= 1 || shifts[axis] == 0 {
-                src_idx += coords[axis] * stride;
+                src_idx += coord * stride;
             } else {
                 let shift = shifts[axis] % size;
-                let src_coord = (coords[axis] + size - shift) % size;
+                let src_coord = (coord + size - shift) % size;
                 src_idx += src_coord * stride;
             }
         }
-        result[dest_idx] = data[src_idx].clone();
+        *dest_slot = data[src_idx].clone();
     }
 
     Ok(result)

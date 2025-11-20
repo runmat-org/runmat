@@ -496,7 +496,7 @@ mod tests {
         let expected = random::expected_uniform_sequence(1)[0];
         match result {
             Value::Num(v) => {
-                assert!(v >= 0.0 && v < 1.0);
+                assert!((0.0..1.0).contains(&v));
                 assert!((v - expected).abs() < 1e-12);
             }
             other => panic!("expected scalar double, got {other:?}"),
@@ -615,7 +615,7 @@ mod tests {
                         test_support::gather(Value::GpuTensor(gpu)).expect("gather to host");
                     assert_eq!(gathered.shape, vec![2, 2]);
                     for value in gathered.data {
-                        assert!(value >= 0.0 && value < 1.0);
+                        assert!((0.0..1.0).contains(&value));
                     }
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -650,7 +650,7 @@ mod tests {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather to host");
                 assert_eq!(gathered.shape, vec![2, 2]);
                 for v in gathered.data {
-                    assert!(v >= 0.0 && v < 1.0);
+                    assert!((0.0..1.0).contains(&v));
                 }
             }
             other => panic!("expected gpu tensor, got {other:?}"),

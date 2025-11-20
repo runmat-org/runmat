@@ -796,7 +796,7 @@ fn parse_cell_reference(token: &str) -> Result<CellReference, String> {
 fn column_index_from_letters(letters: &str) -> Result<usize, String> {
     let mut value: usize = 0;
     for ch in letters.chars() {
-        if !(('A'..='Z').contains(&ch)) {
+        if !ch.is_ascii_uppercase() {
             return Err(format!(
                 "readmatrix: invalid column designator '{}' in Range",
                 letters

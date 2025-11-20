@@ -769,9 +769,7 @@ fn format_numeric(value: f64, precision: &PrecisionSpec) -> Result<String, Strin
             }
             let fmt = format!("%.{digits}g");
             let mut rendered = c_format(value, &fmt)?;
-            if value == 0.0 {
-                rendered = "0".to_string();
-            } else if rendered == "-0" {
+            if value == 0.0 || rendered == "-0" {
                 rendered = "0".to_string();
             }
             Ok(rendered)

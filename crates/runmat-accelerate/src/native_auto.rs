@@ -422,43 +422,46 @@ fn apply_calibration_sample(
 
     if sample.units.elementwise > 0.0 && sample.cpu_time.elementwise > 0.0 {
         let secs_per_elem = (sample.cpu_time.elementwise / 1_000.0) / sample.units.elementwise;
-        if secs_per_elem.is_finite() && secs_per_elem > 0.0 {
-            if (cfg.cpu_elem_per_elem - secs_per_elem).abs() > f64::EPSILON {
-                delta.cpu_elem_per_elem = Some(ThresholdDeltaEntry::new(
-                    cfg.cpu_elem_per_elem,
-                    secs_per_elem,
-                ));
-                cfg.cpu_elem_per_elem = secs_per_elem;
-                changed = true;
-            }
+        if secs_per_elem.is_finite()
+            && secs_per_elem > 0.0
+            && (cfg.cpu_elem_per_elem - secs_per_elem).abs() > f64::EPSILON
+        {
+            delta.cpu_elem_per_elem = Some(ThresholdDeltaEntry::new(
+                cfg.cpu_elem_per_elem,
+                secs_per_elem,
+            ));
+            cfg.cpu_elem_per_elem = secs_per_elem;
+            changed = true;
         }
     }
 
     if sample.units.reduction > 0.0 && sample.cpu_time.reduction > 0.0 {
         let secs_per_elem = (sample.cpu_time.reduction / 1_000.0) / sample.units.reduction;
-        if secs_per_elem.is_finite() && secs_per_elem > 0.0 {
-            if (cfg.cpu_reduction_per_elem - secs_per_elem).abs() > f64::EPSILON {
-                delta.cpu_reduction_per_elem = Some(ThresholdDeltaEntry::new(
-                    cfg.cpu_reduction_per_elem,
-                    secs_per_elem,
-                ));
-                cfg.cpu_reduction_per_elem = secs_per_elem;
-                changed = true;
-            }
+        if secs_per_elem.is_finite()
+            && secs_per_elem > 0.0
+            && (cfg.cpu_reduction_per_elem - secs_per_elem).abs() > f64::EPSILON
+        {
+            delta.cpu_reduction_per_elem = Some(ThresholdDeltaEntry::new(
+                cfg.cpu_reduction_per_elem,
+                secs_per_elem,
+            ));
+            cfg.cpu_reduction_per_elem = secs_per_elem;
+            changed = true;
         }
     }
 
     if sample.units.matmul_flops > 0.0 && sample.cpu_time.matmul > 0.0 {
         let secs_per_flop = (sample.cpu_time.matmul / 1_000.0) / sample.units.matmul_flops;
-        if secs_per_flop.is_finite() && secs_per_flop > 0.0 {
-            if (cfg.cpu_matmul_per_flop - secs_per_flop).abs() > f64::EPSILON {
-                delta.cpu_matmul_per_flop = Some(ThresholdDeltaEntry::new(
-                    cfg.cpu_matmul_per_flop,
-                    secs_per_flop,
-                ));
-                cfg.cpu_matmul_per_flop = secs_per_flop;
-                changed = true;
-            }
+        if secs_per_flop.is_finite()
+            && secs_per_flop > 0.0
+            && (cfg.cpu_matmul_per_flop - secs_per_flop).abs() > f64::EPSILON
+        {
+            delta.cpu_matmul_per_flop = Some(ThresholdDeltaEntry::new(
+                cfg.cpu_matmul_per_flop,
+                secs_per_flop,
+            ));
+            cfg.cpu_matmul_per_flop = secs_per_flop;
+            changed = true;
         }
     }
 
@@ -656,7 +659,7 @@ fn element_count_pair(a: &Value, b: &Value) -> Option<usize> {
 }
 
 pub fn global() -> Option<&'static NativeAutoOffload> {
-    GLOBAL.get_or_init(|| initialize()).as_ref()
+    GLOBAL.get_or_init(initialize).as_ref()
 }
 
 fn initialize() -> Option<NativeAutoOffload> {
@@ -1097,10 +1100,10 @@ impl NativeAutoOffload {
         }
         // Do not attempt to promote 'double' on providers that cannot store f64.
         // Offloading a cast to double requires device-side f64; otherwise keep host.
-        if name.eq_ignore_ascii_case("double") {
-            if self.provider.precision() != runmat_accelerate_api::ProviderPrecision::F64 {
-                return Ok(args.to_vec());
-            }
+        if name.eq_ignore_ascii_case("double")
+            && self.provider.precision() != runmat_accelerate_api::ProviderPrecision::F64
+        {
+            return Ok(args.to_vec());
         }
         if let Some(policy) = builtin_policy(name) {
             if policy.is_sink {
@@ -1252,7 +1255,7 @@ mod tests {
         let data = Value::Tensor(tensor);
         let empty = Value::Tensor(placeholder);
 
-        assert!(max_or_min_reduction_call(&[data.clone()]));
+        assert!(max_or_min_reduction_call(std::slice::from_ref(&data)));
         assert!(max_or_min_reduction_call(&[
             data.clone(),
             empty.clone(),
@@ -1270,20 +1273,22 @@ struct BuiltinPolicy {
 
 static BUILTIN_POLICIES: OnceCell<HashMap<String, BuiltinPolicy>> = OnceCell::new();
 
+fn build_builtin_policy_map() -> HashMap<String, BuiltinPolicy> {
+    let mut map = HashMap::new();
+    for func in builtin_functions() {
+        map.insert(
+            func.name.to_ascii_lowercase(),
+            BuiltinPolicy {
+                accel_tags: func.accel_tags,
+                is_sink: func.is_sink,
+            },
+        );
+    }
+    map
+}
+
 fn builtin_policy(name: &str) -> Option<BuiltinPolicy> {
-    let map = BUILTIN_POLICIES.get_or_init(|| {
-        let mut map = HashMap::new();
-        for func in builtin_functions() {
-            map.insert(
-                func.name.to_ascii_lowercase(),
-                BuiltinPolicy {
-                    accel_tags: func.accel_tags,
-                    is_sink: func.is_sink,
-                },
-            );
-        }
-        map
-    });
+    let map = BUILTIN_POLICIES.get_or_init(build_builtin_policy_map);
     map.get(&name.to_ascii_lowercase()).copied()
 }
 
@@ -1571,7 +1576,7 @@ fn compare_reduction(
         }
     };
     let value = Value::Tensor(template.clone());
-    let cpu_time = time(|| runmat_runtime::call_builtin("sum", &[value.clone()]))?;
+    let cpu_time = time(|| runmat_runtime::call_builtin("sum", std::slice::from_ref(&value)))?;
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {
@@ -1896,9 +1901,7 @@ fn fit_linear_model(samples: &[(f64, f64)]) -> Option<LinearModel> {
 }
 
 fn profile_cost_model() -> Option<&'static ProfileCostModel> {
-    PROFILE_MODEL
-        .get_or_init(|| load_profile_cost_model())
-        .as_ref()
+    PROFILE_MODEL.get_or_init(load_profile_cost_model).as_ref()
 }
 
 fn load_profile_cost_model() -> Option<ProfileCostModel> {

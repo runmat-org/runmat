@@ -234,7 +234,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let divisor = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let divisor = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             let numerator = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
             Ok(format!("({numerator} / {divisor})"))
         },
@@ -606,7 +609,7 @@ fn ldivide_host(divisor: Value, numerator: Value) -> Result<Value, String> {
 fn ldivide_real_real(divisor: &Tensor, numerator: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
         .map_err(|err| format!("ldivide: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("ldivide: {e}"))?;
         return Ok(tensor::tensor_into_value(tensor));
@@ -626,7 +629,7 @@ fn ldivide_complex_complex(
 ) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
         .map_err(|err| format!("ldivide: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("ldivide: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -646,7 +649,7 @@ fn ldivide_complex_complex(
 fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
         .map_err(|err| format!("ldivide: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("ldivide: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -666,7 +669,7 @@ fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> Result<V
 fn ldivide_real_complex(divisor: &Tensor, numerator: &ComplexTensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
         .map_err(|err| format!("ldivide: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("ldivide: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -778,7 +781,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected = vec![1.0, 0.5, 0.3333333333333333, 0.25];
+                let expected = [1.0, 0.5, 0.3333333333333333, 0.25];
                 for (got, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((got - exp).abs() < 1e-12);
                 }
@@ -796,7 +799,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                let expected = vec![
+                let expected = [
                     10.0,
                     5.0,
                     3.3333333333333335,
@@ -828,7 +831,7 @@ mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                let expected = vec![(0.0, -1.0), (-0.28, -0.04)];
+                let expected = [(0.0, -1.0), (-0.28, -0.04)];
                 for (got, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < 1e-10 && (got.1 - exp.1).abs() < 1e-10);
                 }
@@ -865,7 +868,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected = vec![1.0, f64::INFINITY, 4.0, 8.0];
+                let expected = [1.0, f64::INFINITY, 4.0, 8.0];
                 for (got, exp) in t.data.iter().zip(expected.iter()) {
                     if exp.is_infinite() {
                         assert!(got.is_infinite());
@@ -912,7 +915,7 @@ mod tests {
                 .expect("gpu ldivide");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            let expected = vec![0.2, 0.25, 0.3333333333333333];
+            let expected = [0.2, 0.25, 0.3333333333333333];
             for (got, exp) in gathered.data.iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < GPU_EPS);
             }
@@ -970,7 +973,7 @@ mod tests {
                 panic!("expected tensor result after host gather");
             };
             assert_eq!(t.shape, vec![2, 1]);
-            let expected = vec![0.25, 1.0 / 6.0];
+            let expected = [0.25, 1.0 / 6.0];
             for (got, exp) in t.data.iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < EPS);
             }
@@ -990,7 +993,7 @@ mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 1]);
-                let expected = vec![(0.5, 0.0), (0.5, 0.0)];
+                let expected = [(0.5, 0.0), (0.5, 0.0)];
                 for (got, exp) in ct.data.iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < EPS);
                     assert!((got.1 - exp.1).abs() < EPS);

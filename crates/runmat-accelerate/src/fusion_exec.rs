@@ -545,10 +545,11 @@ pub fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Result<Valu
 
     let (matrix_handle, owned_matrix) = ensure_gpu_tensor(provider, matrix_value)?;
 
-    let mut options = CovarianceOptions::default();
-    options.normalization = normalization;
-    options.rows = CovRows::All;
-    options.has_weight_vector = false;
+    let options = CovarianceOptions {
+        normalization,
+        rows: CovRows::All,
+        has_weight_vector: false,
+    };
 
     let output = provider.covariance(&matrix_handle, None, None, &options)?;
 
@@ -886,7 +887,7 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
         } = op
         {
             if name.eq_ignore_ascii_case("mtimes") {
-                a_vid = inputs.get(0).copied();
+                a_vid = inputs.first().copied();
                 b_vid = inputs.get(1).copied();
                 cur_out = *output;
                 break;
@@ -931,7 +932,7 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
                             alpha *= val;
                         } else if row_scale.is_none() || col_scale.is_none() {
                             if let Some(h) = find_handle(other) {
-                                let r = h.shape.get(0).copied().unwrap_or(1);
+                                let r = h.shape.first().copied().unwrap_or(1);
                                 let c = h.shape.get(1).copied().unwrap_or(1);
                                 if c == 1 && row_scale.is_none() {
                                     row_scale = Some(h);
@@ -950,7 +951,7 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
                             }
                         } else if row_scale.is_none() || col_scale.is_none() {
                             if let Some(h) = find_handle(other) {
-                                let r = h.shape.get(0).copied().unwrap_or(1);
+                                let r = h.shape.first().copied().unwrap_or(1);
                                 let c = h.shape.get(1).copied().unwrap_or(1);
                                 if c == 1 && row_scale.is_none() {
                                     row_scale = Some(h);
@@ -1049,7 +1050,7 @@ pub fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Va
     let mut diag_handle: Option<(graph::ValueId, GpuTensorHandle)> = None;
     if let Some(vid) = diag_vid {
         let diag_len = std::cmp::min(
-            a.shape.get(0).copied().unwrap_or(0),
+            a.shape.first().copied().unwrap_or(0),
             b.shape.get(1).copied().unwrap_or(0),
         );
         let mut diag_shape = vec![diag_len, 1];

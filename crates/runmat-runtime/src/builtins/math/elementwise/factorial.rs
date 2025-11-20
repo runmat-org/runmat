@@ -24,9 +24,9 @@ const MAX_FACTORIAL_N: usize = 170;
 static FACT_TABLE: Lazy<[f64; MAX_FACTORIAL_N + 1]> = Lazy::new(|| {
     let mut table = [1.0f64; MAX_FACTORIAL_N + 1];
     let mut acc = 1.0;
-    for n in 1..=MAX_FACTORIAL_N {
+    for (n, slot) in table.iter_mut().enumerate().skip(1) {
         acc *= n as f64;
-        table[n] = acc;
+        *slot = acc;
     }
     table
 });

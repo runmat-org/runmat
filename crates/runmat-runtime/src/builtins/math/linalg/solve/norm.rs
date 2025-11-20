@@ -327,7 +327,7 @@ fn classify_tensor(shape: &[usize]) -> Result<TensorKind, String> {
         return Err(format!("{NAME}: input must be a vector or 2-D matrix."));
     }
 
-    let rows = shape.get(0).copied().unwrap_or(0);
+    let rows = shape.first().copied().unwrap_or(0);
     let cols = shape.get(1).copied().unwrap_or(1);
 
     if shape.len() == 1 || rows <= 1 || cols <= 1 {

@@ -423,9 +423,9 @@ fn parse_arguments(values: &[Value]) -> Result<SaveRequest, String> {
     })
 }
 
-fn ensure_workspace_entries<'a>(
-    cache: &'a mut Option<Vec<(String, Value)>>,
-) -> Result<&'a Vec<(String, Value)>, String> {
+fn ensure_workspace_entries(
+    cache: &mut Option<Vec<(String, Value)>>,
+) -> Result<&Vec<(String, Value)>, String> {
     if cache.is_none() {
         let entries = collect_workspace_entries()?;
         *cache = Some(entries);
@@ -544,9 +544,7 @@ fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
             let idx = row * ca.cols + col;
             buffer.push(ca.data[idx]);
         }
-        let trimmed = buffer
-            .trim_end_matches(|ch| ch == ' ' || ch == '\0')
-            .to_string();
+        let trimmed = buffer.trim_end_matches([' ', '\0']).to_string();
         if !trimmed.is_empty() {
             rows.push(trimmed);
         }
@@ -894,7 +892,7 @@ fn write_subelement(buf: &mut Vec<u8>, data_type: u32, data: &[u8]) {
     buf.extend_from_slice(data);
     let padding = (8 - (data.len() % 8)) % 8;
     if padding != 0 {
-        buf.extend(std::iter::repeat(0u8).take(padding));
+        buf.extend(std::iter::repeat_n(0u8, padding));
     }
 }
 

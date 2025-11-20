@@ -158,16 +158,12 @@ inventory::collect!(FusionSpecInventory);
 
 /// Iterate all registered GPU specs.
 pub fn builtin_gpu_specs() -> impl Iterator<Item = &'static BuiltinGpuSpec> {
-    inventory::iter::<GpuSpecInventory>()
-        .into_iter()
-        .map(|entry| entry.spec)
+    inventory::iter::<GpuSpecInventory>().map(|entry| entry.spec)
 }
 
 /// Iterate all registered fusion specs.
 pub fn builtin_fusion_specs() -> impl Iterator<Item = &'static BuiltinFusionSpec> {
-    inventory::iter::<FusionSpecInventory>()
-        .into_iter()
-        .map(|entry| entry.spec)
+    inventory::iter::<FusionSpecInventory>().map(|entry| entry.spec)
 }
 
 impl fmt::Debug for BuiltinFusionSpec {
@@ -207,7 +203,7 @@ pub struct DocTextInventory {
 inventory::collect!(DocTextInventory);
 
 pub fn builtin_doc_texts() -> impl Iterator<Item = &'static DocTextInventory> {
-    inventory::iter::<DocTextInventory>().into_iter()
+    inventory::iter::<DocTextInventory>()
 }
 
 #[macro_export]

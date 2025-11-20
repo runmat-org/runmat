@@ -166,15 +166,10 @@ fn parse_format_spec(chars: &mut Peekable<Chars<'_>>) -> Result<FormatSpec, Stri
     };
 
     // Length modifiers are ignored, but we must consume them to remain compatible.
-    if let Some(&modch) = chars.peek() {
-        match modch {
-            'h' | 'l' | 'L' | 'z' | 'j' | 't' => {
-                let c = chars.next().unwrap();
-                if (c == 'h' || c == 'l') && chars.peek() == Some(&c) {
-                    chars.next();
-                }
-            }
-            _ => {}
+    if let Some(&('h' | 'l' | 'L' | 'z' | 'j' | 't')) = chars.peek() {
+        let current = chars.next().unwrap();
+        if matches!(current, 'h' | 'l') && chars.peek() == Some(&current) {
+            chars.next();
         }
     }
 
@@ -362,6 +357,7 @@ fn apply_format_spec(
     Ok((formatted, consumed))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn format_integer(
     value: i128,
     is_negative: bool,
@@ -373,7 +369,7 @@ fn format_integer(
     uppercase: bool,
 ) -> Result<String, String> {
     let mut sign = String::new();
-    let abs_val = value.abs() as u128;
+    let abs_val = value.unsigned_abs();
 
     if is_negative {
         sign.push('-');
@@ -584,7 +580,7 @@ fn trim_trailing_zeros(text: &mut String, keep_exponent: bool) {
             end -= 1;
         }
         if keep_exponent {
-            if let Some(exp_idx) = text.find(|c: char| c == 'e' || c == 'E') {
+            if let Some(exp_idx) = text.find(['e', 'E']) {
                 let exponent = text[exp_idx..].to_string();
                 text.truncate(end.min(exp_idx));
                 text.push_str(&exponent);
@@ -784,7 +780,7 @@ fn value_to_char(value: &Value) -> Result<char, String> {
             .ok_or_else(|| "sprintf: %c conversion requires non-empty character input".to_string()),
         Value::CharArray(ca) => ca
             .data
-            .get(0)
+            .first()
             .copied()
             .ok_or_else(|| "sprintf: %c conversion requires non-empty char input".to_string()),
         Value::Num(n) => {

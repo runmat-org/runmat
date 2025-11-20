@@ -70,18 +70,13 @@ impl Default for AccelPowerPreference {
 }
 
 /// Logging verbosity for auto-offload promotion decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum AutoOffloadLogLevel {
     Off,
     Info,
+    #[default]
     Trace,
-}
-
-impl Default for AutoOffloadLogLevel {
-    fn default() -> Self {
-        AutoOffloadLogLevel::Trace
-    }
 }
 
 /// Configuration passed to the native auto-offload planner.

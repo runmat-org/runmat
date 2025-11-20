@@ -42,7 +42,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
     let _ = provider
-        .fused_elementwise(shader, &[elem.clone()], &elem_shape, elem_len)
+        .fused_elementwise(shader, std::slice::from_ref(&elem), &elem_shape, elem_len)
         .expect("fused_elementwise");
 
     let mat_shape = [2usize, 2usize];

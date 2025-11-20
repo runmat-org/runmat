@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn class_reports_double_for_numeric_scalars() {
-        let name = class_builtin(Value::Num(3.14)).expect("class");
+        let name = class_builtin(Value::Num(std::f64::consts::PI)).expect("class");
         assert_eq!(name, "double");
     }
 

@@ -210,7 +210,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             Ok(format!("accumulator *= {input};"))
         },
     }),
@@ -469,14 +472,11 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
         }
 
         if !selection_set || matches!(selection, DimSelection::Auto) {
-            match parse_dimension_spec(arg)? {
-                Some(sel) => {
-                    selection = sel;
-                    selection_set = true;
-                    idx += 1;
-                    continue;
-                }
-                None => {}
+            if let Some(sel) = parse_dimension_spec(arg)? {
+                selection = sel;
+                selection_set = true;
+                idx += 1;
+                continue;
             }
         }
 

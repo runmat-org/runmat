@@ -238,9 +238,8 @@ fn islogical_builtin(value: Value) -> Result<Value, String> {
 
 fn islogical_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.logical_islogical(&handle) {
-            Ok(flag) => return Ok(Value::Bool(flag)),
-            Err(_) => {}
+        if let Ok(flag) = provider.logical_islogical(&handle) {
+            return Ok(Value::Bool(flag));
         }
     }
 

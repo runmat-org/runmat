@@ -37,8 +37,8 @@ fusion:
   constants: "inline"
 requires_feature: null
 tested:
-  unit: "builtins::logical::logical::tests"
-  integration: "builtins::logical::logical::tests::logical_gpu_roundtrip"
+  unit: "builtins::logical::ops::tests"
+  integration: "builtins::logical::ops::tests::logical_gpu_roundtrip"
 ---
 
 # What does the `logical` function do in MATLAB / RunMat?
@@ -182,7 +182,7 @@ See the references below and the RunMat source for implementation details.
 [`islogical`](./tests/islogical), [`gpuArray`](../../acceleration/gpu/gpuArray), [`gather`](../../acceleration/gpu/gather), [`find`](../../math/reduction/find)
 
 ## Source & Feedback
-- Implementation: `crates/runmat-runtime/src/builtins/logical/logical.rs`
+- Implementation: `crates/runmat-runtime/src/builtins/logical/ops.rs`
 - Issues & feature requests: [https://github.com/runmat-org/runmat/issues/new/choose](https://github.com/runmat-org/runmat/issues/new/choose)
 "#;
 

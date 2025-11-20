@@ -70,18 +70,12 @@ pub struct FusionParams {
 }
 
 #[repr(C, align(16))]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
 pub struct PackedI32(pub [i32; 4]);
 
 impl PackedI32 {
     pub fn from_scalar(value: i32) -> Self {
         Self([value, 0, 0, 0])
-    }
-}
-
-impl Default for PackedI32 {
-    fn default() -> Self {
-        Self([0; 4])
     }
 }
 

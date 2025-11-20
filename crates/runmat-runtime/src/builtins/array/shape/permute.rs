@@ -444,7 +444,7 @@ fn permute_generic<T: Clone>(
     }
     let mut src_shape = shape.to_vec();
     if src_shape.len() < rank {
-        src_shape.extend(std::iter::repeat(1).take(rank - src_shape.len()));
+        src_shape.extend(std::iter::repeat_n(1, rank - src_shape.len()));
     }
     let total: usize = src_shape.iter().product();
     if total != data.len() {

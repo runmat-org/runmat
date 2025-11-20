@@ -24,8 +24,8 @@ fn fused_square_mean_all_matches_cpu() {
     // Build simple input
     let n = 1024usize;
     let mut data_h = vec![0.0f64; n];
-    for i in 0..n {
-        data_h[i] = (i as f64 * 0.001).sin();
+    for (i, value) in data_h.iter_mut().enumerate().take(n) {
+        *value = (i as f64 * 0.001).sin();
     }
     let x = provider
         .upload(&HostTensorView {

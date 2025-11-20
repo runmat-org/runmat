@@ -323,7 +323,7 @@ fn value_to_dimension(value: &Value) -> Result<Option<usize>, String> {
                 return Err(DIMENSION_TYPE_ERROR.to_string());
             }
             let rounded = n.round();
-            if (rounded - n).abs() > std::f64::EPSILON {
+            if (rounded - n).abs() > f64::EPSILON {
                 return Err(DIMENSION_TYPE_ERROR.to_string());
             }
             Ok(Some(rounded as usize))
@@ -334,7 +334,7 @@ fn value_to_dimension(value: &Value) -> Result<Option<usize>, String> {
                 return Err(DIMENSION_TYPE_ERROR.to_string());
             }
             let rounded = val.round();
-            if (rounded - val).abs() > std::f64::EPSILON {
+            if (rounded - val).abs() > f64::EPSILON {
                 return Err(DIMENSION_TYPE_ERROR.to_string());
             }
             Ok(Some(rounded as usize))
@@ -420,7 +420,7 @@ fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Result
             Ok(Value::StringArray(array))
         }
         OutputKind::CellArray => {
-            let rows = shape.get(0).copied().unwrap_or(0);
+            let rows = shape.first().copied().unwrap_or(0);
             let cols = shape.get(1).copied().unwrap_or(1);
             if rows == 0 || cols == 0 || data.is_empty() {
                 return make_cell(Vec::new(), rows, cols);

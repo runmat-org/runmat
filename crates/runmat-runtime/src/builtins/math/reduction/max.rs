@@ -200,10 +200,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
-            Ok(format!(
-                "accumulator = max(accumulator, {input});"
-            ))
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
+            Ok(format!("accumulator = max(accumulator, {input});"))
         },
     }),
     emits_nan: true,
@@ -258,7 +256,7 @@ pub fn evaluate(value: Value, rest: &[Value]) -> Result<MaxEvaluation, String> {
             ParsedCall::Reduction(_) => "reduction",
             ParsedCall::Elementwise(_) => "elementwise",
         };
-        let first_arg = rest.get(0).map(debug_value_kind).unwrap_or("None");
+        let first_arg = rest.first().map(debug_value_kind).unwrap_or("None");
         eprintln!(
             "[runmat-debug-max] call_type={call_label} rest_len={} first_arg={first_arg}",
             rest.len()
@@ -944,9 +942,7 @@ fn resolve_output_shape(
     let mut output = shape.to_vec();
     match selection {
         DimSelection::All => {
-            for dim in 0..output.len() {
-                output[dim] = 1;
-            }
+            output.fill(1);
         }
         _ => {
             for &dim in reduced_dims {

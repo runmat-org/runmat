@@ -236,7 +236,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let lhs = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let lhs = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             let rhs = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
             Ok(format!("({lhs} + {rhs})"))
         },
@@ -594,7 +594,7 @@ fn plus_host(lhs: Value, rhs: Value) -> Result<Value, String> {
 
 fn plus_real_real(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("plus: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("plus: {e}"))?;
         return Ok(tensor::tensor_into_value(tensor));
@@ -610,7 +610,7 @@ fn plus_real_real(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
 
 fn plus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("plus: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("plus: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -628,7 +628,7 @@ fn plus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Valu
 
 fn plus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("plus: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("plus: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -646,7 +646,7 @@ fn plus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> Result<Value, String>
 
 fn plus_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("plus: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("plus: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -790,7 +790,7 @@ mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                let expected = vec![(3.0, 1.0), (2.0, -3.0)];
+                let expected = [(3.0, 1.0), (2.0, -3.0)];
                 for (got, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < EPS && (got.1 - exp.1).abs() < EPS);
                 }
@@ -967,7 +967,7 @@ mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 1]);
-                let expected = vec![(6.0, 0.0), (8.0, 0.0)];
+                let expected = [(6.0, 0.0), (8.0, 0.0)];
                 for (got, exp) in ct.data.iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < EPS);
                     assert!((got.1 - exp.1).abs() < EPS);

@@ -302,7 +302,7 @@ pub(super) fn ifft_complex_tensor(
     let mut shape = tensor.shape.clone();
     let origin_rank = shape.len();
     let dim_index = match dimension {
-        Some(dim) if dim == 0 => return Err("ifft: dimension must be >= 1".to_string()),
+        Some(0) => return Err("ifft: dimension must be >= 1".to_string()),
         Some(dim) => dim - 1,
         None => default_dimension(&shape) - 1,
     };
@@ -365,19 +365,19 @@ pub(super) fn ifft_complex_tensor(
         let base_out = outer.saturating_mul(target_len.saturating_mul(inner_stride));
         for inner in 0..inner_stride {
             buffer.fill(Complex::new(0.0, 0.0));
-            for k in 0..copy_len {
+            for (k, slot) in buffer.iter_mut().enumerate().take(copy_len) {
                 let src_idx = base_in + inner + k * inner_stride;
                 if src_idx < input.len() {
-                    buffer[k] = input[src_idx];
+                    *slot = input[src_idx];
                 }
             }
             if let Some(plan) = &ifft_plan {
                 plan.process(&mut buffer);
             }
-            for k in 0..target_len {
+            for (k, value) in buffer.iter().enumerate().take(target_len) {
                 let dst_idx = base_out + inner + k * inner_stride;
                 if dst_idx < output.len() {
-                    output[dst_idx] = buffer[k] * scale;
+                    output[dst_idx] = *value * scale;
                 }
             }
         }

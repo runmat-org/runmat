@@ -339,8 +339,10 @@ mod tests {
             register_wgpu_provider, WgpuProviderOptions,
         };
 
-        let mut options = WgpuProviderOptions::default();
-        options.force_fallback_adapter = true;
+        let options = WgpuProviderOptions {
+            force_fallback_adapter: true,
+            ..Default::default()
+        };
 
         let provider = match register_wgpu_provider(options) {
             Ok(p) => p,

@@ -23,9 +23,11 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
+type BufferStore = HashMap<u64, (Vec<f64>, Vec<usize>)>;
+
 struct TestProvider {
     next_id: AtomicU64,
-    buffers: Mutex<HashMap<u64, (Vec<f64>, Vec<usize>)>>,
+    buffers: Mutex<BufferStore>,
 }
 
 impl TestProvider {
@@ -183,20 +185,20 @@ impl AccelProvider for TestProvider {
             );
         }
         let (data, shape) = self.pull(matrix)?;
-        let rows = shape.get(0).copied().unwrap_or(1);
+        let rows = shape.first().copied().unwrap_or(1);
         let cols = if shape.len() > 1 { shape[1] } else { 1 };
         if rows == 0 || cols == 0 {
             return Ok(self.push(Vec::new(), vec![cols, cols]));
         }
         let mut means = vec![0.0f64; cols];
-        for c in 0..cols {
+        for (c, mean) in means.iter_mut().enumerate().take(cols) {
             for r in 0..rows {
                 let idx = r + rows * c;
                 if let Some(value) = data.get(idx) {
-                    means[c] += *value;
+                    *mean += *value;
                 }
             }
-            means[c] /= rows as f64;
+            *mean /= rows as f64;
         }
         let denom = match options.normalization {
             CovNormalization::Unbiased => (rows as f64) - 1.0,
@@ -314,17 +316,16 @@ impl AccelProvider for TestProvider {
             }
         }
         let mut norms = vec![0.0f64; n];
-        for col in 0..n {
+        for (col, norm) in norms.iter_mut().enumerate().take(n) {
             let mut acc = 0.0f64;
             for row in 0..m {
                 let val = product[row + m * col];
                 acc += val * val;
             }
             acc += epilogue.epsilon;
-            norms[col] = acc.sqrt();
+            *norm = acc.sqrt();
         }
-        for col in 0..n {
-            let norm = norms[col];
+        for (col, norm) in norms.iter().copied().enumerate().take(n) {
             for row in 0..m {
                 let idx = row + m * col;
                 product[idx] /= norm;
@@ -852,8 +853,8 @@ impl<'a> ExprParser<'a> {
 
     fn parse_identifier(&mut self, name: String) -> anyhow::Result<f64> {
         self.advance();
-        if name.starts_with("tmp") {
-            let idx: usize = name[3..]
+        if let Some(rest) = name.strip_prefix("tmp") {
+            let idx: usize = rest
                 .parse()
                 .map_err(|e| anyhow!("invalid tmp identifier '{name}': {e}"))?;
             let value = self
@@ -864,7 +865,10 @@ impl<'a> ExprParser<'a> {
             return Ok(value);
         }
         if name.starts_with("input") && self.check_symbol('.') {
-            let input_idx: usize = name[5..]
+            let rest = name
+                .strip_prefix("input")
+                .ok_or_else(|| anyhow!("invalid input identifier '{name}'"))?;
+            let input_idx: usize = rest
                 .parse()
                 .map_err(|e| anyhow!("invalid input identifier '{name}': {e}"))?;
             self.expect_symbol('.')?;
@@ -1073,7 +1077,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                     Instr::StoreVar(i) => Some(*i),
                     _ => None,
                 })
-                .last()
+                .next_back()
                 .expect("store var for S");
             let s_value_cpu = vars_cpu.get(s_index).expect("value for S (cpu)");
             let gathered_cpu = gather_if_needed(s_value_cpu).expect("gather cpu");
@@ -1294,10 +1298,10 @@ fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
             }
         }
         for c in 0..cols {
-            data[0 + c * rows] = f64::NAN; // first row
+            data[c * rows] = f64::NAN; // first row
         }
-        for r in 0..rows {
-            data[r + 0 * rows] = f64::NAN; // first column
+        for value in data.iter_mut().take(rows) {
+            *value = f64::NAN; // first column
         }
 
         // Run CPU path with host tensor injected
@@ -1455,12 +1459,12 @@ fn reduction_sum_include_omit_dim1_dim2_degenerate_gpu_cpu() {
             }
             if rows > 0 {
                 for c in 0..cols {
-                    data[0 + c * rows] = f64::NAN;
+                    data[c * rows] = f64::NAN;
                 }
             }
             if cols > 0 {
-                for r in 0..rows {
-                    data[r + 0 * rows] = f64::NAN;
+                for value in data.iter_mut().take(rows) {
+                    *value = f64::NAN;
                 }
             }
 
@@ -1708,7 +1712,7 @@ fn provider_reduce_sum_dim_parity_simple() {
             }
         }
         // Insert NaNs: one in column 1, one in row 2
-        data[0 + 1 * rows] = f64::NAN; // (r=0,c=1)
+        data[rows] = f64::NAN; // (r=0,c=1)
         data[2 + 3 * rows] = f64::NAN; // (r=2,c=3)
 
         let view = runmat_accelerate_api::HostTensorView {
@@ -1846,7 +1850,7 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
         let find_by_shape =
             |vars: &Vec<Value>, want_rows: usize, want_cols: usize| -> Option<Vec<f64>> {
                 for v in vars {
-                    if let Some(Value::Tensor(t)) = gather_if_needed(v).ok() {
+                    if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
                         if t.shape.len() == 2 && t.shape[0] == want_rows && t.shape[1] == want_cols
                         {
                             return Some(t.data);
@@ -1927,7 +1931,7 @@ fn fused_reduction_sum_dim1_dim2_omit_gpu_cpu() {
         let find_by_shape =
             |vars: &Vec<Value>, want_rows: usize, want_cols: usize| -> Option<Vec<f64>> {
                 for v in vars {
-                    if let Some(Value::Tensor(t)) = gather_if_needed(v).ok() {
+                    if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
                         if t.shape.len() == 2 && t.shape[0] == want_rows && t.shape[1] == want_cols
                         {
                             return Some(t.data);
@@ -1979,7 +1983,7 @@ fn fused_elementwise_residency_and_gather() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("store var for y");
 
         let y_value = vars.get(y_index).expect("value for y");
@@ -2115,7 +2119,7 @@ fn centered_gram_fusion_matches_cpu() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("cov store index");
 
         let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -2198,7 +2202,7 @@ fn mean_all_gpu_matches_cpu() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("mu store index");
 
         let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -2267,7 +2271,7 @@ fn power_step_normalization_matches_cpu() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("store index for Q");
 
         let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -2342,7 +2346,7 @@ fn image_normalize_matches_cpu() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("store index for out");
 
         let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -2443,7 +2447,7 @@ fn explained_variance_matches_cpu() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("store index for eval");
 
         let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -2519,7 +2523,7 @@ fn explained_variance_matches_cpu() {
             println!("g tensor data {:?}", g_tensor.data);
         }
 
-        let rows = q_tensor.shape.get(0).copied().unwrap_or(0);
+        let rows = q_tensor.shape.first().copied().unwrap_or(0);
         let cols = q_tensor.shape.get(1).copied().unwrap_or(1);
         assert!(
             rows > 0 && cols > 0,

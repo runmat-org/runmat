@@ -217,7 +217,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let a = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let a = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             let b = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
             Ok(format!("{a} - {b} * floor({a} / {b})"))
         },
@@ -304,7 +307,7 @@ fn mod_host(lhs: Value, rhs: Value) -> Result<Value, String> {
 
 fn compute_mod_real(a: &Tensor, b: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape).map_err(|err| format!("mod: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("mod: {e}"))?;
         return Ok(tensor::tensor_into_value(tensor));
@@ -322,7 +325,7 @@ fn compute_mod_real(a: &Tensor, b: &Tensor) -> Result<Value, String> {
 
 fn compute_mod_complex(a: &ComplexTensor, b: &ComplexTensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape).map_err(|err| format!("mod: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("mod: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));
@@ -529,7 +532,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected = vec![0.5, 1.1, 1.7, 0.4];
+                let expected = [0.5, 1.1, 1.7, 0.4];
                 for (a, b) in t.data.iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
@@ -548,7 +551,7 @@ mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                let expected = vec![(0.0, 0.0), (0.0, 1.0)];
+                let expected = [(0.0, 0.0), (0.0, 1.0)];
                 for ((re, im), (er, ei)) in out.data.iter().zip(expected.iter()) {
                     assert!((re - er).abs() < 1e-12);
                     assert!((im - ei).abs() < 1e-12);

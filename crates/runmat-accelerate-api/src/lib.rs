@@ -258,7 +258,7 @@ pub struct ProviderQrPowerIterResult {
     pub perm_vector: GpuTensorHandle,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProviderLinsolveOptions {
     pub lower: bool,
     pub upper: bool,
@@ -270,36 +270,15 @@ pub struct ProviderLinsolveOptions {
     pub rcond: Option<f64>,
 }
 
-impl Default for ProviderLinsolveOptions {
-    fn default() -> Self {
-        Self {
-            lower: false,
-            upper: false,
-            rectangular: false,
-            transposed: false,
-            conjugate: false,
-            symmetric: false,
-            posdef: false,
-            rcond: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderLinsolveResult {
     pub solution: GpuTensorHandle,
     pub reciprocal_condition: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProviderPinvOptions {
     pub tolerance: Option<f64>,
-}
-
-impl Default for ProviderPinvOptions {
-    fn default() -> Self {
-        Self { tolerance: None }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -308,15 +287,9 @@ pub struct ProviderPolyvalMu {
     pub scale: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProviderPolyvalOptions {
     pub mu: Option<ProviderPolyvalMu>,
-}
-
-impl Default for ProviderPolyvalOptions {
-    fn default() -> Self {
-        Self { mu: None }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1914,6 +1887,7 @@ pub trait AccelProvider: Send + Sync {
     /// `num_slices` independent slices (e.g., columns). Providers should create a uniform buffer
     /// compatible with the expected `Params/MParams` struct in the shader and dispatch
     /// `num_slices` workgroups with `workgroup_size` threads, or an equivalent strategy.
+    #[allow(clippy::too_many_arguments)]
     fn fused_reduction(
         &self,
         _shader: &str,

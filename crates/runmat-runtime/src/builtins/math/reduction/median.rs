@@ -544,7 +544,7 @@ fn reduce_tensor_median_dim(
     }
 
     if tensor.shape.is_empty() {
-        let value = tensor.data.get(0).copied().unwrap_or(f64::NAN);
+        let value = tensor.data.first().copied().unwrap_or(f64::NAN);
         return Tensor::new(vec![value], vec![1, 1]).map_err(|e| format!("median: {e}"));
     }
 

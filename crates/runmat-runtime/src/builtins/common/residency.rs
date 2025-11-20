@@ -154,7 +154,7 @@ mod tests {
     fn env_min_len_controls_threshold() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_env();
-        let _ = simple_provider::register_inprocess_provider();
+        simple_provider::register_inprocess_provider();
         std::env::set_var("RUNMAT_SEQUENCE_GPU_MIN", "8192");
         let decision = sequence_gpu_preference(10_000, SequenceIntent::Linspace, false);
         assert!(decision.prefer_gpu);

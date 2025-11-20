@@ -307,7 +307,7 @@ fn parse_options(args: &[Value]) -> Result<WriteMatrixOptions, String> {
     if args.is_empty() {
         return Ok(WriteMatrixOptions::default());
     }
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return Err("writematrix: name/value inputs must appear in pairs".to_string());
     }
 
@@ -625,7 +625,7 @@ fn write_matrix(
             if !cell.is_empty() {
                 file.write_all(cell.as_bytes())
                     .map_err(|err| format!("writematrix: failed to write value ({err})"))?;
-                bytes_written += cell.as_bytes().len();
+                bytes_written += cell.len();
             }
         }
         file.write_all(line_ending.as_bytes())
@@ -677,7 +677,7 @@ fn format_numeric(value: f64, decimal_separator: char) -> String {
     }
 
     let abs = value.abs();
-    let scientific = abs != 0.0 && (abs >= 1e15 || abs < 1e-4);
+    let scientific = abs != 0.0 && !(1e-4..1e15).contains(&abs);
     let raw = if scientific {
         format!("{:.15e}", value)
     } else {

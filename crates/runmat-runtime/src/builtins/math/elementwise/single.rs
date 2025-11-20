@@ -198,7 +198,7 @@ See MathWorks’ documentation linked above or inspect this builtin’s source f
 implementation.
 
 ## See Also
-[gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather), [logical](../../../logical/logical), [single (MathWorks)](https://www.mathworks.com/help/matlab/ref/single.html)
+[gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather), [logical](../../../logical/ops), [single (MathWorks)](https://www.mathworks.com/help/matlab/ref/single.html)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/elementwise/single.rs`
@@ -231,7 +231,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             match ctx.scalar_ty {
                 ScalarType::F32 => Ok(input.to_string()),
                 ScalarType::F64 => Ok(format!("f64(f32({input}))")),

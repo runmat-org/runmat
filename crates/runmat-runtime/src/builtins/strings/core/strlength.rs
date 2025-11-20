@@ -239,7 +239,7 @@ fn strlength_cell_array(cell: CellArray) -> Result<Value, String> {
     for col in 0..cols {
         for row in 0..rows {
             let idx = row * cols + col;
-            let value = &*data[idx];
+            let value: &Value = &data[idx];
             let length = match value {
                 Value::String(text) => string_scalar_length(text),
                 Value::StringArray(sa) if sa.data.len() == 1 => string_scalar_length(&sa.data[0]),

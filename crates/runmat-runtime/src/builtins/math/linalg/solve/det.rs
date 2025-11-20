@@ -554,7 +554,7 @@ fn permutation_sign(permutation: &[usize]) -> f64 {
             current = permutation[current];
             length += 1;
         }
-        if length > 0 && length % 2 == 0 {
+        if length > 0 && length.is_multiple_of(2) {
             sign = -sign;
         }
     }

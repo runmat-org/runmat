@@ -204,7 +204,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!(
                 "accumulator *= select(0.0, 1.0, ({input} != 0.0) || ({input} != {input}));"
             ))
@@ -280,15 +280,12 @@ fn try_all_gpu(
 ) -> Result<Option<HostTensorOwned>, String> {
     let omit_nan = matches!(nan_mode, ReductionNaN::Omit);
 
-    match spec {
-        ReductionSpec::All => {
-            if let Ok(tmp) = provider.reduce_all(handle, omit_nan) {
-                let host = provider.download(&tmp).map_err(|e| e.to_string())?;
-                let _ = provider.free(&tmp);
-                return Ok(Some(host));
-            }
+    if let ReductionSpec::All = spec {
+        if let Ok(tmp) = provider.reduce_all(handle, omit_nan) {
+            let host = provider.download(&tmp).map_err(|e| e.to_string())?;
+            let _ = provider.free(&tmp);
+            return Ok(Some(host));
         }
-        _ => {}
     }
 
     reduce_dims_gpu(provider, handle, spec, omit_nan)

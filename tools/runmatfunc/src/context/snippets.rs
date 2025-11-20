@@ -9,10 +9,7 @@ use crate::context::reference::REFERENCE_FILE_PATHS;
 
 /// Return source paths relevant for the builtin (implementation, docs, tests).
 pub fn source_paths(record: &BuiltinRecord, config: &AppConfig) -> Result<Vec<PathBuf>> {
-    let mut paths: BTreeSet<PathBuf> = REFERENCE_FILE_PATHS
-        .iter()
-        .map(|p| PathBuf::from(p))
-        .collect();
+    let mut paths: BTreeSet<PathBuf> = REFERENCE_FILE_PATHS.iter().map(PathBuf::from).collect();
 
     if let Some(plan) = config.generation_plan_path() {
         paths.insert(plan.to_path_buf());

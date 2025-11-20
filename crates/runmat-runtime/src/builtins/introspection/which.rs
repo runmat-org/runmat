@@ -588,7 +588,7 @@ mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let value = which_builtin(vec![Value::from("sin"), Value::from("-all")]).expect("which");
         match value {
-            Value::Cell(cell) => assert!(cell.data.len() >= 1),
+            Value::Cell(cell) => assert!(!cell.data.is_empty()),
             other => panic!("expected cell array, got {other:?}"),
         }
     }
@@ -610,7 +610,7 @@ mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let value = which_builtin(vec![Value::from("-all"), Value::from("sin")]).expect("which");
         match value {
-            Value::Cell(cell) => assert!(cell.data.len() >= 1),
+            Value::Cell(cell) => assert!(!cell.data.is_empty()),
             other => panic!("expected cell array, got {other:?}"),
         }
     }

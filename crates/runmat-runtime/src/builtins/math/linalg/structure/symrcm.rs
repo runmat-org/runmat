@@ -599,18 +599,14 @@ mod tests {
     #[test]
     fn symrcm_requires_square_matrix() {
         let tensor = tensor_from_entries(2, 3, &[(0, 1, 1.0)]);
-        let err = symrcm_builtin(Value::Tensor(tensor))
-            .err()
-            .expect("should fail");
+        let err = symrcm_builtin(Value::Tensor(tensor)).expect_err("should fail");
         assert!(err.contains("square"), "unexpected error message: {err}");
     }
 
     #[test]
     fn symrcm_vector_is_not_square() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0], vec![3]).unwrap();
-        let err = symrcm_builtin(Value::Tensor(tensor))
-            .err()
-            .expect("should fail");
+        let err = symrcm_builtin(Value::Tensor(tensor)).expect_err("should fail");
         assert!(
             err.contains("square"),
             "unexpected error message for non-square input: {err}"
@@ -620,9 +616,7 @@ mod tests {
     #[test]
     fn symrcm_rejects_higher_dimensional_input() {
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
-        let err = symrcm_builtin(Value::Tensor(tensor))
-            .err()
-            .expect("should fail");
+        let err = symrcm_builtin(Value::Tensor(tensor)).expect_err("should fail");
         assert!(
             err.contains("2-D"),
             "unexpected error message for high-dimensional input: {err}"
@@ -631,9 +625,7 @@ mod tests {
 
     #[test]
     fn symrcm_rejects_unsupported_type() {
-        let err = symrcm_builtin(Value::String("abc".to_string()))
-            .err()
-            .expect("should fail");
+        let err = symrcm_builtin(Value::String("abc".to_string())).expect_err("should fail");
         assert!(
             err.contains("unsupported"),
             "unexpected error message for unsupported type: {err}"

@@ -620,8 +620,7 @@ fn copy_block<T: Clone>(
 
 fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> Result<Value, String> {
     if sizes.len() > 2 {
-        for dim in 2..sizes.len() {
-            let count = sizes[dim];
+        for (dim, &count) in sizes.iter().enumerate().skip(2) {
             let offset = start.get(dim).copied().unwrap_or(0);
             if count != 1 || offset != 0 {
                 return Err(
@@ -631,8 +630,8 @@ fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> Resu
             }
         }
     }
-    let row_start = start.get(0).copied().unwrap_or(0);
-    let row_count = sizes.get(0).copied().unwrap_or(1);
+    let row_start = start.first().copied().unwrap_or(0);
+    let row_count = sizes.first().copied().unwrap_or(1);
     let col_start = start.get(1).copied().unwrap_or(0);
     let col_count = sizes.get(1).copied().unwrap_or(1);
 

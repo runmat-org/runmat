@@ -220,7 +220,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             Ok(format!("ceil({input})"))
         },
     }),
@@ -360,7 +363,7 @@ fn parse_arguments(args: &[Value]) -> Result<CeilArgs, String> {
 }
 
 fn parse_output_template(args: &[Value]) -> Result<(usize, OutputTemplate), String> {
-    if args.len() >= 1 && is_keyword(&args[args.len() - 1], "like") {
+    if !args.is_empty() && is_keyword(&args[args.len() - 1], "like") {
         return Err("ceil: expected prototype after 'like'".to_string());
     }
     if args.len() >= 2 && is_keyword(&args[args.len() - 2], "like") {
@@ -493,7 +496,7 @@ fn ceil_with_significant(value: f64, digits: i32) -> f64 {
     }
     let abs_val = value.abs();
     let order = abs_val.log10().floor();
-    let scale_power = digits as i32 - 1 - order as i32;
+    let scale_power = digits - 1 - order as i32;
     let scale = 10f64.powi(scale_power);
     if !scale.is_finite() || scale == 0.0 {
         return value;

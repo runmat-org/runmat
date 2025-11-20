@@ -60,11 +60,11 @@ fn matches_var(expr: &HirExpr, var: runmat_hir::VarId) -> bool {
     matches!(expr.kind, runmat_hir::HirExprKind::Var(id) if id == var)
 }
 
-fn extract_drift_and_scale<'a>(
-    expr: &'a HirExpr,
+fn extract_drift_and_scale(
+    expr: &HirExpr,
     state_var: runmat_hir::VarId,
     z_var: runmat_hir::VarId,
-) -> Option<(&'a HirExpr, &'a HirExpr)> {
+) -> Option<(&HirExpr, &HirExpr)> {
     use runmat_hir::HirExprKind as EK;
     use runmat_parser::BinOp;
 
@@ -100,7 +100,7 @@ fn extract_drift_and_scale<'a>(
     }
 }
 
-fn extract_scale_term<'a>(expr: &'a HirExpr, z_var: runmat_hir::VarId) -> Option<&'a HirExpr> {
+fn extract_scale_term(expr: &HirExpr, z_var: runmat_hir::VarId) -> Option<&HirExpr> {
     use runmat_hir::HirExprKind as EK;
     use runmat_parser::BinOp;
 

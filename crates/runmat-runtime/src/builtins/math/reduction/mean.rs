@@ -408,39 +408,31 @@ fn normalise_mean_call_args(value: Value, rest: Vec<Value>) -> (Value, Vec<Value
     if is_data_like(&value) {
         return (value, rest);
     }
-    // Find the first data-like argument in rest
-    let mut idx_opt: Option<usize> = None;
-    for i in 0..rest.len() {
-        if is_data_like(&rest[i]) {
-            idx_opt = Some(i);
-            break;
-        }
-    }
-    if let Some(idx) = idx_opt {
+    if let Some(idx) = rest.iter().position(is_data_like) {
         let mut rest_mut = rest;
         let new_value = rest_mut.remove(idx);
         let mut new_rest = Vec::with_capacity(rest_mut.len() + 1);
         // Keep the original non-data 'value' (e.g., 'all') in rest so it can be parsed as a keyword
         new_rest.push(value);
         // Append the remaining rest args
-        new_rest.extend(rest_mut.into_iter());
+        new_rest.extend(rest_mut);
         return (new_value, new_rest);
     }
     (value, rest)
 }
 
 fn is_data_like(v: &Value) -> bool {
-    match v {
+    matches!(
+        v,
         Value::Tensor(_)
-        | Value::GpuTensor(_)
-        | Value::Num(_)
-        | Value::Int(_)
-        | Value::LogicalArray(_)
-        | Value::Bool(_)
-        | Value::Complex(_, _)
-        | Value::ComplexTensor(_) => true,
-        _ => false,
-    }
+            | Value::GpuTensor(_)
+            | Value::Num(_)
+            | Value::Int(_)
+            | Value::LogicalArray(_)
+            | Value::Bool(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+    )
 }
 
 fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
@@ -520,22 +512,19 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
         }
 
         if !axes_set || matches!(axes, MeanAxes::Default) {
-            match parse_axes(arg)? {
-                Some(selection) => {
-                    if matches!(selection, MeanAxes::All)
-                        && axes_set
-                        && !matches!(axes, MeanAxes::Default)
-                    {
-                        return Err(
-                            "mean: 'all' cannot be combined with an explicit dimension".to_string()
-                        );
-                    }
-                    axes = selection;
-                    axes_set = true;
-                    idx += 1;
-                    continue;
+            if let Some(selection) = parse_axes(arg)? {
+                if matches!(selection, MeanAxes::All)
+                    && axes_set
+                    && !matches!(axes, MeanAxes::Default)
+                {
+                    return Err(
+                        "mean: 'all' cannot be combined with an explicit dimension".to_string()
+                    );
                 }
-                None => {}
+                axes = selection;
+                axes_set = true;
+                idx += 1;
+                continue;
             }
         }
 
@@ -623,7 +612,7 @@ fn parse_dimension_vector(tensor: &Tensor) -> Result<Vec<usize>, String> {
             return Err("mean: dimension entries must be finite integers".to_string());
         }
         let rounded = val.round();
-        let adjusted = if rounded < 1.0 && rounded >= 0.0 {
+        let adjusted = if (0.0..1.0).contains(&rounded) {
             1.0
         } else {
             rounded
@@ -785,7 +774,7 @@ fn reduce_mean_dim_gpu(
 fn reduce_mean_vecdim_nd_gpu(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
-    dims_1based: &Vec<usize>,
+    dims_1based: &[usize],
 ) -> Option<GpuTensorHandle> {
     let rank = handle.shape.len();
     if rank == 0 || dims_1based.is_empty() {
@@ -822,7 +811,7 @@ fn reduce_mean_vecdim_nd_gpu(
     let total_elems: usize = handle.shape.iter().copied().product();
     if reduce_len == 0 || total_elems == 0 {
         let _ = provider.free(&permuted);
-        return provider.fill(&vec![1, 1], f64::NAN).ok();
+        return provider.fill(&[1, 1], f64::NAN).ok();
     }
     let num_slices = total_elems / reduce_len;
     // Reshape permuted view to [rows, cols]
@@ -844,7 +833,7 @@ fn reduce_mean_vecdim_nd_gpu(
     let _ = provider.free(&reduced_rows);
     // Expand permuted shape by inserting ones for reduced axes
     let mut expanded_perm_shape: Vec<usize> = Vec::with_capacity(rank);
-    expanded_perm_shape.extend(std::iter::repeat(1usize).take(reduce_dims.len()));
+    expanded_perm_shape.extend(std::iter::repeat_n(1usize, reduce_dims.len()));
     expanded_perm_shape.extend_from_slice(&kept_sizes);
     let expanded = provider
         .reshape(&reshaped_kept, &expanded_perm_shape)
@@ -1011,7 +1000,7 @@ fn reduce_tensor_mean_dim(
     }
 
     if tensor.shape.is_empty() {
-        let value = tensor.data.get(0).copied().unwrap_or(f64::NAN);
+        let value = tensor.data.first().copied().unwrap_or(f64::NAN);
         let result = match nan_mode {
             ReductionNaN::Include => value,
             ReductionNaN::Omit => {
@@ -1142,7 +1131,7 @@ fn reduce_complex_tensor_mean_dim(
     };
 
     if shape.is_empty() {
-        let (re, im) = tensor.data.get(0).copied().unwrap_or((f64::NAN, f64::NAN));
+        let (re, im) = tensor.data.first().copied().unwrap_or((f64::NAN, f64::NAN));
         let result = match nan_mode {
             ReductionNaN::Include => (re, im),
             ReductionNaN::Omit => {
@@ -1696,7 +1685,7 @@ mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                let expected = vec![(3.0, 0.0), (4.0, 0.0)];
+                let expected = [(3.0, 0.0), (4.0, 0.0)];
                 for (got, exp) in out.data.iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < 1e-12);
                     assert!((got.1 - exp.1).abs() < 1e-12);

@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn ndims_scalar_returns_two() {
-        let result = ndims_builtin(Value::Num(3.14)).expect("ndims");
+        let result = ndims_builtin(Value::Num(std::f64::consts::PI)).expect("ndims");
         assert_eq!(result, Value::Num(2.0));
     }
 

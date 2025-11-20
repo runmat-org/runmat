@@ -414,9 +414,15 @@ fn compute_svd_complex(
     assemble_eval_complex(&u, &v, &singular_values, options)
 }
 
+type FactorizationResult<T> = (
+    DMatrix<T>,
+    DVector<<T as nalgebra::ComplexField>::RealField>,
+    DMatrix<T>,
+);
+
 fn factorize<T: nalgebra::ComplexField>(
     matrix: DMatrix<T>,
-) -> Result<(DMatrix<T>, DVector<T::RealField>, DMatrix<T>), String> {
+) -> Result<FactorizationResult<T>, String> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     if rows == 0 || cols == 0 {

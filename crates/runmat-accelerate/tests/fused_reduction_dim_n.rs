@@ -45,8 +45,8 @@ fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
             wh[r + c * rows] = (c as f64) + 2.0;
         }
     }
-    let x = upload(&provider, rows, cols, &xh);
-    let w = upload(&provider, rows, cols, &wh);
+    let x = upload(provider, rows, cols, &xh);
+    let w = upload(provider, rows, cols, &wh);
 
     for dim_val in [1.0f64, 2.0f64] {
         // Build graph: y = sum(x .* w, n)

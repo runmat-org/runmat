@@ -331,10 +331,10 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> Result<FreadEval, String> 
     let (size_arg, precision_arg, skip_arg, machine_arg, like_arg) =
         classify_arguments(&arg_refs).map_err(|e| format!("fread: {e}"))?;
 
-    let size_host = size_arg.map(|value| gather_value(value)).transpose()?;
-    let precision_host = precision_arg.map(|value| gather_value(value)).transpose()?;
-    let skip_host = skip_arg.map(|value| gather_value(value)).transpose()?;
-    let machine_host = machine_arg.map(|value| gather_value(value)).transpose()?;
+    let size_host = size_arg.map(gather_value).transpose()?;
+    let precision_host = precision_arg.map(gather_value).transpose()?;
+    let skip_host = skip_arg.map(gather_value).transpose()?;
+    let machine_host = machine_arg.map(gather_value).transpose()?;
 
     let size_spec = parse_size(size_host.as_ref())?;
     let precision = parse_precision(precision_host.as_ref())?;
@@ -377,18 +377,15 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
     Ok(rounded as i32)
 }
 
-fn classify_arguments<'a>(
-    args: &'a [&'a Value],
-) -> Result<
-    (
-        Option<&'a Value>,
-        Option<&'a Value>,
-        Option<&'a Value>,
-        Option<&'a Value>,
-        Option<&'a Value>,
-    ),
-    String,
-> {
+type ClassifiedArgs<'a> = (
+    Option<&'a Value>,
+    Option<&'a Value>,
+    Option<&'a Value>,
+    Option<&'a Value>,
+    Option<&'a Value>,
+);
+
+fn classify_arguments<'a>(args: &'a [&'a Value]) -> Result<ClassifiedArgs<'a>, String> {
     let mut filtered_indices: Vec<usize> = Vec::with_capacity(args.len());
     let mut like_proto: Option<&Value> = None;
     let mut i = 0usize;
@@ -426,10 +423,12 @@ fn classify_arguments<'a>(
     Ok((size, precision, skip, machine, like_proto))
 }
 
+type ClassifiedIndices = (Option<usize>, Option<usize>, Option<usize>, Option<usize>);
+
 fn classify_ordered_indices(
     args: &[&Value],
     indices: &[usize],
-) -> Result<(Option<usize>, Option<usize>, Option<usize>, Option<usize>), String> {
+) -> Result<ClassifiedIndices, String> {
     let mut position = 0usize;
     let mut size_idx: Option<usize> = None;
     let mut precision_idx: Option<usize> = None;
@@ -710,9 +709,9 @@ fn parse_precision_string(raw: &str) -> Result<PrecisionSpec, String> {
         Ok(PrecisionSpec { input, output })
     } else {
         let input = parse_input_label(lower.trim())?;
-        let output = if matches!(input, InputType::UInt8) && lower.contains("char") {
-            OutputKind::Char
-        } else if lower == "char" {
+        let wants_char =
+            lower == "char" || (matches!(input, InputType::UInt8) && lower.contains("char"));
+        let output = if wants_char {
             OutputKind::Char
         } else {
             OutputKind::Double
@@ -1027,13 +1026,7 @@ fn read_numeric_values<R: Read + Seek>(
         let mut remaining = element_size;
         while remaining > 0 {
             match reader.read(&mut buffer[element_size - remaining..element_size]) {
-                Ok(0) => {
-                    if remaining == element_size {
-                        break 'outer;
-                    } else {
-                        break 'outer;
-                    }
-                }
+                Ok(0) => break 'outer,
                 Ok(n) => remaining -= n,
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
                 Err(err) => {
@@ -1084,13 +1077,7 @@ fn read_char_values<R: Read + Seek>(
         let mut remaining = element_size;
         while remaining > 0 {
             match reader.read(&mut buffer[element_size - remaining..element_size]) {
-                Ok(0) => {
-                    if remaining == element_size {
-                        break 'outer;
-                    } else {
-                        break 'outer;
-                    }
-                }
+                Ok(0) => break 'outer,
                 Ok(n) => remaining -= n,
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
                 Err(err) => {
@@ -1207,7 +1194,7 @@ fn finalize_numeric(
                 let cols = if count_read == 0 {
                     0
                 } else {
-                    (count_read + rows - 1) / rows
+                    count_read.div_ceil(*rows)
                 };
                 let target = rows.saturating_mul(cols);
                 if values.len() < target {
@@ -1254,7 +1241,7 @@ fn finalize_char(
                 let cols = if count_read == 0 {
                     0
                 } else {
-                    (count_read + rows - 1) / rows
+                    count_read.div_ceil(*rows)
                 };
                 let target = rows.saturating_mul(cols);
                 if column_major.len() < target {
@@ -1402,7 +1389,7 @@ mod tests {
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
 
-        let eval = evaluate(&Value::Num(fid as f64), &vec![Value::from("*char")]).expect("fread");
+        let eval = evaluate(&Value::Num(fid as f64), &[Value::from("*char")]).expect("fread");
         assert_eq!(eval.count(), 3);
         match eval.data() {
             Value::CharArray(ca) => {

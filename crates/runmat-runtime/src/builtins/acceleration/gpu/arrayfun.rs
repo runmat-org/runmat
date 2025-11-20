@@ -969,8 +969,8 @@ impl UniformCollector {
                     );
                 }
 
-                let rows = *normalized_shape.get(0).unwrap_or(&1);
-                let cols = *normalized_shape.get(1).unwrap_or(&1);
+                let rows = normalized_shape.first().copied().unwrap_or(1);
+                let cols = normalized_shape.get(1).copied().unwrap_or(1);
                 let expected = rows.checked_mul(cols).ok_or_else(|| {
                     "arrayfun: character output size exceeds platform limits".to_string()
                 })?;
@@ -1156,8 +1156,8 @@ mod tests {
         };
         assert_eq!(cell.rows, 2);
         assert_eq!(cell.cols, 1);
-        for i in 0..2 {
-            assert_eq!(cell.get(i, 0).unwrap(), expected[i]);
+        for (row, value) in expected.iter().enumerate() {
+            assert_eq!(cell.get(row, 0).unwrap(), *value);
         }
     }
 

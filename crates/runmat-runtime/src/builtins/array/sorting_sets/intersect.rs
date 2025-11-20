@@ -1283,7 +1283,7 @@ struct RowStringKey(Vec<String>);
 
 impl RowStringKey {
     fn from_slice(values: &[String]) -> Self {
-        RowStringKey(values.iter().cloned().collect())
+        RowStringKey(values.to_vec())
     }
 }
 

@@ -440,7 +440,7 @@ fn collect_string_array(array: StringArray) -> Result<SubjectCollection, String>
 fn collect_cell_array(cell: runmat_builtins::CellArray) -> Result<SubjectCollection, String> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(&**ptr).map_err(|e| format!("regexprep: {e}"))?;
+        let value = gather_if_needed(ptr).map_err(|e| format!("regexprep: {e}"))?;
         let text = extract_string(&value).ok_or_else(|| {
             format!(
                 "regexprep: cell array elements must be character vectors or string scalars, got {value:?}"
@@ -517,7 +517,7 @@ fn collect_pattern_cell(
 ) -> Result<PatternCollection, String> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(&**ptr).map_err(|e| format!("regexprep: {e}"))?;
+        let value = gather_if_needed(ptr).map_err(|e| format!("regexprep: {e}"))?;
         let text = extract_string(&value).ok_or_else(|| {
             format!(
                 "regexprep: pattern cell elements must be character vectors or string scalars, got {value:?}"
@@ -589,7 +589,7 @@ fn collect_replacement_cell(
 ) -> Result<ReplacementCollection, String> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(&**ptr).map_err(|e| format!("regexprep: {e}"))?;
+        let value = gather_if_needed(ptr).map_err(|e| format!("regexprep: {e}"))?;
         let text = extract_string(&value).ok_or_else(|| {
             format!(
                 "regexprep: replacement cell elements must be character vectors or string scalars, got {value:?}"
@@ -1190,8 +1190,7 @@ mod tests {
             Value::String("x".into()),
             vec![Value::String("unknownOption".into())],
         )
-        .err()
-        .expect("expected error");
+        .expect_err("expected error");
         assert!(
             err.contains("unrecognised option"),
             "unexpected error message: {err}"
@@ -1270,8 +1269,7 @@ mod tests {
             StringArray::new(vec!["A".into(), "O".into(), "U".into()], vec![3, 1]).unwrap(),
         );
         let err = regexprep_builtin(subject, patterns, replacements, Vec::new())
-            .err()
-            .expect("expected error");
+            .expect_err("expected error");
         assert!(
             err.contains("replacement sequence is incompatible with element-wise patterns"),
             "unexpected error message: {err}"

@@ -44,8 +44,8 @@ fn fused_single_pass_reduce_len_1_no_alias() {
         w_data[i] = (i as f64 * 0.002).cos();
     }
 
-    let x = upload(&provider, rows, cols, &x_data);
-    let w = upload(&provider, rows, cols, &w_data);
+    let x = upload(provider, rows, cols, &x_data);
+    let w = upload(provider, rows, cols, &w_data);
 
     let vid_x: ValueId = 0;
     let vid_w: ValueId = 1;

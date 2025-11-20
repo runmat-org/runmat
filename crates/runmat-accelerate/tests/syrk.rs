@@ -69,9 +69,7 @@ fn syrk_matches_cpu() {
     assert_eq!(host.shape, vec![cols, cols]);
 
     let expected = cpu_syrk(&data, rows, cols);
-    for idx in 0..expected.len() {
-        let got = host.data[idx];
-        let want = expected[idx];
+    for (idx, (got, want)) in host.data.iter().zip(expected.iter()).enumerate() {
         let diff = (got - want).abs();
         assert!(
             diff < 1e-9,
@@ -110,9 +108,7 @@ fn syrk_large_rows_chunks() {
     assert_eq!(host.shape, vec![cols, cols]);
 
     let expected = cpu_syrk(&data, rows, cols);
-    for idx in 0..expected.len() {
-        let got = host.data[idx];
-        let want = expected[idx];
+    for (idx, (got, want)) in host.data.iter().zip(expected.iter()).enumerate() {
         let diff = (got - want).abs();
         let tol = 1e-3 * want.abs().max(1.0);
         assert!(
@@ -162,9 +158,8 @@ fn syrk_vec4_f32_matches_cpu() {
     assert_eq!(host.shape, vec![cols, cols]);
 
     let expected = cpu_syrk_f32(&data, rows, cols);
-    for idx in 0..expected.len() {
-        let got = host.data[idx] as f32;
-        let want = expected[idx];
+    for (idx, (got64, want)) in host.data.iter().zip(expected.iter()).enumerate() {
+        let got = *got64 as f32;
         let diff = (got - want).abs();
         let tol = 1e-3 * want.abs().max(1.0);
         assert!(

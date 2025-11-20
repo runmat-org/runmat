@@ -671,8 +671,9 @@ mod tests {
         let target = temp.path().join("readonly_pathdef.m");
         fs::write(&target, "locked").expect("write");
         let mut perms = fs::metadata(&target).expect("metadata").permissions();
+        let original_perms = perms.clone();
         perms.set_readonly(true);
-        fs::set_permissions(&target, perms.clone()).expect("set readonly");
+        fs::set_permissions(&target, perms).expect("set readonly");
 
         let eval =
             evaluate(&[Value::from(target.to_string_lossy().to_string())]).expect("evaluate");
@@ -681,8 +682,7 @@ mod tests {
         assert_eq!(eval.message_id(), MESSAGE_ID_CANNOT_WRITE);
 
         // Restore permissions so tempdir cleanup succeeds.
-        perms.set_readonly(false);
-        let _ = fs::set_permissions(&target, perms);
+        let _ = fs::set_permissions(&target, original_perms);
     }
 
     #[test]

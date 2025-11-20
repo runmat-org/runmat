@@ -60,10 +60,7 @@ where
 
     pub fn insert(&self, key: K, value: V) {
         if let Ok(mut guard) = self.cache.lock() {
-            let needs_flush = match guard.get(&key) {
-                Some(existing) if *existing == value => false,
-                _ => true,
-            };
+            let needs_flush = !matches!(guard.get(&key), Some(existing) if *existing == value);
             if needs_flush {
                 guard.insert(key, value);
                 self.save_to_disk(&guard).ok();

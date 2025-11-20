@@ -232,7 +232,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!("acosh({input})"))
         },
     }),
@@ -471,9 +471,9 @@ mod tests {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [
                     (0.0, 0.0),
-                    (0.0, 1.5707963267948966),
+                    (0.0, std::f64::consts::FRAC_PI_2),
                     (0.0, 0.0),
-                    (0.0, 1.5707963267948966),
+                    (0.0, std::f64::consts::FRAC_PI_2),
                 ];
                 for (actual, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((actual.0 - exp.0).abs() < 1e-12);

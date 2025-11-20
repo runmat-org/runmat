@@ -442,7 +442,7 @@ pub fn build_imfilter_plan(
     kernel: &Tensor,
     options: &ImfilterOptions,
 ) -> Result<ImfilterPlan, String> {
-    if kernel.data.is_empty() || kernel.shape.iter().any(|&dim| dim == 0) {
+    if kernel.data.is_empty() || kernel.shape.contains(&0) {
         return Err("imfilter: filter must be non-empty along every dimension".to_string());
     }
 
@@ -667,7 +667,7 @@ fn evaluate_filter(
     }
 
     let mut out_index = vec![0usize; output_shape.len()];
-    for linear in 0..total {
+    for out_value in out.iter_mut() {
         let mut sum = 0.0;
         for point in kernel_points {
             let value = sample_with_padding(
@@ -681,7 +681,7 @@ fn evaluate_filter(
             );
             sum += point.value * value;
         }
-        out[linear] = sum;
+        *out_value = sum;
         advance_index(&mut out_index, output_shape);
     }
 
@@ -689,9 +689,7 @@ fn evaluate_filter(
 }
 
 fn clamp_index(coord: isize, len: isize) -> usize {
-    if len <= 0 {
-        0
-    } else if coord < 0 {
+    if len <= 0 || coord <= 0 {
         0
     } else if coord >= len {
         (len - 1) as usize
@@ -753,8 +751,10 @@ mod tests {
     fn replicate_padding() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 9], 3, 3);
-        let mut options = ImfilterOptions::default();
-        options.padding = ImfilterPadding::Replicate;
+        let options = ImfilterOptions {
+            padding: ImfilterPadding::Replicate,
+            ..Default::default()
+        };
         let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
         let expected = [18.0, 24.0, 21.0, 27.0];
@@ -767,8 +767,10 @@ mod tests {
     fn full_output_matches_expected_size() {
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
-        let mut options = ImfilterOptions::default();
-        options.shape = ImfilterShape::Full;
+        let options = ImfilterOptions {
+            shape: ImfilterShape::Full,
+            ..Default::default()
+        };
         let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
         assert_eq!(result.shape, vec![3, 3]);
         let expected = [0.0, 0.0, 0.0, 0.0, 4.0, 14.0, 0.0, 11.0, 30.0];
@@ -781,8 +783,10 @@ mod tests {
     fn valid_output_respects_kernel_size() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 4], 2, 2);
-        let mut options = ImfilterOptions::default();
-        options.shape = ImfilterShape::Valid;
+        let options = ImfilterOptions {
+            shape: ImfilterShape::Valid,
+            ..Default::default()
+        };
         let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
         assert_eq!(result.shape, vec![1, 1]);
         assert!((result.data[0] - 10.0).abs() < 1e-12);
@@ -797,8 +801,10 @@ mod tests {
         let flipped_kernel = simple_tensor(&[4.0, 3.0, 2.0, 1.0], 2, 2);
         let corr_flipped =
             apply_imfilter_tensor(&image, &flipped_kernel, &corr_opts).expect("corr flip");
-        let mut conv_opts = ImfilterOptions::default();
-        conv_opts.mode = ImfilterMode::Convolution;
+        let conv_opts = ImfilterOptions {
+            mode: ImfilterMode::Convolution,
+            ..Default::default()
+        };
         let conv = apply_imfilter_tensor(&image, &kernel, &conv_opts).expect("conv");
         assert_eq!(conv.shape, corr_flipped.shape);
         for ((a, b), c) in conv
@@ -815,8 +821,10 @@ mod tests {
     fn circular_padding_wraps_indices() {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[0.0, 1.0, 1.0, 0.0], 2, 2);
-        let mut options = ImfilterOptions::default();
-        options.padding = ImfilterPadding::Circular;
+        let options = ImfilterOptions {
+            padding: ImfilterPadding::Circular,
+            ..Default::default()
+        };
         let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
         let expected = [5.0, 5.0, 5.0, 5.0];
         for (got, exp) in result.data.iter().zip(expected.iter()) {
@@ -870,8 +878,10 @@ mod tests {
     fn doc_example_convolution_same_matches_expected() {
         let image = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).unwrap();
         let kernel = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
-        let mut options = ImfilterOptions::default();
-        options.mode = ImfilterMode::Convolution;
+        let options = ImfilterOptions {
+            mode: ImfilterMode::Convolution,
+            ..Default::default()
+        };
         let result = apply_imfilter_tensor(&image, &kernel, &options).expect("imfilter");
         assert_eq!(result.shape, vec![3, 2]);
         let expected = [1.0, 5.0, 9.0, 6.0, 25.0, 35.0];
@@ -885,9 +895,11 @@ mod tests {
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 9], 3, 3);
 
-        let mut manual = ImfilterOptions::default();
-        manual.padding = ImfilterPadding::Constant;
-        manual.constant_value = 5.0;
+        let manual = ImfilterOptions {
+            padding: ImfilterPadding::Constant,
+            constant_value: 5.0,
+            ..Default::default()
+        };
         let manual_res = apply_imfilter_tensor(&image, &kernel, &manual).expect("imfilter");
 
         let via_builtin = imfilter_builtin(

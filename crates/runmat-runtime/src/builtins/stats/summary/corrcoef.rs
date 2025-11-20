@@ -554,7 +554,7 @@ fn corrcoef_dense(matrix: &Matrix, normalization: CorrcoefNormalization) -> Resu
     }
 
     let mut means = vec![0.0; cols];
-    for col in 0..cols {
+    for (col, mean_slot) in means.iter_mut().enumerate() {
         let column = matrix.column(col);
         let mut sum = 0.0;
         let mut count = 0usize;
@@ -564,7 +564,7 @@ fn corrcoef_dense(matrix: &Matrix, normalization: CorrcoefNormalization) -> Resu
                 count += 1;
             }
         }
-        means[col] = if count > 0 {
+        *mean_slot = if count > 0 {
             sum / (count as f64)
         } else {
             f64::NAN

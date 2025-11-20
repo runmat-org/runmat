@@ -317,7 +317,7 @@ impl FilterArgs {
 
         let mut shape_ext = signal.shape.clone();
         if dim > shape_ext.len() {
-            shape_ext.extend(std::iter::repeat(1).take(dim - shape_ext.len()));
+            shape_ext.extend(std::iter::repeat_n(1, dim - shape_ext.len()));
         }
 
         let order = max(coeffs_b.len, coeffs_a.len);
@@ -618,10 +618,11 @@ impl InitialState {
                             if t.data.is_empty()
                                 && !shapes_compatible(expected_shape, &t.shape) =>
                         {
-                            format!("{msg}")
+                            msg.clone()
                         }
-                        Value::Tensor(_) | Value::ComplexTensor(_) => msg,
-                        Value::GpuTensor(_) => msg,
+                        Value::Tensor(_) | Value::ComplexTensor(_) | Value::GpuTensor(_) => {
+                            msg.clone()
+                        }
                         _ => format!("{msg}; received {:?}", other),
                     });
                 }
@@ -796,9 +797,7 @@ fn try_filter_gpu(args: &FilterArgs) -> Result<Option<FilterEvaluation>, String>
         .map_err(|e| format!("filter: failed to upload denominator coefficients: {e}"))?;
     temp_handles.push(a_handle.clone());
 
-    let (zi_handle_opt, zi_temp) = if args.state_len == 0 {
-        (None, None)
-    } else if !args.initial.provided {
+    let (zi_handle_opt, zi_temp) = if args.state_len == 0 || !args.initial.provided {
         (None, None)
     } else if let Some(handle) = &args.initial.gpu_handle {
         (Some(handle.clone()), None)
@@ -1063,7 +1062,7 @@ fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
 
 fn filter_state_shape(mut base: Vec<usize>, dim_idx: usize, state_len: usize) -> Vec<usize> {
     if base.len() <= dim_idx {
-        base.extend(std::iter::repeat(1).take(dim_idx + 1 - base.len()));
+        base.extend(std::iter::repeat_n(1, dim_idx + 1 - base.len()));
     }
     if !base.is_empty() {
         base[dim_idx] = state_len;
@@ -1132,7 +1131,7 @@ fn states_from_column_major_complex(
         for s in 0..state_len {
             let mut offset = 0usize;
             let mut stride = 1usize;
-            for d in 0..shape.len() {
+            for (d, &extent) in shape.iter().enumerate() {
                 let coord = if d < dim_idx {
                     before_coords.get(d).copied().unwrap_or(0)
                 } else if d == dim_idx {
@@ -1142,7 +1141,7 @@ fn states_from_column_major_complex(
                     after_coords.get(idx).copied().unwrap_or(0)
                 };
                 offset += coord * stride;
-                stride *= shape[d];
+                stride *= extent;
             }
             states[channel * state_len + s] = data[offset];
         }
@@ -1194,7 +1193,7 @@ fn states_to_column_major_complex(
         for s in 0..state_len {
             let mut offset = 0usize;
             let mut stride = 1usize;
-            for d in 0..shape.len() {
+            for (d, &extent) in shape.iter().enumerate() {
                 let coord = if d < dim_idx {
                     before_coords.get(d).copied().unwrap_or(0)
                 } else if d == dim_idx {
@@ -1204,7 +1203,7 @@ fn states_to_column_major_complex(
                     after_coords.get(idx).copied().unwrap_or(0)
                 };
                 offset += coord * stride;
-                stride *= shape[d];
+                stride *= extent;
             }
             out[offset] = states[channel * state_len + s];
         }
@@ -1467,13 +1466,15 @@ mod tests {
             Value::ComplexTensor(t) => t,
             other => panic!("expected complex tensor, got {other:?}"),
         };
+        let root_half = std::f64::consts::FRAC_1_SQRT_2;
+        let one_plus = 1.0 + root_half;
         approx_eq_complex(
             &data,
             &[
                 (1.0, 0.0),
-                (0.7071067812, 1.7071067812),
-                (-0.7071067812, 1.7071067812),
-                (-1.7071067812, 0.7071067812),
+                (root_half, one_plus),
+                (-root_half, one_plus),
+                (-one_plus, root_half),
             ],
         );
     }

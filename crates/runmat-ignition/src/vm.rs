@@ -306,7 +306,7 @@ fn cartesian_product<F: FnMut(&[usize])>(lists: &[Vec<usize>], mut f: F) {
 }
 
 fn cartesian_positions<F: FnMut(&[usize])>(lengths: &[usize], mut f: F) {
-    if lengths.is_empty() || lengths.iter().any(|&len| len == 0) {
+    if lengths.is_empty() || lengths.contains(&0) {
         return;
     }
     let dims = lengths.len();
@@ -557,7 +557,7 @@ fn build_slice_plan(
         per_dim_lists.push(idxs);
     }
 
-    if selection_lengths.iter().any(|&len| len == 0) {
+    if selection_lengths.contains(&0) {
         let mut out_shape = selection_lengths.clone();
         if dims == 2 {
             if selection_lengths[0] > 1 && selection_lengths[1] == 1 {
@@ -740,9 +740,9 @@ fn scatter_string_with_plan(
                     strides,
                 } => {
                     let mut rlin = 0usize;
-                    for d in 0..position.len() {
+                    for (d, &pos_val) in position.iter().enumerate() {
                         let rhs_len = shape.get(d).copied().unwrap_or(1);
-                        let pos = if rhs_len == 1 { 0 } else { position[d] };
+                        let pos = if rhs_len == 1 { 0 } else { pos_val };
                         rlin += pos * strides.get(d).copied().unwrap_or(1);
                     }
                     data.get(rlin).cloned().unwrap_or_default()
@@ -879,15 +879,14 @@ fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> Result<Vec<f6
             }
         }
         Value::LogicalArray(la) => {
-            if la.shape.len() > selection_lengths.len() {
-                if la
+            if la.shape.len() > selection_lengths.len()
+                && la
                     .shape
                     .iter()
                     .skip(selection_lengths.len())
                     .any(|&s| s != 1)
-                {
-                    return Err("shape mismatch for slice assign".to_string());
-                }
+            {
+                return Err("shape mismatch for slice assign".to_string());
             }
             let mut shape = la.shape.clone();
             if shape.len() < selection_lengths.len() {
@@ -966,10 +965,12 @@ struct WorkspaceState {
     len: usize,
 }
 
+type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
+
 thread_local! {
-    static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = RefCell::new(None);
-    static PENDING_WORKSPACE: RefCell<Option<(HashMap<String, usize>, HashSet<String>)>> = RefCell::new(None);
-    static LAST_WORKSPACE_STATE: RefCell<Option<(HashMap<String, usize>, HashSet<String>)>> = RefCell::new(None);
+    static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = const { RefCell::new(None) };
+    static PENDING_WORKSPACE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
+    static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
 }
 
 struct WorkspaceStateGuard;
@@ -990,7 +991,7 @@ impl Drop for WorkspaceStateGuard {
 fn set_workspace_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
-    vars: &Vec<Value>,
+    vars: &[Value],
 ) -> WorkspaceStateGuard {
     WORKSPACE_STATE.with(|state| {
         *state.borrow_mut() = Some(WorkspaceState {
@@ -1003,7 +1004,7 @@ fn set_workspace_state(
     WorkspaceStateGuard
 }
 
-fn refresh_workspace_state(vars: &Vec<Value>) {
+fn refresh_workspace_state(vars: &[Value]) {
     WORKSPACE_STATE.with(|state| {
         if let Some(ws) = state.borrow_mut().as_mut() {
             ws.data_ptr = vars.as_ptr();
@@ -1759,7 +1760,7 @@ pub fn interpret_with_vars(
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("plus", &vec![a.clone(), b.clone()])?;
+                                let v = call_builtin("plus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -1773,7 +1774,7 @@ pub fn interpret_with_vars(
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("plus", &vec![a.clone(), b.clone()])?;
+                                let v = call_builtin("plus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -1781,7 +1782,7 @@ pub fn interpret_with_vars(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = call_builtin("plus", &vec![a_acc, b_acc])?;
+                        let v = call_builtin("plus", &[a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -1799,7 +1800,7 @@ pub fn interpret_with_vars(
                         match call_builtin("minus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("minus", &vec![a.clone(), b.clone()])?;
+                                let v = call_builtin("minus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -1809,7 +1810,7 @@ pub fn interpret_with_vars(
                         match call_builtin("uminus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("minus", &vec![a.clone(), b.clone()])?;
+                                let v = call_builtin("minus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -1817,7 +1818,7 @@ pub fn interpret_with_vars(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = call_builtin("minus", &vec![a_acc, b_acc])?;
+                        let v = call_builtin("minus", &[a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -2746,9 +2747,8 @@ pub fn interpret_with_vars(
                             if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
                                 let qual = path.join(".");
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
-                                match runmat_runtime::call_builtin(&qual, &qual_args) {
-                                    Ok(value) => specific_matches.push((qual, qual_args, value)),
-                                    Err(_) => {}
+                                if let Ok(value) = runmat_runtime::call_builtin(&qual, &qual_args) {
+                                    specific_matches.push((qual, qual_args, value));
                                 }
                             }
                         }
@@ -2783,9 +2783,8 @@ pub fn interpret_with_vars(
                                 qual.push('.');
                                 qual.push_str(&name);
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
-                                match runmat_runtime::call_builtin(&qual, &qual_args) {
-                                    Ok(value) => wildcard_matches.push((qual, qual_args, value)),
-                                    Err(_) => {}
+                                if let Ok(value) = runmat_runtime::call_builtin(&qual, &qual_args) {
+                                    wildcard_matches.push((qual, qual_args, value));
                                 }
                             }
                             if wildcard_matches.len() > 1 {
@@ -6317,7 +6316,7 @@ pub fn interpret_with_vars(
                                     continue;
                                 } else {
                                     let result = provider
-                                        .gather_linear(&handle, &plan.indices, &plan.output_shape)
+                                        .gather_linear(handle, &plan.indices, &plan.output_shape)
                                         .map_err(|e| format!("slice: {e}"))?;
                                     stack.push(Value::GpuTensor(result));
                                     pc += 1;
@@ -6326,7 +6325,7 @@ pub fn interpret_with_vars(
                             }
                         }
                         let host = provider
-                            .download(&handle)
+                            .download(handle)
                             .map_err(|e| format!("slice: {e}"))?;
                         let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
                             .map_err(|e| format!("slice: {e}"))?;
@@ -7161,7 +7160,7 @@ pub fn interpret_with_vars(
                                     }
                                     let values_result = if plan.dims == 1 {
                                         let count =
-                                            plan.selection_lengths.get(0).copied().unwrap_or(0);
+                                            plan.selection_lengths.first().copied().unwrap_or(0);
                                         materialize_rhs_linear(&rhs, count)
                                     } else {
                                         materialize_rhs_nd(&rhs, &plan.selection_lengths)
@@ -7202,7 +7201,7 @@ pub fn interpret_with_vars(
                         let h = handle;
                         // Attempt provider fast-paths for contiguous 2D row/col writes with GPU RHS
                         if dims == 2 {
-                            let rows = h.shape.get(0).copied().unwrap_or(1);
+                            let rows = h.shape.first().copied().unwrap_or(1);
                             let cols = h.shape.get(1).copied().unwrap_or(1);
                             // Build minimal selectors using handle shape for 'end'
                             #[derive(Clone)]
@@ -7256,12 +7255,9 @@ pub fn interpret_with_vars(
                                 let j0 = *j - 1;
                                 if j0 < cols {
                                     if let Value::GpuTensor(vh) = &rhs {
-                                        let v_rows = if vh.shape.len() == 1 {
-                                            vh.shape[0]
-                                        } else if vh.shape.len() == 2 {
-                                            vh.shape[0]
-                                        } else {
-                                            0
+                                        let v_rows = match vh.shape.len() {
+                                            1 | 2 => vh.shape[0],
+                                            _ => 0,
                                         };
                                         if v_rows == rows {
                                             if let Some(p) = runmat_accelerate_api::provider() {
@@ -7284,12 +7280,10 @@ pub fn interpret_with_vars(
                                 let i0 = *i - 1;
                                 if i0 < rows {
                                     if let Value::GpuTensor(vh) = &rhs {
-                                        let v_cols = if vh.shape.len() == 1 {
-                                            vh.shape[0]
-                                        } else if vh.shape.len() == 2 {
-                                            vh.shape[1]
-                                        } else {
-                                            0
+                                        let v_cols = match vh.shape.len() {
+                                            1 => vh.shape[0],
+                                            2 => vh.shape[1],
+                                            _ => 0,
                                         };
                                         if v_cols == cols {
                                             if let Some(p) = runmat_accelerate_api::provider() {
@@ -7798,7 +7792,8 @@ pub fn interpret_with_vars(
                         ) {
                             if let Ok(plan) = build_slice_plan(&selectors, dims, &handle.shape) {
                                 let values = if plan.dims == 1 {
-                                    let count = plan.selection_lengths.get(0).copied().unwrap_or(0);
+                                    let count =
+                                        plan.selection_lengths.first().copied().unwrap_or(0);
                                     materialize_rhs_linear(&rhs, count)
                                 } else {
                                     materialize_rhs_nd(&rhs, &plan.selection_lengths)
@@ -7816,7 +7811,7 @@ pub fn interpret_with_vars(
                                     };
                                     if let Ok(values_handle) = upload_result {
                                         if provider
-                                            .scatter_linear(&handle, &plan.indices, &values_handle)
+                                            .scatter_linear(handle, &plan.indices, &values_handle)
                                             .is_ok()
                                         {
                                             stack.push(Value::GpuTensor(handle.clone()));
@@ -7828,7 +7823,7 @@ pub fn interpret_with_vars(
                             }
                         }
                         let host = provider
-                            .download(&handle)
+                            .download(handle)
                             .map_err(|e| format!("slice assign: {e}"))?;
                         let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
                             .map_err(|e| format!("slice assign: {e}"))?;
@@ -8171,9 +8166,7 @@ pub fn interpret_with_vars(
                         Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_)
                     )
                 {
-                    let tmp = base;
-                    base = rhs;
-                    rhs = tmp;
+                    std::mem::swap(&mut base, &mut rhs);
                 }
                 match base {
                     Value::Tensor(mut t) => {
@@ -9134,7 +9127,7 @@ pub fn interpret_with_vars(
                 let (rows_opt, cols_opt) = match &base {
                     Value::Tensor(t) => (Some(t.rows()), Some(t.cols())),
                     Value::GpuTensor(h) => (
-                        Some(h.shape.get(0).copied().unwrap_or(1).max(1)),
+                        Some(h.shape.first().copied().unwrap_or(1).max(1)),
                         Some(h.shape.get(1).copied().unwrap_or(1).max(1)),
                     ),
                     _ => (None, None),
@@ -9349,7 +9342,7 @@ pub fn interpret_with_vars(
                             let val: f64 = rhs_to_scalar(&rhs)?;
                             let idx = (i - 1) + (j - 1) * rows;
                             t.data[idx] = val;
-                        } else if indices.len() == 0 {
+                        } else if indices.is_empty() {
                             // Trivial colon slice cases from parser may encode as zero indices; handle full-row/col scalar broadcast
                             let val: f64 = rhs_to_scalar(&rhs)?;
                             for k in 0..t.data.len() {
@@ -10312,12 +10305,7 @@ fn try_execute_fusion_group(
 
     if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
         let stack_needed_preview = plan.stack_pattern.len();
-        let stack_snapshot: Vec<&Value> = stack
-            .iter()
-            .rev()
-            .take(stack_needed_preview)
-            .map(|v| v)
-            .collect();
+        let stack_snapshot: Vec<&Value> = stack.iter().rev().take(stack_needed_preview).collect();
         let stack_kinds: Vec<&'static str> =
             stack_snapshot.iter().rev().map(|v| value_kind(v)).collect();
         let input_meta: Vec<String> = plan
@@ -10624,14 +10612,14 @@ fn try_execute_fusion_group(
                             match value {
                                 Value::GpuTensor(h) => {
                                     rows_cols = Some((
-                                        h.shape.get(0).copied().unwrap_or(1).max(1),
+                                        h.shape.first().copied().unwrap_or(1).max(1),
                                         h.shape.get(1).copied().unwrap_or(1).max(1),
                                     ));
                                     break;
                                 }
                                 Value::Tensor(t) => {
                                     rows_cols = Some((
-                                        t.shape.get(0).copied().unwrap_or(1).max(1),
+                                        t.shape.first().copied().unwrap_or(1).max(1),
                                         t.shape.get(1).copied().unwrap_or(1).max(1),
                                     ));
                                     break;
@@ -10647,14 +10635,14 @@ fn try_execute_fusion_group(
                 match v {
                     Value::GpuTensor(h) => {
                         rows_cols = Some((
-                            h.shape.get(0).copied().unwrap_or(1).max(1),
+                            h.shape.first().copied().unwrap_or(1).max(1),
                             h.shape.get(1).copied().unwrap_or(1).max(1),
                         ));
                         break;
                     }
                     Value::Tensor(t) => {
                         rows_cols = Some((
-                            t.shape.get(0).copied().unwrap_or(1).max(1),
+                            t.shape.first().copied().unwrap_or(1).max(1),
                             t.shape.get(1).copied().unwrap_or(1).max(1),
                         ));
                         break;
@@ -10676,12 +10664,12 @@ fn try_execute_fusion_group(
                         if let Some(val) = consumed.get(stack_offset).and_then(|v| v.as_ref()) {
                             match val {
                                 Value::GpuTensor(h) => {
-                                    let r = h.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let r = h.shape.first().copied().unwrap_or(1).max(1);
                                     let c = h.shape.get(1).copied().unwrap_or(1).max(1);
                                     rows_cols = Some((r, c));
                                 }
                                 Value::Tensor(t) => {
-                                    let r = t.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let r = t.shape.first().copied().unwrap_or(1).max(1);
                                     let c = t.shape.get(1).copied().unwrap_or(1).max(1);
                                     rows_cols = Some((r, c));
                                 }
@@ -10694,12 +10682,12 @@ fn try_execute_fusion_group(
                         if let Some(val) = request.inputs.get(input_index) {
                             match val {
                                 Value::GpuTensor(h) => {
-                                    let r = h.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let r = h.shape.first().copied().unwrap_or(1).max(1);
                                     let c = h.shape.get(1).copied().unwrap_or(1).max(1);
                                     rows_cols = Some((r, c));
                                 }
                                 Value::Tensor(t) => {
-                                    let r = t.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let r = t.shape.first().copied().unwrap_or(1).max(1);
                                     let c = t.shape.get(1).copied().unwrap_or(1).max(1);
                                     rows_cols = Some((r, c));
                                 }
@@ -10711,43 +10699,40 @@ fn try_execute_fusion_group(
                 if rows_cols.is_none() {
                     if let Some(info) = graph.value(data_id) {
                         // Try direct variable lookup to get runtime value shape
-                        match &info.origin {
-                            ValueOrigin::Variable { kind, index } => {
-                                let val = match kind {
-                                    VarKind::Global => vars.get(*index).cloned(),
-                                    VarKind::Local => {
-                                        if let Some(frame) = context.call_stack.last() {
-                                            let absolute = frame.locals_start + index;
-                                            context.locals.get(absolute).cloned()
-                                        } else {
-                                            vars.get(*index).cloned()
-                                        }
-                                    }
-                                };
-                                if let Some(v) = val {
-                                    match v {
-                                        Value::GpuTensor(h) => {
-                                            rows_cols = Some((
-                                                h.shape.get(0).copied().unwrap_or(1).max(1),
-                                                h.shape.get(1).copied().unwrap_or(1).max(1),
-                                            ));
-                                        }
-                                        Value::Tensor(t) => {
-                                            rows_cols = Some((
-                                                t.shape.get(0).copied().unwrap_or(1).max(1),
-                                                t.shape.get(1).copied().unwrap_or(1).max(1),
-                                            ));
-                                        }
-                                        _ => {}
+                        if let ValueOrigin::Variable { kind, index } = &info.origin {
+                            let val = match kind {
+                                VarKind::Global => vars.get(*index).cloned(),
+                                VarKind::Local => {
+                                    if let Some(frame) = context.call_stack.last() {
+                                        let absolute = frame.locals_start + index;
+                                        context.locals.get(absolute).cloned()
+                                    } else {
+                                        vars.get(*index).cloned()
                                     }
                                 }
+                            };
+                            if let Some(v) = val {
+                                match v {
+                                    Value::GpuTensor(h) => {
+                                        rows_cols = Some((
+                                            h.shape.first().copied().unwrap_or(1).max(1),
+                                            h.shape.get(1).copied().unwrap_or(1).max(1),
+                                        ));
+                                    }
+                                    Value::Tensor(t) => {
+                                        rows_cols = Some((
+                                            t.shape.first().copied().unwrap_or(1).max(1),
+                                            t.shape.get(1).copied().unwrap_or(1).max(1),
+                                        ));
+                                    }
+                                    _ => {}
+                                }
                             }
-                            _ => {}
                         }
                         if rows_cols.is_none() {
                             if let ShapeInfo::Tensor(dims) = &info.shape {
                                 if !dims.is_empty() {
-                                    let r = dims.get(0).and_then(|d| *d).unwrap_or(1);
+                                    let r = dims.first().and_then(|d| *d).unwrap_or(1);
                                     let c = dims.get(1).and_then(|d| *d).unwrap_or(1);
                                     rows_cols = Some((r.max(1), c.max(1)));
                                 }
@@ -10763,14 +10748,14 @@ fn try_execute_fusion_group(
                     match v {
                         Value::GpuTensor(h) => {
                             rows_cols = Some((
-                                h.shape.get(0).copied().unwrap_or(1).max(1),
+                                h.shape.first().copied().unwrap_or(1).max(1),
                                 h.shape.get(1).copied().unwrap_or(1).max(1),
                             ));
                             break;
                         }
                         Value::Tensor(t) => {
                             rows_cols = Some((
-                                t.shape.get(0).copied().unwrap_or(1).max(1),
+                                t.shape.first().copied().unwrap_or(1).max(1),
                                 t.shape.get(1).copied().unwrap_or(1).max(1),
                             ));
                             break;
@@ -10783,14 +10768,14 @@ fn try_execute_fusion_group(
                         match v {
                             Value::GpuTensor(h) => {
                                 rows_cols = Some((
-                                    h.shape.get(0).copied().unwrap_or(1).max(1),
+                                    h.shape.first().copied().unwrap_or(1).max(1),
                                     h.shape.get(1).copied().unwrap_or(1).max(1),
                                 ));
                                 break;
                             }
                             Value::Tensor(t) => {
                                 rows_cols = Some((
-                                    t.shape.get(0).copied().unwrap_or(1).max(1),
+                                    t.shape.first().copied().unwrap_or(1).max(1),
                                     t.shape.get(1).copied().unwrap_or(1).max(1),
                                 ));
                                 break;
@@ -10804,7 +10789,7 @@ fn try_execute_fusion_group(
             if rows_cols.is_none() {
                 if let ShapeInfo::Tensor(dims) = &plan.group.shape {
                     if !dims.is_empty() {
-                        let r = dims.get(0).and_then(|d| *d).unwrap_or(1);
+                        let r = dims.first().and_then(|d| *d).unwrap_or(1);
                         let c = dims.get(1).and_then(|d| *d).unwrap_or(1);
                         rows_cols = Some((r.max(1), c.max(1)));
                     }

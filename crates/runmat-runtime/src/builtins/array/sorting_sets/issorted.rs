@@ -277,17 +277,12 @@ enum Direction {
     StrictMonotonic,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum ComparisonMethod {
+    #[default]
     Auto,
     Real,
     Abs,
-}
-
-impl Default for ComparisonMethod {
-    fn default() -> Self {
-        ComparisonMethod::Auto
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -802,6 +797,7 @@ fn string_rows_in_order(
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compare_real_row_pair(
     tensor: &Tensor,
     rows: usize,
@@ -829,6 +825,7 @@ fn compare_real_row_pair(
     Ordering::Equal
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compare_complex_row_pair(
     tensor: &ComplexTensor,
     rows: usize,

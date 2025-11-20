@@ -269,7 +269,7 @@ fn str2double_cell_array(cell: CellArray) -> Result<Value, String> {
     for col in 0..cols {
         for row in 0..rows {
             let idx = row * cols + col;
-            let element = &*data[idx];
+            let element: &Value = &data[idx];
             let numeric = match element {
                 Value::String(text) => parse_numeric_scalar(text),
                 Value::StringArray(sa) if sa.data.len() == 1 => parse_numeric_scalar(&sa.data[0]),
@@ -397,7 +397,7 @@ mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data[0], 3.14);
+                assert_eq!(tensor.data[0], std::f64::consts::PI);
                 assert!(tensor.data[1].is_nan());
                 assert_eq!(tensor.data[2], f64::NEG_INFINITY);
             }

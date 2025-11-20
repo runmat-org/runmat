@@ -387,12 +387,10 @@ mod tests {
 
         let dir1 = tempdir().expect("dir1");
         let dir2 = tempdir().expect("dir2");
-        let path1 = Value::CharArray(CharArray::new_row(
-            &dir1.path().to_string_lossy().into_owned(),
-        ));
-        let path2 = Value::CharArray(CharArray::new_row(
-            &dir2.path().to_string_lossy().into_owned(),
-        ));
+        let dir1_str = dir1.path().to_string_lossy().to_string();
+        let dir2_str = dir2.path().to_string_lossy().to_string();
+        let path1 = Value::CharArray(CharArray::new_row(&dir1_str));
+        let path2 = Value::CharArray(CharArray::new_row(&dir2_str));
         let _returned = path_builtin(vec![path1, path2]).expect("path set");
 
         let current =

@@ -15,13 +15,13 @@ fn expect_tensor(value: Value) -> Tensor {
 
 fn column_sum_of_products(a: &[f32], b: &[f32], rows: usize, cols: usize) -> Vec<f64> {
     let mut out = vec![0.0; cols];
-    for col in 0..cols {
+    for (col, out_value) in out.iter_mut().enumerate().take(cols) {
         let mut acc = 0.0;
         for row in 0..rows {
             let idx = row + col * rows;
             acc += (a[idx] as f64) * (b[idx] as f64);
         }
-        out[col] = acc;
+        *out_value = acc;
     }
     out
 }

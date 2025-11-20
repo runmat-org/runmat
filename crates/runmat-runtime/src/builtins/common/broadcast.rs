@@ -15,10 +15,10 @@ pub fn broadcast_shapes(
     // with ones so that the last dimensions line up.
     let rank = left.len().max(right.len());
     let mut left_ext = Vec::with_capacity(rank);
-    left_ext.extend(std::iter::repeat(1).take(rank.saturating_sub(left.len())));
+    left_ext.extend(std::iter::repeat_n(1, rank.saturating_sub(left.len())));
     left_ext.extend_from_slice(left);
     let mut right_ext = Vec::with_capacity(rank);
-    right_ext.extend(std::iter::repeat(1).take(rank.saturating_sub(right.len())));
+    right_ext.extend(std::iter::repeat_n(1, rank.saturating_sub(right.len())));
     right_ext.extend_from_slice(right);
 
     let mut shape = Vec::with_capacity(rank);
@@ -107,11 +107,11 @@ impl BroadcastPlan {
 
         // Pad on the FRONT to align trailing dimensions per MATLAB rules.
         let mut ext_a = Vec::with_capacity(ndims);
-        ext_a.extend(std::iter::repeat(1).take(ndims.saturating_sub(shape_a.len())));
+        ext_a.extend(std::iter::repeat_n(1, ndims.saturating_sub(shape_a.len())));
         ext_a.extend_from_slice(shape_a);
 
         let mut ext_b = Vec::with_capacity(ndims);
-        ext_b.extend(std::iter::repeat(1).take(ndims.saturating_sub(shape_b.len())));
+        ext_b.extend(std::iter::repeat_n(1, ndims.saturating_sub(shape_b.len())));
         ext_b.extend_from_slice(shape_b);
 
         let mut output_shape = Vec::with_capacity(ndims);
@@ -160,6 +160,11 @@ impl BroadcastPlan {
     /// Total number of elements produced by the broadcast.
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    /// Returns true if the broadcast produces no elements.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Output shape after broadcasting both operands.

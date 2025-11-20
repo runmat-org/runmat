@@ -509,8 +509,8 @@ fn stride_after(shape: &[usize], dim: usize) -> usize {
         return 1;
     }
     let mut product = 1usize;
-    for i in dim..shape.len() {
-        product = product.saturating_mul(shape[i]);
+    for extent in shape.iter().skip(dim) {
+        product = product.saturating_mul(*extent);
     }
     product
 }
@@ -527,16 +527,11 @@ fn default_dimension(shape: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum SortDirection {
+    #[default]
     Ascend,
     Descend,
-}
-
-impl Default for SortDirection {
-    fn default() -> Self {
-        SortDirection::Ascend
-    }
 }
 
 impl SortDirection {
@@ -548,17 +543,12 @@ impl SortDirection {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum ComparisonMethod {
+    #[default]
     Auto,
     Real,
     Abs,
-}
-
-impl Default for ComparisonMethod {
-    fn default() -> Self {
-        ComparisonMethod::Auto
-    }
 }
 
 impl ComparisonMethod {

@@ -362,7 +362,7 @@ fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
 
 fn filter_state_shape(mut base: Vec<usize>, dim_idx: usize, state_len: usize) -> Vec<usize> {
     if base.len() <= dim_idx {
-        base.extend(std::iter::repeat(1).take(dim_idx + 1 - base.len()));
+        base.extend(std::iter::repeat_n(1, dim_idx + 1 - base.len()));
     }
     if !base.is_empty() {
         base[dim_idx] = state_len;
@@ -414,7 +414,7 @@ fn states_from_column_major(
         for s in 0..state_len {
             let mut offset = 0usize;
             let mut stride = 1usize;
-            for d in 0..shape.len() {
+            for (d, size) in shape.iter().copied().enumerate() {
                 let coord = if d < dim_idx {
                     before_coords.get(d).copied().unwrap_or(0)
                 } else if d == dim_idx {
@@ -424,7 +424,7 @@ fn states_from_column_major(
                     after_coords.get(idx).copied().unwrap_or(0)
                 };
                 offset += coord * stride;
-                stride *= shape[d];
+                stride *= size;
             }
             states[channel * state_len + s] = data[offset];
         }
@@ -476,7 +476,7 @@ fn states_to_column_major(
         for s in 0..state_len {
             let mut offset = 0usize;
             let mut stride = 1usize;
-            for d in 0..shape.len() {
+            for (d, size) in shape.iter().copied().enumerate() {
                 let coord = if d < dim_idx {
                     before_coords.get(d).copied().unwrap_or(0)
                 } else if d == dim_idx {
@@ -486,7 +486,7 @@ fn states_to_column_major(
                     after_coords.get(idx).copied().unwrap_or(0)
                 };
                 offset += coord * stride;
-                stride *= shape[d];
+                stride *= size;
             }
             out[offset] = states[channel * state_len + s];
         }
@@ -518,7 +518,7 @@ fn permute_data(data: &[f64], shape: &[usize], order: &[usize]) -> Result<(Vec<f
 
     let mut src_shape = shape.to_vec();
     if src_shape.len() < rank {
-        src_shape.extend(std::iter::repeat(1).take(rank - src_shape.len()));
+        src_shape.extend(std::iter::repeat_n(1, rank - src_shape.len()));
     }
 
     let total = product(&src_shape);
@@ -540,7 +540,7 @@ fn permute_data(data: &[f64], shape: &[usize], order: &[usize]) -> Result<(Vec<f
     let mut dst_coords = vec![0usize; rank];
     let mut src_coords = vec![0usize; rank];
 
-    for dst_index in 0..dst_total {
+    for (dst_index, out_value) in out.iter_mut().enumerate() {
         let mut rem = dst_index;
         for (dim, &size) in dst_shape.iter().enumerate() {
             if size == 0 {
@@ -557,7 +557,7 @@ fn permute_data(data: &[f64], shape: &[usize], order: &[usize]) -> Result<(Vec<f
         for (dim, &coord) in src_coords.iter().enumerate() {
             src_index += coord * src_strides[dim];
         }
-        out[dst_index] = data[src_index];
+        *out_value = data[src_index];
     }
 
     Ok((out, dst_shape))
@@ -571,7 +571,7 @@ fn flip_data(data: &[f64], shape: &[usize], axes: &[usize]) -> Result<Vec<f64>> 
     if let Some(max_dim) = axes.iter().copied().max() {
         let needed = max_dim + 1;
         if needed > ext_shape.len() {
-            ext_shape.extend(std::iter::repeat(1).take(needed - ext_shape.len()));
+            ext_shape.extend(std::iter::repeat_n(1, needed - ext_shape.len()));
         }
     }
     let total = product(&ext_shape);
@@ -668,6 +668,7 @@ fn apply_conv_mode_real(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn conv2d_full_real(
     signal: &[f64],
     signal_rows: usize,
@@ -727,6 +728,7 @@ fn slice_matrix_real(
     (out, rows, cols)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_conv2_mode_real_2d(
     full: &[f64],
     full_rows: usize,
@@ -942,7 +944,7 @@ fn circshift_data(data: &[f64], shape: &[usize], shifts: &[isize]) -> Result<Vec
 
     let strides = compute_strides(shape);
     let mut out = vec![0.0f64; data.len()];
-    for idx in 0..data.len() {
+    for (idx, out_value) in out.iter_mut().enumerate() {
         let coords = unravel_index(idx, shape);
         let mut src_idx = 0usize;
         for (axis, &coord) in coords.iter().enumerate() {
@@ -956,7 +958,7 @@ fn circshift_data(data: &[f64], shape: &[usize], shifts: &[isize]) -> Result<Vec
                 src_idx += src_coord * stride;
             }
         }
-        out[idx] = data[src_idx];
+        *out_value = data[src_idx];
     }
     Ok(out)
 }
@@ -1663,7 +1665,7 @@ impl AccelProvider for InProcessProvider {
         {
             let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
             for slot in &mut data {
-                *slot = next_uniform(&mut *guard);
+                *slot = next_uniform(&mut guard);
             }
         }
 
@@ -1683,7 +1685,7 @@ impl AccelProvider for InProcessProvider {
         if len > 0 {
             let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
             while data.len() < len {
-                let (z0, z1) = next_normal_pair(&mut *guard);
+                let (z0, z1) = next_normal_pair(&mut guard);
                 data.push(z0);
                 if data.len() < len {
                     data.push(z1);
@@ -1781,7 +1783,7 @@ impl AccelProvider for InProcessProvider {
             let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
             let span_f64 = span as f64;
             for _ in 0..len {
-                let mut offset = (next_uniform(&mut *guard) * span_f64).floor() as u64;
+                let mut offset = (next_uniform(&mut guard) * span_f64).floor() as u64;
                 if offset >= span {
                     offset = span - 1;
                 }
@@ -1815,7 +1817,7 @@ impl AccelProvider for InProcessProvider {
                 if span == 0 {
                     break;
                 }
-                let mut u = next_uniform(&mut *guard);
+                let mut u = next_uniform(&mut guard);
                 if u >= 1.0 {
                     u = 0.9999999999999999;
                 }
@@ -3410,7 +3412,7 @@ impl AccelProvider for InProcessProvider {
 
         let mut shape_ext = x.shape.clone();
         if dim >= shape_ext.len() {
-            shape_ext.extend(std::iter::repeat(1).take(dim + 1 - shape_ext.len()));
+            shape_ext.extend(std::iter::repeat_n(1, dim + 1 - shape_ext.len()));
         }
         let dim_idx = dim;
         let dim_len = shape_ext.get(dim_idx).copied().unwrap_or(1);
@@ -3577,7 +3579,7 @@ impl AccelProvider for InProcessProvider {
         };
         let mut shape = handle.shape.clone();
         if shifts.len() > shape.len() {
-            shape.extend(std::iter::repeat(1).take(shifts.len() - shape.len()));
+            shape.extend(std::iter::repeat_n(1, shifts.len() - shape.len()));
         }
         let mut full_shifts = vec![0isize; shape.len()];
         for (idx, &shift) in shifts.iter().enumerate() {
@@ -4384,8 +4386,7 @@ impl AccelProvider for InProcessProvider {
             } else {
                 match direction {
                     FindDirection::First => {
-                        for idx in 0..total {
-                            let value = data[idx];
+                        for (idx, &value) in data.iter().enumerate() {
                             if value != 0.0 {
                                 indices.push((idx + 1) as f64);
                                 rows_out.push(((idx % row_extent) + 1) as f64);
@@ -4398,8 +4399,7 @@ impl AccelProvider for InProcessProvider {
                         }
                     }
                     FindDirection::Last => {
-                        for idx in (0..total).rev() {
-                            let value = data[idx];
+                        for (idx, &value) in data.iter().enumerate().rev() {
                             if value != 0.0 {
                                 indices.push((idx + 1) as f64);
                                 rows_out.push(((idx % row_extent) + 1) as f64);
@@ -4700,7 +4700,7 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow!("matmul_power_step: unknown buffer {}", base.buffer_id))?
         };
         let mut norms = vec![0.0f64; cols];
-        for col in 0..cols {
+        for (col, norm) in norms.iter_mut().enumerate().take(cols) {
             let mut acc = 0.0f64;
             for row in 0..rows {
                 let idx = row + col * rows;
@@ -4708,10 +4708,9 @@ impl AccelProvider for InProcessProvider {
                 acc += val * val;
             }
             acc += ep.epsilon;
-            norms[col] = acc.sqrt();
+            *norm = acc.sqrt();
         }
-        for col in 0..cols {
-            let norm = norms[col];
+        for (col, norm) in norms.iter().enumerate().take(cols) {
             for row in 0..rows {
                 let idx = row + col * rows;
                 data[idx] /= norm;
@@ -5059,7 +5058,7 @@ impl AccelProvider for InProcessProvider {
                 .enumerate()
             {
                 let raw = if scalar_mask[dim_index] {
-                    *data.get(0).unwrap_or(&0.0)
+                    *data.first().unwrap_or(&0.0)
                 } else {
                     data[idx]
                 };

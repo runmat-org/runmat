@@ -211,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             let zero = match ctx.scalar_ty {
                 ScalarType::F64 => "f64(0.0)",
                 _ => "0.0",
@@ -369,12 +369,6 @@ struct Mask {
     shape: Vec<usize>,
 }
 
-impl Mask {
-    fn len(&self) -> usize {
-        self.bits.len()
-    }
-}
-
 fn mask_from_value(value: &Value) -> Result<Mask, String> {
     match value {
         Value::Tensor(tensor) => {
@@ -444,7 +438,7 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> Result<Tensor, String> {
     if dim == 0 {
         return Err("nnz: dimension must be >= 1".to_string());
     }
-    if mask.len() == 0 {
+    if mask.bits.is_empty() {
         let mut out_shape = canonical_shape(&mask.shape, 0);
         if dim <= out_shape.len() && !out_shape.is_empty() {
             out_shape[dim - 1] = 1;

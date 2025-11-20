@@ -510,7 +510,7 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> Result<Vec<usize>
                 ));
             }
             dims[auto] = 0;
-        } else if numel % known_product != 0 {
+        } else if !numel.is_multiple_of(known_product) {
             return Err(format!(
                 "reshape: product of dimensions ({}) must equal numel(A) ({numel})",
                 known_product

@@ -440,7 +440,7 @@ fn ensure_column_match(lhs_cols: usize, rhs_cols: usize) -> Result<(), String> {
 
 fn is_effectively_matrix(shape: &[usize]) -> bool {
     match shape.len() {
-        0 | 1 | 2 => true,
+        0..=2 => true,
         _ => shape.iter().skip(2).all(|&dim| dim == 1),
     }
 }

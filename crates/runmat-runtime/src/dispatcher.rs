@@ -11,7 +11,7 @@ pub fn is_gpu_value(value: &Value) -> bool {
 pub fn value_contains_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
-        Value::Cell(ca) => ca.data.iter().any(|ptr| value_contains_gpu(&**ptr)),
+        Value::Cell(ca) => ca.data.iter().any(|ptr| value_contains_gpu(ptr)),
         Value::Struct(sv) => sv.fields.values().any(value_contains_gpu),
         Value::Object(obj) => obj.properties.values().any(value_contains_gpu),
         _ => false,
@@ -63,7 +63,7 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, String> {
         Value::Cell(ca) => {
             let mut gathered = Vec::with_capacity(ca.data.len());
             for ptr in &ca.data {
-                gathered.push(gather_if_needed(&**ptr)?);
+                gathered.push(gather_if_needed(ptr)?);
             }
             make_cell_with_shape(gathered, ca.shape.clone())
         }

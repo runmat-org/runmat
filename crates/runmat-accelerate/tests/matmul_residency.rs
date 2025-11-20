@@ -27,7 +27,7 @@ fn matmul_output_reuse_from_pool() {
     let lhs_handle = provider.upload(&lhs_view).expect("upload lhs");
     let rhs_handle = provider.upload(&rhs_view).expect("upload rhs");
 
-    let mut cpu_out = vec![0.0f64; 16];
+    let mut cpu_out = [0.0f64; 16];
     for row in 0..4 {
         for col in 0..4 {
             let mut acc = 0.0f64;

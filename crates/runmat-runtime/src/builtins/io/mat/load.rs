@@ -685,7 +685,7 @@ fn mat_array_to_value(array: MatArray) -> Result<Value, String> {
             }
         }
         MatData::Char { data } => {
-            let rows = array.dims.get(0).copied().unwrap_or(1);
+            let rows = array.dims.first().copied().unwrap_or(1);
             let cols = array.dims.get(1).copied().unwrap_or(1);
             let mut chars = Vec::with_capacity(rows.saturating_mul(cols));
             for code in data {
@@ -750,7 +750,7 @@ fn cell_elements_to_strings(elements: &[MatArray]) -> Option<Vec<String>> {
         if element.class != MatClass::Char {
             return None;
         }
-        let rows = element.dims.get(0).copied().unwrap_or(1);
+        let rows = element.dims.first().copied().unwrap_or(1);
         if rows > 1 {
             return None;
         }
@@ -823,9 +823,7 @@ fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
             let idx = r * ca.cols + c;
             row.push(ca.data[idx]);
         }
-        let trimmed = row
-            .trim_end_matches(|ch| ch == ' ' || ch == '\0')
-            .to_string();
+        let trimmed = row.trim_end_matches([' ', '\0']).to_string();
         rows.push(trimmed);
     }
     rows

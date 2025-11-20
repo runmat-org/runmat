@@ -82,14 +82,14 @@ fn matmul_small_k_threshold() {
     assert_eq!(host.shape, vec![m, n]);
 
     let expected = cpu_matmul(&a, m, k, &b, k, n);
-    for idx in 0..expected.len() {
-        let diff = (host.data[idx] - expected[idx]).abs();
+    for (idx, (got, want)) in host.data.iter().zip(expected.iter()).enumerate() {
+        let diff = (got - want).abs();
         assert!(
             diff < 1e-9,
             "small-k mismatch at {}: got={} want={} diff={}",
             idx,
-            host.data[idx],
-            expected[idx],
+            got,
+            want,
             diff
         );
     }
@@ -135,14 +135,14 @@ fn matmul_small_k_exact_threshold() {
     assert_eq!(host.shape, vec![m, n]);
 
     let expected = cpu_matmul(&a, m, k, &b, k, n);
-    for idx in 0..expected.len() {
-        let diff = (host.data[idx] - expected[idx]).abs();
+    for (idx, (got, want)) in host.data.iter().zip(expected.iter()).enumerate() {
+        let diff = (got - want).abs();
         assert!(
             diff < 5e-5,
             "threshold mismatch at {}: got={} want={} diff={}",
             idx,
-            host.data[idx],
-            expected[idx],
+            got,
+            want,
             diff
         );
     }
@@ -201,9 +201,8 @@ fn matmul_vec4_f32_matches_cpu() {
     assert_eq!(host.shape, vec![m, n]);
 
     let expected = cpu_matmul_f32(&a, m, k, &b, k, n);
-    for idx in 0..expected.len() {
-        let got = host.data[idx] as f32;
-        let want = expected[idx];
+    for (idx, (got64, want)) in host.data.iter().zip(expected.iter()).enumerate() {
+        let got = *got64 as f32;
         let diff = (got - want).abs();
         let tol = 5e-4 * want.abs().max(1.0);
         assert!(

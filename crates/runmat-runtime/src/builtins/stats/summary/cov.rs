@@ -284,8 +284,8 @@ impl CovArgs {
         let mut normalization_explicit = false;
         let mut rows = CovRows::All;
 
-        let mut iter = rest.into_iter();
-        while let Some(arg) = iter.next() {
+        let iter = rest.into_iter();
+        for arg in iter {
             match arg {
                 Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
                     let key = tensor::value_to_string(&arg)
@@ -641,7 +641,7 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> Result<Tensor, S
             }
 
             let mut means = vec![0.0; cols];
-            for col in 0..cols {
+            for (col, mean_slot) in means.iter_mut().enumerate() {
                 let column = matrix.column(col);
                 let mut sum = 0.0;
                 let mut valid = true;
@@ -652,7 +652,7 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> Result<Tensor, S
                     }
                     sum += value;
                 }
-                means[col] = if valid { sum / (rows as f64) } else { f64::NAN };
+                *mean_slot = if valid { sum / (rows as f64) } else { f64::NAN };
             }
 
             for i in 0..cols {
@@ -676,7 +676,7 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> Result<Tensor, S
             }
 
             let mut means = vec![0.0; cols];
-            for col in 0..cols {
+            for (col, mean_slot) in means.iter_mut().enumerate() {
                 let column = matrix.column(col);
                 let mut weighted_sum = 0.0;
                 let mut valid = true;
@@ -687,7 +687,7 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> Result<Tensor, S
                     }
                     weighted_sum += weights[row] * value;
                 }
-                means[col] = if valid {
+                *mean_slot = if valid {
                     weighted_sum / sum_w
                 } else {
                     f64::NAN
@@ -815,8 +815,7 @@ fn covariance_weighted_pair(
         return f64::NAN;
     }
     let mut accumulator = 0.0;
-    for row in 0..matrix.rows {
-        let weight = weights[row];
+    for (row, &weight) in weights.iter().enumerate().take(matrix.rows) {
         if weight == 0.0 {
             continue;
         }
@@ -849,13 +848,13 @@ fn covariance_pair(matrix: &Matrix, lhs: usize, rhs: usize, weight: &CovWeightSp
             let mut xs = Vec::new();
             let mut ys = Vec::new();
             let mut ws = Vec::new();
-            for row in 0..matrix.rows {
+            for (row, &weight) in weights.iter().enumerate().take(matrix.rows) {
                 let x = matrix.get(row, lhs);
                 let y = matrix.get(row, rhs);
                 if x.is_finite() && y.is_finite() {
                     xs.push(x);
                     ys.push(y);
-                    ws.push(weights[row]);
+                    ws.push(weight);
                 }
             }
             covariance_weighted_slice(&xs, &ys, &ws)

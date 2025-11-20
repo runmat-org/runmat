@@ -1,5 +1,3 @@
-#![cfg(feature = "native-accel")]
-
 use std::collections::HashMap;
 
 use runmat_accelerate::graph::{
@@ -182,15 +180,14 @@ impl<'a> GraphBuilder<'a> {
                     None
                 };
                 let out_value = if let Some(t) = tensor_const {
-                    let id = self.new_value(
+                    self.new_value(
                         ValueOrigin::NodeOutput {
                             node: node_id,
                             output: 0,
                         },
                         ty.clone(),
                         Some(Value::Tensor(t)),
-                    );
-                    id
+                    )
                 } else {
                     self.new_node_output(node_id, 0, ty)
                 };
@@ -651,9 +648,9 @@ impl<'a> GraphBuilder<'a> {
                 (ShapeInfo::Tensor(sa), ShapeInfo::Tensor(sb))
                     if sa.len() >= 2 && sb.len() >= 2 =>
                 {
-                    let m = sa.get(0).cloned().unwrap_or(None);
+                    let m = sa.first().cloned().unwrap_or(None);
                     let k_left = sa.get(1).cloned().unwrap_or(None);
-                    let k_right = sb.get(0).cloned().unwrap_or(None);
+                    let k_right = sb.first().cloned().unwrap_or(None);
                     let n = sb.get(1).cloned().unwrap_or(None);
                     let dims = if let (Some(kl), Some(kr)) = (k_left, k_right) {
                         if kl != kr && kl != 1 && kr != 1 {

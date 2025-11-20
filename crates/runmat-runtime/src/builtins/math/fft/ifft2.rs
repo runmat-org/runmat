@@ -299,7 +299,10 @@ fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> Result<
     Ok(Value::Tensor(real))
 }
 
-fn parse_ifft2_arguments(args: &[Value]) -> Result<((Option<usize>, Option<usize>), bool), String> {
+type LengthPair = (Option<usize>, Option<usize>);
+type LengthsAndSymmetry = (LengthPair, bool);
+
+fn parse_ifft2_arguments(args: &[Value]) -> Result<LengthsAndSymmetry, String> {
     if args.is_empty() {
         return Ok(((None, None), false));
     }

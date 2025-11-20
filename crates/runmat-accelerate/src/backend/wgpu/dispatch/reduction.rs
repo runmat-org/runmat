@@ -58,6 +58,7 @@ pub fn run_single_pass(
     submit(device, queue, enc);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_two_pass(
     device: &wgpu::Device,
     queue: &wgpu::Queue,

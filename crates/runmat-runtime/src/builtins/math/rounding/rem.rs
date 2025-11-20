@@ -210,7 +210,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let a = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let a = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             let b = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
             Ok(format!("{a} - {b} * trunc({a} / {b})"))
         },
@@ -297,7 +300,7 @@ fn rem_host(lhs: Value, rhs: Value) -> Result<Value, String> {
 
 fn compute_rem_real(a: &Tensor, b: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape).map_err(|err| format!("rem: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("rem: {e}"))?;
         return Ok(tensor::tensor_into_value(tensor));
@@ -313,7 +316,7 @@ fn compute_rem_real(a: &Tensor, b: &Tensor) -> Result<Value, String> {
 
 fn compute_rem_complex(a: &ComplexTensor, b: &ComplexTensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape).map_err(|err| format!("rem: {err}"))?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("rem: {e}"))?;
         return Ok(complex_tensor_into_value(tensor));

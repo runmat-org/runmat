@@ -264,6 +264,10 @@ impl GatherResult {
         self.outputs.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
+    }
+
     /// Borrowed slice of outputs (in call-order).
     pub fn outputs(&self) -> &[Value] {
         &self.outputs

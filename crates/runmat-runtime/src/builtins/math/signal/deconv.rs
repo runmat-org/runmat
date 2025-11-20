@@ -418,10 +418,12 @@ fn orientation_from_hint(hint: OrientationHint) -> Orientation {
     }
 }
 
+type PolyDivision = (Vec<Complex<f64>>, Vec<Complex<f64>>);
+
 fn polynomial_division(
     numerator: &[Complex<f64>],
     denominator: &[Complex<f64>],
-) -> Result<(Vec<Complex<f64>>, Vec<Complex<f64>>), String> {
+) -> Result<PolyDivision, String> {
     if denominator.is_empty() {
         return Err("denominator must not be empty".to_string());
     }

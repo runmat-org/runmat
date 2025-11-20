@@ -57,6 +57,12 @@ pub struct BindGroupCache {
     per_layout: Mutex<HashMap<usize, (u64, u64)>>,
 }
 
+impl Default for BindGroupCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BindGroupCache {
     pub fn new() -> Self {
         Self {
@@ -149,7 +155,7 @@ impl BindGroupCache {
             let mut keys_to_remove: Vec<BindGroupKey> = Vec::new();
             if let Ok(mut index) = self.index.lock() {
                 if let Some(keys_set) = index.remove(&buffer_ptr) {
-                    keys_to_remove.extend(keys_set.into_iter());
+                    keys_to_remove.extend(keys_set);
                     let mut empty_ptrs: HashSet<usize> = HashSet::new();
                     for key in &keys_to_remove {
                         for binding in &key.bindings {

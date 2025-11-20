@@ -186,7 +186,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             let (zero, one) = match ctx.scalar_ty {
                 ScalarType::F32 => ("0.0", "1.0"),
                 ScalarType::F64 => ("f64(0.0)", "f64(1.0)"),

@@ -245,7 +245,7 @@ fn regexpi_builtin(subject: Value, pattern: Value, rest: Vec<Value>) -> Result<V
 }
 
 fn build_options(rest: &[Value]) -> Vec<Value> {
-    let mut options: Vec<Value> = rest.iter().cloned().collect();
+    let mut options: Vec<Value> = rest.to_vec();
     if !has_case_directive(rest) {
         options.push(Value::String("ignorecase".into()));
     }

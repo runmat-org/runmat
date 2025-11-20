@@ -666,20 +666,16 @@ mod tests {
 
         let one = dir1.path().to_string_lossy();
         let two = dir2.path().to_string_lossy();
-        let max_len = one.len().max(two.len());
+        let len_one = one.chars().count();
+        let len_two = two.chars().count();
+        let max_len = len_one.max(len_two);
         let mut data = Vec::with_capacity(2 * max_len);
-        for ch in one.chars() {
-            data.push(ch);
-        }
-        for _ in one.len()..max_len {
-            data.push(' ');
-        }
-        for ch in two.chars() {
-            data.push(ch);
-        }
-        for _ in two.len()..max_len {
-            data.push(' ');
-        }
+        let mut push_row = |text: &str, length: usize| {
+            data.extend(text.chars());
+            data.extend(std::iter::repeat_n(' ', max_len - length));
+        };
+        push_row(&one, len_one);
+        push_row(&two, len_two);
         let char_array = CharArray::new(data, 2, max_len).expect("char array");
         addpath_builtin(vec![Value::CharArray(char_array)]).expect("addpath");
 

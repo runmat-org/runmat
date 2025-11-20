@@ -26,6 +26,12 @@ pub struct KernelResourceRegistry {
     scratch_buffers: Mutex<HashMap<ScratchBufferKind, (u64, Arc<wgpu::Buffer>)>>,
 }
 
+impl Default for KernelResourceRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ScratchBufferKind {
     QrGram,

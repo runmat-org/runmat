@@ -95,7 +95,7 @@ fn unary_ops_on_gpu_handles() {
     let g = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t.clone())]).unwrap();
 
     // sin
-    let s = runmat_runtime::call_builtin("sin", &[g.clone()]).unwrap();
+    let s = runmat_runtime::call_builtin("sin", std::slice::from_ref(&g)).unwrap();
     let s = runmat_runtime::call_builtin("gather", &[s]).unwrap();
     if let Value::Tensor(ts) = s {
         assert_eq!(ts.rows(), 2);
@@ -103,14 +103,14 @@ fn unary_ops_on_gpu_handles() {
     }
 
     // abs
-    let a = runmat_runtime::call_builtin("abs", &[g.clone()]).unwrap();
+    let a = runmat_runtime::call_builtin("abs", std::slice::from_ref(&g)).unwrap();
     let a = runmat_runtime::call_builtin("gather", &[a]).unwrap();
     if let Value::Tensor(ta) = a {
         assert_eq!(ta.data, vec![0.0, 1.0, 4.0, 9.0]);
     }
 
     // exp
-    let e = runmat_runtime::call_builtin("exp", &[g.clone()]).unwrap();
+    let e = runmat_runtime::call_builtin("exp", std::slice::from_ref(&g)).unwrap();
     let e = runmat_runtime::call_builtin("gather", &[e]).unwrap();
     if let Value::Tensor(te) = e {
         assert!((te.data[1] - std::f64::consts::E).abs() < 1e-12);
@@ -138,7 +138,7 @@ fn gpu_scalar_elementwise_and_sum_remain_on_device() {
     }
 
     // sum(G) returns gpu handle per our provider implementation
-    let s = runmat_runtime::call_builtin("sum", &[g2.clone()]).unwrap();
+    let s = runmat_runtime::call_builtin("sum", std::slice::from_ref(&g2)).unwrap();
     if let Value::GpuTensor(_) = s {
     } else {
         panic!("expected gpu sum result");
@@ -205,7 +205,7 @@ fn reductions_mean_min_max_on_device() {
     let g = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t)]).unwrap();
 
     // mean(G) -> gpu handle, then gather ~ column means [ (3+1)/2, (4+2)/2 ] = [2, 3]
-    let m = runmat_runtime::call_builtin("mean", &[g.clone()]).unwrap();
+    let m = runmat_runtime::call_builtin("mean", std::slice::from_ref(&g)).unwrap();
     if let Value::GpuTensor(_) = m {
     } else {
         panic!("expected gpu handle");
@@ -216,8 +216,8 @@ fn reductions_mean_min_max_on_device() {
     }
 
     // max(G) and min(G)
-    let mx = runmat_runtime::call_builtin("max", &[g.clone()]).unwrap();
-    let mn = runmat_runtime::call_builtin("min", &[g.clone()]).unwrap();
+    let mx = runmat_runtime::call_builtin("max", std::slice::from_ref(&g)).unwrap();
+    let mn = runmat_runtime::call_builtin("min", std::slice::from_ref(&g)).unwrap();
     assert!(matches!(mx, Value::GpuTensor(_)));
     assert!(matches!(mn, Value::GpuTensor(_)));
 

@@ -702,16 +702,14 @@ fn parse_constructor_args(args: Vec<Value>) -> Result<ConstructorArgs, String> {
     let mut keys_input: Option<Value> = None;
     let mut values_input: Option<Value> = None;
 
-    if index < args.len() {
-        if keyword_of(&args[index]).is_none() {
-            if args.len() < 2 {
-                return Err("containers.Map: constructor requires both keys and values when either is provided."
-                    .to_string());
-            }
-            keys_input = Some(args[index].clone());
-            values_input = Some(args[index + 1].clone());
-            index += 2;
+    if index < args.len() && keyword_of(&args[index]).is_none() {
+        if args.len() < 2 {
+            return Err("containers.Map: constructor requires both keys and values when either is provided."
+                .to_string());
         }
+        keys_input = Some(args[index].clone());
+        values_input = Some(args[index + 1].clone());
+        index += 2;
     }
 
     let mut key_type = KeyType::Char;
@@ -813,8 +811,8 @@ where
     F: FnOnce(&MapStore) -> Result<R, String>,
 {
     let handle = extract_handle(map)?;
-    ensure_handle(&handle)?;
-    let id = map_id(&handle)?;
+    ensure_handle(handle)?;
+    let id = map_id(handle)?;
     let guard = MAP_REGISTRY
         .read()
         .map_err(|_| "containers.Map: registry lock poisoned".to_string())?;
@@ -829,8 +827,8 @@ where
     F: FnOnce(&mut MapStore) -> Result<R, String>,
 {
     let handle = extract_handle(map)?;
-    ensure_handle(&handle)?;
-    let id = map_id(&handle)?;
+    ensure_handle(handle)?;
+    let id = map_id(handle)?;
     let mut guard = MAP_REGISTRY
         .write()
         .map_err(|_| "containers.Map: registry lock poisoned".to_string())?;
