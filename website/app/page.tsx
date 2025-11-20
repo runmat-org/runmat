@@ -125,31 +125,17 @@ export default function HomePage() {
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center">
               <Link 
-                href="/docs/accelerate/how-it-works" 
-                className="text-sm hover:text-foreground text-muted-foreground transition-colors underline"
-              >
-                How accelerate works
-              </Link>
-              <span className="hidden sm:inline text-blue-500">•</span>
-              <Link 
-                href="/docs/fusion-guide" 
-                className="text-sm hover:text-foreground text-muted-foreground transition-colors underline"
-              >
-                Fusion Guide
-              </Link>
-              <span className="hidden sm:inline text-blue-500">•</span>
-              <Link 
-                href="/docs/accelerate/fusion" 
+                href="/docs/accelerate/fusion-intro" 
                 className="text-sm hover:text-foreground text-muted-foreground transition-colors underline"
               >
                 How fusion works
               </Link>
               <span className="hidden sm:inline text-blue-500">•</span>
               <Link 
-                href="/docs/accelerate/gpu-residency" 
+                href="/docs/fusion-guide" 
                 className="text-sm hover:text-foreground text-muted-foreground transition-colors underline"
               >
-                How GPU data residency works
+                Fusion architecture
               </Link>
             </div>
           </div>
