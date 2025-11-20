@@ -243,40 +243,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                 fontSize={14}
             >
               {data.paramLabel ?? data.paramKey}
-            </Text>
-
-            {highlightPoint && annotationText && (
-              <Group>
-                <line
-                  x1={xScale(highlightPoint.param)}
-                  y1={yScale(highlightSpeed)}
-                  x2={(xScale(highlightPoint.param) ?? 0) + 80}
-                  y2={(yScale(highlightSpeed) ?? 0) - 40}
-                  stroke="#a855f7"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 4"
-                />
-                <Circle
-                  cx={(xScale(highlightPoint.param) ?? 0) + 80}
-                  cy={(yScale(highlightSpeed) ?? 0) - 40}
-                  r={4}
-                  fill="#a855f7"
-                />
-                <foreignObject
-                  x={(xScale(highlightPoint.param) ?? 0) + 88}
-                  y={(yScale(highlightSpeed) ?? 0) - 64}
-                  width={140}
-                  height={64}
-                >
-                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white shadow-lg backdrop-blur">
-                    <p className="font-semibold">{annotationText}</p>
-                    <p className="text-[11px] text-white/70">
-                      {formatNumber(highlightPoint.rawParam)} {data.paramLabel ?? data.paramKey}
-                    </p>
-                  </div>
-                </foreignObject>
-              </Group>
-            )}
+              </Text>
           </Group>
         </svg>
       )}
