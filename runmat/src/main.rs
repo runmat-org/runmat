@@ -561,9 +561,13 @@ async fn main() -> Result<()> {
     configure_gc_from_config(&config)?;
 
     // Initialize GUI system if needed
-    let _gui_initialized = if config.plotting.mode == PlotMode::Gui
-        || (config.plotting.mode == PlotMode::Auto && !config.plotting.force_headless)
-    {
+    let wants_gui = match config.plotting.mode {
+        PlotMode::Gui => true,
+        PlotMode::Auto => !config.plotting.force_headless && is_gui_available(),
+        PlotMode::Headless | PlotMode::Jupyter => false,
+    };
+
+    let _gui_initialized = if wants_gui {
         info!("Initializing GUI plotting system");
 
         // Register this thread as the main thread for GUI operations

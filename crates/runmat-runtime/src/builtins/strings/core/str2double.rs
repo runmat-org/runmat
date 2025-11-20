@@ -397,7 +397,7 @@ mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data[0], std::f64::consts::PI);
+                assert_eq!(tensor.data[0], 3.14);
                 assert!(tensor.data[1].is_nan());
                 assert_eq!(tensor.data[2], f64::NEG_INFINITY);
             }
