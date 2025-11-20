@@ -99,7 +99,7 @@ export default function FusionGuidePage() {
               </ul>
               <p className="text-muted-foreground">
                 We prioritised these groups because they appear across domains, keep chatty host/device traffic off PCIe, and
-                benefit greatly from fusion. We'll be adding more fusion groups in the future to cover more workloads.
+                benefit greatly from fusion. We&apos;ll be adding more fusion groups in the future to cover more workloads.
               </p>
               <p className="text-muted-foreground">
                 Have a new fusion flavour in mind? Open an issue or submit a pull request so we can explore it together.
