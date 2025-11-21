@@ -5731,6 +5731,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-runtime-integration-tests"
+version = "0.2.0"
+dependencies = [
+ "inventory",
+ "runmat-accelerate",
+ "runmat-accelerate-api",
+ "runmat-builtins",
+ "runmat-macros",
+ "runmat-runtime",
+]
+
+[[package]]
 name = "runmat-snapshot"
 version = "0.2.0"
 dependencies = [

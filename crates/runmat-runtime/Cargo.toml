@@ -71,12 +71,12 @@ test-classes = []
 # Documentation/export utilities
 doc_export = ["serde", "serde_yaml", "clap"]
 
-# Enable WGPU-backed tests by forwarding to runmat-accelerate's feature
-wgpu = ["runmat-accelerate/wgpu"]
+# Enable WGPU-backed tests (tests enable runmat-accelerate's feature through dev-dependencies)
+wgpu = []
 
 [dev-dependencies]
 runmat-macros = { workspace = true } 
-runmat-accelerate = { workspace = true }
+runmat-accelerate = { workspace = true, features = ["wgpu"] }
 matfile = "0.5.0"
 tempfile = "3.10"
 

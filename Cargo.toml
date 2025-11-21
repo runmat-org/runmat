@@ -11,6 +11,7 @@ members = [
     "crates/runmat-macros",
     "crates/runmat-builtins",
     "crates/runmat-runtime",
+    "crates/runmat-runtime-integration-tests",
     "crates/runmat-kernel",
     "crates/runmat-turbine",
     "crates/runmat-gc-api",

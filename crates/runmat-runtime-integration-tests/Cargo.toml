@@ -1,0 +1,14 @@
+[package]
+name = "runmat-runtime-integration-tests"
+version = "0.2.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+runmat-runtime = { path = "../runmat-runtime", features = ["wgpu"] }
+runmat-accelerate = { path = "../runmat-accelerate", features = ["wgpu"] }
+runmat-accelerate-api = { path = "../runmat-accelerate-api" }
+runmat-builtins = { path = "../runmat-builtins" }
+runmat-macros = { path = "../runmat-macros" }
+inventory = { workspace = true }
+
