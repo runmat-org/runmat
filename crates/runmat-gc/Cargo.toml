@@ -1,6 +1,6 @@
 [package]
 name = "runmat-gc"
-version = "0.0.17"
+version = "0.2.0"
 edition = "2021"
 description = "Generational garbage collector for RunMat with optional pointer compression"
 authors = ["Dystr Team"]
