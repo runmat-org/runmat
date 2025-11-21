@@ -2,27 +2,18 @@
 
 A clear, minimal core. A fast, pragmatic runtime. An open extension model.
 
-RunMat is not a reimplementation of MATLAB-in-full. It is a modern runtime that runs MATLAB code very fast, is pleasant to reason about, and is easy to extend in both the Rust and MATLAB languages. We keep the core small and uncompromisingly high-quality; everything else is a package.
+RunMat is not a reimplementation of MATLAB-in-full. It is a modern runtime that runs MATLAB code very fast, is pleasant to reason about, and is easy to extend in both the Rust and MATLAB languages.
 
 This document explains the “why” and the “how” of that design.
 
 ## TL;DR
 
-- We separate the language from the runtime. The runtime stays slim; the language surface grows via packages.
-- We implement a minimal, well-specified subset of semantics in the core (arrays, indexing, control flow, functions, errors). Built-in functions in core are deliberately few.
-- We expose a first-class package system: native (Rust) packages and source (MATLAB) packages. Both can add functions, operators, types and documentation.
-- We emphasize performance (tiered execution, careful GC, predictable memory layout) and clarity (simple rules, strict errors), not historical quirks.
-- We value stability and composability over maximal compatibility. Where MATLAB's legacy is ambiguous or inconsistent, we choose consistency.
-
-## Historical precedents that work
-
-- The UNIX philosophy: keep the core small, compose through well-defined interfaces.
-- Linux kernel + modules: a tight core with a massive extension surface.
-- LLVM: a small, carefully specified IR and powerful back-ends hosting a universe of front-ends.
-- Node.js + npm, Rust + crates.io, Python + PyPI, Julia + Pkg: a tiny “waist” with a thriving package ecosystem.
-- HotSpot (JVM) / V8 (JS): tiered execution (interpreter feeding an optimizing JIT) as the pragmatic choice for fast dynamic languages.
-
-RunMat stands on the shoulders of these patterns.
+- Full MATLAB language support: the core implements the MATLAB grammar and semantics, not a small subset.
+- Core set of built-ins: RunMat includes a core set of MATLAB built-ins, with clear docs and tests.
+- Tiered CPU execution: Ignition interpreter for fast startup, Turbine JIT for hot code.
+- GPU-first math: a GPU layer and a Fusion engine that turns MATLAB-style code into fast GPU workloads when shapes and patterns fit.
+- Small, portable runtime: single static binary, fast startup, modern CLI, and Jupyter kernel support.
+- Toolboxes on top: signal, stats, image, optimization, and other domains sit above the core as libraries and packages.
 
 ## The minimal core
 
@@ -45,7 +36,7 @@ What we deliberately do not put in the core:
 MATLAB is a language, a large proprietary standard library, an IDE, and an ecosystem of toolboxes. We treat each separately.
 
 - The language is a syntax and semantics for arrays, functions, control flow, and errors. That we support in the core.
-- The library (built-ins) is open-ended. RunMat ships a slim standard library and lets packages provide the rest. Documentation is generated from the runtime (not a hand-maintained spreadsheet of parity; parity is not a product goal).
+- The library (built-ins) is open-ended. RunMat ships a standard library and lets packages provide the rest. Documentation is generated from the runtime (not a hand-maintained spreadsheet of parity; parity is not a product goal).
 - RunMat is not an IDE. It is a runtime that can be used with any IDE (such as Cursor, VSCode, or IntelliJ).
 
 This separation keeps the core maintainable and lets the community move fast without destabilizing the runtime.
@@ -108,10 +99,6 @@ Both package kinds show up identically to users: functions appear in the namespa
 - A smaller trusted compute base (TCB), easier auditing, faster iteration.
 - A runtime that can target new back-ends (SIMD profiles, GPUs, accelerators) without breaking package authors.
 
-## Roadmap (high-level)
-
-- v0.x: polish core semantics, stabilize Value/Type/ABI, publish initial package examples, ship the registry and `.runmat` flow, keep JIT/GC focused and fast, finish plotting library. 
-- v1.0: locked waist (stable ABI), registry GA, hardened GC and profiling, documented performance guide, full reference generated from runtime metadata.
 
 ## Appendix: Frequently asked questions
 

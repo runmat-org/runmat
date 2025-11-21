@@ -12,7 +12,7 @@ The architecture is guided by a few key principles:
 2.  **Safety and Modularity**: By leveraging Rust's safety guarantees and a highly modular crate-based architecture, we aim for a robust and maintainable system. Each core component (parser, interpreter, JIT, GC) is an independent crate, enabling focused development and testing.
 3.  **V8-Inspired Tiered Execution**: We believe that the optimal execution strategy for a dynamic language involves multiple tiers. Code begins execution in a simple, fast-to-start interpreter. "Hot" code paths are then identified and promoted to an optimizing JIT compiler for native-level performance.
 4.  **Fast Startup**: A key pain point of traditional MATLAB environments is slow startup time. RunMat addresses this with a sophisticated snapshotting system that pre-compiles and serializes the entire standard library into a binary blob that can be loaded into memory nearly instantaneously.
-5.  **Excellent Ergonomics**: From the world-class interactive plotting library to the helpful REPL and comprehensive configuration system, the goal is to provide a powerful and pleasant user experience.
+5.  **Excellent Ergonomics**: From the evolving GPU-accelerated plotting layer to the helpful REPL and configuration system, the goal is to provide a powerful and pleasant user experience even while the project is in pre-release.
 
 ---
 
@@ -136,7 +136,7 @@ The snapshot system is a key architectural feature for providing a fast, respons
 
 ## Visualization: `runmat-plot`
 
-RunMat includes a "world-class" interactive plotting library designed to rival and exceed the capabilities of MATLAB's Handle Graphics.
+RunMat includes an in-progress GPU-accelerated plotting layer aimed at eventually rivaling MATLAB's Handle Graphics, but today it focuses on simple 2D line/scatter plots with richer chart types still under development.
 
 -   **GPU-Accelerated**: The entire rendering pipeline is built on `wgpu`, a modern, cross-platform graphics API. This provides smooth, high-performance rendering for complex 2D and 3D scenes.
 -   **Layered Architecture**:

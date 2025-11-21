@@ -11,7 +11,7 @@ import {
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
 import { Button } from "@/components/ui/button";
-import { Download, Menu, Home, BookOpen, FileText, Scale, Minus } from "lucide-react";
+import { Download, Menu, BookOpen, FileText, Scale, Minus } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
@@ -32,13 +32,6 @@ export default function Navigation() {
             <NavigationMenuList>
               <NavigationMenuItem>
                 <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
-                  <Link href="/">
-                    Home
-                  </Link>
-                </NavigationMenuLink>
-              </NavigationMenuItem>
-              <NavigationMenuItem>
-                <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
                   <Link href="/docs">
                     Documentation
                   </Link>
@@ -53,8 +46,8 @@ export default function Navigation() {
               </NavigationMenuItem>
               <NavigationMenuItem>
                 <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
-                  <Link href="/license">
-                    License
+                  <Link href="/benchmarks">
+                    Benchmarks
                   </Link>
                 </NavigationMenuLink>
               </NavigationMenuItem>
@@ -122,14 +115,6 @@ export default function Navigation() {
           <div className="border-b border-border py-4">
             <div className="grid gap-2">
               <Link
-                href="/"
-                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <Home className="mr-2 h-4 w-4" />
-                Home
-              </Link>
-              <Link
                 href="/blog"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
@@ -178,12 +163,12 @@ export default function Navigation() {
                 Configuration
               </Link>
               <Link
-                href="/license"
+                href="/benchmarks"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <Scale className="mr-2 h-4 w-4" />
-                License
+                Benchmarks
               </Link>
               <Link
                 href="/download"

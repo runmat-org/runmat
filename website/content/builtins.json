@@ -533,7 +533,8 @@
     ],
     "keywords": [
       "any",
-      "logical reduction",
+      "logical",
+      "reduction",
       "omitnan",
       "all",
       "gpu"
@@ -3845,32 +3846,10 @@
     "category": [
       "math/elementwise"
     ],
-    "summary": "Element-wise factorial for non-negative integers with MATLAB-compatible NaN/Inf behaviour.",
+    "summary": "Element-wise factorial for non-negative integers.",
     "description": "`factorial(X)` computes `X!` (the product of the integers from `1` to `X`) for every element of `X`.",
     "status": "implemented",
     "signatures": [
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "int"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
       {
         "in": [
           "x",
@@ -3894,15 +3873,35 @@
           "min": 0,
           "max": 1
         }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "int"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
       }
     ],
     "keywords": [
       "factorial",
-      "combinatorics",
       "n!",
-      "permutations",
-      "gpu",
-      "like"
+      "permutation",
+      "gpu"
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/factorial.mdx"
@@ -5024,7 +5023,7 @@
     "category": [
       "acceleration/gpu"
     ],
-    "summary": "Transfer gpuArray data back to host memory, recursively handling cells, structs, and objects.",
+    "summary": "Bring gpuArray data back to host memory.",
     "description": "`gather(X)` copies data that resides on the GPU or in another distributed storage back into host memory.",
     "status": "implemented",
     "signatures": [
@@ -5076,10 +5075,8 @@
     "keywords": [
       "gather",
       "gpuArray",
-      "download",
-      "host copy",
       "accelerate",
-      "residency"
+      "download"
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/gather.mdx"
@@ -5334,10 +5331,32 @@
     "category": [
       "acceleration/gpu"
     ],
-    "summary": "Move data to the GPU and return a gpuArray handle.",
+    "summary": "Move MATLAB values onto the active GPU with optional size, dtype, and prototype controls.",
     "description": "`gpuArray(X)` moves MATLAB values onto the active GPU and returns a handle that the rest of the runtime can execute on.",
     "status": "implemented",
     "signatures": [
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
       {
         "in": [
           "x",
@@ -5361,43 +5380,17 @@
           "min": 0,
           "max": 1
         }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "any"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "any"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      }
-    ],
-    "examples": [
-      {
-        "title": null,
-        "code": "G = gpuArray([1 2 3], 'single');"
       }
     ],
     "keywords": [
       "gpuArray",
       "gpu",
-      "accelerate",
+      "device",
       "upload",
+      "accelerate",
       "dtype",
-      "like"
+      "like",
+      "size"
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/gpuarray.mdx"
@@ -7511,13 +7504,13 @@
           "x"
         ],
         "inTypes": [
-          "double"
+          "any"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "double"
+          "any"
         ],
         "nargin": {
           "min": 0,
@@ -7533,13 +7526,13 @@
           "x"
         ],
         "inTypes": [
-          "any"
+          "double"
         ],
         "out": [
           "out"
         ],
         "outTypes": [
-          "any"
+          "double"
         ],
         "nargin": {
           "min": 0,
@@ -12909,32 +12902,10 @@
     "category": [
       "math/reduction"
     ],
-    "summary": "Standard deviation of scalars, vectors, matrices, or N-D tensors with MATLAB-compatible options.",
+    "summary": "Standard deviation of scalars, vectors, matrices, or N-D tensors.",
     "description": "`std(x)` measures the spread of the elements in `x`. By default RunMat matches MATLABâs sample definition (dividing by `n-1`) and works along the first non-singleton dimension.",
     "status": "implemented",
     "signatures": [
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "Tensor"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
       {
         "in": [
           "x",
@@ -12953,6 +12924,28 @@
         "nargin": {
           "min": 0,
           "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
         },
         "nargout": {
           "min": 0,
@@ -13283,7 +13276,7 @@
     "category": [
       "strings/core"
     ],
-    "summary": "Preallocate string arrays filled with empty text scalars using MATLAB-compatible size syntax.",
+    "summary": "Preallocate string arrays filled with empty string scalars.",
     "description": "`strings` creates string arrays whose elements are empty string scalars (`\"\"`).",
     "status": "implemented",
     "signatures": [
@@ -13334,12 +13327,9 @@
     ],
     "keywords": [
       "strings",
-      "preallocate",
       "string array",
-      "empty strings",
-      "missing",
-      "like",
-      "gpu"
+      "empty",
+      "preallocate"
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/strings.mdx"
@@ -14712,32 +14702,10 @@
     "category": [
       "math/reduction"
     ],
-    "summary": "Variance of scalars, vectors, matrices, or N-D tensors with MATLAB-compatible options.",
+    "summary": "Variance of scalars, vectors, matrices, or N-D tensors.",
     "description": "`var(x)` measures the spread of the elements in `x` by returning their variance.",
     "status": "implemented",
     "signatures": [
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "Tensor"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
       {
         "in": [
           "x",
@@ -14756,6 +14724,28 @@
         "nargin": {
           "min": 0,
           "max": 2
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
+          "x"
+        ],
+        "inTypes": [
+          "Tensor"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "double"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
         },
         "nargout": {
           "min": 0,

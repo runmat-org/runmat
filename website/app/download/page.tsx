@@ -154,14 +154,14 @@ export default function DownloadPage() {
               <CardContent>
                 <div className="space-y-4">
                   <div>
-                    <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Install from crates.io</h4>
+                    <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">Install From crates.io</h4>
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
                       cargo install runmat
                     </div>
                   </div>
                   
                   <div>
-                    <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">From source (latest)</h4>
+                    <h4 className="font-semibold text-gray-500 dark:text-gray-400 mb-2">From Source (Latest)</h4>
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-gray-500 dark:text-gray-400">
                       cargo install --git https://github.com/runmat-org/runmat
                     </div>

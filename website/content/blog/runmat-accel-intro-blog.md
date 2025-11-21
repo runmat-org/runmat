@@ -1,72 +1,214 @@
 ---
-title: "Introducing RunMat Accelerate: The Fastest Runtime for Math"
-description: "RunMat Accelerate is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
-date: "2025-11-05"
+title: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
+description: "RunMat Accelerate is an open-source MATLAB-style runtime that fuses your array math into fast CPU and GPU kernels, often beating MATLAB gpuArray, PyTorch, and Julia for dense numerical workloads."
+date: "2025-11-18"
 author: "Nabeel Allana"
-readTime: "7 min read"
-slug: "runmat-accel-intro-blog"
-tags: ["MATLAB", "Rust", "JIT", "Octave", "scientific computing", "open source"]
-keywords: "MATLAB runtime, GNU Octave comparison, Rust scientific computing, JIT compiler, numerical computing, open source"
-excerpt: "RunMat Accelerate is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
-image: "/images/blog/runmat-hero.png"
-imageAlt: "RunMat logo with performance charts"
+readTime: "8 min read"
+slug: "runmat-accelerate-fastest-runtime-for-your-math"
+tags: ["MATLAB", "Pytorch", "JIT", "Julia", "scientific computing", "numerical computing", "GPU Math", "open source"]
+keywords: "RunMat Accelerate, fastest runtime for your math, MATLAB runtime, MATLAB GPU, GPU accelerated array math, PyTorch vs MATLAB, Julia GPU, CUDA alternative, WGPU, Metal, DirectX 12, Vulkan"
+image: "https://web.runmatstatic.com/runmat-4k-image-performance.png"
+imageAlt: "RunMat performance visualization"
 ogType: "article"
-ogTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Math"
-ogDescription: "RunMat is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
+ogTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
+ogDescription: "RunMat Accelerate takes MATLAB-style array code and plans it across CPU JIT, BLAS, and fused GPU kernels, giving you GPU-level speed for the math you already write—no CUDA, no device flags, one code path."
 twitterCard: "summary_large_image"
-twitterTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Math"
-twitterDescription: "RunMat is a modern, open-source runtime that executes MATLAB code quickly. A slim core, tiered execution, and a package system make it fast, predictable, and easy to extend."
-canonical: "https://runmat.org/blog/runmat-accel-intro-blog"
+twitterTitle: "Introducing RunMat Accelerate: The Fastest Runtime for Your Math"
+twitterDescription: "See how RunMat Accelerate turns a real 4K image pipeline into fused GPU work and stacks up against MATLAB, PyTorch, and Julia as the fastest runtime for your math."
+canonical: "https://runmat.org/blog/runmat-accelerate-fastest-runtime-for-your-math"
 ---
-
-## The Fastest Runtime for Math
 
 ### Why a faster way to do math
 
 Your mathematical code is elegant. It's also 50x slower than it should be. You know GPUs could fix this, but the path there is absurd: rewrite everything in CUDA, manage device memory explicitly, accept vendor lock-in, or pay thousands per seat for accelerators that still require code changes. The gap between "math as we think it" and "math as GPUs want it" has become so normalized that we've forgotten to question why  (A \- mean(A)) / std(A) should require anything more than writing exactly that. 
 
-RunMat eliminates this gap entirely. Write your mathematical operations in clean, readable syntax. RunMat automatically fuses them into optimized GPU kernels that match or exceed hand-tuned CUDA performance. It runs on whatever GPU you have—NVIDIA, AMD, Apple Silicon, Intel—through native APIs (Metal/DirectX/Vulkan). No device management. No vendor lock-in. No rewrites. If you're tired of choosing between mathematical clarity and computational speed, this is for you.
+RunMat eliminates this gap entirely. You write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best place — CPU or GPU. On GPU, it can often match or beat hand-tuned CUDA pipelines on many math-heavy workloads.
+
+It runs on whatever GPU you have — NVIDIA, AMD, Apple Silicon, Intel — through native APIs (Metal / DirectX 12 / Vulkan). No device flags. No vendor lock-in. No rewrites.
+
+### The performance tradeoff (until now)
+
+Running math fast on a machine means setting up the machine to run a sequence of mathematical operations.
+
+You have two choices today:
+
+**Option 1:** Learn CUDA and write GPU kernels. Master how to parallelize workgroups in GPU cores. For those willing to do this work, you can sometimes eke out marginal performance gains by writing GPU kernels yourself.
+
+**Option 2:** Write `y = sin(x)` and leave it at that. This is what RunMat is designed for.
+
+RunMat detects operations that can run well on GPUs, and keeps smaller or awkward workloads on its CPU JIT and BLAS paths. You write one script; it decides what runs where.
+
+
+If you want to write CUDA/GPU code yourself, you might write a marginally faster GPU pipeline. [Note: this mainly applies to specialized pre-written PyTorch pipelines, particularly around ML tasks]
+
+If you want to focus on the math, our promise is: you write math, and we make it fly.
 
 #### What the best path looks like
 
 Let's see RunMat in action with a common problem: processing high-resolution images in batches. Whether you're analyzing satellite imagery, medical scans, or camera sensor data, the pipeline is always the same—normalize the data, apply corrections, and enhance the signal. The math is straightforward. 
 
-This pipeline mirrors common image preprocessing (remote sensing, medical, photography): per-image z-score normalization, radiometric gain/bias correction, gamma correction, and a simple quality check using MSE. We use 16 single-precision 4K tiles to avoid I/O effects and to stress the pattern GPUs handle well: long elementwise chains with light reductions. In RunMat, the MATLAB-style code remains as written, while Accelerate fuses elementwise steps and keeps arrays on the device, reducing kernel launches and transfers. 
+This pipeline mirrors common image preprocessing (remote sensing, medical, photography): per-image z-score normalization, radiometric gain/bias correction, gamma correction, and a simple quality check using MSE. We use 16 single-precision 4K tiles to avoid I/O effects and to stress the pattern GPUs handle well: long elementwise chains with light reductions. In RunMat, the MATLAB-style code remains as written, while Accelerate fuses elementwise steps and eliminates unnecessary memory transfers between operations, reducing kernel launches and transfers. 
 
 
-`rng(0); B \= 16; H \= 2160; W \= 3840;  
-gain \= single(1.0123); bias \= single(\-0.02);  
-gamma \= single(1.8); eps0 \= single(1e-6);  
-imgs \= rand(B, H, W, 'single');  
-mu \= mean(imgs, \[2 3\]);  
-sigma \= sqrt(mean((imgs \- mu).^2, \[2 3\]) \+ eps0);  
-out \= ((imgs \- mu) ./ sigma) \* gain \+ bias;  
-out \= out .^ gamma;  
-mse \= mean((out \- imgs).^2, 'all');  
-fprintf('Done. MSE=%.6e\\n', mse);`
+``` Matlab
+rng(0); 
+B = 16; H = 2160; W = 3840;   % Batch of 16 4K images
+gain = single(1.0123); bias = single(-0.02);   
+gamma = single(1.8); eps0 = single(1e-6);   
+
+% Generate random test images (16 × 2160 × 3840 = 133M elements)
+imgs = rand(B, H, W, 'single');   % RunMat generates directly on GPU when possible
+
+% Compute per-image statistics for normalization
+mu = mean(imgs, [2 3]);           % Mean across height/width dims (stays on GPU)
+sigma = sqrt(mean((imgs - mu).^2, [2 3]) + eps0);  % Std deviation (fused on GPU)
+
+% Apply normalization with gain and bias
+out = ((imgs - mu) ./ sigma) * gain + bias;  % Entire chain fused into single GPU kernel
+
+% Apply gamma correction  
+out = out .^ gamma;               % Fused with previous operations when possible
+
+% Compute error metric
+mse = mean((out - imgs).^2, 'all');  % Reduction stays on GPU until...
+fprintf('Done. MSE=%.6e\n', mse);    % Only here does data return to CPU for printing
+```
+
+### 4K image pipeline: real benchmark numbers
 
 
-![][image1]
+
+We ran this exact pipeline on an **Apple M2 Max** using the Metal backend, averaged over **3 runs** per point. Each batch size `B` is `B × 2160 × 3840` single-precision pixels.
+
+### 4K Image Pipeline Perf Sweep (B = image batch size)
+| B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|---|-------------|--------------|------------|----------------|------------------|
+| 4 | 217.9 | 922.9 | 548.4 | 2.52x | 4.23x |
+| 8 | 270.3 | 960.1 | 989.6 | 3.66x | 3.55x |
+| 16 | 317.4 | 1,040.7 | 1,859.1 | 5.86x | 3.28x |
+| 32 | 520.5 | 1,178.3 | 3,698.6 | 7.11x | 2.26x |
+| 64 | 893.8 | 1,379.6 | 7,434.6 | 8.32x | 1.54x |
+
+At the high end (**B = 64**, 64 4K images ≈ 133M pixels):
+
+- RunMat: **0.89 s**  
+- NumPy: **7.43 s** → about **8.3× slower**  
+- PyTorch: **1.38 s** → about **1.5× slower**
+
+
+
+![RunMat 4K image pipeline benchmark](https://web.runmatstatic.com/runmat-4k-image-performance.png)
+
+This is the same MATLAB-style code you saw above. RunMat’s fusion engine turns that code into a small number of GPU kernels, keeps tensors resident on the device, and only brings data back to CPU when you actually need it (for example, when printing the final MSE).
+
+On smaller batches, RunMat keeps more of this work on the CPU JIT and BLAS paths so you still get low overhead and fast startup.
+
+Run this benchmark yourself: [4K image pipeline script](https://github.com/runmat-org/runmat/blob/main/benchmarks/4k-image-processing/runmat.m)
+
+See your workload accelerated: [Getting Started guide](/docs/getting-started)
 
 ### What RunMat does automatically:
 
 1. Detects a GPU and selects the backend automatically (Metal / DirectX 12 / Vulkan). Falls back to CPU when none is available.  
 2. Plans each operation to the best engine (CPU JIT, BLAS, or GPU) based on array sizes and op type.  
-3. Fuses compatible steps and keeps arrays resident on the device to reduce kernel launches and transfers.  
+3. Fuses compatible steps and intelligently manages data placement between CPU and GPU memory.  
 4. One code path: no device flags, no vendor branches, no separate builds.
 
-![][image2]
+```mermaid
+%%{init: {'theme':'dark','flowchart': {'curve':'linear'}}}%%
+flowchart TD
+  A["Your .m code"] --> B["Typed Graph (IR)"]
+  B --> C["Planner (per step)"]
+  B --> D["Profiler → Device Map"]
+  D -. "size thresholds + transfer costs (refined at runtime)" .-> C
+
+  subgraph CPU["CPU"]
+    CJ["Ignition ➜ JIT (small arrays)<br/>Profiles hot loops; V8-style"]
+    CB["CPU BLAS<br/>(Big CPU math or FP64)"]
+  end
+
+  subgraph GPU["GPU Fusion Engine (via WGPU)"]
+    GF["Fuse back-to-back math into a bigger step<br/>(avoid re-scans)"]
+    GR["Keep data resident on GPU until CPU needs it"]
+  end
+
+  classDef cpu fill:#e6e6e6,stroke:#999,color:#000
+  classDef gpu fill:#e7f5e6,stroke:#7ab97a,color:#073b0b
+  classDef mgr fill:#ffb000,stroke:#b37400,color:#2a1a00
+
+  RM["Residency manager"]:::mgr
+  C -. "partition / choose target / co-locate" .-> RM
+
+  C -- "FP64 or big CPU-optimal" --> CB:::cpu
+  C -- "small arrays" --> CJ:::cpu
+  C -- "big or fuse-friendly" --> GF:::gpu
+
+  RM <--> GF
+  RM -. "avoid ping-pong" .- CJ
+  RM -. "avoid ping-pong" .- CB
+
+  GF --> GR:::gpu
+  R(("Results"))
+  GF --> R
+  GR --> R
+  CB --> R
+  CJ --> R
+	
+```
 
 ### The Complexity You're Avoiding
 
 To understand what RunMat eliminates from your workflow, let's look at what GPU acceleration currently requires. PyTorch is the de facto standard for GPU computing in machine learning and scientific computing—it's mature, well-optimized, and widely used. If you want GPU acceleration today, PyTorch is often your best option. 
 
-Here's our image preprocessing pipeline implemented in both PyTorch and RunMat. Notice what's required beyond the mathematical operations themselves:
+Here's our image preprocessing pipeline implemented in both RunMat and PyTorch. Notice what's required beyond the mathematical operations themselves:
 
-![][image3]  
+```Matlab
+
+% 16×4K tiles: normalize → calibrate → gamma → MSE
+rng(0); B=16; H=2160; W=3840;
+gain=single(1.0123); bias=single(-0.02); gamma=single(1.8); eps0=single(1e-6);
+
+imgs  = rand(B,H,W,'single');                      % [B,H,W]
+mu    = mean(imgs,[2 3]);                          % per-image mean
+sigma = sqrt(mean((imgs - mu).^2,[2 3]) + eps0);   % per-image std
+
+out = ((imgs - mu) ./ sigma) * gain + bias;        % normalize + calibrate
+out = out .^ gamma;                                % gamma correction
+mse = mean((out - imgs).^2,'all');
+
+
+```
+
+
 Vs 
 
-![][image4]
+```Python
+
+# 16×4K tiles: normalize → calibrate → gamma → MSE
+import torch
+B, H, W = 16, 2160, 3840
+
+# [device/setup]
+device = "cuda" if torch.cuda.is_available() else "cpu"
+dtype = torch.float32
+torch.manual_seed(0)
+
+# [allocations on selected device]
+imgs  = torch.rand((B, H, W), dtype=dtype, device=device)
+gain  = torch.tensor(1.0123, dtype=dtype, device=device)
+bias  = torch.tensor(-0.02,  dtype=dtype, device=device)
+gamma = torch.tensor(1.8,    dtype=dtype, device=device)
+eps0  = 1e-6
+
+# [math]
+mu    = imgs.mean(dim=(1, 2), keepdim=True)
+sigma = ((imgs - mu)**2).mean(dim=(1, 2), keepdim=True).add(eps0).sqrt()
+out   = ((imgs - mu) / sigma) * gain + bias
+out   = out.pow(gamma)
+mse   = (out - imgs).pow(2).mean()
+
+
+```
 
 The PyTorch version requires 24 lines to RunMat's 11, but line count isn't the real story. 
 
@@ -97,7 +239,7 @@ A side-by-side of RunMat versus MATLAB+PCT, PyTorch, and Julia+CUDA.jl on six di
 
 RunMat covers the core numerical stack so you can keep MATLAB-style code and use the GPU when it helps. Elementwise chains, reductions, filters, and matmul epilogues are fused on GPU; large linear-algebra ops call optimized BLAS/LAPACK on CPU. 
 
-Full list and examples live in the library. \[ADD LINK\]
+Full list and examples live in the [`benchmarks/`](https://github.com/runmat-org/runmat/tree/main/benchmarks) library.
 
 #### Why MATLAB syntax, not a new language
 
@@ -115,9 +257,9 @@ MATLAB is commonly taught in engineering programs, so many engineers already thi
 
 #### Try for yourself
 
-* **Download RunMat:** \[Download\]
+* **Download RunMat:** [Download](/download)
 
-* **See benchmarks and examples:** \[Benchmarks\]
+* **See benchmarks and examples:** [Benchmarks](/benchmarks)
 
 #### FAQ
 
@@ -128,7 +270,7 @@ An open-source MATLAB-compatible runtime focused on fast, portable numerical com
 macOS (Apple Silicon and supported AMD/NVIDIA cards), Windows, and Linux via the native GPU APIs above. If no compatible GPU is present, RunMat runs on CPU.
 
 **Do I need MATLAB installed or a MATLAB license?**  
-No. RunMat is a standalone runtime. It adheres to MATLAB semantics core language grammar, semantics and core builtins It is not associated or affiliated with MATHWORKS Matlab in any way, shape or form \[LINK Learn more grammar / semantics doc\] 
+No. RunMat is a standalone runtime. It adheres to MATLAB core language grammar and semantics. It is not associated or affiliated with MathWorks MATLAB in any way, shape or form. [Learn more in the grammar/semantics doc.](https://github.com/runmat-org/runmat/blob/main/docs/LANGUAGE_COVERAGE.md)
 
 **How compatible is it with MATLAB?**  
 Core array operations, elementwise math, reductions, common linear-algebra, FFT/signal/image, and statistics functions are covered. Check the function index for exact status. 
@@ -139,10 +281,10 @@ Install RunMat and run your script with the CLI or the Jupyter kernel.
 Yes. The planner chooses CPU JIT/BLAS or GPU per step. Fusion keeps GPU regions device-resident when beneficial.
 
 **Does it work offline? Any telemetry?**  
- It runs locally and does not require internet access for execution. See the repository for any optional diagnostics and how to disable them. \[Privacy/Telemetry\]
+ It runs locally and does not require internet access for execution. See the repository for any optional diagnostics and how to disable them. [Privacy/Telemetry](https://github.com/runmat-org/runmat/blob/main/docs/TELEMETRY.md)
 
 **How do I report an issue or contribute?**  
- Open an issue or PR in the repository. Include OS, GPU/CPU info, a minimal script, and steps to reproduce. \[GitHub\
+ Open an issue or PR in the repository. Include OS, GPU/CPU info, a minimal script, and steps to reproduce. [GitHub](https://github.com/runmat-org/runmat)
 
 
 

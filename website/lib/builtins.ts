@@ -1,5 +1,7 @@
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import type { BuiltinBadge } from './badge-utils';
+import { builtinHasGpuSupport, getBuiltinBadges } from './badge-utils';
 
 export type BuiltinSignature = {
   in: string[];
@@ -22,11 +24,148 @@ export type Builtin = {
   keywords?: string[];
   internal?: boolean;
   mdxPath?: string;
+  firstParagraph?: string; // First paragraph extracted from MDX file
 };
+
+// Extract the first paragraph from MDX content (before first heading)
+function extractFirstParagraphFromMDX(mdxContent: string): string | null {
+  if (!mdxContent || typeof mdxContent !== 'string') {
+    return null;
+  }
+  
+  try {
+    const lines = mdxContent.split(/\r?\n/);
+    let inFence = false;
+    const paraLines: string[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      // Skip code fences
+      if (trimmed.startsWith('```')) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      
+      // Stop at first heading
+      if (trimmed.startsWith('#')) {
+        break;
+      }
+      
+      // Skip empty lines (but allow paragraph to accumulate)
+      if (trimmed === '') {
+        if (paraLines.length > 0) {
+          break; // End of first paragraph
+        }
+        continue;
+      }
+      
+      // Skip blockquotes, lists, etc.
+      if (trimmed.startsWith('>') || trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        continue;
+      }
+      
+      paraLines.push(trimmed);
+    }
+    
+    if (paraLines.length === 0) {
+      return null;
+    }
+    
+    // Join lines and clean up
+    let paragraph = paraLines.join(' ').trim();
+    if (!paragraph || paragraph.length === 0) {
+      return null;
+    }
+    
+    // Remove markdown code backticks but keep the content
+    paragraph = paragraph.replace(/`([^`]+)`/g, '$1');
+    // Remove markdown links but keep text
+    paragraph = paragraph.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+    
+    return paragraph || null;
+  } catch (error) {
+    // If extraction fails, return null
+    return null;
+  }
+}
 
 export function loadBuiltins(): Builtin[] {
   const p = join(process.cwd(), 'content', 'builtins.json');
   const data = readFileSync(p, 'utf-8');
   const arr = JSON.parse(data) as Builtin[];
-  return arr;
+  
+  // Enhance builtins with first paragraph from MDX files
+  return arr.map(builtin => {
+    if (!builtin.mdxPath) {
+      return builtin;
+    }
+    
+    try {
+      const mdxPath = join(process.cwd(), 'content', builtin.mdxPath);
+      if (existsSync(mdxPath)) {
+        const mdxContent = readFileSync(mdxPath, 'utf-8');
+        const firstParagraph = extractFirstParagraphFromMDX(mdxContent);
+        if (firstParagraph && firstParagraph.length > 0) {
+          return { ...builtin, firstParagraph };
+        }
+      }
+    } catch (error) {
+      // If MDX file doesn't exist or can't be read, continue without it
+      // Silently fail to avoid breaking the build
+      // Only log in development to avoid cluttering production logs
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`Failed to load first paragraph for ${builtin.name}:`, error);
+      }
+    }
+    
+    return builtin;
+  });
+}
+
+/**
+ * Formats a category array like ["array/sorting_sets"] into a readable label like "Array: Sorting & Sets"
+ */
+export function formatCategoryLabel(category: string[]): string {
+  if (!category || category.length === 0) {
+    return 'General';
+  }
+  
+  // Take the first category (most specific)
+  const cat = category[0];
+  
+  // Split by '/' and format each part
+  const parts = cat.split('/').map(part => {
+    // Convert snake_case or kebab-case to Title Case
+    return part
+      .split(/[-_]/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  });
+  
+  // Join with ': ' if multiple parts, otherwise just return the formatted part
+  if (parts.length > 1) {
+    return `${parts[0]}: ${parts.slice(1).join(' & ')}`;
+  }
+  
+  return parts[0];
+}
+
+/**
+ * Extracts metadata for a builtin function
+ */
+export type BuiltinMetadata = {
+  category: string;
+  gpuSupport: boolean;
+  badges: BuiltinBadge[];
+};
+
+export function getBuiltinMetadata(builtin: Builtin): BuiltinMetadata {
+  const badges = getBuiltinBadges(builtin);
+  return {
+    category: formatCategoryLabel(builtin.category),
+    gpuSupport: builtinHasGpuSupport(builtin),
+    badges,
+  };
 }
