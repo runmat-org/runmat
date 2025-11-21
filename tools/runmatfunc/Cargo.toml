@@ -1,6 +1,6 @@
 [package]
 name = "runmatfunc"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 authors = ["RunMat Team"]
 description = "RunMat Function Manager CLI/TUI"
