@@ -74,9 +74,18 @@ pub enum Token {
     // Identifiers and literals
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| { lex.extras.last_was_value = true; })]
     Ident,
-    #[regex(r"\d+\.\d+([eE][+-]?\d+)?", |lex| { lex.extras.last_was_value = true; })]
+    // Float with optional underscores as digit separators (strip later)
+    #[regex(r"\d(?:_?\d)*\.(?:\d(?:_?\d)*)?(?:[eE][+-]?\d(?:_?\d)*)?", |lex| {
+        lex.extras.last_was_value = true;
+    })]
+    #[regex(r"\d(?:_?\d)*[eE][+-]?\d(?:_?\d)*", |lex| {
+        lex.extras.last_was_value = true;
+    })]
     Float,
-    #[regex(r"\d+([eE][+-]?\d+)?", |lex| { lex.extras.last_was_value = true; })]
+    // Integer with optional underscores as digit separators (strip later)
+    #[regex(r"\d(?:_?\d)*", |lex| {
+        lex.extras.last_was_value = true;
+    })]
     Integer,
     // Apostrophe is handled contextually in tokenize_detailed: either Transpose or a single-quoted string
     #[token("'")]
@@ -190,6 +199,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
     tokenize_detailed(input)
         .into_iter()
         .map(|t| t.token)
+        .filter(|tok| !matches!(tok, Token::Newline))
         .collect()
 }
 
@@ -201,7 +211,11 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
     while let Some(res) = lex.next() {
         match res {
             Ok(tok) => {
-                let s = lex.slice().to_string();
+                let mut s = lex.slice().to_string();
+                // Normalize numeric literals: remove underscores in integers/floats
+                if matches!(tok, Token::Float | Token::Integer) {
+                    s.retain(|c| c != '_');
+                }
                 let span = lex.span();
 
                 // Handle contextual apostrophe before normal push logic
@@ -530,13 +544,6 @@ fn last_is_value_token(tok: &Token) -> bool {
     )
 }
 
-// If regex matched but it's actually an unterminated quote (no closing '),
-// tell Logos to Skip so the single-quote token can be picked up as Transpose.
-#[allow(dead_code)]
-fn single_quoted_string_or_skip(_lexer: &mut Lexer<Token>) -> Filter<()> {
-    Filter::Skip
-}
-
 fn double_quoted_string_emit(lexer: &mut Lexer<Token>) -> Filter<()> {
     // Always emit and mark as value
     lexer.extras.last_was_value = true;
@@ -559,26 +566,29 @@ fn transpose_filter(lex: &mut Lexer<Token>) -> Filter<()> {
 fn ellipsis_emit_and_skip_to_eol(lex: &mut Lexer<Token>) -> Filter<()> {
     // After an ellipsis, ignore the remainder of the physical line (including comments)
     let rest = lex.remainder();
-    if let Some(pos) = rest.find('\n') {
-        lex.bump(pos); // position to before the newline; newline token will consume it
+    if let Some((idx, len)) = find_line_terminator(rest) {
+        lex.bump(idx + len); // consume through the newline so no standalone newline token is emitted
     } else {
         lex.bump(rest.len());
     }
-    // Ellipsis itself is a token and is considered to be in an expression context
     lex.extras.last_was_value = true; // e.g., '1 + ...\n 2' the ellipsis does not reset value-ness
     Filter::Emit(())
 }
 
 fn newline_skip(lex: &mut Lexer<Token>) -> Filter<()> {
     lex.extras.line_start = true;
-    Filter::Skip
+    lex.extras.last_was_value = false;
+    Filter::Emit(())
 }
 
 fn section_marker(lex: &mut Lexer<Token>) -> Filter<()> {
     // Only emit a Section token when at start of line; otherwise, treat as a comment and skip
     if lex.extras.line_start {
-        lex.extras.line_start = false;
+        lex.extras.line_start = true;
         lex.extras.last_was_value = false;
+        if let Some((_, len)) = find_line_terminator(lex.remainder()) {
+            lex.bump(len);
+        }
         Filter::Emit(())
     } else {
         // Skip to end of line (already consumed by regex except for the newline char)
@@ -596,6 +606,11 @@ fn block_comment_skip(lex: &mut Lexer<Token>) -> Filter<()> {
     } else {
         lex.bump(rest.len()); // consume to end if no terminator
     }
+    if let Some((_, len)) = find_line_terminator(lex.remainder()) {
+        lex.bump(len);
+        lex.extras.line_start = true;
+        lex.extras.last_was_value = false;
+    }
     Filter::Skip
 }
 
@@ -608,4 +623,22 @@ fn line_comment_start(lex: &mut Lexer<Token>) -> Filter<()> {
         lex.bump(rest.len());
     }
     Filter::Skip
+}
+
+fn find_line_terminator(s: &str) -> Option<(usize, usize)> {
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'\n' => return Some((i, 1)),
+            b'\r' => {
+                if bytes.get(i + 1) == Some(&b'\n') {
+                    return Some((i, 2));
+                } else {
+                    return Some((i, 1));
+                }
+            }
+            _ => continue,
+        }
+    }
+    None
 }

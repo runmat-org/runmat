@@ -140,7 +140,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
               Get started with the modern MATLAB runtime today.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Button asChild>
+              <Button variant="outline" asChild>
                 <Link href="/download">Download RunMat</Link>
               </Button>
               <Button variant="outline" asChild>

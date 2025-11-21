@@ -9,7 +9,7 @@ export default function SubscribeForm() {
   return (
     <div className="w-full max-w-xl">
       <form
-        className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
+        className="flex w-full flex-col items-center gap-2 sm:flex-row sm:items-center sm:gap-3"
         onSubmit={async (e) => {
           e.preventDefault();
           if (!email) return;
@@ -43,7 +43,7 @@ export default function SubscribeForm() {
         />
         <button
           type="submit"
-          className="h-11 w-full sm:h-10 sm:w-auto flex-shrink-0 whitespace-nowrap rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 px-5 sm:px-6 text-base sm:text-sm font-semibold text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors disabled:opacity-60"
+          className="h-12 w-full px-8 text-lg font-semibold sm:h-10 sm:w-auto sm:px-6 sm:text-sm flex-shrink-0 whitespace-nowrap rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors disabled:opacity-60"
           disabled={status === "loading" || status === "success"}
         >
           {status === "loading" ? "Subscribing..." : status === "success" ? "Subscribed" : "Stay In The Loop"}

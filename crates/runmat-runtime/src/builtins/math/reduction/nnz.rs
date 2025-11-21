@@ -1,0 +1,731 @@
+//! MATLAB-compatible `nnz` builtin with GPU-aware semantics for RunMat.
+
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
+    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
+    ResidencyPolicy, ScalarType, ShapeRequirements,
+};
+use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
+use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_accelerate_api::GpuTensorHandle;
+use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_macros::runtime_builtin;
+
+#[cfg(feature = "doc_export")]
+pub const DOC_MD: &str = r#"---
+title: "nnz"
+category: "math/reduction"
+keywords: ["nnz", "nonzero", "count", "sparsity", "gpu"]
+summary: "Count the number of nonzero elements in an array with MATLAB-compatible semantics."
+references: []
+gpu_support:
+  elementwise: false
+  reduction: true
+  precisions: ["f32", "f64"]
+  broadcasting: "matlab"
+  notes: "Uses provider reduce_nnz / reduce_nnz_dim kernels when available and gathers results to the host for MATLAB-compatible doubles."
+fusion:
+  elementwise: false
+  reduction: true
+  max_inputs: 1
+  constants: "inline"
+requires_feature: null
+tested:
+  unit: "builtins::math::reduction::nnz::tests::nnz_tensor_counts_entries"
+  integration: "builtins::math::reduction::nnz::tests::nnz_gpu_provider_roundtrip"
+  gpu: "builtins::math::reduction::nnz::tests::nnz_wgpu_dim_matches_cpu"
+---
+
+# What does the `nnz` function do in MATLAB / RunMat?
+`nnz(X)` returns the number of elements of `X` that are nonzero. The result is always a
+double-precision value, matching MATLAB, and the builtin works for dense tensors, logical arrays,
+complex inputs, and character data.
+
+## How does the `nnz` function behave in MATLAB / RunMat?
+- `nnz(X)` treats any value that is not exactly zero as nonzero. Both `NaN` and `Inf` therefore
+  contribute to the total.
+- Complex numbers are counted when either the real or imaginary part is nonzero (including `NaN`).
+- Logical arrays (`logical`) are summed as if `true` were `1` and `false` were `0`.
+- Character arrays use their code points; only the null character (`char(0)`) is considered zero.
+- Empty arrays return `0` because no elements are nonzero.
+- `nnz(X, dim)` counts nonzeros along the specified dimension, returning a tensor whose size in that
+  dimension becomes `1` (mirroring `sum(X ~= 0, dim)`).
+- Dimensions larger than `ndims(X)` leave the result unchanged, again following MATLAB's reduction
+  rules for singleton trailing dimensions.
+
+## `nnz` Function GPU Execution Behaviour
+When RunMat Accelerate is active, `nnz` keeps work on the GPU whenever the provider implements
+`reduce_nnz` / `reduce_nnz_dim`. The WGPU provider ships with dedicated kernels that count nonzero
+elements without gathering intermediate data. The resulting scalar or tensor is then downloaded to
+the host so the return value matches MATLAB's CPU-resident doubles. If a provider lacks these hooks
+RunMat falls back to gathering the input and computing on the CPU.
+
+## Examples of using the `nnz` function in MATLAB / RunMat
+
+### Counting nonzero elements in a dense matrix
+
+```matlab
+A = [1 0 3; 0 0 5];
+count = nnz(A);
+```
+
+Expected output:
+
+```matlab
+count = 3;
+```
+
+### Counting nonzero entries in each column
+
+```matlab
+A = [1 0 3; 0 7 5];
+perColumn = nnz(A, 1);
+```
+
+Expected output:
+
+```matlab
+perColumn = [1 1 2];
+```
+
+### Counting nonzero entries in each row
+
+```matlab
+A = [1 0 3; 0 7 0];
+perRow = nnz(A, 2);
+```
+
+Expected output:
+
+```matlab
+perRow = [2; 1];
+```
+
+### Recognising `NaN` values as nonzero
+
+```matlab
+values = [0 NaN 5];
+nanCount = nnz(values);
+```
+
+Expected output:
+
+```matlab
+nanCount = 2;
+```
+
+### Counting GPU-resident values without manual gathers
+
+```matlab
+G = gpuArray([1 0 2 0 3]);
+gpuCount = nnz(G);
+```
+
+Expected output:
+
+```matlab
+gpuCount = 3;
+```
+
+## GPU residency in RunMat (Do I need `gpuArray`?)
+
+You usually do **not** need to call `gpuArray` explicitly. RunMat's auto-offload planner tracks
+residency automatically. For `nnz`, the runtime inspects the active provider and, when available,
+invokes device-side reduction kernels to count nonzeros on the GPU before downloading the final
+result. When a provider cannot supply those kernels, RunMat gathers the tensor and computes on the
+CPU, preserving MATLAB semantics.
+
+## FAQ
+
+### When should I use the `nnz` function?
+Use `nnz` whenever you need a quick count of nonzero elements—for example when measuring sparsity or
+validating that an algorithm produced the expected number of nonzeros.
+
+### What data types does `nnz` support?
+Numeric, logical, complex, and character arrays are supported. Other types (structs, cell arrays,
+strings, objects) raise descriptive errors, as in MATLAB.
+
+### Does `nnz` treat `NaN` as nonzero?
+Yes. Because `NaN ~= 0`, each `NaN` contributes to the result.
+
+### How can I count nonzeros along a dimension?
+Use `nnz(X, dim)`—it behaves like `sum(X ~= 0, dim)` and returns a tensor whose size in the
+specified dimension becomes `1`.
+
+### What does `nnz` return for logical arrays?
+It returns the number of `true` elements, effectively behaving like `sum(logicalArray)`.
+
+### Does `nnz` work with GPU arrays?
+Yes. The builtin dispatches to provider kernels when possible and downloads the MATLAB-compatible
+double result. When a provider lacks specialised kernels, RunMat gathers the tensor and counts on
+the CPU.
+
+### How does `nnz` handle character arrays?
+Characters are converted to their numeric code points; any character other than the null character
+counts as nonzero.
+
+### Can the result exceed double precision?
+Counts are stored in double precision (like MATLAB). Extremely large arrays share MATLAB's
+limitation where values above `2^53` may lose the least significant bit, but RunMat still returns a
+finite double.
+
+## See Also
+[sum](./sum), [any](./any), [find](../../array/indexing/find), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+
+## Source & Feedback
+- The full source code for the implementation of the `nnz` function is available at: [`crates/runmat-runtime/src/builtins/math/reduction/nnz.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/nnz.rs)
+- Found a bug or behavioural difference? Please [open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with details and a minimal repro.
+"#;
+
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "nnz",
+    op_kind: GpuOpKind::Reduction,
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    broadcast: BroadcastSemantics::Matlab,
+    provider_hooks: &[
+        ProviderHook::Reduction {
+            name: "reduce_nnz_dim",
+        },
+        ProviderHook::Reduction {
+            name: "reduce_nnz",
+        },
+    ],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::GatherImmediately,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: Some(512),
+    workgroup_size: Some(256),
+    accepts_nan_mode: false,
+    notes: "Providers that implement reduce_nnz[_dim] keep counting on-device; the builtin downloads the MATLAB-compatible double result afterwards.",
+};
+
+register_builtin_gpu_spec!(GPU_SPEC);
+
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "nnz",
+    shape: ShapeRequirements::BroadcastCompatible,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: Some(FusionKernelTemplate {
+        scalar_precisions: &[ScalarType::F32, ScalarType::F64],
+        wgsl_body: |ctx: &FusionExprContext| {
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
+            let zero = match ctx.scalar_ty {
+                ScalarType::F64 => "f64(0.0)",
+                _ => "0.0",
+            };
+            let one = match ctx.scalar_ty {
+                ScalarType::F64 => "f64(1.0)",
+                _ => "1.0",
+            };
+            Ok(format!(
+                "if (isNan({input}) || {input} != {zero}) {{ accumulator += {one}; }}"
+            ))
+        },
+    }),
+    emits_nan: false,
+    notes: "Fusion reductions treat NaN values as nonzero, mirroring MATLAB `nnz` semantics.",
+};
+
+register_builtin_fusion_spec!(FUSION_SPEC);
+
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("nnz", DOC_MD);
+
+#[runtime_builtin(
+    name = "nnz",
+    category = "math/reduction",
+    summary = "Count the number of nonzero elements in an array with MATLAB-compatible semantics.",
+    keywords = "nnz,nonzero,count,sparsity,gpu",
+    accel = "reduction"
+)]
+fn nnz_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+    let dim = parse_dimension_arg(&rest)?;
+    match value {
+        Value::GpuTensor(handle) => nnz_gpu(handle, dim),
+        other => nnz_host_value(other, dim),
+    }
+}
+
+fn parse_dimension_arg(args: &[Value]) -> Result<Option<usize>, String> {
+    match args.len() {
+        0 => Ok(None),
+        1 => {
+            let dim = tensor::parse_dimension(&args[0], "nnz")?;
+            Ok(Some(dim))
+        }
+        _ => Err("nnz: too many input arguments".to_string()),
+    }
+}
+
+fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> Result<Value, String> {
+    let provider = runmat_accelerate_api::provider();
+    match dim {
+        None => {
+            if let Some(p) = provider {
+                if let Ok(result) = p.reduce_nnz(&handle) {
+                    let host = p.download(&result).map_err(|e| format!("nnz: {e}"))?;
+                    let _ = p.free(&result);
+                    let count = host.data.into_iter().next().unwrap_or(0.0);
+                    return Ok(Value::Num(count));
+                }
+            }
+            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            nnz_host_value(Value::Tensor(tensor), None)
+        }
+        Some(dim) => {
+            if let Some(p) = provider {
+                let zero_based = dim.saturating_sub(1);
+                if zero_based < handle.shape.len() {
+                    if let Ok(result) = p.reduce_nnz_dim(&handle, zero_based) {
+                        let host = p.download(&result).map_err(|e| format!("nnz: {e}"))?;
+                        let _ = p.free(&result);
+                        let tensor =
+                            Tensor::new(host.data, host.shape).map_err(|e| format!("nnz: {e}"))?;
+                        return Ok(tensor::tensor_into_value(tensor));
+                    }
+                }
+            }
+            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            nnz_host_value(Value::Tensor(tensor), Some(dim))
+        }
+    }
+}
+
+fn nnz_host_value(value: Value, dim: Option<usize>) -> Result<Value, String> {
+    match dim {
+        None => {
+            let count = count_nonzero_value(&value)?;
+            Ok(Value::Num(count as f64))
+        }
+        Some(dim) => {
+            let mask = mask_from_value(&value)?;
+            let tensor = reduce_mask_dim(&mask, dim)?;
+            Ok(tensor::tensor_into_value(tensor))
+        }
+    }
+}
+
+fn count_nonzero_value(value: &Value) -> Result<usize, String> {
+    match value {
+        Value::Tensor(tensor) => Ok(count_nonzero_tensor(tensor)),
+        Value::ComplexTensor(ct) => Ok(count_nonzero_complex_tensor(ct)),
+        Value::LogicalArray(logical) => Ok(count_nonzero_logical(logical)),
+        Value::CharArray(chars) => Ok(count_nonzero_char(chars)),
+        Value::Num(n) => Ok(if is_nonzero_scalar(*n) { 1 } else { 0 }),
+        Value::Int(i) => Ok(if i.to_i64() != 0 { 1 } else { 0 }),
+        Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
+        Value::Complex(re, im) => Ok(if is_nonzero_complex(*re, *im) { 1 } else { 0 }),
+        Value::GpuTensor(_) => {
+            Err("nnz: GPU inputs are handled before host evaluation".to_string())
+        }
+        other => Err(format!(
+            "nnz: expected numeric, logical, complex, or char array, got {}",
+            describe_value_kind(other)
+        )),
+    }
+}
+
+fn count_nonzero_tensor(tensor: &Tensor) -> usize {
+    tensor
+        .data
+        .iter()
+        .copied()
+        .filter(|value| is_nonzero_scalar(*value))
+        .count()
+}
+
+fn count_nonzero_complex_tensor(tensor: &ComplexTensor) -> usize {
+    tensor
+        .data
+        .iter()
+        .copied()
+        .filter(|(re, im)| is_nonzero_complex(*re, *im))
+        .count()
+}
+
+fn count_nonzero_logical(logical: &LogicalArray) -> usize {
+    logical.data.iter().filter(|&&b| b != 0).count()
+}
+
+fn count_nonzero_char(chars: &CharArray) -> usize {
+    chars.data.iter().filter(|&&ch| ch != '\0').count()
+}
+
+#[inline]
+fn is_nonzero_scalar(value: f64) -> bool {
+    value.is_nan() || value != 0.0
+}
+
+#[inline]
+fn is_nonzero_complex(re: f64, im: f64) -> bool {
+    re.is_nan() || im.is_nan() || re != 0.0 || im != 0.0
+}
+
+struct Mask {
+    bits: Vec<u8>,
+    shape: Vec<usize>,
+}
+
+fn mask_from_value(value: &Value) -> Result<Mask, String> {
+    match value {
+        Value::Tensor(tensor) => {
+            let shape = canonical_shape(&tensor.shape, tensor.data.len());
+            let bits = tensor
+                .data
+                .iter()
+                .map(|&v| if is_nonzero_scalar(v) { 1u8 } else { 0u8 })
+                .collect();
+            Ok(Mask { bits, shape })
+        }
+        Value::ComplexTensor(tensor) => {
+            let shape = canonical_shape(&tensor.shape, tensor.data.len());
+            let bits = tensor
+                .data
+                .iter()
+                .map(|&(re, im)| if is_nonzero_complex(re, im) { 1u8 } else { 0u8 })
+                .collect();
+            Ok(Mask { bits, shape })
+        }
+        Value::LogicalArray(logical) => Ok(Mask {
+            bits: logical
+                .data
+                .iter()
+                .map(|&b| if b != 0 { 1 } else { 0 })
+                .collect(),
+            shape: canonical_shape(&logical.shape, logical.data.len()),
+        }),
+        Value::CharArray(chars) => {
+            let bits = chars
+                .data
+                .iter()
+                .map(|&ch| if ch != '\0' { 1u8 } else { 0u8 })
+                .collect();
+            Ok(Mask {
+                bits,
+                shape: vec![chars.rows, chars.cols],
+            })
+        }
+        Value::Num(n) => Ok(Mask {
+            bits: vec![if is_nonzero_scalar(*n) { 1 } else { 0 }],
+            shape: vec![1, 1],
+        }),
+        Value::Int(i) => Ok(Mask {
+            bits: vec![if i.to_i64() != 0 { 1 } else { 0 }],
+            shape: vec![1, 1],
+        }),
+        Value::Bool(b) => Ok(Mask {
+            bits: vec![if *b { 1 } else { 0 }],
+            shape: vec![1, 1],
+        }),
+        Value::Complex(re, im) => Ok(Mask {
+            bits: vec![if is_nonzero_complex(*re, *im) { 1 } else { 0 }],
+            shape: vec![1, 1],
+        }),
+        Value::GpuTensor(_) => {
+            Err("nnz: GPU inputs are handled before host evaluation".to_string())
+        }
+        other => Err(format!(
+            "nnz: expected numeric, logical, complex, or char array, got {}",
+            describe_value_kind(other)
+        )),
+    }
+}
+
+fn reduce_mask_dim(mask: &Mask, dim: usize) -> Result<Tensor, String> {
+    if dim == 0 {
+        return Err("nnz: dimension must be >= 1".to_string());
+    }
+    if mask.bits.is_empty() {
+        let mut out_shape = canonical_shape(&mask.shape, 0);
+        if dim <= out_shape.len() && !out_shape.is_empty() {
+            out_shape[dim - 1] = 1;
+        }
+        let out_len = out_shape.iter().copied().product::<usize>();
+        let zeros = vec![0.0; out_len];
+        return Tensor::new(zeros, out_shape).map_err(|e| format!("nnz: {e}"));
+    }
+    if mask.shape.is_empty() {
+        let data = vec![mask.bits[0] as f64];
+        return Tensor::new(data, vec![1, 1]).map_err(|e| format!("nnz: {e}"));
+    }
+    if dim > mask.shape.len() {
+        return mask_to_tensor(mask);
+    }
+    let dim_index = dim - 1;
+    let reduce_len = mask.shape[dim_index];
+    let stride_before = if dim_index == 0 {
+        1
+    } else {
+        mask.shape[..dim_index].iter().copied().product::<usize>()
+    };
+    let stride_after = if dim_index + 1 >= mask.shape.len() {
+        1
+    } else {
+        mask.shape[dim_index + 1..]
+            .iter()
+            .copied()
+            .product::<usize>()
+    };
+    let out_len = stride_before
+        .checked_mul(stride_after)
+        .ok_or_else(|| "nnz: dimension too large".to_string())?;
+    let mut out_shape = mask.shape.clone();
+    out_shape[dim_index] = 1;
+    let mut output = vec![0f64; out_len];
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            let mut count = 0usize;
+            for k in 0..reduce_len {
+                let idx = before + k * stride_before + after * stride_before * reduce_len;
+                if idx < mask.bits.len() && mask.bits[idx] != 0 {
+                    count += 1;
+                }
+            }
+            let out_idx = after * stride_before + before;
+            if out_idx < output.len() {
+                output[out_idx] = count as f64;
+            }
+        }
+    }
+    Tensor::new(output, out_shape).map_err(|e| format!("nnz: {e}"))
+}
+
+fn mask_to_tensor(mask: &Mask) -> Result<Tensor, String> {
+    let data = mask.bits.iter().map(|&b| b as f64).collect::<Vec<_>>();
+    Tensor::new(data, canonical_shape(&mask.shape, mask.bits.len()))
+        .map_err(|e| format!("nnz: {e}"))
+}
+
+fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
+    if shape.is_empty() {
+        if len <= 1 {
+            vec![1, 1]
+        } else {
+            vec![len, 1]
+        }
+    } else {
+        shape.to_vec()
+    }
+}
+
+fn describe_value_kind(value: &Value) -> String {
+    match value {
+        Value::Int(_) => "integer scalar".to_string(),
+        Value::Num(_) => "numeric scalar".to_string(),
+        Value::Complex(_, _) => "complex scalar".to_string(),
+        Value::Bool(_) => "logical scalar".to_string(),
+        Value::LogicalArray(_) => "logical array".to_string(),
+        Value::String(_) => "string scalar".to_string(),
+        Value::StringArray(_) => "string array".to_string(),
+        Value::CharArray(_) => "char array".to_string(),
+        Value::Tensor(_) => "numeric tensor".to_string(),
+        Value::ComplexTensor(_) => "complex tensor".to_string(),
+        Value::Cell(_) => "cell array".to_string(),
+        Value::Struct(_) => "struct".to_string(),
+        Value::GpuTensor(_) => "GPU tensor".to_string(),
+        Value::Object(obj) => format!("{} object", obj.class_name),
+        Value::HandleObject(h) => format!("handle object ({})", h.class_name),
+        Value::Listener(l) => format!("listener for {}", l.event_name),
+        Value::FunctionHandle(_) | Value::Closure(_) => "function handle".to_string(),
+        Value::ClassRef(_) => "class reference".to_string(),
+        Value::MException(_) => "exception".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtins::common::test_support;
+    use runmat_builtins::{IntValue, LogicalArray};
+
+    #[test]
+    fn nnz_scalar_zero() {
+        let result = nnz_host_value(Value::Num(0.0), None).expect("nnz");
+        assert_eq!(result, Value::Num(0.0));
+    }
+
+    #[test]
+    fn nnz_scalar_negative_zero_is_zero() {
+        let result = nnz_host_value(Value::Num(-0.0), None).expect("nnz");
+        assert_eq!(result, Value::Num(0.0));
+    }
+
+    #[test]
+    fn nnz_scalar_nonzero() {
+        let result = nnz_host_value(Value::Int(IntValue::I32(-5)), None).expect("nnz");
+        assert_eq!(result, Value::Num(1.0));
+    }
+
+    #[test]
+    fn nnz_tensor_counts_entries() {
+        let tensor = Tensor::new(vec![1.0, 0.0, -3.0, f64::NAN], vec![2, 2]).unwrap();
+        let result = nnz_host_value(Value::Tensor(tensor), None).expect("nnz");
+        assert_eq!(result, Value::Num(3.0));
+    }
+
+    #[test]
+    fn nnz_matrix_dimension_one() {
+        let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
+        let result = nnz_host_value(Value::Tensor(tensor), Some(1)).expect("nnz");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![1.0, 2.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nnz_matrix_dimension_two() {
+        let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
+        let result = nnz_host_value(Value::Tensor(tensor), Some(2)).expect("nnz");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.data, vec![2.0, 1.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nnz_empty_matrix_dimension_returns_zero_counts() {
+        let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
+        let result = nnz_host_value(Value::Tensor(tensor), Some(1)).expect("nnz");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.data, vec![0.0, 0.0, 0.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nnz_scalar_with_dimension_returns_scalar() {
+        let tensor = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+        let result = nnz_host_value(Value::Tensor(tensor), Some(1)).expect("nnz");
+        assert_eq!(result, Value::Num(1.0));
+    }
+
+    #[test]
+    fn nnz_three_dimensional_reduction_counts_per_slice() {
+        let data = vec![1.0, 0.0, 0.0, 2.0, 3.0, 0.0, 0.0, 4.0];
+        let tensor = Tensor::new(data, vec![2, 2, 2]).unwrap();
+        let result = nnz_host_value(Value::Tensor(tensor), Some(3)).expect("nnz");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2, 1]);
+                assert_eq!(out.data, vec![2.0, 0.0, 0.0, 2.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nnz_dimension_greater_than_ndims_returns_mask() {
+        let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
+        let result = nnz_host_value(Value::Tensor(tensor), Some(3)).expect("nnz");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nnz_empty_tensor_is_zero() {
+        let tensor = Tensor::new(vec![], vec![0, 3]).unwrap();
+        let result = nnz_host_value(Value::Tensor(tensor), None).expect("nnz");
+        assert_eq!(result, Value::Num(0.0));
+    }
+
+    #[test]
+    fn nnz_complex_tensor_counts() {
+        let data = vec![(0.0, 0.0), (2.0, 0.0), (0.0, -4.0), (0.0, 0.0)];
+        let tensor = ComplexTensor::new(data, vec![2, 2]).unwrap();
+        let result = nnz_host_value(Value::ComplexTensor(tensor), None).expect("nnz");
+        assert_eq!(result, Value::Num(2.0));
+    }
+
+    #[test]
+    fn nnz_logical_array_counts_true() {
+        let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![4]).unwrap();
+        let result = nnz_host_value(Value::LogicalArray(logical), None).expect("nnz");
+        assert_eq!(result, Value::Num(2.0));
+    }
+
+    #[test]
+    fn nnz_char_array_counts_nonzero_codepoints() {
+        let chars = CharArray::new(vec!['a', '\0', 'c'], 1, 3).unwrap();
+        let result = nnz_host_value(Value::CharArray(chars), None).expect("nnz");
+        assert_eq!(result, Value::Num(2.0));
+    }
+
+    #[test]
+    fn nnz_complex_scalar_nan_counts() {
+        let result = nnz_host_value(Value::Complex(f64::NAN, 0.0), None).expect("nnz");
+        assert_eq!(result, Value::Num(1.0));
+    }
+
+    #[test]
+    fn nnz_gpu_provider_roundtrip() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 0.0, 3.0], vec![5, 1]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let result = nnz_gpu(handle, None).expect("nnz");
+            assert_eq!(result, Value::Num(3.0));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn nnz_wgpu_dim_matches_cpu() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
+        let cpu = nnz_host_value(Value::Tensor(tensor.clone()), Some(1)).expect("nnz");
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let gpu = nnz_gpu(handle, Some(1)).expect("nnz");
+        match (cpu, gpu) {
+            (Value::Tensor(ct), Value::Tensor(gt)) => {
+                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.data, ct.data);
+            }
+            other => panic!("unexpected comparison result {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nnz_rejects_strings() {
+        let err = nnz_host_value(Value::from("hello"), None).unwrap_err();
+        assert!(
+            err.contains("expected numeric, logical, complex, or char array"),
+            "unexpected error: {err}"
+        );
+        assert!(err.contains("string scalar"), "unexpected error: {err}");
+    }
+
+    #[test]
+    #[cfg(feature = "doc_export")]
+    fn doc_examples_present() {
+        let blocks = test_support::doc_examples(DOC_MD);
+        assert!(!blocks.is_empty());
+    }
+}

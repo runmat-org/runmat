@@ -1,72 +1,88 @@
-import { Metadata } from 'next';
+import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { loadBuiltins } from '@/lib/builtins';
+import { loadBuiltins, getBuiltinMetadata } from '@/lib/builtins';
+import fs from 'fs';
+import path from 'path';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+import { slugifyHeading } from '@/lib/utils';
+import { builtinMetadataForSlug } from './meta';
+import { BuiltinMetadataChips } from '@/components/BuiltinMetadataChips';
 
 export const dynamic = 'force-static';
 
 export async function generateStaticParams() {
-  const builtins = loadBuiltins().filter(b => !b.internal);
+  const builtins = loadBuiltins();
   return builtins.map(b => ({ slug: b.slug }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
-  const b = loadBuiltins().find(x => x.slug === slug);
-  if (!b) return { title: 'Builtin | Docs' };
-  return {
-    title: `${b.name} | Docs`,
-    description: `Runmat Matlab Runtime builtin function ${b.name}`,
-    openGraph: { title: `${b.name} - RunMat`, description: `Runmat Matlab Runtime builtin function ${b.name}` },
-    twitter: { card: 'summary', title: `${b.name} - RunMat`, description: `Runmat Matlab Runtime builtin function ${b.name}` },
-  };
+  return builtinMetadataForSlug(slug);
 }
 
-export default async function BuiltinPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function BuiltinDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const b = loadBuiltins().find(x => x.slug === slug);
-  if (!b) notFound();
+  const builtins = loadBuiltins();
+  const b = builtins.find(x => x.slug === slug);
+  if (!b) return notFound();
+  let source = '';
+  if (b.mdxPath) {
+    try {
+      const abs = path.join(process.cwd(), 'content', b.mdxPath);
+      source = fs.readFileSync(abs, 'utf-8');
+    } catch { }
+  }
+  if (!source) return notFound();
+  const toc = extractHeadings(source);
+  const metadata = getBuiltinMetadata(b);
   return (
-    <div className="min-h-screen">
-      <h1 className="text-3xl font-bold mb-2">{b.name}</h1>
-      {b.summary && <p className="text-muted-foreground mb-6 max-w-[70ch]">{b.summary}</p>}
-      <div className="mb-6 flex items-center gap-2 flex-wrap">
-        {b.category.map(c => (
-          <span key={c} className="text-[11px] px-2 py-1 rounded bg-muted text-muted-foreground">{c}</span>
-        ))}
+    <>
+      <div className="container mx-auto px-4 md:px-6 pt-8">
+        <p className="mb-4 text-muted-foreground leading-relaxed break-words">
+          <Link href="/docs/matlab-function-reference" className="text-muted-foreground hover:text-foreground transition-colors">
+            View all functions
+          </Link>
+        </p>
+        <BuiltinMetadataChips metadata={metadata} />
       </div>
-
-      <section className="mb-8" id="usage">
-        <h2 className="text-xl font-semibold mb-2">Usage</h2>
-        <ul className="space-y-2 text-sm">
-          {b.signatures.map((s, i) => {
-            const argList = s.in.map((name, idx) => s.inTypes && s.inTypes[idx] ? `${name}: ${s.inTypes[idx]}` : name).join(', ');
-            const outList = s.out.map((name, idx) => s.outTypes && s.outTypes[idx] ? `${name}: ${s.outTypes[idx]}` : name).join(', ');
-            return (
-              <li key={i} className="rounded border border-border p-3">
-                <code className="block">{b.name}({argList})</code>
-                {s.out.length > 0 && <div className="text-muted-foreground">returns [{outList}]</div>}
-                <div className="text-muted-foreground">nargin: {s.nargin.min}..{s.nargin.max} · nargout: {s.nargout.min}..{s.nargout.max}</div>
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-
-      {b.examples && b.examples.length > 0 && (
-        <section className="mb-8" id="examples">
-          <h2 className="text-xl font-semibold mb-2">Examples</h2>
-          <ul className="space-y-2 text-sm">
-            {b.examples.map((ex, i) => (
-              <li key={i} className="rounded border border-border p-3 bg-muted/30">
-                {ex.title && <div className="font-medium mb-1">{ex.title}</div>}
-                <pre className="whitespace-pre-wrap">{ex.code}</pre>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <div className="container mx-auto px-4 md:px-6 pb-8">
+      <div className="grid gap-8 lg:grid-cols-[1fr_280px]">
+        <article className="prose dark:prose-invert max-w-none prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
+          <MarkdownRenderer source={source} />
+        </article>
+        {toc.length > 0 && (
+          <aside className="hidden lg:block sticky top-24 h-max text-sm">
+            <div className="mb-2 font-semibold text-foreground/80">On this page</div>
+            <ul className="space-y-1 text-muted-foreground">
+              {toc.map((t) => (
+                <li key={t.id} className={t.depth === 3 ? 'pl-3' : ''}>
+                  <a href={`#${t.id}`} className="hover:text-foreground">{t.text}</a>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        )}
+      </div>
     </div>
+    </>
   );
 }
 
-
+function extractHeadings(md: string): { id: string; text: string; depth: number }[] {
+  const lines = md.split(/\r?\n/);
+  const out: { id: string; text: string; depth: number }[] = [];
+  let inFence = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (/^```/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    const m = /^(#{2,6})\s+(.+)$/.exec(line);
+    if (!m) continue;
+    const depth = m[1].length; // 2..6
+    const text = m[2].replace(/`/g, '');
+    const id = slugifyHeading(text);
+    out.push({ id, text, depth });
+  }
+  return out;
+}

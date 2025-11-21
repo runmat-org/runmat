@@ -34,6 +34,7 @@ pub enum Instr {
     Jump(usize),
     Pop,
     CallBuiltin(String, usize),
+    StochasticEvolution,
     // User function call
     CreateMatrix(usize, usize),
     CreateMatrixDynamic(usize), // Number of rows, each row can have variable elements

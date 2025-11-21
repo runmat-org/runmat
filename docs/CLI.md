@@ -155,6 +155,22 @@ status, and available commands.
 runmat info
 ```
 
+### accel-info
+Show acceleration provider information: device name/backend, fused pipeline cache
+hits/misses, last warmup duration, and reduction defaults (two-pass threshold and workgroup size).
+
+```sh
+runmat accel-info
+```
+
+Notes:
+- When built without the `wgpu` feature, the command reports that no GPU provider
+  is available.
+- Reduction defaults can be overridden at runtime via environment variables
+  (see below).
+ - Warmup duration reflects the provider's most recent warmup pass (including on-disk cache precompile),
+   when available.
+
 ### gc
 Garbage collection utilities.
 
@@ -256,6 +272,35 @@ runmat config paths
 - Kernel:
   - `RUSTMAT_KERNEL_IP`, `RUSTMAT_KERNEL_KEY`
   - Optional ports: `RUSTMAT_SHELL_PORT`, `RUSTMAT_IOPUB_PORT`, `RUSTMAT_STDIN_PORT`, `RUSTMAT_CONTROL_PORT`, `RUSTMAT_HB_PORT`
+
+### Acceleration provider (RunMat Accelerate)
+
+These control GPU workgroup sizing, reductions, and provider debugging:
+
+- `RUNMAT_WG` (u32)
+  - Global compute workgroup size used in WGSL at module creation.
+    Applies to elementwise kernels and fused kernels (including fused reductions).
+    Default: `512`.
+- `RUNMAT_MATMUL_TILE` (u32)
+  - Square tile size for matmul kernels. Default: `16`.
+- `RUNMAT_REDUCTION_WG` (u32)
+  - Default workgroup size for provider-managed reduction kernels when a call site
+    opts into provider defaults (e.g., passes `0`). Default: `512`.
+- `RUNMAT_TWO_PASS_THRESHOLD` (usize)
+  - Threshold for reduction length per slice above which the provider uses a two-pass kernel.
+    Default: `1024`.
+- `RUNMAT_DEBUG_PIPELINE_ONLY` (bool)
+  - When set, the provider stops after pipeline compilation and skips buffer
+    creation/dispatch. Useful for triaging driver pipeline creation behavior.
+- `RUNMAT_PIPELINE_CACHE_DIR` (path)
+  - Overrides the on-disk pipeline cache directory. Defaults to the OS cache
+    directory (e.g., `$XDG_CACHE_HOME/runmat/pipelines` or platform equivalent),
+    falling back to `target/tmp/wgpu-pipeline-cache-<device>` when not set.
+
+The provider clamps `RUNMAT_WG`, `RUNMAT_MATMUL_TILE`, and
+`RUNMAT_REDUCTION_WG` to the adapter's compute limits
+(`max_compute_workgroup_size_*`, `max_compute_invocations_per_workgroup`)
+so DX12/Metal/Vulkan backends never see invalid workgroup sizes.
 
 ## Precedence model
 

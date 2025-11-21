@@ -9,3 +9,4 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true }
+once_cell = "1"

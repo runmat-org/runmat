@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "global": {
+    "iterations": 3,
+    "device_policy": {
+      "runmat": "wgpu"
+    },
+    "timeout_s": 900,
+    "fairness": {
+      "mode": "perf"
+    }
+  },
+  "cases": [
+    {
+      "id": "4k-image-processing",
+      "label": "4K Image Pipeline Perf Sweep",
+      "entries": {
+        "runmat": "4k-image-processing/runmat_rng.m",
+        "python-numpy": "4k-image-processing/python_numpy_rng.py",
+        "python-torch": "4k-image-processing/python_torch_rng.py"
+      },
+      "include_impl": [
+        "runmat",
+        "python-numpy",
+        "python-torch"
+      ],
+      "params": {
+        "defaults": {
+          "B": 16,
+          "H": 2160,
+          "W": 3840
+        },
+        "scale": {
+          "key": "B",
+          "values": [
+            4,
+            8,
+            16,
+            32,
+            64
+          ]
+        }
+      },
+      "env_map": {
+        "B": "IMG_B",
+        "H": "IMG_H",
+        "W": "IMG_W"
+      },
+      "parity": null,
+      "harness": {
+        "warmup": 0,
+        "timeout_s": 600
+      }
+    },
+    {
+      "id": "monte-carlo-analysis",
+      "label": "Monte Carlo Perf Sweep",
+      "entries": {
+        "runmat": "monte-carlo-analysis/runmat_rng.m",
+        "python-numpy": "monte-carlo-analysis/python_numpy_rng.py",
+        "python-torch": "monte-carlo-analysis/python_torch_rng.py"
+      },
+      "include_impl": [
+        "runmat",
+        "python-numpy",
+        "python-torch"
+      ],
+      "params": {
+        "defaults": {
+          "M": 250000,
+          "T": 1024
+        },
+        "scale": {
+          "key": "M",
+          "values": [
+            250000,
+            500000,
+            1000000,
+            2000000,
+            5000000
+          ]
+        }
+      },
+      "env_map": {
+        "M": "MC_M",
+        "T": "MC_T"
+      },
+      "parity": null,
+      "harness": {
+        "warmup": 0,
+        "timeout_s": 900
+      }
+    },
+    {
+      "id": "elementwise-math",
+      "label": "Elementwise Math Perf Sweep",
+      "entries": {
+        "runmat": "elementwise-math/runmat.m",
+        "python-numpy": "elementwise-math/python_numpy.py",
+        "python-torch": "elementwise-math/python_torch.py"
+      },
+      "include_impl": [
+        "runmat",
+        "python-numpy",
+        "python-torch"
+      ],
+      "params": {
+        "defaults": {
+          "points": 1000000
+        },
+        "scale": {
+          "key": "points",
+          "values": [
+            1000000,
+            2000000,
+            5000000,
+            10000000,
+            100000000,
+            200000000,
+            500000000,
+            1000000000
+          ]
+        }
+      },
+      "env_map": {
+        "points": "ELM_POINTS"
+      },
+      "harness": {
+        "warmup": 0,
+        "timeout_s": 300
+      },
+      "plot": {
+        "log_x": true,
+        "log_x_min": 1000000
+      }
+    }
+  ]
+}

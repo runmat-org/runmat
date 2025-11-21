@@ -1,0 +1,1275 @@
+//! MATLAB-compatible `polyval` builtin with GPU-aware semantics for RunMat.
+
+use log::debug;
+use num_complex::Complex64;
+use runmat_accelerate_api::{HostTensorView, ProviderPolyvalMu, ProviderPolyvalOptions};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_macros::runtime_builtin;
+
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+};
+use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
+use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+
+const EPS: f64 = 1.0e-12;
+
+#[cfg(feature = "doc_export")]
+pub const DOC_MD: &str = r#"---
+title: "polyval"
+category: "math/poly"
+keywords: ["polyval", "polynomial evaluation", "prediction interval", "polyfit", "gpu"]
+summary: "Evaluate a polynomial at given points and optionally compute prediction intervals using polyfit output."
+references:
+  - title: "MATLAB polyval documentation"
+    url: "https://www.mathworks.com/help/matlab/ref/polyval.html"
+  - title: "Numerical Recipes: Polynomial fitting and evaluation"
+    url: "https://numerical.recipes/"
+gpu_support:
+  elementwise: false
+  reduction: false
+  precisions: ["f32", "f64"]
+  broadcasting: "matlab"
+  notes: "Providers with Horner kernels keep real-valued workloads on the device; complex inputs and prediction intervals fall back to the CPU implementation."
+fusion:
+  elementwise: false
+  reduction: false
+  max_inputs: 2
+  constants: "uniform"
+requires_feature: null
+tested:
+  unit: "builtins::math::poly::polyval::tests"
+  integration: "builtins::math::poly::polyval::tests::polyval_gpu_roundtrip"
+---
+
+# What does the `polyval` function do in MATLAB / RunMat?
+`polyval(p, x)` evaluates the polynomial defined by the coefficient vector `p` at every element of
+`x`. Coefficients follow MATLAB’s convention: `p(1)` is the highest-order term, `p(end)` is the
+constant term. Both real and complex inputs are supported, and the output matches the shape of `x`.
+
+## How does the `polyval` function behave in MATLAB / RunMat?
+- Accepts scalar, vector, or N-D coefficient inputs that have at most one non-singleton dimension.
+- Logical and integer coefficients are promoted to double precision; complex coefficients are kept
+  exactly.
+- When `p` and `x` are real-valued and a provider is registered, RunMat issues a Horner-series GPU
+  kernel via RunMat Accelerate. Mixed or complex inputs fall back to the reference CPU
+  implementation, with purely real outputs re-uploaded to the device when residency makes sense.
+- `polyval(p, x, [], mu)` applies centering and scaling parameters from `polyfit`, evaluating the
+  polynomial at `(x - mu(1)) / mu(2)`.
+- `[y, delta] = polyval(p, x, S, mu)` computes prediction intervals using the structure `S`
+  produced by `polyfit`. RunMat mirrors MATLAB rules: `S` must contain the fields `R`, `normr`,
+  and `df`, and the interval collapses to zeros when `df <= 0` or `normr == 0`.
+- Empty inputs yield empty outputs; an empty coefficient vector represents the zero polynomial.
+- MATLAB-compatible errors are raised for non-numeric inputs, invalid `mu` vectors, or malformed
+  `S` structures.
+
+## `polyval` Function GPU Execution Behaviour
+When a GPU provider is active, RunMat first attempts to evaluate the polynomial in device memory
+using a dedicated Horner kernel. Coefficients and inputs are uploaded automatically when required.
+If the call requests complex arithmetic, prediction intervals, or otherwise falls outside the GPU
+kernel’s contract, RunMat gathers to the host, executes the CPU implementation, and (for real-valued
+results) pushes the output back to the GPU so downstream kernels retain residency.
+
+## Examples of using the `polyval` function in MATLAB / RunMat
+
+### Evaluating a polynomial at scalar points
+
+```matlab
+p = [2 -3 5];   % 2x^2 - 3x + 5
+y = polyval(p, 4);
+```
+
+Expected output:
+
+```matlab
+y = 21;
+```
+
+### Evaluating across a vector of inputs
+
+```matlab
+p = [1 0 -2 1];
+x = linspace(-2, 2, 5);
+y = polyval(p, x);
+```
+
+Expected output:
+
+```matlab
+y = [ -3   2   1   0   5 ];
+```
+
+### Evaluating a polynomial over a matrix grid
+
+```matlab
+[X, Y] = meshgrid(-1:1);
+Z = polyval([1 -3 2], X + Y);
+```
+
+Expected output (matching the shape of `X` and `Y`):
+
+```matlab
+Z =
+    12     6     2
+     6     2     0
+     2     0     0
+```
+
+### Using centering and scaling parameters from `polyfit`
+
+```matlab
+x = -2:2;
+noise = 0.05 * randn(size(x));
+[p, S, mu] = polyfit(x, sin(x) + noise, 3);
+y = polyval(p, x, [], mu);
+```
+
+Expected output:
+
+```matlab
+% y closely matches sin(x) + noise with polynomial smoothing
+```
+
+### Computing prediction intervals with polyfit output
+
+```matlab
+[p, S, mu] = polyfit((0:10)', exp((0:10)'/10), 3);
+[y, delta] = polyval(p, 5, S, mu);
+```
+
+Expected output:
+
+```matlab
+% y is the fitted value at x = 5
+% delta is the 1σ prediction interval (standard error)
+```
+
+### Handling complex coefficients and inputs
+
+```matlab
+p = [1+2i, -3, 4i];
+z = [-1+1i, 0, 1-2i];
+y = polyval(p, z);
+```
+
+Expected output:
+
+```matlab
+% Complex results that agree with MATLAB's polyval
+```
+
+### Evaluating on a gpuArray input
+
+```matlab
+x = gpuArray.linspace(-1, 1, 2048);
+p = [1 0 1];
+y = polyval(p, x);    % Runs on the GPU for real-valued inputs
+```
+
+Expected behaviour:
+
+```matlab
+y is a gpuArray because the result is real-valued.
+```
+
+## FAQ
+
+### Do coefficients need to be a row vector?
+No. They can be row or column vectors (or any N-D shape with a single non-singleton dimension). The
+output always matches the shape of `x`.
+
+### What kinds of inputs are accepted?
+Numeric scalars, vectors, matrices, N-D arrays, logical arrays, and complex data are all accepted.
+Logical and integer inputs are promoted to double precision automatically.
+
+### How do centering (`mu`) parameters work?
+RunMat mirrors MATLAB: the polynomial is evaluated at `(x - mu(1)) / mu(2)`. The `mu` vector must
+contain at least two finite values, and the scale `mu(2)` must be non-zero.
+
+### Why does `[y, delta] = polyval(...)` require the structure `S`?
+The prediction interval comes from the QR factorization stored in `S` by `polyfit`. The structure
+must include the fields `R`, `df`, and `normr`; without them the interval cannot be computed.
+
+### What happens when `df <= 0` or `normr == 0`?
+The prediction interval collapses to zeros (RunMat matches MATLAB and Octave here). This typically
+occurs when the fit is exact or when there are insufficient degrees of freedom.
+
+### Can I keep results on the GPU?
+Yes. RunMat re-uploads real-valued results to the active provider after the host evaluation. Complex
+outputs stay on the host until providers add complex buffer uploads.
+
+### Does `polyval` support sparse inputs?
+Not yet. Dense inputs (including gpuArray tensors) are supported today. Sparse support will arrive
+once RunMat's sparse infrastructure stabilises.
+
+## See Also
+[polyfit](./polyfit), [conv](../signal/conv), [deconv](../signal/deconv), [poly](./poly), [polyder](./polyder), [gpuArray](../../acceleration/gpu/gpuArray), [gather](../../acceleration/gpu/gather)
+
+## Source & Feedback
+- Source: `crates/runmat-runtime/src/builtins/math/poly/polyval.rs`
+- Found an issue or behavioural difference? [Open an issue](https://github.com/runmat-org/runmat/issues/new/choose) with a minimal reproduction.
+"#;
+
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "polyval",
+    op_kind: GpuOpKind::Custom("polyval"),
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    broadcast: BroadcastSemantics::Matlab,
+    provider_hooks: &[ProviderHook::Custom("polyval")],
+    constant_strategy: ConstantStrategy::UniformBuffer,
+    residency: ResidencyPolicy::NewHandle,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes:
+        "Uses provider-level Horner kernels for real coefficients/inputs; falls back to host evaluation (with upload) for complex or prediction-interval paths.",
+};
+
+register_builtin_gpu_spec!(GPU_SPEC);
+
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "polyval",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::UniformBuffer,
+    elementwise: None,
+    reduction: None,
+    emits_nan: true,
+    notes: "Acts as a fusion sink; real-valued workloads stay on device, while complex/delta paths gather to the host.",
+};
+
+register_builtin_fusion_spec!(FUSION_SPEC);
+
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("polyval", DOC_MD);
+
+#[runtime_builtin(
+    name = "polyval",
+    category = "math/poly",
+    summary = "Evaluate a polynomial at given points with MATLAB-compatible options.",
+    keywords = "polyval,polynomial,polyfit,delta,gpu",
+    accel = "sink",
+    sink = true
+)]
+fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> Result<Value, String> {
+    let eval = evaluate(p, x, &rest, false)?;
+    Ok(eval.value())
+}
+
+/// Evaluate `polyval`, optionally computing the prediction interval.
+pub fn evaluate(
+    coefficients: Value,
+    points: Value,
+    rest: &[Value],
+    want_delta: bool,
+) -> Result<PolyvalEval, String> {
+    let options = parse_option_values(rest)?;
+
+    let coeff_clone = coefficients.clone();
+    let points_clone = points.clone();
+
+    let coeff_was_gpu = matches!(coefficients, Value::GpuTensor(_));
+    let (coeffs, coeff_real) = convert_coefficients(coeff_clone)?;
+
+    let (mut inputs, prefer_gpu_points) = convert_points(points_clone)?;
+    let prefer_gpu_output = prefer_gpu_points || coeff_was_gpu;
+
+    let mu = match options.mu.clone() {
+        Some(mu_value) => Some(parse_mu(mu_value)?),
+        None => None,
+    };
+
+    if prefer_gpu_output && !want_delta && options.s.is_none() {
+        if let Some(value) = try_gpu_polyval(&coeffs, coeff_real, &inputs, mu, prefer_gpu_output)? {
+            return Ok(PolyvalEval::new(value, None));
+        }
+    }
+
+    if let Some(mu_val) = mu {
+        apply_mu(&mut inputs.data, mu_val)?;
+    }
+
+    let stats = if let Some(s_value) = options.s {
+        parse_stats(s_value, coeffs.len())?
+    } else {
+        None
+    };
+
+    if want_delta && stats.is_none() {
+        return Err(
+            "polyval: S input (structure returned by polyfit) is required for delta output"
+                .to_string(),
+        );
+    }
+
+    if inputs.data.is_empty() {
+        let y = zeros_like(&inputs.shape, prefer_gpu_output)?;
+        let delta = if want_delta {
+            Some(zeros_like(&inputs.shape, prefer_gpu_output)?)
+        } else {
+            None
+        };
+        return Ok(PolyvalEval::new(y, delta));
+    }
+
+    if coeffs.is_empty() {
+        let zeros = zeros_like(&inputs.shape, prefer_gpu_output)?;
+        let delta = if want_delta {
+            Some(zeros_like(&inputs.shape, prefer_gpu_output)?)
+        } else {
+            None
+        };
+        return Ok(PolyvalEval::new(zeros, delta));
+    }
+
+    let output_real = coeff_real && inputs.all_real;
+    let values = evaluate_polynomial(&coeffs, &inputs.data);
+    let result_value = finalize_values(
+        &values,
+        &inputs.shape,
+        prefer_gpu_output,
+        output_real && values_are_real(&values),
+    )?;
+
+    let delta_value = if want_delta {
+        let stats = stats.expect("delta requires stats");
+        let delta = compute_prediction_interval(&coeffs, &inputs.data, &stats)?;
+        let prefer = prefer_gpu_output && stats.is_real;
+        Some(finalize_delta(delta, &inputs.shape, prefer)?)
+    } else {
+        None
+    };
+
+    Ok(PolyvalEval::new(result_value, delta_value))
+}
+
+fn try_gpu_polyval(
+    coeffs: &[Complex64],
+    coeff_real: bool,
+    inputs: &NumericArray,
+    mu: Option<Mu>,
+    prefer_gpu_output: bool,
+) -> Result<Option<Value>, String> {
+    if !coeff_real || !inputs.all_real {
+        return Ok(None);
+    }
+    if coeffs.is_empty() || inputs.data.is_empty() {
+        return Ok(None);
+    }
+    let Some(provider) = runmat_accelerate_api::provider() else {
+        return Ok(None);
+    };
+
+    let coeff_data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
+    let coeff_shape = vec![1usize, coeffs.len()];
+    let coeff_view = HostTensorView {
+        data: &coeff_data,
+        shape: &coeff_shape,
+    };
+    let coeff_handle = match provider.upload(&coeff_view) {
+        Ok(handle) => handle,
+        Err(err) => {
+            debug!("polyval: GPU upload of coefficients failed, falling back: {err}");
+            return Ok(None);
+        }
+    };
+
+    let input_data: Vec<f64> = inputs.data.iter().map(|c| c.re).collect();
+    let input_shape = inputs.shape.clone();
+    let input_view = HostTensorView {
+        data: &input_data,
+        shape: &input_shape,
+    };
+    let input_handle = match provider.upload(&input_view) {
+        Ok(handle) => handle,
+        Err(err) => {
+            debug!("polyval: GPU upload of evaluation points failed, falling back: {err}");
+            let _ = provider.free(&coeff_handle);
+            return Ok(None);
+        }
+    };
+
+    let options = ProviderPolyvalOptions {
+        mu: mu.map(|m| ProviderPolyvalMu {
+            mean: m.mean,
+            scale: m.scale,
+        }),
+    };
+
+    let result_handle = match provider.polyval(&coeff_handle, &input_handle, &options) {
+        Ok(handle) => handle,
+        Err(err) => {
+            debug!("polyval: GPU kernel execution failed, falling back: {err}");
+            let _ = provider.free(&coeff_handle);
+            let _ = provider.free(&input_handle);
+            return Ok(None);
+        }
+    };
+
+    let _ = provider.free(&coeff_handle);
+    let _ = provider.free(&input_handle);
+
+    if prefer_gpu_output {
+        return Ok(Some(Value::GpuTensor(result_handle)));
+    }
+
+    let host = match provider.download(&result_handle) {
+        Ok(host) => host,
+        Err(err) => {
+            debug!("polyval: GPU download failed, falling back: {err}");
+            let _ = provider.free(&result_handle);
+            return Ok(None);
+        }
+    };
+    let _ = provider.free(&result_handle);
+
+    let tensor = Tensor::new(host.data, host.shape).map_err(|e| format!("polyval: {e}"))?;
+    Ok(Some(tensor::tensor_into_value(tensor)))
+}
+
+/// Result object for polyval evaluation.
+#[derive(Debug)]
+pub struct PolyvalEval {
+    value: Value,
+    delta: Option<Value>,
+}
+
+impl PolyvalEval {
+    fn new(value: Value, delta: Option<Value>) -> Self {
+        Self { value, delta }
+    }
+
+    /// Primary output (`y`).
+    pub fn value(&self) -> Value {
+        self.value.clone()
+    }
+
+    /// Optional prediction interval (`delta`).
+    pub fn delta(&self) -> Result<Value, String> {
+        self.delta
+            .clone()
+            .ok_or_else(|| "polyval: delta output not computed".to_string())
+    }
+
+    /// Consume into the main value.
+    pub fn into_value(self) -> Value {
+        self.value
+    }
+
+    /// Consume into `(value, delta)` pair.
+    pub fn into_pair(self) -> Result<(Value, Value), String> {
+        match self.delta {
+            Some(delta) => Ok((self.value, delta)),
+            None => Err("polyval: delta output not computed".to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Mu {
+    mean: f64,
+    scale: f64,
+}
+
+impl Mu {
+    fn new(mean: f64, scale: f64) -> Result<Self, String> {
+        if !mean.is_finite() || !scale.is_finite() {
+            return Err("polyval: mu values must be finite".to_string());
+        }
+        if scale.abs() <= EPS {
+            return Err("polyval: mu(2) must be non-zero".to_string());
+        }
+        Ok(Self { mean, scale })
+    }
+}
+
+#[derive(Clone)]
+struct NumericArray {
+    data: Vec<Complex64>,
+    shape: Vec<usize>,
+    all_real: bool,
+}
+
+#[derive(Clone)]
+struct PolyfitStats {
+    r: Matrix,
+    df: f64,
+    normr: f64,
+    is_real: bool,
+}
+
+impl PolyfitStats {
+    fn is_effective(&self) -> bool {
+        self.r.len() > 0 && self.df > 0.0 && self.normr.is_finite()
+    }
+}
+
+#[derive(Clone)]
+struct Matrix {
+    rows: usize,
+    cols: usize,
+    data: Vec<Complex64>,
+}
+
+impl Matrix {
+    fn get(&self, row: usize, col: usize) -> Complex64 {
+        self.data[row + col * self.rows]
+    }
+
+    fn len(&self) -> usize {
+        self.rows * self.cols
+    }
+}
+
+struct ParsedOptions {
+    s: Option<Value>,
+    mu: Option<Value>,
+}
+
+fn parse_option_values(rest: &[Value]) -> Result<ParsedOptions, String> {
+    match rest.len() {
+        0 => Ok(ParsedOptions { s: None, mu: None }),
+        1 => Ok(ParsedOptions {
+            s: if is_empty_value(&rest[0]) {
+                None
+            } else {
+                Some(rest[0].clone())
+            },
+            mu: None,
+        }),
+        2 => Ok(ParsedOptions {
+            s: if is_empty_value(&rest[0]) {
+                None
+            } else {
+                Some(rest[0].clone())
+            },
+            mu: Some(rest[1].clone()),
+        }),
+        _ => Err("polyval: too many input arguments".to_string()),
+    }
+}
+
+fn convert_coefficients(value: Value) -> Result<(Vec<Complex64>, bool), String> {
+    match value {
+        Value::GpuTensor(handle) => {
+            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle.clone()))?;
+            convert_coefficients(gathered)
+        }
+        Value::Tensor(mut tensor) => {
+            ensure_vector_shape("polyval", &tensor.shape)?;
+            let data = tensor
+                .data
+                .drain(..)
+                .map(|re| Complex64::new(re, 0.0))
+                .collect();
+            Ok((data, true))
+        }
+        Value::ComplexTensor(mut tensor) => {
+            ensure_vector_shape("polyval", &tensor.shape)?;
+            let all_real = tensor.data.iter().all(|&(_, im)| im.abs() <= EPS);
+            let data = tensor
+                .data
+                .drain(..)
+                .map(|(re, im)| Complex64::new(re, im))
+                .collect();
+            Ok((data, all_real))
+        }
+        Value::LogicalArray(mut array) => {
+            ensure_vector_data_shape("polyval", &array.shape)?;
+            let data = array
+                .data
+                .drain(..)
+                .map(|bit| Complex64::new(if bit != 0 { 1.0 } else { 0.0 }, 0.0))
+                .collect();
+            Ok((data, true))
+        }
+        Value::Num(n) => Ok((vec![Complex64::new(n, 0.0)], true)),
+        Value::Int(i) => Ok((vec![Complex64::new(i.to_f64(), 0.0)], true)),
+        Value::Bool(flag) => Ok((
+            vec![Complex64::new(if flag { 1.0 } else { 0.0 }, 0.0)],
+            true,
+        )),
+        Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im.abs() <= EPS)),
+        other => Err(format!(
+            "polyval: coefficients must be numeric, got {other:?}"
+        )),
+    }
+}
+
+fn convert_points(value: Value) -> Result<(NumericArray, bool), String> {
+    match value {
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            let array = NumericArray {
+                data: tensor
+                    .data
+                    .iter()
+                    .map(|&re| Complex64::new(re, 0.0))
+                    .collect(),
+                shape: tensor.shape.clone(),
+                all_real: true,
+            };
+            Ok((array, true))
+        }
+        Value::Tensor(tensor) => Ok((
+            NumericArray {
+                data: tensor
+                    .data
+                    .iter()
+                    .map(|&re| Complex64::new(re, 0.0))
+                    .collect(),
+                shape: tensor.shape.clone(),
+                all_real: true,
+            },
+            false,
+        )),
+        Value::ComplexTensor(tensor) => Ok((
+            NumericArray {
+                data: tensor
+                    .data
+                    .iter()
+                    .map(|&(re, im)| Complex64::new(re, im))
+                    .collect(),
+                shape: tensor.shape.clone(),
+                all_real: tensor.data.iter().all(|&(_, im)| im.abs() <= EPS),
+            },
+            false,
+        )),
+        Value::LogicalArray(array) => Ok((
+            NumericArray {
+                data: array
+                    .data
+                    .iter()
+                    .map(|&bit| Complex64::new(if bit != 0 { 1.0 } else { 0.0 }, 0.0))
+                    .collect(),
+                shape: array.shape.clone(),
+                all_real: true,
+            },
+            false,
+        )),
+        Value::Num(n) => Ok((
+            NumericArray {
+                data: vec![Complex64::new(n, 0.0)],
+                shape: vec![1, 1],
+                all_real: true,
+            },
+            false,
+        )),
+        Value::Int(i) => Ok((
+            NumericArray {
+                data: vec![Complex64::new(i.to_f64(), 0.0)],
+                shape: vec![1, 1],
+                all_real: true,
+            },
+            false,
+        )),
+        Value::Bool(flag) => Ok((
+            NumericArray {
+                data: vec![Complex64::new(if flag { 1.0 } else { 0.0 }, 0.0)],
+                shape: vec![1, 1],
+                all_real: true,
+            },
+            false,
+        )),
+        Value::Complex(re, im) => Ok((
+            NumericArray {
+                data: vec![Complex64::new(re, im)],
+                shape: vec![1, 1],
+                all_real: im.abs() <= EPS,
+            },
+            false,
+        )),
+        other => Err(format!("polyval: X must be numeric, got {other:?}")),
+    }
+}
+
+fn parse_mu(value: Value) -> Result<Mu, String> {
+    match value {
+        Value::GpuTensor(handle) => {
+            let gathered = gpu_helpers::gather_tensor(&handle)?;
+            parse_mu(Value::Tensor(gathered))
+        }
+        Value::Tensor(tensor) => {
+            if tensor.data.len() < 2 {
+                return Err("polyval: mu must contain at least two elements".to_string());
+            }
+            Mu::new(tensor.data[0], tensor.data[1])
+        }
+        Value::LogicalArray(array) => {
+            if array.data.len() < 2 {
+                return Err("polyval: mu must contain at least two elements".to_string());
+            }
+            let mean = if array.data[0] != 0 { 1.0 } else { 0.0 };
+            let scale = if array.data[1] != 0 { 1.0 } else { 0.0 };
+            Mu::new(mean, scale)
+        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
+            Err("polyval: mu must be a numeric vector with at least two values".to_string())
+        }
+        Value::ComplexTensor(tensor) => {
+            if tensor.data.len() < 2 {
+                return Err("polyval: mu must contain at least two elements".to_string());
+            }
+            let (mean_re, mean_im) = tensor.data[0];
+            let (scale_re, scale_im) = tensor.data[1];
+            if mean_im.abs() > EPS || scale_im.abs() > EPS {
+                return Err("polyval: mu values must be real".to_string());
+            }
+            Mu::new(mean_re, scale_re)
+        }
+        _ => Err("polyval: mu must be a numeric vector with at least two values".to_string()),
+    }
+}
+
+fn parse_stats(value: Value, coeff_len: usize) -> Result<Option<PolyfitStats>, String> {
+    if is_empty_value(&value) {
+        return Ok(None);
+    }
+    let struct_value = match value {
+        Value::Struct(s) => s,
+        Value::GpuTensor(handle) => {
+            let gathered = gpu_helpers::gather_value(&Value::GpuTensor(handle))?;
+            return parse_stats(gathered, coeff_len);
+        }
+        other => {
+            return Err(format!(
+                "polyval: S input must be the structure returned by polyfit, got {other:?}"
+            ))
+        }
+    };
+    let r_value = struct_value
+        .fields
+        .get("R")
+        .cloned()
+        .ok_or_else(|| "polyval: S input is missing the field 'R'".to_string())?;
+    let df_value = struct_value
+        .fields
+        .get("df")
+        .cloned()
+        .ok_or_else(|| "polyval: S input is missing the field 'df'".to_string())?;
+    let normr_value = struct_value
+        .fields
+        .get("normr")
+        .cloned()
+        .ok_or_else(|| "polyval: S input is missing the field 'normr'".to_string())?;
+
+    let (matrix, is_real) = convert_matrix(r_value, coeff_len)?;
+    let df = scalar_to_f64(df_value, "polyval: S.df")?;
+    let normr = scalar_to_f64(normr_value, "polyval: S.normr")?;
+
+    Ok(Some(PolyfitStats {
+        r: matrix,
+        df,
+        normr,
+        is_real,
+    }))
+}
+
+fn convert_matrix(value: Value, coeff_len: usize) -> Result<(Matrix, bool), String> {
+    match value {
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            convert_matrix(Value::Tensor(tensor), coeff_len)
+        }
+        Value::Tensor(tensor) => {
+            let Tensor {
+                data, rows, cols, ..
+            } = tensor;
+            if rows != coeff_len || cols != coeff_len {
+                return Err("polyval: size of S.R must match the coefficient vector".to_string());
+            }
+            let data = data.into_iter().map(|re| Complex64::new(re, 0.0)).collect();
+            Ok((Matrix { rows, cols, data }, true))
+        }
+        Value::ComplexTensor(tensor) => {
+            let ComplexTensor {
+                data, rows, cols, ..
+            } = tensor;
+            if rows != coeff_len || cols != coeff_len {
+                return Err("polyval: size of S.R must match the coefficient vector".to_string());
+            }
+            let imag_small = data.iter().all(|&(_, im)| im.abs() <= EPS);
+            let data = data
+                .into_iter()
+                .map(|(re, im)| Complex64::new(re, im))
+                .collect();
+            Ok((Matrix { rows, cols, data }, imag_small))
+        }
+        Value::LogicalArray(array) => {
+            let LogicalArray { data, shape } = array;
+            let rows = shape.first().copied().unwrap_or(0);
+            let cols = shape.get(1).copied().unwrap_or(0);
+            if rows != coeff_len || cols != coeff_len {
+                return Err("polyval: size of S.R must match the coefficient vector".to_string());
+            }
+            let data = data
+                .into_iter()
+                .map(|bit| Complex64::new(if bit != 0 { 1.0 } else { 0.0 }, 0.0))
+                .collect();
+            Ok((Matrix { rows, cols, data }, true))
+        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Err(
+            "polyval: S.R must be a square numeric matrix matching the coefficient vector length"
+                .to_string(),
+        ),
+        Value::Struct(_)
+        | Value::Cell(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_) => Err(
+            "polyval: S.R must be a square numeric matrix matching the coefficient vector length"
+                .to_string(),
+        ),
+        _ => Err(
+            "polyval: S.R must be a square numeric matrix matching the coefficient vector length"
+                .to_string(),
+        ),
+    }
+}
+
+fn scalar_to_f64(value: Value, context: &str) -> Result<f64, String> {
+    match value {
+        Value::Num(n) => Ok(n),
+        Value::Int(i) => Ok(i.to_f64()),
+        Value::Bool(flag) => Ok(if flag { 1.0 } else { 0.0 }),
+        Value::Tensor(tensor) => {
+            if tensor.data.len() != 1 {
+                return Err(format!("{context} must be a scalar"));
+            }
+            Ok(tensor.data[0])
+        }
+        Value::LogicalArray(array) => {
+            if array.data.len() != 1 {
+                return Err(format!("{context} must be a scalar"));
+            }
+            Ok(if array.data[0] != 0 { 1.0 } else { 0.0 })
+        }
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor(&handle)?;
+            scalar_to_f64(Value::Tensor(tensor), context)
+        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => {
+            Err(format!("{context} must be real-valued"))
+        }
+        other => Err(format!("{context} must be a scalar, got {other:?}")),
+    }
+}
+
+fn apply_mu(values: &mut [Complex64], mu: Mu) -> Result<(), String> {
+    let mean = Complex64::new(mu.mean, 0.0);
+    let scale = Complex64::new(mu.scale, 0.0);
+    for v in values.iter_mut() {
+        *v = (*v - mean) / scale;
+    }
+    Ok(())
+}
+
+fn evaluate_polynomial(coeffs: &[Complex64], inputs: &[Complex64]) -> Vec<Complex64> {
+    let mut outputs = Vec::with_capacity(inputs.len());
+    for &x in inputs {
+        let mut acc = Complex64::new(0.0, 0.0);
+        for &c in coeffs {
+            acc = acc * x + c;
+        }
+        outputs.push(acc);
+    }
+    outputs
+}
+
+fn compute_prediction_interval(
+    coeffs: &[Complex64],
+    inputs: &[Complex64],
+    stats: &PolyfitStats,
+) -> Result<Vec<f64>, String> {
+    if !stats.is_effective() {
+        return Ok(vec![0.0; inputs.len()]);
+    }
+    let n = coeffs.len();
+    let mut delta = Vec::with_capacity(inputs.len());
+    for &x in inputs {
+        let row = vandermonde_row(x, n);
+        let solved = solve_row_against_upper(&row, &stats.r)?;
+        let sum_sq: f64 = solved.iter().map(|c| c.norm_sqr()).sum();
+        let interval = (1.0 + sum_sq).sqrt() * (stats.normr / stats.df.sqrt());
+        delta.push(interval);
+    }
+    Ok(delta)
+}
+
+fn vandermonde_row(x: Complex64, len: usize) -> Vec<Complex64> {
+    if len == 0 {
+        return vec![Complex64::new(1.0, 0.0)];
+    }
+    let degree = len - 1;
+    let mut powers = vec![Complex64::new(1.0, 0.0); degree + 1];
+    for idx in 1..=degree {
+        powers[idx] = powers[idx - 1] * x;
+    }
+    let mut row = vec![Complex64::new(0.0, 0.0); degree + 1];
+    for (i, value) in powers.into_iter().enumerate() {
+        row[degree - i] = value;
+    }
+    row
+}
+
+fn solve_row_against_upper(row: &[Complex64], matrix: &Matrix) -> Result<Vec<Complex64>, String> {
+    let n = row.len();
+    if matrix.rows != n || matrix.cols != n {
+        return Err("polyval: size of S.R must match the coefficient vector".to_string());
+    }
+    let mut result = vec![Complex64::new(0.0, 0.0); n];
+    for j in (0..n).rev() {
+        let mut acc = row[j];
+        for (k, value) in result.iter().enumerate().skip(j + 1) {
+            acc -= *value * matrix.get(k, j);
+        }
+        let diag = matrix.get(j, j);
+        if diag.norm() <= EPS {
+            return Err("polyval: S.R is singular".to_string());
+        }
+        result[j] = acc / diag;
+    }
+    Ok(result)
+}
+
+fn finalize_values(
+    data: &[Complex64],
+    shape: &[usize],
+    prefer_gpu: bool,
+    real_only: bool,
+) -> Result<Value, String> {
+    if real_only {
+        let real_data: Vec<f64> = data.iter().map(|c| c.re).collect();
+        finalize_real(real_data, shape, prefer_gpu)
+    } else if data.len() == 1 {
+        let value = data[0];
+        Ok(Value::Complex(value.re, value.im))
+    } else {
+        let complex_data: Vec<(f64, f64)> = data.iter().map(|c| (c.re, c.im)).collect();
+        let tensor = ComplexTensor::new(complex_data, shape.to_vec())
+            .map_err(|e| format!("polyval: failed to build complex tensor: {e}"))?;
+        Ok(Value::ComplexTensor(tensor))
+    }
+}
+
+fn finalize_delta(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> Result<Value, String> {
+    finalize_real(data, shape, prefer_gpu)
+}
+
+fn finalize_real(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> Result<Value, String> {
+    let tensor = Tensor::new(data, shape.to_vec())
+        .map_err(|e| format!("polyval: failed to build tensor: {e}"))?;
+    if prefer_gpu {
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            let view = HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            if let Ok(handle) = provider.upload(&view) {
+                return Ok(Value::GpuTensor(handle));
+            }
+        }
+    }
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+fn zeros_like(shape: &[usize], prefer_gpu: bool) -> Result<Value, String> {
+    let len = shape.iter().product();
+    finalize_real(vec![0.0; len], shape, prefer_gpu)
+}
+
+fn ensure_vector_shape(name: &str, shape: &[usize]) -> Result<(), String> {
+    if !is_vector_shape(shape) {
+        Err(format!(
+            "{name}: coefficients must be a scalar, row vector, or column vector"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_vector_data_shape(name: &str, shape: &[usize]) -> Result<(), String> {
+    if !is_vector_shape(shape) {
+        Err(format!("{name}: inputs must be vectors or scalars"))
+    } else {
+        Ok(())
+    }
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    shape.iter().filter(|&&dim| dim > 1).count() <= 1
+}
+
+fn is_empty_value(value: &Value) -> bool {
+    match value {
+        Value::Tensor(t) => t.data.is_empty(),
+        Value::LogicalArray(l) => l.data.is_empty(),
+        Value::Cell(ca) => ca.data.is_empty(),
+        Value::GpuTensor(handle) => {
+            match gpu_helpers::gather_value(&Value::GpuTensor(handle.clone())) {
+                Ok(gathered) => is_empty_value(&gathered),
+                Err(_) => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+fn values_are_real(values: &[Complex64]) -> bool {
+    values.iter().all(|c| c.im.abs() <= EPS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtins::common::test_support;
+    use runmat_builtins::StructValue;
+
+    #[test]
+    fn polyval_scalar() {
+        let coeffs = Tensor::new(vec![2.0, -3.0, 5.0], vec![1, 3]).unwrap();
+        let value =
+            polyval_builtin(Value::Tensor(coeffs), Value::Num(4.0), Vec::new()).expect("polyval");
+        match value {
+            Value::Num(n) => assert!((n - (2.0 * 16.0 - 12.0 + 5.0)).abs() < 1e-12),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyval_matrix_input() {
+        let coeffs = Tensor::new(vec![1.0, 0.0, -2.0, 1.0], vec![1, 4]).unwrap();
+        let points = Tensor::new(vec![-2.0, -1.0, 0.0, 1.0, 2.0], vec![5, 1]).unwrap();
+        let value = polyval_builtin(
+            Value::Tensor(coeffs),
+            Value::Tensor(points.clone()),
+            Vec::new(),
+        )
+        .expect("polyval");
+        match value {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, points.shape);
+                let expected = vec![-3.0, 2.0, 1.0, 0.0, 5.0];
+                assert_eq!(tensor.data, expected);
+            }
+            other => panic!("expected tensor output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyval_complex_inputs() {
+        let coeffs =
+            ComplexTensor::new(vec![(1.0, 2.0), (-3.0, 0.0), (0.0, 4.0)], vec![1, 3]).unwrap();
+        let points =
+            ComplexTensor::new(vec![(-1.0, 1.0), (0.0, 0.0), (1.0, -2.0)], vec![1, 3]).unwrap();
+        let value = polyval_builtin(
+            Value::ComplexTensor(coeffs),
+            Value::ComplexTensor(points.clone()),
+            Vec::new(),
+        )
+        .expect("polyval");
+        match value {
+            Value::ComplexTensor(tensor) => {
+                assert_eq!(tensor.shape, points.shape);
+                assert_eq!(tensor.data.len(), 3);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyval_with_mu() {
+        let coeffs = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
+        let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
+        let mu = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let value = polyval_builtin(
+            Value::Tensor(coeffs),
+            Value::Tensor(points),
+            vec![
+                Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+                Value::Tensor(mu),
+            ],
+        )
+        .expect("polyval");
+        match value {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.data, vec![0.25, 0.0, 0.25]);
+            }
+            other => panic!("expected tensor output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyval_delta_computation() {
+        let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
+        let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
+        let mut st = StructValue::new();
+        let r = Tensor::new(
+            vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            vec![3, 3],
+        )
+        .unwrap();
+        st.fields.insert("R".to_string(), Value::Tensor(r));
+        st.fields.insert("df".to_string(), Value::Num(4.0));
+        st.fields.insert("normr".to_string(), Value::Num(2.0));
+        let stats = Value::Struct(st);
+        let eval = evaluate(Value::Tensor(coeffs), Value::Tensor(points), &[stats], true)
+            .expect("polyval");
+        let (_, delta) = eval.into_pair().expect("delta available");
+        match delta {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.data.len(), 3);
+            }
+            other => panic!("expected tensor delta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyval_delta_requires_stats() {
+        let coeffs = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+        let points = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let err = evaluate(Value::Tensor(coeffs), Value::Tensor(points), &[], true)
+            .expect_err("expected error");
+        assert!(err.contains("S input"));
+    }
+
+    #[test]
+    fn polyval_invalid_mu_length_errors() {
+        let coeffs = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+        let points = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+        let mu = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let placeholder = Tensor::new(vec![], vec![0, 0]).unwrap();
+        let err = polyval_builtin(
+            Value::Tensor(coeffs),
+            Value::Tensor(points),
+            vec![Value::Tensor(placeholder), Value::Tensor(mu)],
+        )
+        .expect_err("expected mu length error");
+        assert!(err.contains("mu must contain at least two elements"));
+    }
+
+    #[test]
+    fn polyval_complex_mu_rejected() {
+        let coeffs = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+        let points = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+        let complex_mu =
+            ComplexTensor::new(vec![(0.0, 0.0), (1.0, 0.5)], vec![1, 2]).expect("complex mu");
+        let placeholder = Tensor::new(vec![], vec![0, 0]).unwrap();
+        let err = polyval_builtin(
+            Value::Tensor(coeffs),
+            Value::Tensor(points),
+            vec![Value::Tensor(placeholder), Value::ComplexTensor(complex_mu)],
+        )
+        .expect_err("expected complex mu error");
+        assert!(err.contains("mu values must be real"));
+    }
+
+    #[test]
+    fn polyval_invalid_stats_missing_r() {
+        let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
+        let points = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+        let mut st = StructValue::new();
+        st.fields.insert("df".to_string(), Value::Num(1.0));
+        st.fields.insert("normr".to_string(), Value::Num(1.0));
+        let stats = Value::Struct(st);
+        let err = polyval_builtin(Value::Tensor(coeffs), Value::Tensor(points), vec![stats])
+            .expect_err("expected missing R error");
+        assert!(err.contains("missing the field 'R'"));
+    }
+
+    #[test]
+    fn polyval_gpu_roundtrip() {
+        test_support::with_test_provider(|provider| {
+            let coeffs = Tensor::new(vec![1.0, 0.0, 1.0], vec![1, 3]).unwrap();
+            let points = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
+            let coeff_handle = provider
+                .upload(&HostTensorView {
+                    data: &coeffs.data,
+                    shape: &coeffs.shape,
+                })
+                .expect("upload coeff");
+            let point_handle = provider
+                .upload(&HostTensorView {
+                    data: &points.data,
+                    shape: &points.shape,
+                })
+                .expect("upload points");
+            let value = polyval_builtin(
+                Value::GpuTensor(coeff_handle),
+                Value::GpuTensor(point_handle),
+                Vec::new(),
+            )
+            .expect("polyval");
+            match value {
+                Value::GpuTensor(handle) => {
+                    let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+                    assert_eq!(gathered.data, vec![2.0, 1.0, 2.0]);
+                }
+                other => panic!("expected gpu tensor, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn polyval_wgpu_matches_cpu_real_inputs() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
+        let points = Tensor::new(vec![-2.0, -1.0, 0.5, 2.5], vec![4, 1]).unwrap();
+
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let coeff_handle = provider
+            .upload(&HostTensorView {
+                data: &coeffs.data,
+                shape: &coeffs.shape,
+            })
+            .expect("upload coeffs");
+        let point_handle = provider
+            .upload(&HostTensorView {
+                data: &points.data,
+                shape: &points.shape,
+            })
+            .expect("upload points");
+
+        let gpu_value = polyval_builtin(
+            Value::GpuTensor(coeff_handle.clone()),
+            Value::GpuTensor(point_handle.clone()),
+            Vec::new(),
+        )
+        .expect("polyval gpu");
+
+        let _ = provider.free(&coeff_handle);
+        let _ = provider.free(&point_handle);
+
+        let gathered = test_support::gather(gpu_value).expect("gather");
+
+        let coeff_complex: Vec<Complex64> = coeffs
+            .data
+            .iter()
+            .map(|&c| Complex64::new(c, 0.0))
+            .collect();
+        let point_complex: Vec<Complex64> = points
+            .data
+            .iter()
+            .map(|&x| Complex64::new(x, 0.0))
+            .collect();
+        let expected_vals = evaluate_polynomial(&coeff_complex, &point_complex);
+        let expected: Vec<f64> = expected_vals.iter().map(|c| c.re).collect();
+
+        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.data, expected);
+    }
+
+    #[test]
+    #[cfg(feature = "doc_export")]
+    fn doc_examples_present() {
+        let blocks = test_support::doc_examples(DOC_MD);
+        assert!(!blocks.is_empty());
+    }
+}

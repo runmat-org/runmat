@@ -180,7 +180,7 @@ fn extract_numeric_vector(matrix: &Tensor) -> Vec<f64> {
     matrix.data.clone()
 }
 
-#[runtime_builtin(name = "plot")]
+#[runtime_builtin(name = "plot", sink = true)]
 fn plot_builtin(x: Tensor, y: Tensor) -> Result<String, String> {
     let x_data = extract_numeric_vector(&x);
     let y_data = extract_numeric_vector(&y);
@@ -209,7 +209,7 @@ fn plot_builtin(x: Tensor, y: Tensor) -> Result<String, String> {
     execute_plot(figure)
 }
 
-#[runtime_builtin(name = "scatter")]
+#[runtime_builtin(name = "scatter", sink = true)]
 fn scatter_builtin(x: Tensor, y: Tensor) -> Result<String, String> {
     let x_data = extract_numeric_vector(&x);
     let y_data = extract_numeric_vector(&y);
@@ -238,7 +238,7 @@ fn scatter_builtin(x: Tensor, y: Tensor) -> Result<String, String> {
     execute_plot(figure)
 }
 
-#[runtime_builtin(name = "bar")]
+#[runtime_builtin(name = "bar", sink = true)]
 fn bar_builtin(values: Tensor) -> Result<String, String> {
     let data = extract_numeric_vector(&values);
 
@@ -261,7 +261,7 @@ fn bar_builtin(values: Tensor) -> Result<String, String> {
     execute_plot(figure)
 }
 
-#[runtime_builtin(name = "hist")]
+#[runtime_builtin(name = "hist", sink = true)]
 fn hist_builtin(values: Tensor) -> Result<String, String> {
     let data = extract_numeric_vector(&values);
     let bins = 10; // Default number of bins
@@ -284,7 +284,7 @@ fn hist_builtin(values: Tensor) -> Result<String, String> {
 
 // 3D Plotting Functions
 
-#[runtime_builtin(name = "surf")]
+#[runtime_builtin(name = "surf", sink = true)]
 fn surf_builtin(x: Tensor, y: Tensor, z: Tensor) -> Result<String, String> {
     // Convert matrices to 3D surface format
     // For now, assume z is a flattened grid
@@ -320,7 +320,7 @@ fn surf_builtin(x: Tensor, y: Tensor, z: Tensor) -> Result<String, String> {
     ))
 }
 
-#[runtime_builtin(name = "scatter3")]
+#[runtime_builtin(name = "scatter3", sink = true)]
 fn scatter3_builtin(x: Tensor, y: Tensor, z: Tensor) -> Result<String, String> {
     let x_data = extract_numeric_vector(&x);
     let y_data = extract_numeric_vector(&y);
@@ -367,7 +367,7 @@ fn scatter3_builtin(x: Tensor, y: Tensor, z: Tensor) -> Result<String, String> {
     execute_plot(figure)
 }
 
-#[runtime_builtin(name = "mesh")]
+#[runtime_builtin(name = "mesh", sink = true)]
 fn mesh_builtin(x: Tensor, y: Tensor, z: Tensor) -> Result<String, String> {
     // Similar to surf but wireframe mode
     let result = surf_builtin(x, y, z)?;

@@ -45,6 +45,13 @@ fn test_mixed_semicolon_behavior() {
     engine.execute("a = 10;").unwrap(); // No output
     engine.execute("b = 20;").unwrap(); // No output
 
+    let result = engine.execute("a").unwrap();
+    assert!(result.value.is_some());
+    assert_eq!(result.value.unwrap().to_string(), "10");
+    let result = engine.execute("b").unwrap();
+    assert!(result.value.is_some());
+    assert_eq!(result.value.unwrap().to_string(), "20");
+
     // Expression without semicolon should show result
     let result = engine.execute("a + b").unwrap();
     assert!(result.value.is_some());

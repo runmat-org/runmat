@@ -1,0 +1,80 @@
+{
+  "name": "runmat-vscode",
+  "displayName": "RunMat",
+  "description": "Language support for the RunMat language and runtime.",
+  "version": "0.1.0",
+  "publisher": "runmat",
+  "license": "SEE LICENSE IN ../../LICENSE.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/runmat-org/runmat"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:runmat",
+    "onCommand:runmat.restartServer",
+    "onCommand:runmat.showLogs"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "runmat",
+        "aliases": ["RunMat", "runmat"],
+        "extensions": [".m", ".runmat"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "RunMat",
+      "properties": {
+        "runmat.lsp.path": {
+          "type": "string",
+          "default": "runmat-lsp",
+          "description": "Path to the RunMat language server executable.",
+          "scope": "resource"
+        },
+        "runmat.lsp.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional command line arguments passed to the language server.",
+          "scope": "resource"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "runmat.restartServer",
+        "title": "RunMat: Restart Language Server"
+      },
+      {
+        "command": "runmat.showLogs",
+        "title": "RunMat: Show Language Server Logs"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint .",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.50",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

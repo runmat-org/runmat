@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     default: "RunMat - Fast, Free, Modern MATLAB Runtime",
     template: "%s | RunMat"
   },
-  description: "Drop-in replacement for MATLAB and GNU Octave with the same syntax but dramatically faster performance. Jupyter kernel, BLAS/LAPACK, JIT compilation, generational garbage collection, and GPU-accelerated plotting. Open source and free.",
+  description: "RunMat is a pre-release MATLAB-style runtime for early adopters: the core runtime and GPU engine deliver our published speedups, while plotting presently covers simple 2D line/scatter views with richer charts still in progress.",
   keywords: [
     "MATLAB", "Octave", "Rust", "JIT compiler", "scientific computing", 
     "numerical computing", "open source", "high performance", "plotting",
@@ -39,12 +39,12 @@ export const metadata: Metadata = {
     url: 'https://runmat.org',
     siteName: 'RunMat',
     title: 'RunMat - High-Performance MATLAB/Octave Runtime',
-    description: 'Drop-in replacement for MATLAB and GNU Octave with the same syntax but dramatically faster performance. Jupyter kernel, BLAS/LAPACK, JIT compilation, and GPU-accelerated plotting.',
+    description: 'Pre-release MATLAB-style runtime delivering benchmarked CPU/GPU speedups; plotting currently covers simple 2D line/scatter while 3D and richer chart types are still being built.',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'RunMat - High-Performance MATLAB/Octave Runtime',
-    description: 'Drop-in replacement for MATLAB and GNU Octave with the same syntax but dramatically faster performance. Jupyter kernel, BLAS/LAPACK, and JIT compilation.',
+    description: 'RunMat is in pre-release: fast MATLAB-style runtime with proven benchmarks today and plotting limited to simple 2D line/scatter until richer charts land.',
   },
   robots: {
     index: true,
@@ -79,7 +79,7 @@ export default function RootLayout({
               "@context": "https://schema.org",
               "@type": "WebSite",
               "name": "RunMat",
-              "description": "Fast, free, modern MATLAB runtime with Jupyter kernel, BLAS/LAPACK, beautiful plotting, and JIT compilation",
+              "description": "Pre-release MATLAB-style runtime with Jupyter kernel, BLAS/LAPACK, and JIT compilation; current plotting covers simple 2D line/scatter while richer charts are in progress",
               "url": "https://runmat.org",
               "potentialAction": {
                 "@type": "SearchAction",
@@ -108,7 +108,7 @@ export default function RootLayout({
               "@context": "https://schema.org",
               "@type": "SoftwareApplication",
               "name": "RunMat",
-              "description": "Fast, free, modern MATLAB runtime with Jupyter kernel, BLAS/LAPACK, beautiful plotting, and JIT compilation",
+              "description": "Pre-release MATLAB-style runtime with Jupyter kernel, BLAS/LAPACK, and JIT compilation; simple 2D line/scatter plotting works today and advanced charts are still coming",
               "url": "https://runmat.org",
               "downloadUrl": "https://runmat.org/download",
               "operatingSystem": ["Windows", "macOS", "Linux"],

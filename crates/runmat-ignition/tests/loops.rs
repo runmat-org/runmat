@@ -1,5 +1,5 @@
 use runmat_hir::lower;
-use runmat_ignition::execute;
+use runmat_ignition::{compile, execute, instr::Instr};
 use runmat_parser::parse;
 use std::convert::TryInto;
 
@@ -75,4 +75,25 @@ fn for_negative_step_no_iterations_when_increasing() {
     let vars = execute(&hir).unwrap();
     let x: f64 = (&vars[0]).try_into().unwrap();
     assert_eq!(x, 0.0);
+}
+
+#[test]
+fn stochastic_evolution_loop_emits_instruction() {
+    let source = "
+    M = 32;
+    S = ones(M, 1, 'single');
+    drift = single(0.1);
+    scale = single(0.2);
+    for t = 1:8
+        Z = randn(M, 1, 'single');
+        S = S .* exp(drift + scale .* Z);
+    end
+    ";
+    let ast = parse(source).unwrap();
+    let hir = lower(&ast).unwrap();
+    let bytecode = compile(&hir).unwrap();
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::StochasticEvolution)));
 }

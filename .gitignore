@@ -7,10 +7,20 @@
 # VSCode
 .vscode/
 
-# Core dumps
-core
-core.*
-*.core
-**/core
+# Core dumps (files only; do not ignore directories named "core")
+/core
+/core.*
 **/core.*
 **/*.core
+
+# Generated website content
+website/content/builtins.json
+website/content/builtins-mdx/
+
+artifacts/
+.env
+
+.bench_venv/
+__pycache__/
+
+benchmarks/results/

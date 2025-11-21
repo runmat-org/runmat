@@ -259,10 +259,21 @@ struct Parser {
 }
 
 impl Parser {
+    fn skip_newlines(&mut self) {
+        while self.consume(&Token::Newline) {}
+    }
+
+    fn is_simple_assignment_ahead(&self) -> bool {
+        // Heuristic: at statement start, if we see Ident ... '=' before a terminator, treat as assignment
+        self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
+    }
     fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
         while self.pos < self.tokens.len() {
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             body.push(self.parse_stmt_with_semicolon()?);
@@ -317,6 +328,22 @@ impl Parser {
                     is_semicolon_terminated && has_more_toplevel_tokens,
                 ))
             }
+            Stmt::MultiAssign(names, expr, _) => {
+                let has_more_toplevel_tokens = self.pos < self.tokens.len();
+                Ok(Stmt::MultiAssign(
+                    names,
+                    expr,
+                    is_semicolon_terminated && has_more_toplevel_tokens,
+                ))
+            }
+            Stmt::AssignLValue(lv, expr, _) => {
+                let has_more_toplevel_tokens = self.pos < self.tokens.len();
+                Ok(Stmt::AssignLValue(
+                    lv,
+                    expr,
+                    is_semicolon_terminated && has_more_toplevel_tokens,
+                ))
+            }
             other => Ok(other),
         }
     }
@@ -347,14 +374,14 @@ impl Parser {
             Some(Token::Function) => self.parse_function().map_err(|e| e.into()),
             // Multi-assign like [a,b] = f()
             Some(Token::LBracket) => {
-                let save = self.pos;
-                match self.try_parse_multi_assign() {
-                    Ok(stmt) => Ok(stmt),
-                    Err(_) => {
-                        self.pos = save;
-                        let expr = self.parse_expr()?;
-                        Ok(Stmt::ExprStmt(expr, false))
+                if matches!(self.peek_token_at(1), Some(Token::Ident | Token::Tilde)) {
+                    match self.try_parse_multi_assign() {
+                        Ok(stmt) => Ok(stmt),
+                        Err(msg) => Err(self.error(&msg)),
                     }
+                } else {
+                    let expr = self.parse_expr()?;
+                    Ok(Stmt::ExprStmt(expr, false))
                 }
             }
             _ => {
@@ -370,6 +397,14 @@ impl Parser {
                     }
                     let expr = self.parse_expr()?;
                     Ok(Stmt::Assign(name, expr, false)) // Will be updated by parse_stmt_with_semicolon
+                } else if self.is_simple_assignment_ahead() {
+                    // Fallback: treat as simple assignment if '=' appears before terminator
+                    let name = self.expect_ident().map_err(|e| self.error(&e))?;
+                    if !self.consume(&Token::Assign) {
+                        return Err(self.error_with_expected("expected assignment operator", "'='"));
+                    }
+                    let expr = self.parse_expr()?;
+                    Ok(Stmt::Assign(name, expr, false))
                 } else if self.peek_token() == Some(&Token::Ident) {
                     // First, try complex lvalue assignment starting from an identifier: A(1)=x, A{1}=x, s.f=x, s.(n)=x
                     if let Some(lv) = self.try_parse_lvalue_assign()? {
@@ -420,6 +455,12 @@ impl Parser {
     fn can_start_command_form(&self) -> bool {
         // At entry, peek_token() is Some(Ident) for callee
         let mut i = 1;
+        while matches!(
+            self.peek_token_at(i),
+            Some(Token::Newline | Token::Ellipsis)
+        ) {
+            i += 1;
+        }
         // At least one simple arg must follow
         if !matches!(
             self.peek_token_at(i),
@@ -428,11 +469,16 @@ impl Parser {
             return false;
         }
         // Consume all contiguous simple args
-        while matches!(
-            self.peek_token_at(i),
-            Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)
-        ) {
-            i += 1;
+        loop {
+            match self.peek_token_at(i) {
+                Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End) => {
+                    i += 1;
+                }
+                Some(Token::Newline | Token::Ellipsis) => {
+                    i += 1;
+                }
+                _ => break,
+            }
         }
         // If the next token begins indexing/member or other expression syntax, do not use command-form
         match self.peek_token_at(i) {
@@ -453,6 +499,12 @@ impl Parser {
     fn parse_command_args(&mut self) -> Vec<Expr> {
         let mut args = Vec::new();
         loop {
+            if self.consume(&Token::Newline) {
+                continue;
+            }
+            if self.consume(&Token::Ellipsis) {
+                continue;
+            }
             match self.peek_token() {
                 Some(Token::Ident) => {
                     let ident = self.next().unwrap().lexeme;
@@ -735,16 +787,14 @@ impl Parser {
                         return Err("expected ')' after arguments".into());
                     }
                 }
-                // Heuristic: If arguments indicate indexing (colon/end/range), treat as indexing; else if
-                // the callee is an identifier, treat as function call; otherwise as indexing.
-                let has_index_hint = args.iter().any(|a| self.expr_suggests_indexing(a));
-                if has_index_hint {
-                    expr = Expr::Index(Box::new(expr), args);
+                // Binder-based disambiguation:
+                // If the callee is an identifier, defer call vs. index to HIR binding.
+                // Parse as a function call now; HIR will rewrite to Index if a variable shadows the function.
+                if let Expr::Ident(ref name) = expr {
+                    expr = Expr::FuncCall(name.clone(), args);
                 } else {
-                    match expr {
-                        Expr::Ident(ref name) => expr = Expr::FuncCall(name.clone(), args),
-                        _ => expr = Expr::Index(Box::new(expr), args),
-                    }
+                    // For non-ident bases (e.g., X(1), (A+B)(1)), this is indexing.
+                    expr = Expr::Index(Box::new(expr), args);
                 }
             } else if self.consume(&Token::LBracket) {
                 // Array indexing
@@ -819,27 +869,6 @@ impl Parser {
     fn parse_postfix(&mut self) -> Result<Expr, String> {
         let expr = self.parse_primary()?;
         self.parse_postfix_with_base(expr)
-    }
-
-    fn expr_suggests_indexing(&self, e: &Expr) -> bool {
-        match e {
-            Expr::Colon | Expr::EndKeyword | Expr::Range(_, _, _) => true,
-            Expr::Binary(_, op, _) => matches!(
-                op,
-                BinOp::Colon
-                    | BinOp::Equal
-                    | BinOp::NotEqual
-                    | BinOp::Less
-                    | BinOp::LessEqual
-                    | BinOp::Greater
-                    | BinOp::GreaterEqual
-                    | BinOp::AndAnd
-                    | BinOp::OrOr
-                    | BinOp::BitAnd
-                    | BinOp::BitOr
-            ),
-            _ => false,
-        }
     }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
@@ -987,16 +1016,24 @@ impl Parser {
     }
 
     fn parse_matrix(&mut self) -> Result<Expr, String> {
+        self.skip_newlines();
         let mut rows = Vec::new();
         if self.peek_token() == Some(&Token::RBracket) {
             return Ok(Expr::Tensor(rows));
         }
         loop {
+            self.skip_newlines();
+            if self.peek_token() == Some(&Token::RBracket) {
+                break;
+            }
             let mut row = Vec::new();
             // First element in the row
             row.push(self.parse_expr()?);
             // Accept either comma-separated or whitespace-separated elements until ';' or ']'
             loop {
+                if self.consume(&Token::Newline) {
+                    continue;
+                }
                 if self.consume(&Token::Comma) {
                     row.push(self.parse_expr()?);
                     continue;
@@ -1035,11 +1072,13 @@ impl Parser {
             }
             rows.push(row);
             if self.consume(&Token::Semicolon) {
+                self.skip_newlines();
                 continue;
             } else {
                 break;
             }
         }
+        self.skip_newlines();
         Ok(Expr::Tensor(rows))
     }
 
@@ -1195,16 +1234,26 @@ impl Parser {
             if term(tok) {
                 break;
             }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
-            let stmt = self.parse_stmt().map_err(|e| e.message)?;
+            // Fast-path: handle multi-assign LHS at statement start inside blocks reliably
+            let stmt = if self.peek_token() == Some(&Token::LBracket) {
+                self.try_parse_multi_assign()?
+            } else {
+                self.parse_stmt().map_err(|e| e.message)?
+            };
             let is_semicolon_terminated = self.consume(&Token::Semicolon);
 
             // Only expression statements are display-suppressed by semicolon.
             let final_stmt = match stmt {
                 Stmt::ExprStmt(expr, _) => Stmt::ExprStmt(expr, is_semicolon_terminated),
                 Stmt::Assign(name, expr, _) => Stmt::Assign(name, expr, false),
+                Stmt::MultiAssign(names, expr, _) => Stmt::MultiAssign(names, expr, false),
+                Stmt::AssignLValue(lv, expr, _) => Stmt::AssignLValue(lv, expr, false),
                 other => other,
             };
             body.push(final_stmt);
@@ -1214,10 +1263,15 @@ impl Parser {
 
     fn parse_cell(&mut self) -> Result<Expr, String> {
         let mut rows = Vec::new();
+        self.skip_newlines();
         if self.peek_token() == Some(&Token::RBrace) {
             return Ok(Expr::Cell(rows));
         }
         loop {
+            self.skip_newlines();
+            if self.peek_token() == Some(&Token::RBrace) {
+                break;
+            }
             let mut row = Vec::new();
             row.push(self.parse_expr()?);
             while self.consume(&Token::Comma) {
@@ -1225,11 +1279,13 @@ impl Parser {
             }
             rows.push(row);
             if self.consume(&Token::Semicolon) {
+                self.skip_newlines();
                 continue;
             } else {
                 break;
             }
         }
+        self.skip_newlines();
         Ok(Expr::Cell(rows))
     }
 
@@ -1239,6 +1295,9 @@ impl Parser {
         let mut cases = Vec::new();
         let mut otherwise: Option<Vec<Stmt>> = None;
         loop {
+            if self.consume(&Token::Newline) || self.consume(&Token::Semicolon) {
+                continue;
+            }
             if self.consume(&Token::Case) {
                 let val = self.parse_expr()?;
                 let body =
@@ -1247,6 +1306,8 @@ impl Parser {
             } else if self.consume(&Token::Otherwise) {
                 let body = self.parse_block(|t| matches!(t, Token::End))?;
                 otherwise = Some(body);
+            } else if self.consume(&Token::Comma) {
+                continue;
             } else {
                 break;
             }
@@ -1320,7 +1381,10 @@ impl Parser {
         let mut members: Vec<ClassMember> = Vec::new();
         loop {
             // Skip layout separators between member blocks
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             match self.peek_token() {
@@ -1404,7 +1468,10 @@ impl Parser {
             if matches!(tok, Token::End) {
                 break;
             }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             if let Some(Token::Ident) = self.peek_token() {
@@ -1423,7 +1490,10 @@ impl Parser {
             if matches!(tok, Token::End) {
                 break;
             }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             if let Some(Token::Ident) = self.peek_token() {

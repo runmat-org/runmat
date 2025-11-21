@@ -32,13 +32,13 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
 
   const defaultComponents: MarkdownRendererComponents = {
     h1: ({ children, ...props }: { children: React.ReactNode }) => (
-      <h1 className="text-4xl font-bold mt-12 mb-6 text-foreground first:mt-0" {...props}>{children}</h1>
+      <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mt-12 mb-6 text-foreground first:mt-0 break-words" {...props}>{children}</h1>
     ),
     h2: ({ children, ...props }: { children: React.ReactNode }) => {
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h2 id={id} className="group scroll-mt-24 text-3xl font-semibold mt-10 mb-5 text-foreground" {...props}>
+        <h2 id={id} className="group scroll-mt-24 text-3xl sm:text-4xl md:text-5xl font-semibold mt-10 mb-5 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h2>
@@ -48,7 +48,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h3 id={id} className="group scroll-mt-24 text-2xl font-semibold mt-8 mb-4 text-foreground" {...props}>
+        <h3 id={id} className="group scroll-mt-24 text-2xl sm:text-3xl font-semibold mt-8 mb-4 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h3>
@@ -58,7 +58,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h4 id={id} className="group scroll-mt-24 text-xl font-semibold mt-6 mb-3 text-foreground" {...props}>
+        <h4 id={id} className="group scroll-mt-24 text-xl sm:text-2xl font-semibold mt-6 mb-3 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h4>
@@ -68,7 +68,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h5 id={id} className="group scroll-mt-24 text-lg font-semibold mt-5 mb-2 text-foreground" {...props}>
+        <h5 id={id} className="group scroll-mt-24 text-lg sm:text-xl font-semibold mt-5 mb-2 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h5>
@@ -78,7 +78,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h6 id={id} className="group scroll-mt-24 text-base font-semibold mt-4 mb-2 text-foreground" {...props}>
+        <h6 id={id} className="group scroll-mt-24 text-base sm:text-lg font-semibold mt-4 mb-2 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h6>
@@ -93,22 +93,22 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         return false;
       });
       if (hasBlock) {
-        return <div className="my-6" {...props}>{children}</div>;
+        return <div className="my-6 break-words" {...props}>{children}</div>;
       }
-      return <p className="my-6 text-muted-foreground leading-relaxed" {...props}>{children}</p>;
+      return <p className="my-6 text-muted-foreground leading-relaxed break-words" {...props}>{children}</p>;
     },
     ul: ({ children, ...props }: { children: React.ReactNode }) => (
-      <ul className="my-6 ml-6 space-y-2 list-disc marker:text-blue-500" {...props}>{children}</ul>
+      <ul className="my-6 ml-6 space-y-2 list-disc marker:text-blue-500 break-words" {...props}>{children}</ul>
     ),
     ol: ({ children, ...props }: { children: React.ReactNode }) => (
-      <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-blue-500" {...props}>{children}</ol>
+      <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-blue-500 break-words" {...props}>{children}</ol>
     ),
     li: ({ children, ...props }: { children: React.ReactNode }) => (
-      <li className="text-muted-foreground leading-relaxed pl-2" {...props}>{children}</li>
+      <li className="text-muted-foreground leading-relaxed pl-2 break-words" {...props}>{children}</li>
     ),
     blockquote: ({ children, ...props }: { children: React.ReactNode }) => (
-      <blockquote className="my-6 pl-6 border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20 py-4 pr-4 rounded-r-lg" {...props}>
-        <div className="text-muted-foreground italic">{children}</div>
+      <blockquote className="my-6 pl-4 sm:pl-6 border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20 py-4 pr-4 rounded-r-lg break-words overflow-x-hidden" {...props}>
+        <div className="text-muted-foreground italic break-words">{children}</div>
       </blockquote>
     ),
     hr: ({ ...props }: Record<string, unknown>) => (
@@ -120,8 +120,8 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       </a>
     ),
     table: ({ children, ...props }: { children: React.ReactNode }) => (
-      <div className="my-8 overflow-x-auto">
-        <table className="w-full border-collapse border border-border rounded-lg table-mobile-wrap" {...props}>{children}</table>
+      <div className="my-8 -mx-4 sm:mx-0 overflow-x-auto max-w-full">
+        <table className="w-full min-w-full sm:min-w-[500px] border-collapse border border-border rounded-lg table-mobile-wrap" {...props}>{children}</table>
       </div>
     ),
     thead: ({ children, ...props }: { children: React.ReactNode }) => (
@@ -134,23 +134,105 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       <tr className="border-b border-border last:border-b-0" {...props}>{children}</tr>
     ),
     th: ({ children, ...props }: { children: React.ReactNode }) => (
-      <th className="border border-border px-4 py-3 text-left font-semibold text-foreground" {...props}>{children}</th>
+      <th className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-left font-semibold text-foreground" {...props}>{children}</th>
     ),
     td: ({ children, ...props }: { children: React.ReactNode }) => (
-      <td className="border border-border px-4 py-3 text-muted-foreground" {...props}>{children}</td>
+      <td className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-muted-foreground" {...props}>{children}</td>
     ),
-    code: ({ children, className, ...props }: { children?: React.ReactNode; className?: string }) => {
-      // Render Mermaid even if the renderer bypassed <pre> wrapper
-      if (className && /language-mermaid/.test(className)) {
+    pre: ({ children, ...props }: { children?: React.ReactNode }) => {
+      // Check if this contains a mermaid code block
+      const hasMermaid = React.Children.toArray(children).some(child => {
+        if (React.isValidElement(child)) {
+          const childType = typeof child.type === 'string' ? child.type : null;
+          if (childType === 'code') {
+            const childProps = child.props as { className?: string };
+            return childProps?.className?.includes('language-mermaid') || 
+                   childProps?.className?.includes('mermaid');
+          }
+        }
+        return false;
+      });
+
+      // If it's mermaid, don't wrap in pre - let the code component handle it
+      if (hasMermaid) {
+        return <>{children}</>;
+      }
+
+      // Check if this is a code block (has code child with hljs or language- class, or any code child)
+      const hasCodeBlock = React.Children.toArray(children).some(child => {
+        if (React.isValidElement(child)) {
+          const childType = typeof child.type === 'string' ? child.type : null;
+          if (childType === 'code') {
+            const childProps = child.props as { className?: string };
+            return childProps?.className?.includes('hljs') || 
+                   childProps?.className?.includes('language-') ||
+                   true; // Any code element inside pre should be styled
+          }
+        }
+        return false;
+      });
+      
+      if (hasCodeBlock) {
         return (
-          <div className="my-8">
-            <MermaidDiagram chart={String(children ?? '')} />
+          <pre className="my-6 overflow-x-auto max-w-full -mx-4 sm:mx-0 px-4 sm:px-0" {...props}>
+            {children}
+          </pre>
+        );
+      }
+      return <pre className="overflow-x-auto max-w-full break-words" {...props}>{children}</pre>;
+    },
+    code: ({ children, className, ...props }: { children?: React.ReactNode; className?: string }) => {
+      // Render Mermaid - check for language-mermaid or mermaid class
+      // Also handle cases where rehype-highlight might have added hljs classes
+      if (className && (/language-mermaid/.test(className) || className.includes('mermaid'))) {
+        // Extract the actual mermaid content - children might be wrapped in additional elements
+        const toPlain = (node: React.ReactNode): string => {
+          if (node == null) return '';
+          if (typeof node === 'string' || typeof node === 'number') return String(node);
+          if (Array.isArray(node)) return node.map(toPlain).join('');
+          if (React.isValidElement(node)) {
+            const props = node.props as { children?: React.ReactNode };
+            return toPlain(props?.children);
+          }
+          return '';
+        };
+        const mermaidContent = toPlain(children);
+        
+        return (
+          <div className="my-8 w-full">
+            <MermaidDiagram chart={mermaidContent.trim()} />
           </div>
         );
       }
-      // Otherwise fall back to default rendering (allows rehype-highlight SSR output to style)
+      // Check if this is inside a pre block (has hljs class from rehype-highlight or language- class)
+      // Also check if parent is pre by looking at context
+      const isCodeBlock = className?.includes('hljs') || className?.includes('language-');
+      
+      // If we're inside a pre (which we can't directly check), ensure we have proper styling
+      // We'll add hljs class if we have a language class or if className is undefined (code block without language)
+      if (isCodeBlock || !className) {
+        // Ensure hljs class is present for styling
+        let finalClassName = className || 'hljs';
+        if (className?.includes('language-') && !className.includes('hljs')) {
+          finalClassName = `hljs ${className}`;
+        } else if (!className) {
+          // Code block without language identifier - add hljs for styling
+          finalClassName = 'hljs';
+        }
+        return <code className={finalClassName} {...props}>{children}</code>;
+      }
+      // Inline code styling
       return <code className={className} {...props}>{children}</code>;
     },
+    img: ({ src, alt, ...props }: { src?: string; alt?: string } & Record<string, unknown>) => (
+      <img 
+        src={src} 
+        alt={alt} 
+        className="my-6 max-w-full h-auto rounded-lg" 
+        loading="lazy"
+        {...props} 
+      />
+    ),
     MermaidDiagram: (props: { chart?: string } & Record<string, unknown>) => (
       <div className="my-12 flex justify-center">
         <div className="max-w-full overflow-x-auto">
@@ -167,12 +249,21 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
   function sanitizeMarkdown(input: string): string {
     const lines = input.split(/\r?\n/);
     let inFence = false;
+    let fenceLanguage = '';
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (/^\s*```/.test(line)) {
         inFence = !inFence;
+        // Extract language from fence (e.g., ```mermaid or ```matlab)
+        if (inFence) {
+          const match = line.match(/^```(\w+)/);
+          fenceLanguage = match ? match[1] : '';
+        } else {
+          fenceLanguage = '';
+        }
         continue;
       }
+      // Skip processing inside code fences (including mermaid)
       if (inFence) continue;
       // Process only parts of the line that are not inside inline code (backticks)
       const segments = line.split(/(`[^`]*`)/g);
@@ -184,9 +275,9 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         out = out.replace(/([A-Za-z0-9_]+)<([A-Za-z0-9_]+)>/g, '`$1<$2>`');
         // Wrap brace groups in backticks to avoid MDX expression evaluation
         out = out.replace(/\{([^{}\n]+)\}/g, '`{$1}`');
-        // Protect literal HTML-like tags that appear in prose (e.g., <main>) from being parsed as JSX/HTML by MDX.
+        // Protect literal HTML-like tags that appear in prose (e.g., <main>, <insert>) from being parsed as JSX/HTML by MDX.
         // We only target a small allowlist of known tokens used in docs to avoid interfering with intentional MDX components.
-        out = out.replace(/<\/?(main|anonymous)>/gi, (m) => '`' + m + '`');
+        out = out.replace(/<\/?(main|anonymous|insert)(\s[^>]*)?>/gi, (m) => '`' + m + '`');
         segments[s] = out;
       }
       lines[i] = segments.join('');
@@ -201,7 +292,12 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       options={{
         mdxOptions: {
           remarkPlugins: [remarkGfm],
-          rehypePlugins: [[rehypeHighlight, { ignoreMissing: true }]],
+          rehypePlugins: [[rehypeHighlight, { 
+            ignoreMissing: true,
+            // Don't highlight mermaid code blocks
+            detect: true,
+            subset: ['javascript', 'typescript', 'python', 'matlab', 'bash', 'shell', 'json', 'yaml', 'markdown'],
+          }]],
           development: process.env.NODE_ENV !== 'production',
         },
       }}

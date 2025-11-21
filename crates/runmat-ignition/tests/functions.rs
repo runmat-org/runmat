@@ -946,20 +946,37 @@ fn operator_overloading_relational_lt_eq() {
 
 #[test]
 fn operator_overloading_full_grid_basic() {
-    let setup = "__register_test_classes();";
-    // Cover ne, ge, le, power (as elementwise on numeric), left-div, elementwise div/left-div, and logical &|
-    let program = format!(
-        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); \
-        a1 = (o ~= 10); a2 = (10 ~= o); \
-        b1 = (o >= 5); b2 = (o <= 5); \
-        % use numeric power to avoid object exponent when not provided
-        c1 = ([2 3] .^ 2); c2 = (2 .^ [2 3]); \
-        d1 = (o ./ 2); d2 = (2 ./ o); \
-        e1 = (o .\\ 2); e2 = (2 .\\ o); \
-        f1 = ([1 0 1] & [1 1 0]); f2 = ([1 0 1] | [0 1 1]);",
-    );
-    let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
-    let _ = execute(&hir).unwrap();
+    let setup = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5);";
+    let statements = [
+        "a1 = (o ~= 10);",
+        "a2 = (10 ~= o);",
+        "b1 = (o >= 5);",
+        "b2 = (o <= 5);",
+        "% use numeric power to avoid object exponent when not provided",
+        "c1 = ([2 3] .^ 2);",
+        "c2 = (2 .^ [2 3]);",
+        "d1 = (o ./ 2);",
+        "d2 = (2 ./ o);",
+        "e1 = (o .\\ 2);",
+        "e2 = (2 .\\ o);",
+        "f1 = ([1 0 1] & [1 1 0]);",
+        "f2 = ([1 0 1] | [0 1 1]);",
+    ];
+    let mut program = String::from(setup);
+    program.push('\n');
+    for (idx, stmt) in statements.iter().enumerate() {
+        program.push_str(stmt);
+        program.push('\n');
+        let ast = runmat_parser::parse(&program).unwrap();
+        let hir = lower(&ast).unwrap();
+        execute(&hir).unwrap_or_else(|err| {
+            let bc = runmat_ignition::compile(&hir).unwrap();
+            panic!(
+                "operator overload script failed after stmt #{idx} `{stmt}`: {err}\nbytecode={:?}",
+                bc.instructions
+            );
+        });
+    }
 }
 
 #[test]
@@ -1029,6 +1046,23 @@ fn operator_overloading_numeric_results_and_bitwise_arrays() {
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-5.0).abs()<1e-9)));
+}
+
+#[test]
+fn operator_overloading_left_division_variants() {
+    let setup = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5);";
+    let program = format!("{setup} a = (o .\\ 2); b = (2 .\\ o); c = (o ./ 2); d = (2 ./ o);",);
+    let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
+    let _ = execute(&hir).unwrap();
+}
+
+#[test]
+fn bitwise_or_row_vectors() {
+    let program = "f = ([1 0 1] | [0 1 1]);";
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let bc = runmat_ignition::compile(&hir).unwrap();
+    dbg!(&bc.instructions);
+    let _ = runmat_ignition::interpret(&bc).unwrap();
 }
 
 #[test]
@@ -1171,7 +1205,7 @@ fn class_dependent_property_get_set() {
 fn struct_isfield_multi_and_fieldnames() {
     let program = r#"
         s = struct(); s = setfield(s, 'a', 1); s = setfield(s, 'b', 2);
-        c = {'a','x';'b','a'}; r = isfield(c, s); f = fieldnames(s);
+        c = {'a','x';'b','a'}; r = isfield(s, c); f = fieldnames(s);
     "#;
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
@@ -1180,10 +1214,8 @@ fn struct_isfield_multi_and_fieldnames() {
     let mut found_f_ok = false;
     for v in &vars {
         match v {
-            runmat_builtins::Value::Tensor(t) => {
-                if t.shape == vec![2, 2]
-                    && (t.data == vec![1.0, 0.0, 1.0, 0.0] || t.data == vec![1.0, 1.0, 0.0, 1.0])
-                {
+            runmat_builtins::Value::LogicalArray(arr) => {
+                if arr.shape == vec![2, 2] && arr.data == vec![1, 1, 0, 1] {
                     found_r_ok = true;
                 }
             }
@@ -1213,7 +1245,7 @@ fn struct_isfield_string_array_placeholder() {
     println!("vars: {vars:?}");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-12)));
+        .any(|v| matches!(v, runmat_builtins::Value::Bool(true))));
 }
 
 #[test]

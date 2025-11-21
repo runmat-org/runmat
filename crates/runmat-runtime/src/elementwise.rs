@@ -28,7 +28,7 @@ fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (
 fn to_host_value(v: &Value) -> Result<Value, String> {
     match v {
         Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider() {
+            if let Some(p) = runmat_accelerate_api::provider_for_handle(h) {
                 let ht = p.download(h).map_err(|e| e.to_string())?;
                 Ok(Value::Tensor(
                     Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
@@ -71,7 +71,33 @@ pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
 /// Element-wise multiplication: A .* B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
-    // If exactly one is GPU, gather to host and recurse
+    // GPU+scalar: keep on device if provider supports scalar mul
+    if let Some(p) = runmat_accelerate_api::provider() {
+        match (a, b) {
+            (Value::GpuTensor(ga), Value::Num(s)) => {
+                if let Ok(hc) = p.scalar_mul(ga, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            (Value::Num(s), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_mul(gb, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            (Value::GpuTensor(ga), Value::Int(i)) => {
+                if let Ok(hc) = p.scalar_mul(ga, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            (Value::Int(i), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_mul(gb, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            _ => {}
+        }
+    }
+    // If exactly one is GPU and no scalar fast-path, gather to host and recurse
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
         let ah = to_host_value(a)?;
         let bh = to_host_value(b)?;
@@ -80,10 +106,7 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
             if let Ok(hc) = p.elem_mul(ha, hb) {
-                let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(
-                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
-                ));
+                return Ok(Value::GpuTensor(hc));
             }
         }
     }
@@ -178,219 +201,39 @@ pub fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
     }
 }
 
-/// Element-wise addition: A + B
-/// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
-pub fn elementwise_add(a: &Value, b: &Value) -> Result<Value, String> {
-    if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
-        let ah = to_host_value(a)?;
-        let bh = to_host_value(b)?;
-        return elementwise_add(&ah, &bh);
-    }
-    if let Some(p) = runmat_accelerate_api::provider() {
-        if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
-            if let Ok(hc) = p.elem_add(ha, hb) {
-                let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(
-                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
-                ));
-            }
-        }
-    }
-    match (a, b) {
-        // Complex scalars
-        (Value::Complex(ar, ai), Value::Complex(br, bi)) => Ok(Value::Complex(ar + br, ai + bi)),
-        (Value::Complex(ar, ai), Value::Num(s)) => Ok(Value::Complex(ar + s, *ai)),
-        (Value::Num(s), Value::Complex(br, bi)) => Ok(Value::Complex(s + br, *bi)),
-        // Scalar-scalar case
-        (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x + y)),
-        (Value::Int(x), Value::Num(y)) => Ok(Value::Num(x.to_f64() + y)),
-        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x + y.to_f64())),
-        (Value::Int(x), Value::Int(y)) => Ok(Value::Num(x.to_f64() + y.to_f64())),
+// elementwise_add has been retired in favor of the `plus` builtin
 
-        // Matrix-scalar cases (broadcasting)
-        (Value::Tensor(m), Value::Num(s)) => {
-            let data: Vec<f64> = m.data.iter().map(|x| x + s).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
-        (Value::Tensor(m), Value::Int(s)) => {
-            let scalar = s.to_f64();
-            let data: Vec<f64> = m.data.iter().map(|x| x + scalar).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
-        (Value::Num(s), Value::Tensor(m)) => {
-            let data: Vec<f64> = m.data.iter().map(|x| s + x).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
-        (Value::Int(s), Value::Tensor(m)) => {
-            let scalar = s.to_f64();
-            let data: Vec<f64> = m.data.iter().map(|x| scalar + x).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
-
-        // Matrix-matrix case
-        (Value::Tensor(m1), Value::Tensor(m2)) => {
-            if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
-                return Err(format!(
-                    "Matrix dimensions must agree for addition: {}x{} + {}x{}",
-                    m1.rows(),
-                    m1.cols(),
-                    m2.rows(),
-                    m2.cols()
-                ));
-            }
-            let data: Vec<f64> = m1
-                .data
-                .iter()
-                .zip(m2.data.iter())
-                .map(|(x, y)| x + y)
-                .collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
-        }
-
-        // Complex tensors
-        (Value::ComplexTensor(m1), Value::ComplexTensor(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols {
-                return Err(format!(
-                    "Matrix dimensions must agree for addition: {}x{} + {}x{}",
-                    m1.rows, m1.cols, m2.rows, m2.cols
-                ));
-            }
-            let data: Vec<(f64, f64)> = m1
-                .data
-                .iter()
-                .zip(m2.data.iter())
-                .map(|((ar, ai), (br, bi))| (ar + br, ai + bi))
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m1.rows, m1.cols)?,
-            ))
-        }
-        (Value::ComplexTensor(m), Value::Num(s)) => {
-            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (re + s, *im)).collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
-            ))
-        }
-        (Value::Num(s), Value::ComplexTensor(m)) => {
-            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (s + re, *im)).collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
-            ))
-        }
-
-        _ => Err(format!("Addition not supported for types: {a:?} + {b:?}")),
-    }
-}
-
-/// Element-wise subtraction: A - B
-/// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
-pub fn elementwise_sub(a: &Value, b: &Value) -> Result<Value, String> {
-    if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
-        let ah = to_host_value(a)?;
-        let bh = to_host_value(b)?;
-        return elementwise_sub(&ah, &bh);
-    }
-    if let Some(p) = runmat_accelerate_api::provider() {
-        if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
-            if let Ok(hc) = p.elem_sub(ha, hb) {
-                let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(
-                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
-                ));
-            }
-        }
-    }
-    match (a, b) {
-        // Complex scalars
-        (Value::Complex(ar, ai), Value::Complex(br, bi)) => Ok(Value::Complex(ar - br, ai - bi)),
-        (Value::Complex(ar, ai), Value::Num(s)) => Ok(Value::Complex(ar - s, *ai)),
-        (Value::Num(s), Value::Complex(br, bi)) => Ok(Value::Complex(s - br, -*bi)),
-        // Scalar-scalar case
-        (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x - y)),
-        (Value::Int(x), Value::Num(y)) => Ok(Value::Num(x.to_f64() - y)),
-        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x - y.to_f64())),
-        (Value::Int(x), Value::Int(y)) => Ok(Value::Num(x.to_f64() - y.to_f64())),
-
-        // Matrix-scalar cases (broadcasting)
-        (Value::Tensor(m), Value::Num(s)) => {
-            let data: Vec<f64> = m.data.iter().map(|x| x - s).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
-        (Value::Tensor(m), Value::Int(s)) => {
-            let scalar = s.to_f64();
-            let data: Vec<f64> = m.data.iter().map(|x| x - scalar).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
-        (Value::Num(s), Value::Tensor(m)) => {
-            let data: Vec<f64> = m.data.iter().map(|x| s - x).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
-        (Value::Int(s), Value::Tensor(m)) => {
-            let scalar = s.to_f64();
-            let data: Vec<f64> = m.data.iter().map(|x| scalar - x).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
-
-        // Matrix-matrix case
-        (Value::Tensor(m1), Value::Tensor(m2)) => {
-            if m1.rows() != m2.rows() || m1.cols() != m2.cols() {
-                return Err(format!(
-                    "Matrix dimensions must agree for subtraction: {}x{} - {}x{}",
-                    m1.rows(),
-                    m1.cols(),
-                    m2.rows(),
-                    m2.cols()
-                ));
-            }
-            let data: Vec<f64> = m1
-                .data
-                .iter()
-                .zip(m2.data.iter())
-                .map(|(x, y)| x - y)
-                .collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
-        }
-
-        // Complex tensors
-        (Value::ComplexTensor(m1), Value::ComplexTensor(m2)) => {
-            if m1.rows != m2.rows || m1.cols != m2.cols {
-                return Err(format!(
-                    "Matrix dimensions must agree for element-wise multiplication: {}x{} .* {}x{}",
-                    m1.rows, m1.cols, m2.rows, m2.cols
-                ));
-            }
-            let data: Vec<(f64, f64)> = m1
-                .data
-                .iter()
-                .zip(m2.data.iter())
-                .map(|((ar, ai), (br, bi))| (ar * br - ai * bi, ar * bi + ai * br))
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m1.rows, m1.cols)?,
-            ))
-        }
-        (Value::ComplexTensor(m), Value::Num(s)) => {
-            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (re * s, im * s)).collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
-            ))
-        }
-        (Value::Num(s), Value::ComplexTensor(m)) => {
-            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (s * re, s * im)).collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
-            ))
-        }
-
-        _ => Err(format!(
-            "Subtraction not supported for types: {a:?} - {b:?}"
-        )),
-    }
-}
+// elementwise_sub has been retired in favor of the `minus` builtin
 
 /// Element-wise division: A ./ B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
+    // GPU+scalar: use scalar div when form is G ./ s or left-scalar s ./ G
+    if let Some(p) = runmat_accelerate_api::provider() {
+        match (a, b) {
+            (Value::GpuTensor(ga), Value::Num(s)) => {
+                if let Ok(hc) = p.scalar_div(ga, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            (Value::GpuTensor(ga), Value::Int(i)) => {
+                if let Ok(hc) = p.scalar_div(ga, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            (Value::Num(s), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_rdiv(gb, *s) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            (Value::Int(i), Value::GpuTensor(gb)) => {
+                if let Ok(hc) = p.scalar_rdiv(gb, i.to_f64()) {
+                    return Ok(Value::GpuTensor(hc));
+                }
+            }
+            _ => {}
+        }
+    }
     if matches!(a, Value::GpuTensor(_)) ^ matches!(b, Value::GpuTensor(_)) {
         let ah = to_host_value(a)?;
         let bh = to_host_value(b)?;
@@ -399,10 +242,7 @@ pub fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
     if let Some(p) = runmat_accelerate_api::provider() {
         if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
             if let Ok(hc) = p.elem_div(ha, hb) {
-                let ht = p.download(&hc).map_err(|e| e.to_string())?;
-                return Ok(Value::Tensor(
-                    Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,
-                ));
+                return Ok(Value::GpuTensor(hc));
             }
         }
     }

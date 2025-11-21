@@ -1,5 +1,7 @@
 use crate::functions::UserFunction;
 use crate::instr::Instr;
+use once_cell::sync::OnceCell;
+use runmat_builtins::Type;
 use runmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
 use std::collections::HashMap;
 
@@ -14,9 +16,173 @@ pub struct Compiler {
     pub loop_stack: Vec<LoopLabels>,
     pub functions: HashMap<String, UserFunction>,
     pub imports: Vec<(Vec<String>, bool)>,
+    pub var_types: Vec<Type>,
+}
+
+struct StochasticEvolutionPlan<'a> {
+    state: runmat_hir::VarId,
+    drift: &'a HirExpr,
+    scale: &'a HirExpr,
+    steps: &'a HirExpr,
+}
+
+fn expr_is_one(expr: &HirExpr) -> bool {
+    parse_number(expr)
+        .map(|v| (v - 1.0).abs() < 1e-9)
+        .unwrap_or(false)
+}
+
+fn parse_number(expr: &HirExpr) -> Option<f64> {
+    if let runmat_hir::HirExprKind::Number(raw) = &expr.kind {
+        raw.parse::<f64>().ok()
+    } else {
+        None
+    }
+}
+
+fn stochastic_evolution_disabled() -> bool {
+    static DISABLE: OnceCell<bool> = OnceCell::new();
+    *DISABLE.get_or_init(|| {
+        std::env::var("RUNMAT_DISABLE_STOCHASTIC_EVOLUTION")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false)
+    })
+}
+
+fn is_randn_call(expr: &HirExpr) -> bool {
+    match &expr.kind {
+        runmat_hir::HirExprKind::FuncCall(name, _) => name.eq_ignore_ascii_case("randn"),
+        _ => false,
+    }
+}
+
+fn matches_var(expr: &HirExpr, var: runmat_hir::VarId) -> bool {
+    matches!(expr.kind, runmat_hir::HirExprKind::Var(id) if id == var)
+}
+
+fn extract_drift_and_scale(
+    expr: &HirExpr,
+    state_var: runmat_hir::VarId,
+    z_var: runmat_hir::VarId,
+) -> Option<(&HirExpr, &HirExpr)> {
+    use runmat_hir::HirExprKind as EK;
+    use runmat_parser::BinOp;
+
+    let (maybe_state_side, maybe_exp_side) = match &expr.kind {
+        EK::Binary(lhs, BinOp::ElemMul, rhs) => (lhs.as_ref(), rhs.as_ref()),
+        _ => return None,
+    };
+
+    let exp_side = if matches_var(maybe_state_side, state_var) && is_exp_call(maybe_exp_side) {
+        maybe_exp_side
+    } else if matches_var(maybe_exp_side, state_var) && is_exp_call(maybe_state_side) {
+        maybe_state_side
+    } else {
+        return None;
+    };
+
+    let exp_arg = match &exp_side.kind {
+        EK::FuncCall(name, args) if name.eq_ignore_ascii_case("exp") && args.len() == 1 => &args[0],
+        _ => return None,
+    };
+
+    match &exp_arg.kind {
+        EK::Binary(lhs, BinOp::Add, rhs) => {
+            if let Some(scale_expr) = extract_scale_term(lhs, z_var) {
+                Some((rhs.as_ref(), scale_expr))
+            } else if let Some(scale_expr) = extract_scale_term(rhs, z_var) {
+                Some((lhs.as_ref(), scale_expr))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn extract_scale_term(expr: &HirExpr, z_var: runmat_hir::VarId) -> Option<&HirExpr> {
+    use runmat_hir::HirExprKind as EK;
+    use runmat_parser::BinOp;
+
+    match &expr.kind {
+        EK::Binary(lhs, BinOp::ElemMul, rhs) => {
+            if matches_var(lhs, z_var) {
+                Some(rhs.as_ref())
+            } else if matches_var(rhs, z_var) {
+                Some(lhs.as_ref())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn is_exp_call(expr: &HirExpr) -> bool {
+    matches!(
+        &expr.kind,
+        runmat_hir::HirExprKind::FuncCall(name, _) if name.eq_ignore_ascii_case("exp")
+    )
 }
 
 impl Compiler {
+    fn compile_stochastic_evolution(
+        &mut self,
+        plan: StochasticEvolutionPlan<'_>,
+    ) -> Result<(), String> {
+        self.emit(Instr::LoadVar(plan.state.0));
+        self.compile_expr(plan.drift)?;
+        self.compile_expr(plan.scale)?;
+        self.compile_expr(plan.steps)?;
+        self.emit(Instr::StochasticEvolution);
+        self.emit(Instr::StoreVar(plan.state.0));
+        Ok(())
+    }
+
+    fn detect_stochastic_evolution<'a>(
+        &self,
+        expr: &'a HirExpr,
+        body: &'a [HirStmt],
+    ) -> Option<StochasticEvolutionPlan<'a>> {
+        if stochastic_evolution_disabled() {
+            return None;
+        }
+        use runmat_hir::HirExprKind as EK;
+        match &expr.kind {
+            EK::Range(start, step, end) => {
+                if !expr_is_one(start) {
+                    return None;
+                }
+                if let Some(step_expr) = step {
+                    if !expr_is_one(step_expr) {
+                        return None;
+                    }
+                }
+                if body.len() != 2 {
+                    return None;
+                }
+                let (z_var, randn_expr) = match &body[0] {
+                    HirStmt::Assign(var, expr, _) => (*var, expr),
+                    _ => return None,
+                };
+                if !is_randn_call(randn_expr) {
+                    return None;
+                }
+                let (state_var, update_expr) = match &body[1] {
+                    HirStmt::Assign(var, expr, _) => (*var, expr),
+                    _ => return None,
+                };
+                let (drift, scale) = extract_drift_and_scale(update_expr, state_var, z_var)?;
+                Some(StochasticEvolutionPlan {
+                    state: state_var,
+                    drift,
+                    scale,
+                    steps: end,
+                })
+            }
+            _ => None,
+        }
+    }
     fn attr_access_from_str(s: &str) -> runmat_builtins::Access {
         match s.to_ascii_lowercase().as_str() {
             "private" => runmat_builtins::Access::Private,
@@ -309,16 +475,43 @@ impl Compiler {
         }
 
         visit_stmts(&prog.body, &mut max_var);
+        let mut var_types = prog.var_types.clone();
+        if var_types.len() < max_var {
+            var_types.resize(max_var, Type::Unknown);
+        }
         Self {
             instructions: Vec::new(),
             var_count: max_var,
             loop_stack: Vec::new(),
             functions: HashMap::new(),
             imports: Vec::new(),
+            var_types,
         }
     }
 
+    fn ensure_var(&mut self, id: usize) {
+        if id + 1 > self.var_count {
+            self.var_count = id + 1;
+        }
+        while self.var_types.len() <= id {
+            self.var_types.push(Type::Unknown);
+        }
+    }
+
+    fn alloc_temp(&mut self) -> usize {
+        let id = self.var_count;
+        self.var_count += 1;
+        if self.var_types.len() <= id {
+            self.var_types.push(Type::Unknown);
+        }
+        id
+    }
+
     pub fn emit(&mut self, instr: Instr) -> usize {
+        match &instr {
+            Instr::LoadVar(id) | Instr::StoreVar(id) => self.ensure_var(*id),
+            _ => {}
+        }
         let pc = self.instructions.len();
         self.instructions.push(instr);
         pc
@@ -431,16 +624,18 @@ impl Compiler {
                 }
             }
             HirStmt::For { var, expr, body } => {
+                if let Some(plan) = self.detect_stochastic_evolution(expr, body) {
+                    self.compile_stochastic_evolution(plan)?;
+                    return Ok(());
+                }
                 if let HirExprKind::Range(start, step, end) = &expr.kind {
                     // Initialize loop variable, end, and step
                     self.compile_expr(start)?;
                     self.emit(Instr::StoreVar(var.0));
                     self.compile_expr(end)?;
-                    let end_var = self.var_count;
-                    self.var_count += 1;
+                    let end_var = self.alloc_temp();
                     self.emit(Instr::StoreVar(end_var));
-                    let step_var = self.var_count;
-                    self.var_count += 1;
+                    let step_var = self.alloc_temp();
                     if let Some(step_expr) = step {
                         self.compile_expr(step_expr)?;
                         self.emit(Instr::StoreVar(step_var));
@@ -690,6 +885,20 @@ impl Compiler {
                 for stmt in body {
                     visit_stmt_for_vars(stmt, &mut max_local_var);
                 }
+                let var_map =
+                    runmat_hir::remapping::create_complete_function_var_map(params, outputs, body);
+                let local_var_count = var_map.len();
+                if local_var_count > max_local_var {
+                    max_local_var = local_var_count;
+                }
+                let mut func_var_types = vec![Type::Unknown; local_var_count];
+                for (orig, local) in &var_map {
+                    if let Some(ty) = self.var_types.get(orig.0) {
+                        if let Some(slot) = func_var_types.get_mut(local.0) {
+                            *slot = ty.clone();
+                        }
+                    }
+                }
                 let user_func = UserFunction {
                     name: name.clone(),
                     params: params.clone(),
@@ -698,6 +907,7 @@ impl Compiler {
                     local_var_count: max_local_var,
                     has_varargin: *has_varargin,
                     has_varargout: *has_varargout,
+                    var_types: func_var_types,
                 };
                 self.functions.insert(name.clone(), user_func);
             }
@@ -706,8 +916,7 @@ impl Compiler {
                 cases,
                 otherwise,
             } => {
-                let temp_id = self.var_count;
-                self.var_count += 1;
+                let temp_id = self.alloc_temp();
                 self.compile_expr(expr)?;
                 self.emit(Instr::StoreVar(temp_id));
                 let mut end_jumps: Vec<usize> = Vec::new();
@@ -1567,22 +1776,22 @@ impl Compiler {
                     BinOp::BitAnd => {
                         self.compile_expr(a)?;
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         self.compile_expr(b)?;
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         self.emit(Instr::ElemMul);
                     }
                     BinOp::BitOr => {
                         self.compile_expr(a)?;
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         self.compile_expr(b)?;
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         self.emit(Instr::Add);
                         self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::NotEqual);
+                        self.emit(Instr::CallBuiltin("ne".to_string(), 2));
                         // Stay element-wise by folding through elementwise ops
                     }
                     _ => {
@@ -1942,8 +2151,14 @@ impl Compiler {
                     }
                     // Existing propagation path and builtin call
                     if !has_any_expand {
+                        // First scan for user-defined inner function calls to expand; avoid compiling
+                        // simple args here to prevent duplicating them on the stack. If any inner
+                        // user functions are found, compile them and then compile the remaining
+                        // simple args once, emit the builtin call, and return. Otherwise, fall
+                        // through to the normal (single-pass) compilation below.
                         let mut total_argc = 0usize;
                         let mut did_expand_inner = false;
+                        let mut pending_simple: Vec<&runmat_hir::HirExpr> = Vec::new();
                         for arg in args {
                             if let HirExprKind::FuncCall(inner, inner_args) = &arg.kind {
                                 if self.functions.contains_key(inner) {
@@ -1963,15 +2178,17 @@ impl Compiler {
                                     total_argc += outc;
                                     did_expand_inner = true;
                                 } else {
-                                    self.compile_expr(arg)?;
-                                    total_argc += 1;
+                                    pending_simple.push(arg);
                                 }
                             } else {
-                                self.compile_expr(arg)?;
-                                total_argc += 1;
+                                pending_simple.push(arg);
                             }
                         }
                         if did_expand_inner {
+                            for arg in pending_simple {
+                                self.compile_expr(arg)?;
+                                total_argc += 1;
+                            }
                             self.emit(Instr::CallBuiltin(resolved, total_argc));
                             return Ok(());
                         }
@@ -2073,9 +2290,6 @@ impl Compiler {
                         }
                     }
                     let row_lengths: Vec<usize> = matrix_data.iter().map(|row| row.len()).collect();
-                    for &row_len in &row_lengths {
-                        self.emit(Instr::LoadConst(row_len as f64));
-                    }
                     if matches!(expr.kind, HirExprKind::Cell(_)) {
                         // For 2D cells, we know rows and row lengths; emit 2D version when rectangular
                         let rectangular = row_lengths.iter().all(|&c| c == row_lengths[0]);
@@ -2088,6 +2302,9 @@ impl Compiler {
                             self.emit(Instr::CreateCell2D(1, total));
                         }
                     } else {
+                        for &row_len in &row_lengths {
+                            self.emit(Instr::LoadConst(row_len as f64));
+                        }
                         self.emit(Instr::CreateMatrixDynamic(rows));
                     }
                 } else {
@@ -2395,6 +2612,7 @@ impl Compiler {
                     local_var_count: capture_count + params.len() + 1,
                     has_varargin: false,
                     has_varargout: false,
+                    var_types: vec![Type::Unknown; capture_count + params.len() + 1],
                 };
                 self.functions.insert(synthesized.clone(), user_func);
 

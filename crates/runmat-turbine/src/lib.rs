@@ -11,12 +11,22 @@ use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use log::{debug, error, info, warn};
-use runmat_builtins::Value;
+use runmat_builtins::{Type, Value};
 use runmat_gc::gc_allocate;
 use runmat_ignition::{Bytecode, Instr};
 
 use target_lexicon::Triple;
 use thiserror::Error;
+
+#[cfg(feature = "native-accel")]
+fn accel_prepare_args(name: &str, args: &[Value]) -> std::result::Result<Vec<Value>, String> {
+    runmat_accelerate::prepare_builtin_args(name, args).map_err(|e| e.to_string())
+}
+
+#[cfg(not(feature = "native-accel"))]
+fn accel_prepare_args(_name: &str, args: &[Value]) -> std::result::Result<Vec<Value>, String> {
+    Ok(args.to_vec())
+}
 
 pub mod cache;
 pub mod compiler;
@@ -198,7 +208,7 @@ pub extern "C" fn runmat_value_pow(a_ptr: *const Value, b_ptr: *const Value) -> 
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        let result = match runmat_runtime::power(a, b) {
+        let result = match runmat_runtime::call_builtin("power", &[a.clone(), b.clone()]) {
             Ok(value) => value,
             Err(e) => {
                 error!("Power operation failed: {e}");
@@ -223,7 +233,7 @@ pub extern "C" fn runmat_value_neg(a_ptr: *const Value) -> *mut Value {
     unsafe {
         let a = &*a_ptr;
 
-        let result = match runmat_runtime::elementwise_neg(a) {
+        let result = match runmat_runtime::call_builtin("times", &[a.clone(), Value::Num(-1.0)]) {
             Ok(value) => value,
             Err(e) => {
                 error!("Negation failed: {e}");
@@ -252,7 +262,7 @@ pub extern "C" fn runmat_value_elementwise_mul(
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        match runmat_runtime::elementwise_mul(a, b) {
+        match runmat_runtime::call_builtin("times", &[a.clone(), b.clone()]) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),
@@ -279,7 +289,7 @@ pub extern "C" fn runmat_value_elementwise_div(
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        match runmat_runtime::elementwise_div(a, b) {
+        match runmat_runtime::call_builtin("rdivide", &[a.clone(), b.clone()]) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),
@@ -306,7 +316,7 @@ pub extern "C" fn runmat_value_elementwise_pow(
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        match runmat_runtime::elementwise_pow(a, b) {
+        match runmat_runtime::call_builtin("power", &[a.clone(), b.clone()]) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),
@@ -333,8 +343,8 @@ pub extern "C" fn runmat_value_elementwise_leftdiv(
         let a = &*a_ptr;
         let b = &*b_ptr;
 
-        // Left division is b \ a which is equivalent to a / b
-        match runmat_runtime::elementwise_div(b, a) {
+        // Left division is b \ a which is equivalent to a ./ b
+        match runmat_runtime::call_builtin("rdivide", &[a.clone(), b.clone()]) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),
@@ -412,8 +422,17 @@ pub extern "C" fn runmat_call_builtin(
             args.push((*arg_ptr).clone());
         }
 
+        // Prepare arguments with native acceleration when available
+        let prepared_args = match accel_prepare_args(name, &args) {
+            Ok(v) => v,
+            Err(err) => {
+                error!("Auto-offload prepare failed: {err}");
+                return std::ptr::null_mut();
+            }
+        };
+
         // Call the builtin
-        match runmat_runtime::call_builtin(name, &args) {
+        match runmat_runtime::call_builtin(name, &prepared_args) {
             Ok(result) => match gc_allocate(result) {
                 Ok(gc_ptr) => gc_ptr.as_raw_mut(),
                 Err(_) => std::ptr::null_mut(),
@@ -649,8 +668,13 @@ fn execute_user_function_isolated(
     }
 
     // Execute the function using Ignition interpreter
+    let mut func_var_types = function_def.var_types.clone();
+    if func_var_types.len() < local_var_count {
+        func_var_types.resize(local_var_count, Type::Unknown);
+    }
     let func_program = runmat_hir::HirProgram {
         body: remapped_body,
+        var_types: func_var_types,
     };
     let func_bytecode = runmat_ignition::compile_with_functions(&func_program, all_functions)
         .map_err(|e| TurbineError::ExecutionError(format!("Failed to compile function: {e}")))?;

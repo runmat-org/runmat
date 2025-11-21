@@ -2,8 +2,7 @@
 //!
 //! Advanced linear algebra operations including decompositions and linear system solvers.
 
-use runmat_builtins::{Tensor as Matrix, Value};
-use runmat_macros::runtime_builtin;
+use runmat_builtins::Tensor as Matrix;
 
 /// LU decomposition result
 pub struct LuDecomposition {
@@ -348,60 +347,4 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
 // Helper function to check if a matrix is square
 fn is_square(matrix: &Matrix) -> bool {
     matrix.rows() == matrix.cols()
-}
-
-// Helper function to convert Vec<Value> to Vec<f64>
-fn value_vector_to_f64(values: &[Value]) -> Result<Vec<f64>, String> {
-    let mut out: Vec<f64> = Vec::new();
-    for v in values {
-        match v {
-            Value::Num(n) => out.push(*n),
-            Value::Int(i) => out.push(i.to_f64()),
-            Value::Cell(c) => {
-                for elem in &c.data {
-                    match &**elem {
-                        Value::Num(n) => out.push(*n),
-                        Value::Int(i) => out.push(i.to_f64()),
-                        _ => return Err(format!("Cannot convert {elem:?} to f64")),
-                    }
-                }
-            }
-            _ => return Err(format!("Cannot convert {v:?} to f64")),
-        }
-    }
-    Ok(out)
-}
-
-// Helper function to convert Vec<f64> to Vec<Value>
-#[allow(dead_code)]
-fn f64_vector_to_value(values: Vec<f64>) -> Vec<Value> {
-    values.into_iter().map(Value::Num).collect()
-}
-
-// Builtin functions for LAPACK operations
-#[runtime_builtin(name = "solve")]
-fn solve_builtin(a: Matrix, b: Vec<Value>) -> Result<Value, String> {
-    let b_f64 = value_vector_to_f64(&b)?;
-    let solution = lapack_solve_linear_system(&a, &b_f64)?;
-    // Return as a cell column vector to match test expectations
-    let n = solution.len();
-    let data: Vec<Value> = solution.into_iter().map(Value::Num).collect();
-    super::make_cell(data, n, 1)
-}
-
-#[runtime_builtin(name = "det")]
-fn det_builtin(matrix: Matrix) -> Result<f64, String> {
-    lapack_determinant(&matrix)
-}
-
-#[runtime_builtin(name = "inv")]
-fn inv_builtin(matrix: Matrix) -> Result<Matrix, String> {
-    lapack_matrix_inverse(&matrix)
-}
-
-#[runtime_builtin(name = "eig")]
-fn eig_builtin(matrix: Matrix) -> Result<Matrix, String> {
-    let decomp = lapack_eigenvalues(&matrix, false)?;
-    let n = decomp.eigenvalues.len();
-    Matrix::new_2d(decomp.eigenvalues, n, 1)
 }

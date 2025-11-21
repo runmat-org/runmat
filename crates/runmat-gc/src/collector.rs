@@ -56,6 +56,8 @@ impl MarkSweepCollector {
             let addr = ptr as usize;
             if !self.marked_objects.lock().contains(&addr) {
                 collected += 1;
+                // Run finalizer if registered for this object address
+                crate::gc_run_finalizer_for_addr(addr);
                 // Drop the value in place to run destructors if any
                 unsafe {
                     std::ptr::drop_in_place(ptr as *mut Value);

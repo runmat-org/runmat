@@ -339,6 +339,36 @@ All `RUSTMAT_*` variables map onto the above fields. Notable ones:
 
 Boolean parsing accepts `1/0`, `true/false`, `yes/no`, `on/off`, `enable/disable`.
 
+### Acceleration provider (RunMat Accelerate)
+
+Provider-specific env vars are read by the WGPU backend and fusion code:
+
+- `RUNMAT_WG` (u32)
+  - Global compute workgroup size used in WGSL at module creation.
+    Applies to elementwise kernels and fused kernels. Default: `512`.
+- `RUNMAT_MATMUL_TILE` (u32)
+  - Square tile size used by matmul kernels.
+    Default: `16`.
+- `RUNMAT_REDUCTION_WG` (u32)
+  - Default reduction workgroup size when call sites opt into provider defaults
+    (passing `0`). Default: `512`.
+- `RUNMAT_TWO_PASS_THRESHOLD` (usize)
+  - Controls when two-pass reductions are used (per-slice length threshold).
+  - Default: `1024`.
+- `RUNMAT_DEBUG_PIPELINE_ONLY` (bool)
+  - If set, provider may compile pipelines and skip buffer/dispatch paths to
+    isolate driver issues during development.
+- `RUNMAT_PIPELINE_CACHE_DIR` (path)
+  - Overrides the on-disk pipeline cache directory. Defaults to the OS cache
+    directory (e.g., `$XDG_CACHE_HOME/runmat/pipelines` or platform equivalent),
+    falling back to `target/tmp/wgpu-pipeline-cache-<device>`.
+
+> **Note:** `RUNMAT_WG`, `RUNMAT_MATMUL_TILE`, and `RUNMAT_REDUCTION_WG` are
+> automatically clamped to the adapter's compute limits
+> (`max_compute_workgroup_size_*`, `max_compute_invocations_per_workgroup`) to
+> prevent invalid pipelines on DX12/Metal/Vulkan backends. The adjusted values
+> are logged during provider initialization.
+
 ## Precedence & merging
 
 1. Start from built-in defaults.

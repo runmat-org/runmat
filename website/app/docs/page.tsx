@@ -22,7 +22,7 @@ export default function DocsPage() {
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
             RunMat Documentation
           </h1>
-          <p className="mt-6 text-xl text-muted-foreground">
+          <p className="mt-6 text-base text-muted-foreground sm:text-lg">
             Complete guides and API reference to get you started with RunMat
           </p>
         </div>
@@ -109,7 +109,7 @@ export default function DocsPage() {
           </Link>
 
           {/* Built-in Functions */}
-          <Link href="/docs/reference/builtins" className="block">
+          <Link href="/docs/matlab-function-reference" className="block">
             <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
@@ -117,7 +117,7 @@ export default function DocsPage() {
                   <CardTitle>Built-in Functions</CardTitle>
                 </div>
                 <CardDescription>
-                  Complete reference of all mathematical and plotting functions
+                  Complete math builtin reference plus the pre-release plotting commands (current focus: 2D line/scatter)
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -148,21 +148,21 @@ export default function DocsPage() {
             </Card>
           </Link>
 
-          {/* Language Coverage (from repo docs) */}
-          <Link href="/docs/language-coverage" className="block">
+          {/* Fusion Guide */}
+          <Link href="/docs/fusion-guide" className="block">
             <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
-                  <BookOpen className="h-6 w-6 text-primary" />
-                  <CardTitle>Language Coverage</CardTitle>
+                  <Zap className="h-6 w-6 text-primary" />
+                  <CardTitle>Fusion Guide</CardTitle>
                 </div>
                 <CardDescription>
-                  Track MATLAB syntax and feature support in RunMat
+                  Understand RunMat fusion groups, how workloads stay on the GPU, and where to dive deeper into each fusion topic.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-sm text-muted-foreground">
-                  View Coverage →
+                <div className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                  Read Guide →
                 </div>
               </CardContent>
             </Card>
@@ -211,7 +211,7 @@ export default function DocsPage() {
 
         {/* Quick Links */}
         <div className="mt-16 rounded-lg border bg-muted/50 p-6">
-          <h2 className="mb-4 text-xl font-semibold">Quick Links</h2>
+          <h2 className="mb-4 text-3xl font-semibold sm:text-4xl md:text-5xl">Quick Links</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Button variant="outline" size="default" asChild>
               <Link href="/download">Download RunMat</Link>

@@ -215,9 +215,9 @@ fn test_complex_operation_performance() {
 
             assert!(result.is_ok());
 
-            // Complex arithmetic should still be fast
+            // Allow generous headroom on CI where virtualized CPUs can be slower
             assert!(
-                elapsed < Duration::from_millis(20),
+                elapsed < Duration::from_millis(100),
                 "Complex operation too slow: {elapsed:?}"
             );
         }

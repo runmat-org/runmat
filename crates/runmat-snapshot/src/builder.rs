@@ -634,7 +634,10 @@ impl SnapshotBuilder {
     fn create_pattern_hir(&self, source: &str) -> runmat_hir::HirProgram {
         self.compile_to_hir(source).unwrap_or_else(|_| {
             // Fallback to empty program
-            runmat_hir::HirProgram { body: Vec::new() }
+            runmat_hir::HirProgram {
+                body: Vec::new(),
+                var_types: Vec::new(),
+            }
         })
     }
 
@@ -711,18 +714,9 @@ impl SnapshotBuilder {
     /// Create bytecode for sequence
     fn create_sequence_bytecode(&self, source: &str) -> runmat_ignition::Bytecode {
         match self.compile_to_hir(source) {
-            Ok(hir) => {
-                runmat_ignition::compile(&hir).unwrap_or_else(|_| runmat_ignition::Bytecode {
-                    instructions: Vec::new(),
-                    var_count: 0,
-                    functions: std::collections::HashMap::new(),
-                })
-            }
-            Err(_) => runmat_ignition::Bytecode {
-                instructions: Vec::new(),
-                var_count: 0,
-                functions: std::collections::HashMap::new(),
-            },
+            Ok(hir) => runmat_ignition::compile(&hir)
+                .unwrap_or_else(|_| runmat_ignition::Bytecode::empty()),
+            Err(_) => runmat_ignition::Bytecode::empty(),
         }
     }
 
@@ -1192,6 +1186,8 @@ mod tests {
             vec![],
             runmat_builtins::Type::Num,
             |_| Ok(runmat_builtins::Value::Num(0.0)),
+            &[],
+            false,
         );
 
         let metadata = builder.analyze_builtin_function(&builtin).unwrap();

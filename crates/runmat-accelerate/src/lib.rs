@@ -5,15 +5,268 @@
 //! - Support multiple backends via features (CUDA, ROCm, Metal, Vulkan, OpenCL, wgpu).
 //! - Allow zero-copy interop with `runmat-builtins::Matrix` where possible.
 //! - Defer actual kernel authoring to backend crates/modules; this crate defines traits and wiring.
-//!
-//! This is scaffolding only; implementations will land after interpreter/JIT semantics are complete.
 
+use once_cell::sync::Lazy;
 use runmat_builtins::{Tensor, Value};
+use std::path::PathBuf;
+use std::sync::RwLock;
 
+pub mod backend;
+pub mod fusion;
+pub mod fusion_exec;
+pub mod fusion_residency;
+pub mod graph;
+mod host_lu;
+pub mod native_auto;
+pub mod precision;
+mod reduction_meta;
 pub mod simple_provider;
+mod sortrows_host;
+pub mod telemetry;
+pub use fusion::*;
+pub use graph::*;
+pub use native_auto::{
+    apply_auto_offload_calibration_from_file, auto_offload_report, is_sink, prepare_builtin_args,
+    promote_binary, promote_reduction_args, promote_unary, reset_auto_offload_log,
+    AutoOffloadCalibrationOutcome, AutoOffloadCalibrationSummary, AutoOffloadDecisionEntry,
+    AutoOffloadDisposition, AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason,
+    ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
+};
+pub use reduction_meta::{value_is_all_keyword, ReductionAxes};
 #[cfg(feature = "wgpu")]
-pub mod wgpu_backend;
+use runmat_accelerate_api::AccelProvider;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "wgpu")]
+use wgpu::PowerPreference;
+
+/// Preferred acceleration provider selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccelerateProviderPreference {
+    Auto,
+    Wgpu,
+    InProcess,
+}
+
+impl Default for AccelerateProviderPreference {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+/// Power preference used when initializing a WGPU backend
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccelPowerPreference {
+    Auto,
+    HighPerformance,
+    LowPower,
+}
+
+impl Default for AccelPowerPreference {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+/// Logging verbosity for auto-offload promotion decisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoOffloadLogLevel {
+    Off,
+    Info,
+    #[default]
+    Trace,
+}
+
+/// Configuration passed to the native auto-offload planner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoOffloadOptions {
+    pub enabled: bool,
+    pub calibrate: bool,
+    #[serde(default)]
+    pub profile_path: Option<PathBuf>,
+    #[serde(default)]
+    pub log_level: AutoOffloadLogLevel,
+}
+
+impl Default for AutoOffloadOptions {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            calibrate: true,
+            profile_path: None,
+            log_level: AutoOffloadLogLevel::Trace,
+        }
+    }
+}
+
+static AUTO_OFFLOAD_OPTIONS: Lazy<RwLock<AutoOffloadOptions>> =
+    Lazy::new(|| RwLock::new(AutoOffloadOptions::default()));
+
+static API_HOOKS: Lazy<()> = Lazy::new(|| {
+    runmat_accelerate_api::register_residency_clear(fusion_residency::clear);
+    runmat_accelerate_api::register_sequence_threshold_provider(sequence_threshold_hint_bridge);
+});
+
+pub(crate) fn ensure_residency_hooks() {
+    Lazy::force(&API_HOOKS);
+}
+
+fn sequence_threshold_hint_bridge() -> Option<usize> {
+    native_auto::sequence_threshold_hint()
+}
+
+pub fn configure_auto_offload(options: AutoOffloadOptions) {
+    if let Ok(mut guard) = AUTO_OFFLOAD_OPTIONS.write() {
+        *guard = options;
+    }
+}
+
+pub(crate) fn auto_offload_options() -> AutoOffloadOptions {
+    AUTO_OFFLOAD_OPTIONS
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
+/// Initialization options for selecting and configuring the acceleration provider.
+#[derive(Debug, Clone)]
+pub struct AccelerateInitOptions {
+    pub enabled: bool,
+    pub provider: AccelerateProviderPreference,
+    pub allow_inprocess_fallback: bool,
+    pub wgpu_power_preference: AccelPowerPreference,
+    pub wgpu_force_fallback_adapter: bool,
+    pub auto_offload: AutoOffloadOptions,
+}
+
+impl Default for AccelerateInitOptions {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            provider: AccelerateProviderPreference::Auto,
+            allow_inprocess_fallback: true,
+            wgpu_power_preference: AccelPowerPreference::Auto,
+            wgpu_force_fallback_adapter: false,
+            auto_offload: AutoOffloadOptions::default(),
+        }
+    }
+}
+
+/// Initialize the global acceleration provider using the supplied options.
+pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
+    configure_auto_offload(options.auto_offload.clone());
+
+    if runmat_accelerate_api::provider().is_some() {
+        return;
+    }
+
+    if !options.enabled {
+        if options.allow_inprocess_fallback {
+            simple_provider::register_inprocess_provider();
+            log::info!(
+                "RunMat Accelerate: acceleration disabled; using in-process provider for compatibility"
+            );
+        } else {
+            log::info!("RunMat Accelerate: acceleration disabled; no provider registered");
+        }
+        return;
+    }
+
+    let registered = {
+        #[cfg(feature = "wgpu")]
+        {
+            let mut reg = false;
+            if matches!(
+                options.provider,
+                AccelerateProviderPreference::Auto | AccelerateProviderPreference::Wgpu
+            ) {
+                let wgpu_options = backend::wgpu::provider::WgpuProviderOptions {
+                    power_preference: match options.wgpu_power_preference {
+                        AccelPowerPreference::Auto => PowerPreference::HighPerformance,
+                        AccelPowerPreference::HighPerformance => PowerPreference::HighPerformance,
+                        AccelPowerPreference::LowPower => PowerPreference::LowPower,
+                    },
+                    force_fallback_adapter: options.wgpu_force_fallback_adapter,
+                };
+
+                match backend::wgpu::provider::register_wgpu_provider(wgpu_options) {
+                    Ok(provider) => {
+                        reg = true;
+                        let info = provider.device_info_struct();
+                        let backend = info.backend.as_deref().unwrap_or("unknown");
+                        log::info!(
+                            "RunMat Accelerate: using WGPU provider {} (vendor: {}, backend: {})",
+                            info.name,
+                            info.vendor,
+                            backend
+                        );
+                        // Warmup to amortize first-dispatch costs
+                        provider.warmup();
+                        let (hits, misses) = provider.fused_cache_counters();
+                        log::info!(
+                            "RunMat Accelerate: fused pipeline cache after warmup - hits: {}, misses: {}",
+                            hits, misses
+                        );
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "RunMat Accelerate: failed to initialize WGPU provider, falling back: {err}"
+                        );
+                    }
+                }
+            }
+            reg
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            if matches!(options.provider, AccelerateProviderPreference::Wgpu) {
+                log::warn!(
+                    "RunMat Accelerate: WGPU provider requested but crate built without 'wgpu' feature"
+                );
+            }
+            false
+        }
+    };
+
+    if !registered {
+        if options.allow_inprocess_fallback
+            || matches!(options.provider, AccelerateProviderPreference::InProcess)
+        {
+            simple_provider::register_inprocess_provider();
+            log::info!("RunMat Accelerate: using in-process acceleration provider");
+        } else {
+            log::warn!("RunMat Accelerate: no acceleration provider registered");
+        }
+    }
+}
+
+/// Initialize the acceleration provider using default options.
+pub fn initialize_acceleration_provider() {
+    initialize_acceleration_provider_with(&AccelerateInitOptions::default());
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "wgpu")]
+    use crate::backend::wgpu::cache::key::compute_pipeline_hash_bytes;
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn elementwise_hash_varies_with_arity() {
+        let wg = 256u32;
+        let h2 = compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-2", Some(wg));
+        let h3 = compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-3", Some(wg));
+        assert_ne!(h2, h3, "hash should differ with input arity");
+    }
+}
+
+/// Return fused pipeline cache statistics if the active provider exposes them.
+#[cfg(feature = "wgpu")]
+pub fn provider_cache_stats() -> Option<(u64, u64)> {
+    runmat_accelerate_api::provider().map(|p| p.fused_cache_counters())
+}
 
 /// High-level device kind. Concrete selection is provided by backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +325,16 @@ pub trait AccelerateBackend: Send + Sync {
         b: &dyn DeviceMatrix,
     ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
     fn elem_mul(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_ne(
+        &self,
+        a: &dyn DeviceMatrix,
+        b: &dyn DeviceMatrix,
+    ) -> anyhow::Result<Box<dyn DeviceMatrix>>;
+    fn elem_eq(
         &self,
         a: &dyn DeviceMatrix,
         b: &dyn DeviceMatrix,
@@ -143,7 +406,8 @@ impl Accelerator {
         match (a, b) {
             (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
                 ExecutionTarget::Cpu => {
-                    runmat_runtime::elementwise_add(a, b).map_err(|e| anyhow::anyhow!(e))
+                    runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
+                        .map_err(|e| anyhow::anyhow!(e))
                 }
                 ExecutionTarget::Gpu(_) => {
                     let bk = self
@@ -172,7 +436,8 @@ impl Accelerator {
                 let hb = self.gather_handle(gb)?;
                 self.elementwise_add(other, &hb)
             }
-            _ => runmat_runtime::elementwise_add(a, b).map_err(|e| anyhow::anyhow!(e)),
+            _ => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
+                .map_err(|e| anyhow::anyhow!(e)),
         }
     }
 
@@ -190,6 +455,3 @@ impl Accelerator {
         }
     }
 }
-
-// NOTE: No concrete backend is provided in this crate yet. Future crates (or modules enabled via
-// features) will implement `AccelerateBackend` for CUDA/ROCm/Metal/Vulkan/OpenCL/etc.

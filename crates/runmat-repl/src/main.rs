@@ -8,8 +8,8 @@ fn main() -> Result<()> {
     // Initialize logging
     env_logger::init();
 
-    // Install a minimal in-process acceleration provider so gpuArray/gather round-trip
-    runmat_accelerate::simple_provider::register_inprocess_provider();
+    // Initialize acceleration provider (prefer WGPU when available)
+    runmat_accelerate::initialize_acceleration_provider();
 
     // Initialize the REPL engine with GC test context for safety
     let mut engine = gc_test_context(ReplEngine::new)?;

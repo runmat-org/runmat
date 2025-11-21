@@ -24,6 +24,48 @@ pub mod generations;
 pub mod roots;
 pub mod stats;
 
+// Finalizer support
+use std::collections::HashMap;
+
+/// A finalizer that runs when a GC-managed Value is collected.
+///
+/// Finalizers must be fast, non-panicking, and avoid allocating.
+pub trait GcFinalizer: Send + Sync {
+    fn finalize(&self);
+}
+
+static FINALIZERS: once_cell::sync::Lazy<
+    parking_lot::Mutex<HashMap<usize, std::sync::Arc<dyn GcFinalizer>>>,
+> = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(HashMap::new()));
+
+/// Register a finalizer for the provided GC pointer.
+pub fn gc_register_finalizer(ptr: GcPtr<Value>, f: std::sync::Arc<dyn GcFinalizer>) -> Result<()> {
+    let addr = unsafe { ptr.as_raw() } as usize;
+    if addr == 0 {
+        return Ok(());
+    }
+    FINALIZERS.lock().insert(addr, f);
+    Ok(())
+}
+
+/// Remove any registered finalizer for the provided GC pointer.
+pub fn gc_unregister_finalizer(ptr: GcPtr<Value>) -> Result<()> {
+    let addr = unsafe { ptr.as_raw() } as usize;
+    if addr == 0 {
+        return Ok(());
+    }
+    FINALIZERS.lock().remove(&addr);
+    Ok(())
+}
+
+/// Internal: run and remove finalizer for an address if present.
+pub(crate) fn gc_run_finalizer_for_addr(addr: usize) {
+    if let Some(f) = FINALIZERS.lock().remove(&addr) {
+        // Run finalizer; avoid panicking across GC boundaries
+        f.finalize();
+    }
+}
+
 #[cfg(feature = "pointer-compression")]
 pub mod compression;
 
@@ -113,12 +155,38 @@ impl HighPerformanceGC {
             let _ = self.collect_minor();
         }
 
+        // Capture GPU handle if present to attach a finalizer after allocation
+        let gpu_handle: Option<runmat_accelerate_api::GpuTensorHandle> =
+            if let Value::GpuTensor(h) = &value {
+                Some(h.clone())
+            } else {
+                None
+            };
+
         let mut allocator = self.allocator.lock();
         let ptr = allocator.allocate(value, &self.stats)?;
         let usage = allocator.young_generation_usage();
         let alloc_count = allocator.young_allocations_count();
         let cfg = self.config.read().clone();
         drop(allocator);
+
+        // Register finalizer for GPU tensors so buffers are freed on collection
+        if let Some(handle) = gpu_handle {
+            struct GpuTensorFinalizer {
+                handle: runmat_accelerate_api::GpuTensorHandle,
+            }
+            impl GcFinalizer for GpuTensorFinalizer {
+                fn finalize(&self) {
+                    if let Some(p) = runmat_accelerate_api::provider() {
+                        let _ = p.free(&self.handle);
+                        runmat_accelerate_api::clear_handle_logical(&self.handle);
+                    }
+                }
+            }
+            let fin = std::sync::Arc::new(GpuTensorFinalizer { handle });
+            let _ = gc_register_finalizer(ptr.clone(), fin);
+        }
+
         // Heuristic triggers:
         // - Utilization threshold
         // - Aggressive mode: periodic minor GC by allocation count to satisfy stress configs
@@ -452,90 +520,82 @@ mod tests {
 
     #[test]
     fn test_basic_allocation() {
-        let _ = gc_reset_for_test();
-
-        let value = Value::Num(42.0);
-        let ptr = gc_allocate(value).expect("allocation failed");
-        assert_eq!(*ptr, Value::Num(42.0));
+        gc_test_context(|| {
+            let value = Value::Num(42.0);
+            let ptr = gc_allocate(value).expect("allocation failed");
+            assert_eq!(*ptr, Value::Num(42.0));
+        });
     }
 
     #[test]
     fn test_collection() {
-        let _ = gc_reset_for_test();
+        gc_test_context(|| {
+            let mut _ptrs = Vec::new();
+            for i in 0..100 {
+                let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation failed");
+                _ptrs.push(ptr);
+            }
 
-        // Allocate many objects to trigger collection
-        let mut _ptrs = Vec::new();
-        for i in 0..100 {
-            let ptr = gc_allocate(Value::Num(i as f64)).expect("allocation failed");
-            _ptrs.push(ptr);
-        }
-
-        let _collected = gc_collect_minor().expect("collection failed");
-        // Collection completed successfully
+            let _collected = gc_collect_minor().expect("collection failed");
+            drop(_ptrs);
+        });
     }
 
     #[test]
     fn test_thread_safety() {
         use std::thread;
 
-        let handles: Vec<_> = (0..4)
-            .map(|i| {
-                thread::spawn(move || {
-                    let mut ptrs = Vec::new();
-                    for j in 0..100 {
-                        let value = Value::Num((i * 100 + j) as f64);
-                        let ptr = gc_allocate(value).expect("allocation failed");
-                        ptrs.push(ptr);
-                    }
-                    ptrs
+        gc_test_context(|| {
+            let handles: Vec<_> = (0..4)
+                .map(|i| {
+                    thread::spawn(move || {
+                        let mut ptrs = Vec::new();
+                        for j in 0..100 {
+                            let value = Value::Num((i * 100 + j) as f64);
+                            let ptr = gc_allocate(value).expect("allocation failed");
+                            ptrs.push(ptr);
+                        }
+                        ptrs
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        for handle in handles {
-            let _ptrs = handle.join().expect("thread failed");
-        }
+            for handle in handles {
+                let _ptrs = handle.join().expect("thread failed");
+            }
 
-        // Force collection to clean up
-        let _ = gc_collect_major();
+            let _ = gc_collect_major();
+        });
     }
 
     #[test]
     fn test_root_protection() {
-        let _ = gc_reset_for_test();
+        gc_test_context(|| {
+            let protected = gc_allocate(Value::Num(42.0)).expect("allocation failed");
+            gc_add_root(protected.clone()).expect("root registration failed");
 
-        // Allocate an object and keep a reference
-        let protected = gc_allocate(Value::Num(42.0)).expect("allocation failed");
+            for i in 0..60 {
+                let _ = gc_allocate(Value::String(format!("garbage_{i}")));
+            }
 
-        // Register it as a root
-        gc_add_root(protected.clone()).expect("root registration failed");
+            let _ = gc_collect_minor().expect("collection failed");
+            assert_eq!(*protected, Value::Num(42.0));
 
-        // Allocate garbage
-        for i in 0..60 {
-            let _ = gc_allocate(Value::String(format!("garbage_{i}")));
-        }
-
-        // Force collection
-        let _ = gc_collect_minor().expect("collection failed");
-
-        // Protected object should still be valid
-        assert_eq!(*protected, Value::Num(42.0));
-
-        // Clean up
-        gc_remove_root(protected).expect("root removal failed");
+            gc_remove_root(protected).expect("root removal failed");
+        });
     }
 
     #[test]
     fn test_gc_allocation_and_roots() {
-        let _ = gc_reset_for_test();
+        gc_test_context(|| {
+            let v = gc_allocate(Value::Num(7.0)).expect("allocation failed");
+            assert_eq!(*v, Value::Num(7.0));
 
-        let v = gc_allocate(Value::Num(7.0)).expect("allocation failed");
-        assert_eq!(*v, Value::Num(7.0));
+            gc_add_root(v.clone()).expect("root add failed");
+            let _ = gc_collect_minor().expect("collection failed");
+            assert_eq!(*v, Value::Num(7.0));
 
-        gc_add_root(v.clone()).expect("root add failed");
-        let _ = gc_collect_minor().expect("collection failed");
-        assert_eq!(*v, Value::Num(7.0));
-
-        gc_remove_root(v).expect("root remove failed");
+            gc_remove_root(v).expect("root remove failed");
+        });
     }
 }

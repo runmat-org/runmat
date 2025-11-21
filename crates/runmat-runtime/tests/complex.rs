@@ -5,7 +5,7 @@ use runmat_builtins::Value;
 fn complex_scalar_arithmetic() {
     let a = Value::Complex(3.0, 2.0);
     let b = Value::Complex(1.5, -4.0);
-    let s = runmat_runtime::elementwise_add(&a, &b).unwrap();
+    let s = runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]).unwrap();
     if let Value::Complex(re, im) = s {
         assert!((re - 4.5).abs() < 1e-12);
         assert!((im + 2.0).abs() < 1e-12);
@@ -31,7 +31,7 @@ fn complex_scalar_arithmetic() {
 #[test]
 fn complex_scalar_with_real() {
     let a = Value::Complex(2.0, -1.0);
-    let s = runmat_runtime::elementwise_add(&a, &Value::Num(3.0)).unwrap();
+    let s = runmat_runtime::call_builtin("plus", &[a.clone(), Value::Num(3.0)]).unwrap();
     if let Value::Complex(re, im) = s {
         assert!((re - 5.0).abs() < 1e-12);
         assert!((im + 1.0).abs() < 1e-12);
@@ -61,7 +61,7 @@ fn complex_array_elementwise_add() {
         ComplexTensor::new_2d(vec![(1.0, 0.0), (0.0, 1.0), (2.0, -3.0), (0.0, 0.0)], 2, 2).unwrap();
     let a = Value::ComplexTensor(ct);
     let b = Value::Num(2.0);
-    let c = runmat_runtime::elementwise_add(&a, &b).unwrap();
+    let c = runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]).unwrap();
     if let Value::ComplexTensor(t) = c {
         assert_eq!(t.rows, 2);
         assert_eq!(t.cols, 2);

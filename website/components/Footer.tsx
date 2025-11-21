@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
-import { SiGithub } from "react-icons/si";
 import Logo from "@/components/Logo";
 import NewsletterCta from "@/components/NewsletterCta";
 
@@ -27,40 +26,32 @@ export default function Footer() {
   }, []);
 
   return (
-    <footer className="border-t bg-background">
-      <div className="container relative mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-8 py-8 px-4 md:px-6">
-        <div className="flex w-full flex-col items-start gap-3 md:flex-[2]">
+    <footer className="bg-background">
+      <div className="container mx-auto flex flex-col md:flex-row items-start justify-between gap-8 py-8 px-4 md:px-6 border-t">
+        <div className="hidden md:flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <Logo height={24} className="shrink-0" />
-            <p className="text-center text-base leading-none md:text-left md:text-lg">
+            <div className="shrink-0" style={{ minWidth: '47px', width: '47px' }}>
+              <Logo height={24} className="w-full h-auto" />
+            </div>
+            <p className="text-base leading-none md:text-lg">
               <span className="font-semibold brand-text-sheen">RunMat</span>
             </p>
           </div>
-          <p className="text-left text-sm leading-loose text-muted-foreground">
-            A modern, high-performance runtime for MATLAB and GNU Octave code.
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            The Fastest Runtime for Math
           </p>
+        </div>
+        <div className="w-full md:w-auto md:flex-1 md:max-w-md">
           <NewsletterCta
-            title="Subscribe to our newsletter"
             description="Get updates on releases, benchmarks, and deep dives."
             align="left"
             className="w-full"
           />
         </div>
-        <div className="flex items-center gap-4 md:flex-[0_0_auto] absolute right-4 top-4 md:static">
-          <Link
-            href="https://github.com/runmat-org/runmat"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-muted-foreground hover:text-foreground flex items-center"
-          >
-            <SiGithub className="h-5 w-5" aria-label="GitHub" />
-            <span className="sr-only">GitHub</span>
-          </Link>
-        </div>
       </div>
       <div className="border-t">
         <div className="container flex flex-col items-center justify-between gap-4 py-6 md:flex-row">
-          <div className="text-sm text-muted-foreground md:text-left">
+          <div className="text-sm text-center md:text-left" style={{ color: 'hsl(var(--muted-foreground))' }}>
             <p>
             © 2025 Dystr Inc. All rights reserved. MIT+ Licensed.
             </p>
@@ -68,13 +59,10 @@ export default function Footer() {
               MATLAB is a registered trademark of The MathWorks, Inc.
             </p>
             <p>
-              GNU Octave is a registered trademark of the Free Software Foundation.
-            </p>
-            <p>
               RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc. or the Free Software Foundation.
             </p>
           </div>
-          <p className="flex items-center text-center text-sm text-muted-foreground md:text-left">
+          <p className="flex items-center text-center text-sm md:text-left" style={{ color: 'hsl(var(--muted-foreground))' }}>
             Made with
             <Heart className="mx-1 h-4 w-4 fill-red-500 text-red-500" />
             for the scientific community by{" "}

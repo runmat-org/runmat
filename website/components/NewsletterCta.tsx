@@ -16,8 +16,8 @@ export default function NewsletterCta({
   align = "left",
   className = "",
 }: NewsletterCtaProps) {
-  const textAlignClass = align === "center" ? "text-center" : "text-left";
-  const formWrapClass = align === "center" ? "flex justify-center" : "";
+  const textAlignClass = align === "center" ? "text-center md:text-center" : "text-center md:text-left";
+  const formWrapClass = align === "center" ? "flex justify-center" : "flex justify-center md:justify-start";
 
   return (
     <section className={`not-prose ${className}`} aria-label="Newsletter signup">

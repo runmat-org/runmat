@@ -114,7 +114,7 @@ fn linspace_basic() {
 fn meshgrid_basic() {
     let x = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
     let y = runmat_builtins::Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap();
-    // arrays::meshgrid returns a tensor; just assert it returns a tensor of size 2x3 or 3x2 depending on convention
+    // meshgrid returns its first output by default; ensure the shape follows MATLAB conventions
     let v = rt::call_builtin("meshgrid", &[Value::Tensor(x), Value::Tensor(y)]).unwrap();
     if let Value::Tensor(t) = v {
         assert!(t.shape == vec![2, 3] || t.shape == vec![3, 2]);

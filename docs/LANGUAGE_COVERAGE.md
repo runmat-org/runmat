@@ -166,7 +166,7 @@ end
 ## Where RunMat intentionally goes beyond MATLAB
 
 - GPU-native tensor execution: When a device provider is registered, element-wise ops and matrix multiply execute on the GPU and return opaque `GpuTensorHandle`s, keeping data resident on device across chained ops. CPU paths remain available with identical MATLAB-compatible semantics.
-- Automatic device planning (in progress): A planner is being integrated to pick device placement based on tensor sizes/shapes and fuse compatible operations to minimize host↔device transfers, with room for overlapping compute/transfer via streams and memory pools.
+- Automatic device planning and fusion: RunMat Accelerate automatically picks device placement based on tensor sizes/shapes and fuses compatible operations to minimize host↔device transfers. The fusion planner detects elementwise chains and reductions, generating optimized GPU kernels that keep data resident on device.
 - Zero-temporary slice expansion: Expansion of function outputs and cell contents into slice targets writes directly to the destination using dynamic packing, avoiding intermediate temporaries and reducing peak memory for large assignments.
 - HIR-powered developer tooling: The HIR/type system tracks value kinds and tensor shapes across control flow and imports, enabling richer LSP features (hover types, shape/arity hints, precise go-to-definition across packages/classes, property completions from the class registry).
 - Deterministic import diagnostics: MATLAB-parity import precedence with explicit, readable diagnostics for shadows/ambiguities (including participation of `Class.*` statics) improves debugging and code navigation.

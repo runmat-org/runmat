@@ -16,7 +16,9 @@ members = [
     "crates/runmat-gc-api",
     "crates/runmat-gc",
     "crates/runmat-snapshot",
+    "crates/runmat-lsp",
     "runmat",
+    "tools/runmatfunc",
 ]
 resolver = "2"
 
@@ -36,7 +38,7 @@ clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.11"
 log = "0.4"
 thiserror = "1"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.42", features = ["serde"] }
 anyhow = "1"
 cranelift = "0.115"
 cranelift-jit = "0.115"
@@ -44,6 +46,8 @@ cranelift-module = "0.115"
 cranelift-codegen = "0.115"
 cranelift-native = "0.115"
 target-lexicon = "0.12"
+tower-lsp = "0.20"
+once_cell = "1"
 
 # Internal workspace crates
 runmat-lexer = { version = "=0.0.17", path = "crates/runmat-lexer" }

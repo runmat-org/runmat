@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 
+use indexmap::IndexMap;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(IntValue),
@@ -92,14 +94,29 @@ impl IntValue {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructValue {
-    pub fields: HashMap<String, Value>,
+    pub fields: IndexMap<String, Value>,
 }
 
 impl StructValue {
     pub fn new() -> Self {
         Self {
-            fields: HashMap::new(),
+            fields: IndexMap::new(),
         }
+    }
+
+    /// Insert a field, preserving insertion order when the name is new.
+    pub fn insert(&mut self, name: impl Into<String>, value: Value) -> Option<Value> {
+        self.fields.insert(name.into(), value)
+    }
+
+    /// Remove a field while preserving the relative order of remaining fields.
+    pub fn remove(&mut self, name: &str) -> Option<Value> {
+        self.fields.shift_remove(name)
+    }
+
+    /// Returns an iterator over field names in their stored order.
+    pub fn field_names(&self) -> impl Iterator<Item = &String> {
+        self.fields.keys()
     }
 }
 
@@ -109,12 +126,20 @@ impl Default for StructValue {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NumericDType {
+    F64,
+    F32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
     pub data: Vec<f64>,
     pub shape: Vec<usize>, // Column-major layout
     pub rows: usize,       // Compatibility for 2D usage
     pub cols: usize,       // Compatibility for 2D usage
+    /// Logical numeric class of this tensor; host storage remains f64.
+    pub dtype: NumericDType,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -261,11 +286,32 @@ impl Tensor {
             shape,
             rows,
             cols,
+            dtype: NumericDType::F64,
         })
     }
 
     pub fn new_2d(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new(data, vec![rows, cols])
+    }
+
+    pub fn from_f32(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
+        let converted: Vec<f64> = data.into_iter().map(|v| v as f64).collect();
+        Self::new_with_dtype(converted, shape, NumericDType::F32)
+    }
+
+    pub fn from_f32_slice(data: &[f32], shape: &[usize]) -> Result<Self, String> {
+        let converted: Vec<f64> = data.iter().map(|&v| v as f64).collect();
+        Self::new_with_dtype(converted, shape.to_vec(), NumericDType::F32)
+    }
+
+    pub fn new_with_dtype(
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        dtype: NumericDType,
+    ) -> Result<Self, String> {
+        let mut t = Self::new(data, shape)?;
+        t.dtype = dtype;
+        Ok(t)
     }
 
     pub fn zeros(shape: Vec<usize>) -> Self {
@@ -282,6 +328,7 @@ impl Tensor {
             shape,
             rows,
             cols,
+            dtype: NumericDType::F64,
         }
     }
 
@@ -299,6 +346,7 @@ impl Tensor {
             shape,
             rows,
             cols,
+            dtype: NumericDType::F64,
         }
     }
 
@@ -348,6 +396,7 @@ impl Tensor {
             shape: vec![rows, cols],
             rows,
             cols,
+            dtype: NumericDType::F64,
         }
     }
     // No-compat constructors: prefer new/new_2d/zeros/zeros2/ones/ones2
@@ -874,6 +923,17 @@ pub struct Closure {
     pub captures: Vec<Value>,
 }
 
+/// Acceleration metadata describing GPU-friendly characteristics of a builtin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccelTag {
+    Unary,
+    Elementwise,
+    Reduction,
+    MatMul,
+    Transpose,
+    ArrayConstruct,
+}
+
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -885,6 +945,8 @@ pub struct BuiltinFunction {
     pub param_types: Vec<Type>,
     pub return_type: Type,
     pub implementation: fn(&[Value]) -> Result<Value, String>,
+    pub accel_tags: &'static [AccelTag],
+    pub is_sink: bool,
 }
 
 impl BuiltinFunction {
@@ -898,6 +960,8 @@ impl BuiltinFunction {
         param_types: Vec<Type>,
         return_type: Type,
         implementation: fn(&[Value]) -> Result<Value, String>,
+        accel_tags: &'static [AccelTag],
+        is_sink: bool,
     ) -> Self {
         Self {
             name,
@@ -908,6 +972,8 @@ impl BuiltinFunction {
             param_types,
             return_type,
             implementation,
+            accel_tags,
+            is_sink,
         }
     }
 }
@@ -1218,7 +1284,11 @@ impl fmt::Display for ComplexTensor {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellArray {
     pub data: Vec<GcPtr<Value>>,
+    /// Full MATLAB-visible shape vector (column-major semantics).
+    pub shape: Vec<usize>,
+    /// Cached row count for 2-D interop; equals `shape[0]` when present.
     pub rows: usize,
+    /// Cached column count for 2-D interop; equals `shape[1]` when present, otherwise 1 (or 0 for empty).
     pub cols: usize,
 }
 
@@ -1228,27 +1298,45 @@ impl CellArray {
         rows: usize,
         cols: usize,
     ) -> Result<Self, String> {
-        if rows * cols != handles.len() {
+        Self::new_handles_with_shape(handles, vec![rows, cols])
+    }
+
+    pub fn new_handles_with_shape(
+        handles: Vec<GcPtr<Value>>,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
+        let expected = total_len(&shape)
+            .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
+        if expected != handles.len() {
             return Err(format!(
-                "Cell data length {} doesn't match dimensions {}x{}",
+                "Cell data length {} doesn't match shape {:?} ({} elements)",
                 handles.len(),
-                rows,
-                cols
+                shape,
+                expected
             ));
         }
+        let (rows, cols) = shape_rows_cols(&shape);
         Ok(CellArray {
             data: handles,
+            shape,
             rows,
             cols,
         })
     }
+
     pub fn new(data: Vec<Value>, rows: usize, cols: usize) -> Result<Self, String> {
-        if rows * cols != data.len() {
+        Self::new_with_shape(data, vec![rows, cols])
+    }
+
+    pub fn new_with_shape(data: Vec<Value>, shape: Vec<usize>) -> Result<Self, String> {
+        let expected = total_len(&shape)
+            .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
             return Err(format!(
-                "Cell data length {} doesn't match dimensions {}x{}",
+                "Cell data length {} doesn't match shape {:?} ({} elements)",
                 data.len(),
-                rows,
-                cols
+                shape,
+                expected
             ));
         }
         // Note: data will be allocated into GC handles by callers (runtime/ignition) to avoid builtins↔gc cycles
@@ -1256,11 +1344,7 @@ impl CellArray {
             .into_iter()
             .map(|v| unsafe { GcPtr::from_raw(Box::into_raw(Box::new(v))) })
             .collect();
-        Ok(CellArray {
-            data: handles,
-            rows,
-            cols,
-        })
+        Self::new_handles_with_shape(handles, shape)
     }
 
     pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {
@@ -1274,8 +1358,29 @@ impl CellArray {
     }
 }
 
+fn total_len(shape: &[usize]) -> Option<usize> {
+    if shape.is_empty() {
+        return Some(0);
+    }
+    shape
+        .iter()
+        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+}
+
+fn shape_rows_cols(shape: &[usize]) -> (usize, usize) {
+    if shape.is_empty() {
+        return (0, 0);
+    }
+    let rows = shape[0];
+    let cols = if shape.len() >= 2 { shape[1] } else { 1 };
+    (rows, cols)
+}
+
 impl fmt::Display for CellArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.shape.len() > 2 {
+            return write!(f, "CellArray(shape={:?})", self.shape);
+        }
         write!(f, "{{")?;
         for r in 0..self.rows {
             for c in 0..self.cols {

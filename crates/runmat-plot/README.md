@@ -1,19 +1,19 @@
 # RunMat Plot
 
-RunMat Plot is a **world-class interactive plotting library for Rust**, designed to provide comprehensive 2D/3D plotting. It is built from the ground up for performance, featuring a GPU-accelerated rendering pipeline using `wgpu`, a modern theming system, and seamless integration with Jupyter notebooks.
+RunMat Plot is the **in-progress visualization layer** for the RunMat pre-release. Simple 2D line and scatter plots run today on the GPU-backed renderer, while filled shapes, advanced 3D views, and polished exports are still being built. The focus is delivering fast, lightweight visuals for early adopters while the broader plotting surface takes shape.
 
 As a core component of the [RunMat project](../..//docs/ARCHITECTURE.md), it serves as the powerful handle-graphics engine for all visualization tasks.
 
-## Key Features
+## Key Features (Pre-release)
 
-- **GPU-Accelerated Rendering**: High-performance plotting powered by `wgpu` for fast, smooth, and interactive visualizations.
-- **Comprehensive 2D Plots**: Support for line plots, scatter plots, bar charts, and histograms with extensive styling options.
-- **Advanced 3D Visualization**: Create stunning 3D surface plots and point clouds with configurable colormaps and shading.
-- **Interactive GUI**: A feature-rich interactive window built with `winit` and `egui`, offering smooth camera controls, zooming, panning, and UI overlays.
-- **Multi-Plot Figures**: Combine multiple plot types in a single figure with automatic bounds computation, legends, and grid lines.
-- **Language Compatibility**: A familiar, language-agnostic API for quickly creating plots (e.g., `plot()`, `surf()`, `scatter3()`).
-- **Jupyter Notebook Integration**: Display plots directly in Jupyter notebooks as static images or interactive HTML widgets.
-- **Modern Theming System**: A professional and configurable styling system with beautiful presets like `ModernDark`.
+- **GPU-Accelerated Rendering**: The current builds use `wgpu` for fast 2D line/scatter plots; more chart types are under active development.
+- **Foundational 2D Plots**: Line and scatter plots work today. Bar charts, histograms, and other filled-shape plots are stubbed but not yet production-ready.
+- **Planned 3D Visualization**: Surface plots and point clouds are on the roadmap; 3D rendering paths exist in the codebase but are not feature-complete.
+- **Interactive GUI (Preview)**: The `winit`/`egui` window handles basic zoom and pan. Advanced camera controls and multiple plot management are still being polished.
+- **Multi-Plot Figures (Roadmap)**: Figure composition APIs exist, but mixed plot layouts are experimental and will stabilize post pre-release.
+- **Language Compatibility**: MATLAB-style APIs (`plot`, `scatter`, future `surf`) keep syntax familiar even as capabilities expand.
+- **Jupyter Notebook Integration**: Static image export works today; interactive HTML widgets are planned.
+- **Modern Theming System**: The `ModernDark` preset is available now, with broader theming to follow as features land.
 
 ## Architecture
 

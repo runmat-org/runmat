@@ -8,6 +8,7 @@ import {
   FileText,
   CheckCircle,
   ArrowRight,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
@@ -129,17 +130,44 @@ export default function GettingStartedPage() {
               </CardContent>
             </Card>
 
-            {/* Plotting */}
+            {/* GPU Acceleration */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <span className="bg-purple-100 dark:bg-purple-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-purple-600 mr-3">4</span>
-                  Create Your First Plot
+                  <span className="bg-orange-100 dark:bg-orange-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-orange-600 mr-3">4</span>
+                  Experience Automatic GPU Acceleration
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  Generate beautiful plots with GPU acceleration:
+                  RunMat keeps data on the GPU and fuses operations automatically—no device flags required.
+                </p>
+                <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
+                  <div className="text-blue-400">runmat&gt;</div>{" "}
+                  <span>x = rand(1000, 1000);</span>
+                  <span className="text-gray-400">  % Million elements</span>
+                  <div className="text-blue-400 mt-2">runmat&gt;</div>{" "}
+                  <span>y = sin(x) .* exp(x);</span>
+                  <span className="text-gray-400">  % Fused on GPU automatically</span>
+                  <div className="text-blue-400 mt-2">runmat&gt;</div>{" "}
+                  <span>m = mean(y, &apos;all&apos;);</span>
+                  <span className="text-gray-400">  % Stays on GPU</span>
+                  <div className="text-gray-400 mt-3">[GPU] Fused 2 operations, 1M elements in 0.8ms</div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Plotting */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <span className="bg-purple-100 dark:bg-purple-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-purple-600 mr-3">5</span>
+                  Create Your First Plot (Pre-release)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  Generate simple 2D line or scatter plots. Advanced plot types are still in progress, so expect rough edges while we expand coverage.
                 </p>
                 <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
                   <div className="text-blue-400">runmat&gt;</div> <span>x = [0, 1, 2, 3, 4, 5]</span>
@@ -147,11 +175,11 @@ export default function GettingStartedPage() {
                   <div className="text-blue-400 mt-1">runmat&gt;</div> <span>y = [0, 1, 4, 9, 16, 25]</span>
                   <div className="text-gray-400">ans = [0 1 4 9 16 25]</div>
                   <div className="text-blue-400 mt-1">runmat&gt;</div> <span>plot(x, y)</span>
-                  <div className="text-green-400 mt-1">[Interactive plot window opens]</div>
+                  <div className="text-green-400 mt-1">[Pre-release plot window opens for 2D line/scatter]</div>
                 </div>
                 <div className="flex items-center space-x-2 text-sm text-green-600 dark:text-green-400">
                   <CheckCircle className="h-4 w-4" />
-                  <span>Interactive window with zoom, pan, and rotate controls</span>
+                  <span>Basic zoom/pan controls ship today; rotate and richer tooling arrive with future plotting milestones.</span>
                 </div>
               </CardContent>
             </Card>
@@ -173,7 +201,7 @@ export default function GettingStartedPage() {
             </CardHeader>
             <CardContent>
               <p className="text-muted-foreground mb-4">
-                Run existing MATLAB/Octave scripts directly:
+                Run existing MATLAB/Octave scripts directly with automatic GPU acceleration:
               </p>
               <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto mb-4">
                 <div className="text-gray-400"># Run a script file</div>
@@ -241,7 +269,7 @@ export default function GettingStartedPage() {
                 </div>
                 <div className="flex items-center space-x-2 text-sm text-blue-600 dark:text-blue-400">
                   <CheckCircle className="h-4 w-4" />
-                  <span>Full MATLAB syntax support with 150x faster execution than GNU Octave</span>
+                  <span>Full MATLAB syntax support with automatic GPU acceleration</span>
                 </div>
               </CardContent>
             </Card>
@@ -278,7 +306,7 @@ export default function GettingStartedPage() {
             Next Steps
           </h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -291,7 +319,7 @@ export default function GettingStartedPage() {
                   Dive deeper into RunMat&apos;s features and capabilities.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
-                  <Link href="/docs/how-it-works">
+                  <Link href="/docs/how-it-works" className="flex items-center justify-center">
                     How RunMat Works
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
@@ -299,19 +327,42 @@ export default function GettingStartedPage() {
               </CardContent>
             </Card>
 
-            <Card className="opacity-60 transition-shadow">
+            <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Terminal className="h-5 w-5 mr-2 text-gray-400" />
-                  <span className="text-gray-500 dark:text-gray-400">Explore Examples</span>
+                  <Terminal className="h-5 w-5 mr-2 text-green-600 dark:text-green-400" />
+                  Explore Examples
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-gray-500 dark:text-gray-400 mb-4">
+                <p className="text-muted-foreground mb-4">
                   See RunMat in action with real-world examples.
                 </p>
-                <Button variant="outline" className="w-full opacity-50 cursor-not-allowed" disabled>
-                  Coming Soon
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/benchmarks" className="flex items-center justify-center">
+                    Benchmarks
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Zap className="h-5 w-5 mr-2 text-orange-600" />
+                  Discover RunMat on the GPU
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  How RunMat turns MATLAB scripts into GPU-accelerated workloads
+                </p>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/docs/accelerate/gpu-residency" className="flex items-center justify-center">
+                    RunMat Accelerate
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
                 </Button>
               </CardContent>
             </Card>

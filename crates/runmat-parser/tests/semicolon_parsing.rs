@@ -82,6 +82,29 @@ fn test_multiple_expressions_semicolon_patterns() {
     }
 }
 
+/// Test newline-separated statements behave like implicit separators
+#[test]
+fn test_newline_separates_statements() {
+    let program = parse("x = 1\ny = x + 1").unwrap();
+    assert_eq!(program.body.len(), 2);
+
+    match &program.body[0] {
+        Stmt::Assign(name, _, suppressed) => {
+            assert_eq!(name, "x");
+            assert!(!*suppressed);
+        }
+        other => panic!("expected assignment for first stmt, got {other:?}"),
+    }
+
+    match &program.body[1] {
+        Stmt::Assign(name, _, suppressed) => {
+            assert_eq!(name, "y");
+            assert!(!*suppressed);
+        }
+        other => panic!("expected assignment for second stmt, got {other:?}"),
+    }
+}
+
 /// Test that function calls preserve semicolon information
 #[test]
 fn test_function_call_semicolon_preservation() {

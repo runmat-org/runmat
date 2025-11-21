@@ -32,6 +32,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut introduced_lit: Option<Lit> = None;
     let mut status_lit: Option<Lit> = None;
     let mut examples_lit: Option<Lit> = None;
+    let mut accel_values: Vec<String> = Vec::new();
+    let mut sink_flag = false;
     for arg in args {
         if let NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) = arg {
             if path.is_ident("name") {
@@ -52,6 +54,19 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 status_lit = Some(lit);
             } else if path.is_ident("examples") {
                 examples_lit = Some(lit);
+            } else if path.is_ident("accel") {
+                if let Lit::Str(ls) = lit {
+                    accel_values.extend(
+                        ls.value()
+                            .split(|c: char| c == ',' || c == '|' || c.is_ascii_whitespace())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_ascii_lowercase()),
+                    );
+                }
+            } else if path.is_ident("sink") {
+                if let Lit::Bool(lb) = lit {
+                    sink_flag = lb.value;
+                }
             } else {
                 // Gracefully ignore unknown parameters for better IDE experience
             }
@@ -211,6 +226,26 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let status_opt_tok = opt_tok(&status_lit);
     let examples_opt_tok = opt_tok(&examples_lit);
 
+    let accel_tokens: Vec<proc_macro2::TokenStream> = accel_values
+        .iter()
+        .map(|mode| match mode.as_str() {
+            "unary" => quote! { runmat_builtins::AccelTag::Unary },
+            "elementwise" => quote! { runmat_builtins::AccelTag::Elementwise },
+            "reduction" => quote! { runmat_builtins::AccelTag::Reduction },
+            "matmul" => quote! { runmat_builtins::AccelTag::MatMul },
+            "transpose" => quote! { runmat_builtins::AccelTag::Transpose },
+            "array_construct" => quote! { runmat_builtins::AccelTag::ArrayConstruct },
+            _ => quote! {},
+        })
+        .filter(|ts| !ts.is_empty())
+        .collect();
+    let accel_slice = if accel_tokens.is_empty() {
+        quote! { &[] as &[runmat_builtins::AccelTag] }
+    } else {
+        quote! { &[#(#accel_tokens),*] }
+    };
+    let sink_bool = sink_flag;
+
     let register = quote! {
         runmat_builtins::inventory::submit! {
             runmat_builtins::BuiltinFunction::new(
@@ -221,7 +256,9 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 "",
                 vec![#(#inferred_param_types),*],
                 #inferred_return_type,
-                #wrapper_ident
+                #wrapper_ident,
+                #accel_slice,
+                #sink_bool,
             )
         }
         runmat_builtins::inventory::submit! {
