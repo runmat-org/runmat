@@ -35,6 +35,8 @@ jobs:
     env:
       # Ensure single-threaded tests for GC stability
       RUST_TEST_THREADS: 1
+      # Enable backtraces on CI to aid debugging of panics/segfaults
+      RUST_BACKTRACE: 1
       MATRIX_NAME: ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v3
@@ -127,6 +129,7 @@ jobs:
         if: runner.os != 'Windows'
         env:
           RUST_TEST_THREADS: 1
+          RUST_BACKTRACE: 1
         run: |
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 -- --test-threads=1 | tee test.log
@@ -136,6 +139,7 @@ jobs:
         shell: pwsh
         env:
           RUST_TEST_THREADS: 1
+          RUST_BACKTRACE: 1
         run: |
           $ErrorActionPreference = 'Stop'
           cargo test --all-targets --all-features -- --test-threads=1 2>&1 | Tee-Object -FilePath test.log
