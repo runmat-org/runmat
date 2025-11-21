@@ -12,7 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-accelerate = { workspace = true, optional = true }
-runmat-accelerate-api = { path = "../runmat-accelerate-api", optional = true }
+runmat-accelerate-api = { workspace = true, optional = true }
 runmat-lexer = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
