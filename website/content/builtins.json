@@ -533,8 +533,7 @@
     ],
     "keywords": [
       "any",
-      "logical",
-      "reduction",
+      "logical reduction",
       "omitnan",
       "all",
       "gpu"
@@ -3637,74 +3636,6 @@
     "mdxPath": "builtins-mdx/exp.mdx"
   },
   {
-    "name": "exp10",
-    "slug": "exp10",
-    "category": [
-      "general"
-    ],
-    "summary": "Runtime builtin function",
-    "status": "implemented",
-    "signatures": [
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "double"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      }
-    ],
-    "internal": false
-  },
-  {
-    "name": "exp2",
-    "slug": "exp2",
-    "category": [
-      "general"
-    ],
-    "summary": "Runtime builtin function",
-    "status": "implemented",
-    "signatures": [
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "double"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      }
-    ],
-    "internal": false
-  },
-  {
     "name": "expm1",
     "slug": "expm1",
     "category": [
@@ -3868,28 +3799,6 @@
         "nargin": {
           "min": 0,
           "max": 2
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "int"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
         },
         "nargout": {
           "min": 0,
@@ -5048,28 +4957,6 @@
           "min": 0,
           "max": 1
         }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "any"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "any"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
       }
     ],
     "keywords": [
@@ -5331,32 +5218,10 @@
     "category": [
       "acceleration/gpu"
     ],
-    "summary": "Move MATLAB values onto the active GPU with optional size, dtype, and prototype controls.",
+    "summary": "Move data to the GPU and return a gpuArray handle.",
     "description": "`gpuArray(X)` moves MATLAB values onto the active GPU and returns a handle that the rest of the runtime can execute on.",
     "status": "implemented",
     "signatures": [
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "any"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "any"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
       {
         "in": [
           "x",
@@ -5382,15 +5247,19 @@
         }
       }
     ],
+    "examples": [
+      {
+        "title": null,
+        "code": "G = gpuArray([1 2 3], 'single');"
+      }
+    ],
     "keywords": [
       "gpuArray",
       "gpu",
-      "device",
-      "upload",
       "accelerate",
+      "upload",
       "dtype",
-      "like",
-      "size"
+      "like"
     ],
     "internal": false,
     "mdxPath": "builtins-mdx/gpuarray.mdx"
@@ -7372,40 +7241,6 @@
     "mdxPath": "builtins-mdx/linspace.mdx"
   },
   {
-    "name": "ln",
-    "slug": "ln",
-    "category": [
-      "general"
-    ],
-    "summary": "Runtime builtin function",
-    "status": "implemented",
-    "signatures": [
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "double"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      }
-    ],
-    "internal": false
-  },
-  {
     "name": "load",
     "slug": "load",
     "category": [
@@ -7511,28 +7346,6 @@
         ],
         "outTypes": [
           "any"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "double"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
         ],
         "nargin": {
           "min": 0,
@@ -7669,28 +7482,6 @@
         "nargin": {
           "min": 0,
           "max": 2
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "any"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "any"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
         },
         "nargout": {
           "min": 0,
@@ -10530,42 +10321,6 @@
     "mdxPath": "builtins-mdx/polyval.mdx"
   },
   {
-    "name": "pow",
-    "slug": "pow",
-    "category": [
-      "general"
-    ],
-    "summary": "Runtime builtin function",
-    "status": "implemented",
-    "signatures": [
-      {
-        "in": [
-          "x",
-          "y"
-        ],
-        "inTypes": [
-          "double",
-          "double"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 2
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      }
-    ],
-    "internal": false
-  },
-  {
     "name": "pow2",
     "slug": "pow2",
     "category": [
@@ -12929,28 +12684,6 @@
           "min": 0,
           "max": 1
         }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "Tensor"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
       }
     ],
     "keywords": [
@@ -13280,28 +13013,6 @@
     "description": "`strings` creates string arrays whose elements are empty string scalars (`\"\"`).",
     "status": "implemented",
     "signatures": [
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "any"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "any"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
       {
         "in": [
           "x"
@@ -14729,28 +14440,6 @@
           "min": 0,
           "max": 1
         }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "Tensor"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "double"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
       }
     ],
     "keywords": [
@@ -14818,6 +14507,28 @@
     "signatures": [
       {
         "in": [
+          "x"
+        ],
+        "inTypes": [
+          "any"
+        ],
+        "out": [
+          "out"
+        ],
+        "outTypes": [
+          "any"
+        ],
+        "nargin": {
+          "min": 0,
+          "max": 1
+        },
+        "nargout": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      {
+        "in": [
           "x",
           "y"
         ],
@@ -14834,28 +14545,6 @@
         "nargin": {
           "min": 0,
           "max": 2
-        },
-        "nargout": {
-          "min": 0,
-          "max": 1
-        }
-      },
-      {
-        "in": [
-          "x"
-        ],
-        "inTypes": [
-          "any"
-        ],
-        "out": [
-          "out"
-        ],
-        "outTypes": [
-          "any"
-        ],
-        "nargin": {
-          "min": 0,
-          "max": 1
         },
         "nargout": {
           "min": 0,
