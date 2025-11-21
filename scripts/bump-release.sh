@@ -59,7 +59,7 @@ cargo workspaces version custom "${NEW_VERSION}" \
   --force '*' \
   --no-git-commit \
   --exact \
-  --allow-private \
+  --all \
   --yes
 
 echo "Running a quick build check..."
