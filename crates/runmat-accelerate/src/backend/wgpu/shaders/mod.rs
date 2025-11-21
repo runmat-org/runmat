@@ -10,6 +10,7 @@ pub mod filter;
 pub mod find;
 pub mod flip;
 pub mod image_normalize;
+pub mod image_normalize_stub;
 pub mod imfilter;
 pub mod ind2sub;
 pub mod index_select;

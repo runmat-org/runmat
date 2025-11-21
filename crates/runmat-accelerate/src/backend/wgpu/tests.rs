@@ -1,5 +1,37 @@
-use super::provider_impl::{host_tensor_from_value, invert_upper_triangular};
+use super::provider_impl::host_tensor_from_value;
+use anyhow::{anyhow, Result};
 use runmat_builtins::{NumericDType, Tensor, Value};
+
+fn invert_upper_triangular(data: &[f64], n: usize) -> Result<Vec<f64>> {
+    let mut inv = vec![0.0f64; n * n];
+    let idx = |row: usize, col: usize| -> usize { row + col * n };
+    for j in 0..n {
+        let diag = data[idx(j, j)];
+        if diag.abs() <= f64::EPSILON {
+            return Err(anyhow!(
+                "qr_power_iter: singular diagonal encountered while inverting R"
+            ));
+        }
+        inv[idx(j, j)] = 1.0 / diag;
+        if j == 0 {
+            continue;
+        }
+        for i in (0..j).rev() {
+            let mut sum = 0.0;
+            for k in (i + 1)..=j {
+                sum += data[idx(i, k)] * inv[idx(k, j)];
+            }
+            let diag_ii = data[idx(i, i)];
+            if diag_ii.abs() <= f64::EPSILON {
+                return Err(anyhow!(
+                    "qr_power_iter: singular diagonal encountered while inverting R"
+                ));
+            }
+            inv[idx(i, j)] = -sum / diag_ii;
+        }
+    }
+    Ok(inv)
+}
 
 fn make_column_major(rows: usize, cols: usize, f: impl Fn(usize, usize) -> f64) -> Vec<f64> {
     let mut data = vec![0.0; rows * cols];

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
-use log::{info, warn};
+use log::{debug, info, warn};
 use num_complex::Complex;
 use once_cell::sync::OnceCell;
 use pollster::block_on;
@@ -60,7 +60,9 @@ use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::{
     bind_group::BindGroupCache, key as cache_key, persist as cache_persist,
 };
-use crate::backend::wgpu::config::{DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD};
+use crate::backend::wgpu::config::{
+    self, DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD, MATMUL_TILE, WORKGROUP_SIZE,
+};
 use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
     DiffParams, FilterParams, ImageNormalizeUniforms, LinearGatherParams, LinearScatterParams,
@@ -68,7 +70,7 @@ use crate::backend::wgpu::params::{
     IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE,
     SYRK_FLAG_FILL_BOTH,
 };
-use crate::backend::wgpu::pipelines::WgpuPipelines;
+use crate::backend::wgpu::pipelines::{ImageNormalizeBootstrap, WgpuPipelines};
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::resources::{KernelResourceRegistry, UniformBufferKey};
 use crate::backend::wgpu::shaders::image_normalize::{
@@ -86,38 +88,6 @@ use crate::telemetry::AccelTelemetry;
 pub struct WgpuProviderOptions {
     pub power_preference: wgpu::PowerPreference,
     pub force_fallback_adapter: bool,
-}
-
-#[allow(dead_code)]
-pub(crate) fn invert_upper_triangular(data: &[f64], n: usize) -> Result<Vec<f64>> {
-    let mut inv = vec![0.0f64; n * n];
-    let idx = |row: usize, col: usize| -> usize { row + col * n };
-    for j in 0..n {
-        let diag = data[idx(j, j)];
-        if diag.abs() <= f64::EPSILON {
-            return Err(anyhow!(
-                "qr_power_iter: singular diagonal encountered while inverting R"
-            ));
-        }
-        inv[idx(j, j)] = 1.0 / diag;
-        if j == 0 {
-            continue;
-        }
-        for i in (0..j).rev() {
-            let mut sum = 0.0;
-            for k in (i + 1)..=j {
-                sum += data[idx(i, k)] * inv[idx(k, j)];
-            }
-            let diag_ii = data[idx(i, i)];
-            if diag_ii.abs() <= f64::EPSILON {
-                return Err(anyhow!(
-                    "qr_power_iter: singular diagonal encountered while inverting R"
-                ));
-            }
-            inv[idx(i, j)] = -sum / diag_ii;
-        }
-    }
-    Ok(inv)
 }
 
 impl Default for WgpuProviderOptions {
@@ -139,6 +109,7 @@ pub struct WgpuProvider {
     queue: wgpu::Queue,
     adapter_info: wgpu::AdapterInfo,
     adapter_limits: wgpu::Limits,
+    workgroup_config: WorkgroupConfig,
     buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
     buffer_residency: BufferResidency,
     next_id: AtomicU64,
@@ -185,6 +156,149 @@ struct MatrixOperandView {
     cols: usize,
     lda: u32,
     transpose: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WorkgroupConfig {
+    scalar: u32,
+    reduction_default: u32,
+    matmul_tile: u32,
+    max_x: u32,
+    max_y: u32,
+    max_z: u32,
+    max_invocations: u32,
+}
+
+impl WorkgroupConfig {
+    fn new(
+        limits: &wgpu::Limits,
+        requested_scalar: u32,
+        requested_reduction: u32,
+        requested_tile: u32,
+    ) -> Self {
+        let max_x = Self::normalize_dim(limits.max_compute_workgroup_size_x, 1024);
+        let max_y = Self::normalize_dim(limits.max_compute_workgroup_size_y, 1024);
+        let max_z = Self::normalize_dim(limits.max_compute_workgroup_size_z, 64);
+        let max_invocations =
+            Self::normalize_invocations(limits.max_compute_invocations_per_workgroup, 1536);
+
+        let scalar = Self::clamp_linear_workgroup(requested_scalar, max_x, max_invocations, 32);
+        let reduction =
+            Self::clamp_linear_workgroup(requested_reduction, max_x, max_invocations, 32);
+        let matmul_tile = Self::clamp_matmul_tile(requested_tile, max_x, max_y, max_invocations, 8);
+
+        Self {
+            scalar,
+            reduction_default: reduction,
+            matmul_tile,
+            max_x,
+            max_y,
+            max_z,
+            max_invocations,
+        }
+    }
+
+    fn normalize_dim(value: u32, fallback: u32) -> u32 {
+        if value == 0 {
+            fallback
+        } else {
+            value
+        }
+    }
+
+    fn normalize_invocations(value: u32, fallback: u32) -> u32 {
+        if value == 0 {
+            fallback
+        } else {
+            value
+        }
+    }
+
+    fn clamp_linear_workgroup(requested: u32, max_dim: u32, max_inv: u32, align: u32) -> u32 {
+        let mut value = requested.max(1);
+        let allowed_max = max_dim.min(max_inv).max(1);
+        let align = if allowed_max < align { 1 } else { align };
+        value = value.min(allowed_max);
+        value = Self::align_down(value, align).max(1);
+        if value == 0 {
+            value = allowed_max;
+        }
+        while value > allowed_max && value > 1 {
+            value = Self::align_down((value / 2).max(1), align).max(1);
+        }
+        value.max(1).min(allowed_max)
+    }
+
+    fn clamp_matmul_tile(requested: u32, max_x: u32, max_y: u32, max_inv: u32, align: u32) -> u32 {
+        let mut tile = requested.max(1);
+        tile = tile.min(max_x).min(max_y);
+        let inv_limit = (max_inv as f64).sqrt().floor() as u32;
+        tile = tile.min(inv_limit.max(1));
+        let align = if tile < align { 1 } else { align };
+        tile = Self::align_down(tile, align).max(1);
+        tile = Self::floor_power_of_two(tile);
+        if tile == 0 {
+            tile = 1;
+        }
+        while tile > 1
+            && (tile > max_x || tile > max_y || (tile as u64 * tile as u64) > max_inv as u64)
+        {
+            tile = if tile > align {
+                Self::align_down(tile - align, align).max(1)
+            } else {
+                (tile / 2).max(1)
+            };
+        }
+        tile.max(1)
+    }
+
+    fn align_down(value: u32, align: u32) -> u32 {
+        if align <= 1 {
+            return value;
+        }
+        let remainder = value % align;
+        if remainder == 0 {
+            value
+        } else {
+            value.saturating_sub(remainder)
+        }
+    }
+
+    fn floor_power_of_two(value: u32) -> u32 {
+        if value == 0 {
+            return 1;
+        }
+        1 << (31 - value.leading_zeros())
+    }
+
+    fn sanitize_image_normalize_tuning(
+        &self,
+        mut tuning: ImageNormalizeTuning,
+        batches: u32,
+    ) -> ImageNormalizeTuning {
+        let max_lane_dim = self.max_x.max(32);
+        tuning.lane_count = tuning.lane_count.clamp(32, max_lane_dim).max(32);
+        tuning.lane_count =
+            WgpuProvider::round_up_to_multiple(tuning.lane_count, 32).min(max_lane_dim);
+        tuning.values_per_thread = tuning.values_per_thread.clamp(1, 8);
+        let max_spatial = self.max_y.max(1);
+        tuning.spatial_tile = tuning.spatial_tile.clamp(1, max_spatial);
+        let max_invocations = self
+            .max_invocations
+            .max(64)
+            .min(self.reduction_default.max(self.scalar));
+        while tuning.lane_count.saturating_mul(tuning.spatial_tile) > max_invocations {
+            if tuning.lane_count > 32 {
+                tuning.lane_count -= 32;
+            } else if tuning.spatial_tile > 1 {
+                tuning.spatial_tile -= 1;
+            } else {
+                break;
+            }
+        }
+        tuning.batch_tile = tuning.batch_tile.clamp(1, batches.max(1));
+        tuning
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1859,41 +1973,13 @@ impl WgpuProvider {
         }
     }
 
-    fn sanitize_image_normalize_tuning(
-        &self,
-        mut tuning: ImageNormalizeTuning,
-        batches: u32,
-    ) -> ImageNormalizeTuning {
-        let max_lane_dim = self.adapter_limits.max_compute_workgroup_size_x.max(32);
-        tuning.lane_count = tuning.lane_count.clamp(32, max_lane_dim).max(32);
-        tuning.lane_count = Self::round_up_to_multiple(tuning.lane_count, 32).min(max_lane_dim);
-        tuning.values_per_thread = tuning.values_per_thread.clamp(1, 8);
-        let max_spatial = self.adapter_limits.max_compute_workgroup_size_y.max(1);
-        tuning.spatial_tile = tuning.spatial_tile.clamp(1, max_spatial);
-        let max_invocations = self
-            .adapter_limits
-            .max_compute_invocations_per_workgroup
-            .max(64);
-        while tuning.lane_count.saturating_mul(tuning.spatial_tile) > max_invocations {
-            if tuning.lane_count > 32 {
-                tuning.lane_count -= 32;
-            } else if tuning.spatial_tile > 1 {
-                tuning.spatial_tile -= 1;
-            } else {
-                break;
-            }
-        }
-        tuning.batch_tile = tuning.batch_tile.clamp(1, batches.max(1));
-        tuning
-    }
-
     fn select_image_normalize_tuning(&self, batches: u32, plane: u32) -> ImageNormalizeTuning {
         let batches = batches.max(1);
         let plane = plane.max(1);
         let mut lane =
             ((plane as f64) / Self::IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE).ceil() as u32;
         lane = lane.max(32);
-        let max_lane_dim = self.adapter_limits.max_compute_workgroup_size_x.max(32);
+        let max_lane_dim = self.workgroup_config.max_x.max(32);
         lane = lane.min(max_lane_dim);
         lane = Self::round_up_to_multiple(lane, 32).max(32);
         let plane_per_lane = (plane as f64 / lane as f64).max(1.0);
@@ -1924,7 +2010,8 @@ impl WgpuProvider {
             lane_count: lane,
             spatial_tile,
         };
-        self.sanitize_image_normalize_tuning(tuning, batches)
+        self.workgroup_config
+            .sanitize_image_normalize_tuning(tuning, batches)
     }
 
     fn resolve_image_normalize_tuning(
@@ -1935,7 +2022,13 @@ impl WgpuProvider {
         let key = ImageNormalizeKey::new(self.precision, batches, plane);
         if self.image_norm_autotune.is_enabled() {
             if let Some(tuning) = self.image_norm_autotune.get(&key) {
-                return (tuning, true);
+                let sanitized = self
+                    .workgroup_config
+                    .sanitize_image_normalize_tuning(tuning, batches);
+                if sanitized != tuning {
+                    self.image_norm_autotune.insert(key, sanitized);
+                }
+                return (sanitized, true);
             }
             let tuning = self.select_image_normalize_tuning(batches, plane);
             self.image_norm_autotune.insert(key, tuning);
@@ -1984,6 +2077,14 @@ impl WgpuProvider {
                 return Ok(existing.clone());
             }
         }
+        info!(
+            "Compiling image_normalize pipeline tuning: batch_tile={} values/thread={} lane={} spatial={}",
+            tuning.batch_tile, tuning.values_per_thread, tuning.lane_count, tuning.spatial_tile
+        );
+        eprintln!(
+            "[runmat] Compiling image_normalize pipeline: batch_tile={} values_per_thread={} lane_count={} spatial_tile={}",
+            tuning.batch_tile, tuning.values_per_thread, tuning.lane_count, tuning.spatial_tile
+        );
         let template = match self.precision {
             NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
             NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
@@ -2275,7 +2376,22 @@ impl WgpuProvider {
     }
 
     pub fn new(opts: WgpuProviderOptions) -> Result<Self> {
-        let instance = wgpu::Instance::default();
+        let mut instance_desc = wgpu::InstanceDescriptor::default();
+        #[cfg(target_os = "windows")]
+        {
+            instance_desc.dx12_shader_compiler = wgpu::util::dx12_shader_compiler_from_env()
+                .unwrap_or(wgpu::Dx12Compiler::Dxc {
+                    dxil_path: None,
+                    dxc_path: None,
+                });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(compiler) = wgpu::util::dx12_shader_compiler_from_env() {
+                instance_desc.dx12_shader_compiler = compiler;
+            }
+        }
+        let instance = wgpu::Instance::new(instance_desc);
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: opts.power_preference,
             force_fallback_adapter: opts.force_fallback_adapter,
@@ -2318,10 +2434,10 @@ impl WgpuProvider {
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(DEFAULT_TWO_PASS_THRESHOLD);
-        let reduction_wg_default = std::env::var("RUNMAT_REDUCTION_WG")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(DEFAULT_REDUCTION_WG);
+        let requested_scalar_wg = config::env_requested_workgroup_size().unwrap_or(WORKGROUP_SIZE);
+        let requested_matmul_tile = config::env_requested_matmul_tile().unwrap_or(MATMUL_TILE);
+        let requested_reduction_wg =
+            config::env_requested_reduction_workgroup_size().unwrap_or(DEFAULT_REDUCTION_WG);
         let reduction_two_pass_mode = match std::env::var("RUNMAT_REDUCTION_TWO_PASS") {
             Ok(raw) if !raw.trim().is_empty() => match parse_two_pass_mode(&raw) {
                 Some(mode) => mode,
@@ -2350,8 +2466,73 @@ impl WgpuProvider {
             },
             None,
         ))?;
+        let satisfied_limits = device.limits();
 
-        let pipelines = WgpuPipelines::new(&device, precision);
+        let workgroup_config = WorkgroupConfig::new(
+            &satisfied_limits,
+            requested_scalar_wg,
+            requested_reduction_wg,
+            requested_matmul_tile,
+        );
+        config::set_effective_workgroup_size(workgroup_config.scalar);
+        config::set_effective_matmul_tile(workgroup_config.matmul_tile);
+        let reduction_wg_default = workgroup_config.reduction_default;
+
+        info!(
+            "Adapter '{}' compute limits: invocations={} max_wg=({}, {}, {}) -> wg={} reduction_wg={} matmul_tile={}",
+            adapter_info.name,
+            workgroup_config.max_invocations,
+            workgroup_config.max_x,
+            workgroup_config.max_y,
+            workgroup_config.max_z,
+            workgroup_config.scalar,
+            reduction_wg_default,
+            workgroup_config.matmul_tile
+        );
+        if workgroup_config.scalar != requested_scalar_wg {
+            info!(
+                "Adjusted RUNMAT_WG from {} to {} to satisfy adapter limits",
+                requested_scalar_wg, workgroup_config.scalar
+            );
+        }
+        if workgroup_config.reduction_default != requested_reduction_wg {
+            info!(
+                "Adjusted RUNMAT_REDUCTION_WG from {} to {} to satisfy adapter limits",
+                requested_reduction_wg, workgroup_config.reduction_default
+            );
+        }
+        if workgroup_config.matmul_tile != requested_matmul_tile {
+            info!(
+                "Adjusted RUNMAT_MATMUL_TILE from {} to {} to satisfy adapter limits",
+                requested_matmul_tile, workgroup_config.matmul_tile
+            );
+        }
+
+        let bootstrap_tuning = ImageNormalizeTuning {
+            batch_tile: 32,
+            values_per_thread: 4,
+            lane_count: 256,
+            spatial_tile: 4,
+        };
+        let bootstrap_tuning =
+            workgroup_config.sanitize_image_normalize_tuning(bootstrap_tuning, 32);
+        debug!(
+            "Bootstrap image_normalize tuning lane={} spatial={} vpt={} batch_tile={}",
+            bootstrap_tuning.lane_count,
+            bootstrap_tuning.spatial_tile,
+            bootstrap_tuning.values_per_thread,
+            bootstrap_tuning.batch_tile
+        );
+        let pipelines = WgpuPipelines::new(
+            &device,
+            precision,
+            ImageNormalizeBootstrap {
+                batch_tile: bootstrap_tuning.batch_tile,
+                values_per_thread: bootstrap_tuning.values_per_thread,
+                lane_count: bootstrap_tuning.lane_count,
+                spatial_tile: bootstrap_tuning.spatial_tile,
+            },
+        );
         let cache_device_id = adapter_info.device;
         let runtime_device_id = runmat_accelerate_api::next_device_id();
         let element_size = match precision {
@@ -2436,7 +2617,7 @@ impl WgpuProvider {
             device,
             queue,
             adapter_info,
-            adapter_limits: limits.clone(),
+            adapter_limits: satisfied_limits.clone(),
             buffers: Mutex::new(HashMap::new()),
             buffer_residency: BufferResidency::new(Self::BUFFER_RESIDENCY_MAX_PER_KEY),
             next_id: AtomicU64::new(1),
@@ -2455,6 +2636,7 @@ impl WgpuProvider {
             reduction_two_pass_mode,
             reduction_two_pass_threshold: two_pass_threshold,
             reduction_workgroup_size_default: reduction_wg_default,
+            workgroup_config,
             pipeline_cache_dir: Some(cache_dir),
             reduction_autotune,
             image_norm_autotune,
@@ -14494,6 +14676,15 @@ impl AccelProvider for WgpuProvider {
                     .map_err(|_| anyhow!("image_normalize: stride_w too large"))?;
                 let (tuning, cache_hit) =
                     self.resolve_image_normalize_tuning(batches_u32, plane_u32);
+                log::debug!(
+                    "image_normalize tuning batches={} plane={} lane={} spatial={} values/thread={} cache_hit={}",
+                    batches_u32,
+                    plane_u32,
+                    tuning.lane_count,
+                    tuning.spatial_tile,
+                    tuning.values_per_thread,
+                    cache_hit
+                );
                 let pipeline = self.image_normalize_pipeline(&tuning)?;
 
                 let mut flags = 0u32;

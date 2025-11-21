@@ -105,10 +105,16 @@ const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
 const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
 const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
+#[cfg(not(target_os = "windows"))]
 const IMAGE_NORMALIZE_SHADER_F64: &str =
     crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F64;
+#[cfg(not(target_os = "windows"))]
 const IMAGE_NORMALIZE_SHADER_F32: &str =
     crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F32;
+#[cfg(target_os = "windows")]
+use crate::backend::wgpu::shaders::image_normalize_stub::{
+    IMAGE_NORMALIZE_STUB_SHADER_F32, IMAGE_NORMALIZE_STUB_SHADER_F64,
+};
 const BANDWIDTH_SHADER_F64: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F64;
 const BANDWIDTH_SHADER_F32: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F32;
 const SYMMETRY_SHADER_F64: &str = crate::backend::wgpu::shaders::symmetry::SYMMETRY_SHADER_F64;
@@ -143,6 +149,14 @@ const LINEAR_SCATTER_SHADER_F32: &str =
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
     pub layout: wgpu::BindGroupLayout,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ImageNormalizeBootstrap {
+    pub batch_tile: u32,
+    pub values_per_thread: u32,
+    pub lane_count: u32,
+    pub spatial_tile: u32,
 }
 
 pub struct WgpuPipelines {
@@ -202,7 +216,13 @@ pub struct WgpuPipelines {
 }
 
 impl WgpuPipelines {
-    pub fn new(device: &wgpu::Device, precision: NumericPrecision) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        precision: NumericPrecision,
+        image_norm_bootstrap: ImageNormalizeBootstrap,
+    ) -> Self {
+        #[cfg(target_os = "windows")]
+        let _ = &image_norm_bootstrap;
         let binary = create_pipeline(
             device,
             "runmat-binary-layout",
@@ -832,30 +852,31 @@ impl WgpuPipelines {
             },
         );
 
-        const IMAGE_NORMALIZE_BOOTSTRAP_BATCH_TILE: u32 = 4;
-        const IMAGE_NORMALIZE_BOOTSTRAP_VALUES_PER_THREAD: u32 = 4;
-        const IMAGE_NORMALIZE_BOOTSTRAP_LANE_COUNT: u32 = 256;
-        const IMAGE_NORMALIZE_BOOTSTRAP_SPATIAL_TILE: u32 = 4;
-
-        let image_norm_bt = IMAGE_NORMALIZE_BOOTSTRAP_BATCH_TILE.to_string();
-        let image_norm_vp = IMAGE_NORMALIZE_BOOTSTRAP_VALUES_PER_THREAD.to_string();
-        let image_norm_template = match precision {
-            NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
-            NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
+        #[cfg(target_os = "windows")]
+        let image_norm_source: Cow<'static, str> = Cow::Borrowed(match precision {
+            NumericPrecision::F64 => IMAGE_NORMALIZE_STUB_SHADER_F64,
+            NumericPrecision::F32 => IMAGE_NORMALIZE_STUB_SHADER_F32,
+        });
+        #[cfg(not(target_os = "windows"))]
+        let image_norm_source: Cow<'static, str> = {
+            let image_norm_template = match precision {
+                NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
+                NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
+            };
+            let image_norm_vec_width = match precision {
+                NumericPrecision::F64 => 2,
+                NumericPrecision::F32 => 4,
+            }
+            .to_string();
+            Cow::Owned(
+                image_norm_template
+                    .replace("@BT@", &image_norm_bootstrap.batch_tile.to_string())
+                    .replace("@VP@", &image_norm_bootstrap.values_per_thread.to_string())
+                    .replace("@WG@", &image_norm_bootstrap.lane_count.to_string())
+                    .replace("@BV@", &image_norm_vec_width)
+                    .replace("@ST@", &image_norm_bootstrap.spatial_tile.to_string()),
+            )
         };
-        let image_norm_lane = IMAGE_NORMALIZE_BOOTSTRAP_LANE_COUNT.to_string();
-        let image_norm_vec_width = match precision {
-            NumericPrecision::F64 => 2,
-            NumericPrecision::F32 => 4,
-        }
-        .to_string();
-        let image_norm_source = image_norm_template
-            .replace("@BT@", &image_norm_bt)
-            .replace("@VP@", &image_norm_vp)
-            .replace("@WG@", &image_norm_lane)
-            .replace("@BV@", &image_norm_vec_width);
-        let image_norm_spatial = IMAGE_NORMALIZE_BOOTSTRAP_SPATIAL_TILE.to_string();
-        let image_norm_source = image_norm_source.replace("@ST@", &image_norm_spatial);
 
         let image_normalize = create_pipeline(
             device,
