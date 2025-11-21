@@ -68,6 +68,7 @@ jobs:
       - name: Install Linux system dependencies (BLAS/LAPACK, ZMQ, GUI, OpenSSL)
         if: runner.os == 'Linux'
         run: |
+          # TEMP: include gdb while investigating Linux GPU segfaults (remove once resolved)
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             libopenblas-dev liblapack-dev libssl-dev \
@@ -75,7 +76,8 @@ jobs:
             libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
             libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev \
             libegl1-mesa-dev libgl1-mesa-dev \
-            libudev-dev libdbus-1-dev ca-certificates
+            libudev-dev libdbus-1-dev ca-certificates \
+            gdb
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
