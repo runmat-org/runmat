@@ -28,7 +28,7 @@ fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (
 fn to_host_value(v: &Value) -> Result<Value, String> {
     match v {
         Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider() {
+            if let Some(p) = runmat_accelerate_api::provider_for_handle(h) {
                 let ht = p.download(h).map_err(|e| e.to_string())?;
                 Ok(Value::Tensor(
                     Tensor::new(ht.data, ht.shape).map_err(|e| e.to_string())?,

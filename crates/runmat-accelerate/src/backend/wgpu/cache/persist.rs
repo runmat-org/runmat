@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::backend::wgpu::types::NumericPrecision;
 
 /// Bump this when bind group layouts or shader-binding schemas change.
-pub const PIPELINE_CACHE_VERSION: u32 = 3;
+pub const PIPELINE_CACHE_VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 pub struct PipelineMeta {

@@ -225,7 +225,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!("acos({input})"))
         },
     }),
@@ -258,7 +258,7 @@ fn acos_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn acos_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(false) => {
                 if let Ok(out) = provider.unary_acos(&handle) {
@@ -442,7 +442,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected = vec![
+                let expected = [
                     0.0f64.acos(),
                     (-0.5f64).acos(),
                     (0.75f64).acos(),
@@ -463,7 +463,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.data.len(), 4);
-                assert!((t.data[0] - 1.5707963267948966).abs() < 1e-12);
+                assert!((t.data[0] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
                 assert!(t.data[1].abs() < 1e-12);
             }
             other => panic!("unexpected result {other:?}"),
@@ -527,7 +527,7 @@ mod tests {
             let result = acos_builtin(Value::GpuTensor(handle)).expect("acos gpu");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            let expected = vec![
+            let expected = [
                 0.0f64.acos(),
                 0.5f64.acos(),
                 (-0.75f64).acos(),

@@ -457,10 +457,7 @@ fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
             let idx = r * ca.cols + c;
             row.push(ca.data[idx]);
         }
-        rows.push(
-            row.trim_end_matches(|ch| ch == ' ' || ch == '\0')
-                .to_string(),
-        );
+        rows.push(row.trim_end_matches([' ', '\0']).to_string());
     }
     rows
 }
@@ -489,7 +486,7 @@ mod tests {
                         .data
                         .iter()
                         .collect::<String>()
-                        .trim_end_matches(|ch| ch == ' ' || ch == '\0')
+                        .trim_end_matches([' ', '\0'])
                         .to_string(),
                     other => panic!("expected string entry, got {other:?}"),
                 })

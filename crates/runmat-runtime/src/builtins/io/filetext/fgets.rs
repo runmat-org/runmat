@@ -353,7 +353,7 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> Result<FgetsEval, String> 
         .map_err(|_| "fgets: failed to lock file handle (poisoned mutex)".to_string())?;
 
     let limit = parse_nchar(rest)?;
-    let read = read_line(&mut *file, limit).map_err(|err| format!("fgets: {err}"))?;
+    let read = read_line(&mut file, limit).map_err(|err| format!("fgets: {err}"))?;
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
     }
@@ -664,7 +664,7 @@ mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_path(prefix: &str) -> PathBuf {
@@ -675,7 +675,7 @@ mod tests {
         std::env::temp_dir().join(filename)
     }
 
-    fn fopen_path(path: &PathBuf) -> FopenHandle {
+    fn fopen_path(path: &Path) -> FopenHandle {
         let eval =
             fopen::evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let open = eval.as_open().expect("open outputs");

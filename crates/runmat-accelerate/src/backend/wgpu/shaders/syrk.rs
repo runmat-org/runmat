@@ -11,7 +11,7 @@ struct Params {
     row_offset: u32,
     chunk_rows: u32,
     flags: u32,
-    _pad: u32,
+    offset_out: u32,
 };
 
 const SYRK_FLAG_ACCUMULATE: u32 = 1u;
@@ -34,7 +34,7 @@ fn main(
     let global_col = wid.x * tile + lid.x;
     let cols = params.cols;
 
-    let active = global_row < cols && global_col < cols && global_row <= global_col;
+    let is_active = global_row < cols && global_col < cols && global_row <= global_col;
 
     let rows_total = params.rows_total;
     let row_offset = params.row_offset;
@@ -62,7 +62,7 @@ fn main(
 
         workgroupBarrier();
 
-        if (active) {
+        if (is_active) {
             for (var p: u32 = 0u; p < tile; p = p + 1u) {
                 let a_val = tile_left[lid.y][p];
                 let b_val = tile_right[p][lid.x];
@@ -73,13 +73,13 @@ fn main(
         workgroupBarrier();
     }
 
-    if (!active) {
+    if (!is_active) {
         return;
     }
 
     let partial = acc;
-    let upper_index = global_row + global_col * params.ldc;
-    let lower_index = global_col + global_row * params.ldc;
+    let upper_index = params.offset_out + global_row + global_col * params.ldc;
+    let lower_index = params.offset_out + global_col + global_row * params.ldc;
 
     var upper_prev: f64 = 0.0;
     var lower_prev: f64 = 0.0;
@@ -90,19 +90,17 @@ fn main(
         }
     }
 
-    let upper_val = if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
-        upper_prev + partial
-    } else {
-        partial
-    };
+    var upper_val: f64 = partial;
+    if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
+        upper_val = upper_prev + partial;
+    }
     Out.data[upper_index] = upper_val;
 
     if ((params.flags & SYRK_FLAG_FILL_BOTH) != 0u && global_row != global_col) {
-        let lower_val = if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
-            lower_prev + partial
-        } else {
-            partial
-        };
+        var lower_val: f64 = partial;
+        if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
+            lower_val = lower_prev + partial;
+        }
         Out.data[lower_index] = lower_val;
     }
 }
@@ -121,7 +119,7 @@ struct Params {
     row_offset: u32,
     chunk_rows: u32,
     flags: u32,
-    _pad: u32,
+    offset_out: u32,
 };
 
 const SYRK_FLAG_ACCUMULATE: u32 = 1u;
@@ -144,7 +142,7 @@ fn main(
     let global_col = wid.x * tile + lid.x;
     let cols = params.cols;
 
-    let active = global_row < cols && global_col < cols && global_row <= global_col;
+    let is_active = global_row < cols && global_col < cols && global_row <= global_col;
 
     let rows_total = params.rows_total;
     let row_offset = params.row_offset;
@@ -172,7 +170,7 @@ fn main(
 
         workgroupBarrier();
 
-        if (active) {
+        if (is_active) {
             for (var p: u32 = 0u; p < tile; p = p + 1u) {
                 let a_val = tile_left[lid.y][p];
                 let b_val = tile_right[p][lid.x];
@@ -183,13 +181,13 @@ fn main(
         workgroupBarrier();
     }
 
-    if (!active) {
+    if (!is_active) {
         return;
     }
 
     let partial = acc;
-    let upper_index = global_row + global_col * params.ldc;
-    let lower_index = global_col + global_row * params.ldc;
+    let upper_index = params.offset_out + global_row + global_col * params.ldc;
+    let lower_index = params.offset_out + global_col + global_row * params.ldc;
 
     var upper_prev: f32 = 0.0;
     var lower_prev: f32 = 0.0;
@@ -200,20 +198,20 @@ fn main(
         }
     }
 
-    let upper_val = if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
-        upper_prev + partial
-    } else {
-        partial
-    };
+    var upper_val: f32 = partial;
+    if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
+        upper_val = upper_prev + partial;
+    }
     Out.data[upper_index] = upper_val;
 
     if ((params.flags & SYRK_FLAG_FILL_BOTH) != 0u && global_row != global_col) {
-        let lower_val = if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
-            lower_prev + partial
-        } else {
-            partial
-        };
+        var lower_val: f32 = partial;
+        if ((params.flags & SYRK_FLAG_ACCUMULATE) != 0u) {
+            lower_val = lower_prev + partial;
+        }
         Out.data[lower_index] = lower_val;
     }
 }
 "#;
+
+pub const SYRK_SHADER_VEC4_F64: &str = SYRK_SHADER_F64;

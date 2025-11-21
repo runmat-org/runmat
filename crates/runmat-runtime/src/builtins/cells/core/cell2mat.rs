@@ -329,7 +329,7 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
     let mut detected_kind: Option<ElementKind> = None;
 
     for ptr in &ca.data {
-        let gathered = gather_if_needed(&**ptr)?;
+        let gathered = gather_if_needed(ptr)?;
         let entry = parse_cell_entry(gathered)?;
         if let Some(kind) = detected_kind {
             if kind != entry.kind {
@@ -392,7 +392,7 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
         }
     }
 
-    let extra_dims = extra_shape.unwrap_or_else(Vec::new);
+    let extra_dims = extra_shape.unwrap_or_default();
     let mut result_shape = Vec::with_capacity(rank + extra_dims.len());
     for sizes in &block_sizes {
         let sum = sizes
@@ -465,7 +465,7 @@ fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> Result<Value, String
             Ok(Value::LogicalArray(logical))
         }
         ElementKind::Char => {
-            let rows = result_shape.get(0).copied().unwrap_or(0);
+            let rows = result_shape.first().copied().unwrap_or(0);
             let cols = result_shape.get(1).copied().unwrap_or(1);
             let char_data = copy_chars(&entries, &multi_indices, rows, cols, &block_sizes)?;
             let array =
@@ -511,10 +511,10 @@ fn copy_numeric(
         let padded_shape = extend_shape(&entry.shape, total_rank);
         let base_offsets = compute_base_offsets(multi, prefix_offsets, total_rank, rank)?;
 
-        for linear in 0..data.len() {
+        for (linear, value) in data.iter().enumerate() {
             let local_index = linear_to_multi_column_major(linear, &padded_shape);
             let dest_linear = accumulate_linear(&base_offsets, &local_index, &dest_strides);
-            output[dest_linear] = data[linear];
+            output[dest_linear] = *value;
         }
     }
     Ok(())
@@ -541,10 +541,10 @@ fn copy_complex(
         let padded_shape = extend_shape(&entry.shape, total_rank);
         let base_offsets = compute_base_offsets(multi, prefix_offsets, total_rank, rank)?;
 
-        for linear in 0..data.len() {
+        for (linear, value) in data.iter().enumerate() {
             let local_index = linear_to_multi_column_major(linear, &padded_shape);
             let dest_linear = accumulate_linear(&base_offsets, &local_index, &dest_strides);
-            output[dest_linear] = data[linear];
+            output[dest_linear] = *value;
         }
     }
     Ok(())
@@ -571,10 +571,10 @@ fn copy_logical(
         let padded_shape = extend_shape(&entry.shape, total_rank);
         let base_offsets = compute_base_offsets(multi, prefix_offsets, total_rank, rank)?;
 
-        for linear in 0..data.len() {
+        for (linear, value) in data.iter().enumerate() {
             let local_index = linear_to_multi_column_major(linear, &padded_shape);
             let dest_linear = accumulate_linear(&base_offsets, &local_index, &dest_strides);
-            output[dest_linear] = data[linear];
+            output[dest_linear] = *value;
         }
     }
     Ok(())
@@ -589,7 +589,7 @@ fn copy_chars(
 ) -> Result<Vec<char>, String> {
     let mut output = vec!['\0'; rows.saturating_mul(cols)];
     let row_prefix = block_sizes
-        .get(0)
+        .first()
         .map(|sizes| prefix_sums(sizes))
         .unwrap_or_else(|| vec![0]);
     let col_prefix = block_sizes
@@ -606,17 +606,17 @@ fn copy_chars(
         };
         let shape = extend_shape(&entry.shape, 2);
         let row_offset = row_prefix
-            .get(*multi.get(0).unwrap_or(&0))
+            .get(multi.first().copied().unwrap_or(0))
             .copied()
             .unwrap_or(0);
         let col_offset = col_prefix
-            .get(*multi.get(1).unwrap_or(&0))
+            .get(multi.get(1).copied().unwrap_or(0))
             .copied()
             .unwrap_or(0);
 
-        for linear in 0..data.len() {
+        for (linear, value) in data.iter().enumerate() {
             let local_idx = linear_to_multi_row_major(linear, &shape);
-            let dest_row = row_offset + local_idx.get(0).copied().unwrap_or(0);
+            let dest_row = row_offset + local_idx.first().copied().unwrap_or(0);
             let dest_col = col_offset + local_idx.get(1).copied().unwrap_or(0);
             let dest_linear = dest_row
                 .checked_mul(cols)
@@ -624,7 +624,7 @@ fn copy_chars(
                 .ok_or_else(|| {
                     "cell2mat: resulting character array exceeds supported size".to_string()
                 })?;
-            output[dest_linear] = data[linear];
+            output[dest_linear] = *value;
         }
     }
 

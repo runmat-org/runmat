@@ -246,14 +246,12 @@ fn handle_message_call(
 
     if rest.is_empty() {
         emit_warning(DEFAULT_IDENTIFIER, &first_string, rest)
+    } else if is_message_identifier(&first_string) {
+        let fmt = value_to_string("warning", &rest[0])?;
+        let args = &rest[1..];
+        emit_warning(&first_string, &fmt, args)
     } else {
-        if is_message_identifier(&first_string) {
-            let fmt = value_to_string("warning", &rest[0])?;
-            let args = &rest[1..];
-            emit_warning(&first_string, &fmt, args)
-        } else {
-            emit_warning(DEFAULT_IDENTIFIER, &first_string, rest)
-        }
+        emit_warning(DEFAULT_IDENTIFIER, &first_string, rest)
     }
 }
 

@@ -453,7 +453,7 @@ fn var_tensor(
 }
 
 fn var_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, String> {
-    let value = tensor.data.get(0).copied().unwrap_or(f64::NAN);
+    let value = tensor.data.first().copied().unwrap_or(f64::NAN);
     let result = if value.is_nan() {
         f64::NAN
     } else {
@@ -522,23 +522,22 @@ fn var_tensor_reduce(
 
     let mut output = vec![0.0f64; out_len];
     for idx in 0..out_len {
-        output[idx] = if saw_nan[idx] && matches!(nan_mode, ReductionNaN::Include) {
-            f64::NAN
-        } else if counts[idx] == 0 {
-            f64::NAN
-        } else {
-            let count = counts[idx];
-            match normalization {
-                VarNormalization::Sample => {
-                    if count > 1 {
-                        (m2[idx] / (count - 1) as f64).max(0.0)
-                    } else {
-                        0.0
+        output[idx] =
+            if (saw_nan[idx] && matches!(nan_mode, ReductionNaN::Include)) || counts[idx] == 0 {
+                f64::NAN
+            } else {
+                let count = counts[idx];
+                match normalization {
+                    VarNormalization::Sample => {
+                        if count > 1 {
+                            (m2[idx] / (count - 1) as f64).max(0.0)
+                        } else {
+                            0.0
+                        }
                     }
+                    VarNormalization::Population => (m2[idx] / (count as f64)).max(0.0),
                 }
-                VarNormalization::Population => (m2[idx] / (count as f64)).max(0.0),
-            }
-        };
+            };
     }
 
     Tensor::new(output, output_shape).map_err(|e| format!("var: {e}"))

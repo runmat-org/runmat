@@ -1,8 +1,9 @@
 //! MATLAB-compatible `zeros` builtin with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use std::sync::OnceLock;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
@@ -376,13 +377,27 @@ fn build_output(parsed: ParsedZeros) -> Result<Value, String> {
 }
 
 fn zeros_double(shape: &[usize]) -> Result<Value, String> {
+    if !force_host_allocation(shape) {
+        if let Some(value) = zeros_gpu_alloc(shape, NumericDType::F64)? {
+            return Ok(value);
+        }
+    }
     let tensor = tensor::zeros(shape)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn zeros_single(shape: &[usize]) -> Result<Value, String> {
+    if !force_host_allocation(shape) {
+        if let Some(value) = zeros_gpu_alloc(shape, NumericDType::F32)? {
+            return Ok(value);
+        }
+    }
     let tensor = tensor::zeros_with_dtype(shape, NumericDType::F32)?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn force_host_allocation(shape: &[usize]) -> bool {
+    tensor::element_count(shape) <= 1
 }
 
 fn zeros_logical(shape: &[usize]) -> Result<Value, String> {
@@ -409,32 +424,97 @@ fn zeros_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
 
 fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
+        let precision =
+            runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
+        let dtype = dtype_from_precision(precision);
         let attempt = if handle.shape == shape {
             provider.zeros_like(handle)
         } else {
             provider.zeros(shape)
         };
         if let Ok(gpu) = attempt {
+            runmat_accelerate_api::set_handle_precision(&gpu, precision);
             return Ok(Value::GpuTensor(gpu));
+        } else {
+            log_zeros_fallback(shape, dtype, "provider-like-error");
         }
         // Fallback: build a host tensor with dtype matching provider precision and upload
-        let dtype = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-            runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
-        };
         let host = tensor::zeros_with_dtype(shape, dtype)?;
         let view = HostTensorView {
             data: &host.data,
             shape: &host.shape,
         };
         if let Ok(gpu) = provider.upload(&view) {
+            runmat_accelerate_api::set_handle_precision(&gpu, precision);
             return Ok(Value::GpuTensor(gpu));
+        } else {
+            log_zeros_fallback(shape, dtype, "upload-error");
         }
+    } else {
+        log_zeros_fallback(shape, NumericDType::F32, "no-provider-like");
     }
 
     let gathered = crate::dispatcher::gather_if_needed(&Value::GpuTensor(handle.clone()))
         .map_err(|e| format!("zeros: {e}"))?;
+    log_zeros_fallback(shape, NumericDType::F32, "gather-fallback");
     zeros_like(&gathered, shape)
+}
+
+fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> Result<Option<Value>, String> {
+    let Some(provider) = runmat_accelerate_api::provider() else {
+        log_zeros_fallback(shape, dtype, "no-provider");
+        return Ok(None);
+    };
+    let precision = match dtype {
+        NumericDType::F32 => ProviderPrecision::F32,
+        NumericDType::F64 => ProviderPrecision::F64,
+    };
+    if provider.precision() != precision {
+        log_zeros_fallback(shape, dtype, "precision-mismatch");
+        return Ok(None);
+    }
+    match provider.zeros(shape) {
+        Ok(handle) => {
+            runmat_accelerate_api::set_handle_precision(&handle, precision);
+            Ok(Some(Value::GpuTensor(handle)))
+        }
+        Err(err) => {
+            log::warn!("zeros: provider zeros failed ({err}); falling back to host tensor path");
+            log_zeros_fallback(shape, dtype, "provider-error");
+            Ok(None)
+        }
+    }
+}
+
+fn zeros_fallback_debug_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| {
+        matches!(
+            std::env::var("RUNMAT_DEBUG_ZEROS_FALLBACK"),
+            Ok(value)
+                if value == "1"
+                    || value.eq_ignore_ascii_case("true")
+                    || value.eq_ignore_ascii_case("yes")
+        )
+    })
+}
+
+fn log_zeros_fallback(shape: &[usize], dtype: NumericDType, reason: &str) {
+    if !zeros_fallback_debug_enabled() {
+        return;
+    }
+    let elems = tensor::element_count(shape);
+    eprintln!(
+        "[zeros_debug] fallback dtype={:?} elems={} shape={:?} reason={}",
+        dtype, elems, shape, reason
+    );
+}
+
+fn dtype_from_precision(precision: ProviderPrecision) -> NumericDType {
+    match precision {
+        ProviderPrecision::F32 => NumericDType::F32,
+        ProviderPrecision::F64 => NumericDType::F64,
+    }
 }
 
 fn keyword_of(value: &Value) -> Option<String> {
@@ -529,26 +609,18 @@ mod tests {
     fn zeros_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![3, 3]);
+        assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
     #[test]
     fn zeros_rectangular_from_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 4]);
-                assert_eq!(t.data.len(), 8);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 4]);
+        assert_eq!(tensor.data.len(), 8);
     }
 
     #[test]
@@ -556,10 +628,8 @@ mod tests {
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 3]),
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 3]);
     }
 
     #[test]
@@ -580,13 +650,9 @@ mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
     #[test]
@@ -616,13 +682,9 @@ mod tests {
             Value::Tensor(proto),
         ];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 3]);
+        assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
     #[test]
@@ -630,13 +692,9 @@ mod tests {
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
         let result = zeros_builtin(args).expect("zeros");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data.iter().all(|&x| x == 0.0));
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let tensor = test_support::gather(result).expect("gather tensor");
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert!(tensor.data.iter().all(|&x| x == 0.0));
     }
 
     #[test]
@@ -696,5 +754,23 @@ mod tests {
     fn doc_examples_present() {
         let blocks = test_support::doc_examples(DOC_MD);
         assert!(!blocks.is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn zeros_wgpu_single_allocates_gpu_without_like() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let value = zeros_single(&[2, 2]).expect("zeros single");
+        match value {
+            Value::GpuTensor(handle) => {
+                let gathered =
+                    test_support::gather(Value::GpuTensor(handle)).expect("gather to host");
+                assert_eq!(gathered.shape, vec![2, 2]);
+                assert!(gathered.data.iter().all(|&x| x == 0.0));
+            }
+            other => panic!("expected gpu tensor, got {other:?}"),
+        }
     }
 }

@@ -31,6 +31,8 @@ const KRON_SHADER_F64: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F
 const KRON_SHADER_F32: &str = crate::backend::wgpu::shaders::kron::KRON_SHADER_F32;
 const MATMUL_SHADER_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F64;
 const MATMUL_SHADER_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F32;
+const MATMUL_SHADER_VEC4_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_VEC4_F64;
+const MATMUL_SHADER_VEC4_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_VEC4_F32;
 const MATMUL_EPILOGUE_SHADER_F64: &str =
     crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64;
 const MATMUL_EPILOGUE_SHADER_F32: &str =
@@ -39,8 +41,18 @@ const MATMUL_SMALLK_SHADER_F64: &str =
     crate::backend::wgpu::shaders::matmul_smallk::MATMUL_SMALLK_SHADER_F64;
 const MATMUL_SMALLK_SHADER_F32: &str =
     crate::backend::wgpu::shaders::matmul_smallk::MATMUL_SMALLK_SHADER_F32;
+const MATMUL_TALL_SKINNY_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::matmul_tall_skinny::MATMUL_TALL_SKINNY_F64;
+const MATMUL_TALL_SKINNY_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::matmul_tall_skinny::MATMUL_TALL_SKINNY_F32;
 const SYRK_SHADER_F64: &str = crate::backend::wgpu::shaders::syrk::SYRK_SHADER_F64;
 const SYRK_SHADER_F32: &str = crate::backend::wgpu::shaders::syrk::SYRK_SHADER_F32;
+const CENTERED_GRAM_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::centered_gram::CENTERED_GRAM_SHADER_F64;
+const CENTERED_GRAM_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::centered_gram::CENTERED_GRAM_SHADER_F32;
+const QR_POWER_ITER_CHOL_SHADER: &str =
+    crate::backend::wgpu::shaders::qr_power_iter::QR_POWER_ITER_CHOL_SHADER;
 const CONV1D_SHADER_F64: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F64;
 const CONV1D_SHADER_F32: &str = crate::backend::wgpu::shaders::conv::CONV1D_SHADER_F32;
 const REDUCE_GLOBAL_SHADER_F64: &str =
@@ -93,10 +105,16 @@ const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
 const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
 const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
+#[cfg(not(target_os = "windows"))]
 const IMAGE_NORMALIZE_SHADER_F64: &str =
     crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F64;
+#[cfg(not(target_os = "windows"))]
 const IMAGE_NORMALIZE_SHADER_F32: &str =
     crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F32;
+#[cfg(target_os = "windows")]
+use crate::backend::wgpu::shaders::image_normalize_stub::{
+    IMAGE_NORMALIZE_STUB_SHADER_F32, IMAGE_NORMALIZE_STUB_SHADER_F64,
+};
 const BANDWIDTH_SHADER_F64: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F64;
 const BANDWIDTH_SHADER_F32: &str = crate::backend::wgpu::shaders::bandwidth::BANDWIDTH_SHADER_F32;
 const SYMMETRY_SHADER_F64: &str = crate::backend::wgpu::shaders::symmetry::SYMMETRY_SHADER_F64;
@@ -115,10 +133,30 @@ const REDUCE_ND_MOMENTS_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_ND_MOMENTS_SHADER_F64;
 const REDUCE_ND_MOMENTS_SHADER_F32: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_ND_MOMENTS_SHADER_F32;
+const STOCHASTIC_EVOLUTION_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F64;
+const STOCHASTIC_EVOLUTION_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F32;
+const LINEAR_GATHER_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_GATHER_SHADER_F64;
+const LINEAR_GATHER_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_GATHER_SHADER_F32;
+const LINEAR_SCATTER_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_SCATTER_SHADER_F64;
+const LINEAR_SCATTER_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_SCATTER_SHADER_F32;
 
 pub struct PipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
     pub layout: wgpu::BindGroupLayout,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ImageNormalizeBootstrap {
+    pub batch_tile: u32,
+    pub values_per_thread: u32,
+    pub lane_count: u32,
+    pub spatial_tile: u32,
 }
 
 pub struct WgpuPipelines {
@@ -142,8 +180,12 @@ pub struct WgpuPipelines {
     pub repmat: PipelineBundle,
     pub kron: PipelineBundle,
     pub matmul: PipelineBundle,
+    pub matmul_vec4: PipelineBundle,
     pub matmul_smallk: PipelineBundle,
+    pub matmul_tall_skinny: PipelineBundle,
     pub matmul_epilogue: PipelineBundle,
+    pub centered_gram: PipelineBundle,
+    pub qr_power_iter: PipelineBundle,
     pub syrk: PipelineBundle,
     pub reduce_global: PipelineBundle,
     pub reduce_dim_sum_mean: PipelineBundle,
@@ -154,6 +196,7 @@ pub struct WgpuPipelines {
     pub random_int: PipelineBundle,
     pub random_uniform: PipelineBundle,
     pub random_normal: PipelineBundle,
+    pub stochastic_evolution: PipelineBundle,
     pub randperm: PipelineBundle,
     pub fspecial: PipelineBundle,
     pub imfilter: PipelineBundle,
@@ -163,6 +206,8 @@ pub struct WgpuPipelines {
     pub polyint: PipelineBundle,
     pub diag_from_vector: PipelineBundle,
     pub diag_extract: PipelineBundle,
+    pub gather_linear: PipelineBundle,
+    pub scatter_linear: PipelineBundle,
     pub find: PipelineBundle,
     pub bandwidth: PipelineBundle,
     pub symmetry: PipelineBundle,
@@ -171,7 +216,13 @@ pub struct WgpuPipelines {
 }
 
 impl WgpuPipelines {
-    pub fn new(device: &wgpu::Device, precision: NumericPrecision) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        precision: NumericPrecision,
+        image_norm_bootstrap: ImageNormalizeBootstrap,
+    ) -> Self {
+        #[cfg(target_os = "windows")]
+        let _ = &image_norm_bootstrap;
         let binary = create_pipeline(
             device,
             "runmat-binary-layout",
@@ -504,6 +555,23 @@ impl WgpuPipelines {
             },
         );
 
+        let matmul_vec4 = create_pipeline(
+            device,
+            "runmat-matmul-vec4-layout",
+            "runmat-matmul-vec4-shader",
+            "runmat-matmul-vec4-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => MATMUL_SHADER_VEC4_F64,
+                NumericPrecision::F32 => MATMUL_SHADER_VEC4_F32,
+            },
+        );
+
         let matmul_smallk = create_pipeline(
             device,
             "runmat-matmul-smallk-layout",
@@ -518,6 +586,23 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => MATMUL_SMALLK_SHADER_F64,
                 NumericPrecision::F32 => MATMUL_SMALLK_SHADER_F32,
+            },
+        );
+
+        let matmul_tall_skinny = create_pipeline(
+            device,
+            "runmat-matmul-tall-skinny-layout",
+            "runmat-matmul-tall-skinny-shader",
+            "runmat-matmul-tall-skinny-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => MATMUL_TALL_SKINNY_SHADER_F64,
+                NumericPrecision::F32 => MATMUL_TALL_SKINNY_SHADER_F32,
             },
         );
 
@@ -539,6 +624,37 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => MATMUL_EPILOGUE_SHADER_F64,
                 NumericPrecision::F32 => MATMUL_EPILOGUE_SHADER_F32,
             },
+        );
+
+        let centered_gram = create_pipeline(
+            device,
+            "runmat-centered-gram-layout",
+            "runmat-centered-gram-shader",
+            "runmat-centered-gram-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => CENTERED_GRAM_SHADER_F64,
+                NumericPrecision::F32 => CENTERED_GRAM_SHADER_F32,
+            },
+        );
+
+        let qr_power_iter = create_pipeline(
+            device,
+            "runmat-qr-power-layout",
+            "runmat-qr-power-shader",
+            "runmat-qr-power-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            QR_POWER_ITER_CHOL_SHADER,
         );
 
         let syrk = create_pipeline(
@@ -678,6 +794,22 @@ impl WgpuPipelines {
             },
         );
 
+        let stochastic_evolution = create_pipeline(
+            device,
+            "runmat-stochastic-evolution-layout",
+            "runmat-stochastic-evolution-shader",
+            "runmat-stochastic-evolution-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => STOCHASTIC_EVOLUTION_SHADER_F64,
+                NumericPrecision::F32 => STOCHASTIC_EVOLUTION_SHADER_F32,
+            },
+        );
+
         let randperm = create_pipeline(
             device,
             "runmat-randperm-layout",
@@ -720,6 +852,32 @@ impl WgpuPipelines {
             },
         );
 
+        #[cfg(target_os = "windows")]
+        let image_norm_source: Cow<'static, str> = Cow::Borrowed(match precision {
+            NumericPrecision::F64 => IMAGE_NORMALIZE_STUB_SHADER_F64,
+            NumericPrecision::F32 => IMAGE_NORMALIZE_STUB_SHADER_F32,
+        });
+        #[cfg(not(target_os = "windows"))]
+        let image_norm_source: Cow<'static, str> = {
+            let image_norm_template = match precision {
+                NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
+                NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
+            };
+            let image_norm_vec_width = match precision {
+                NumericPrecision::F64 => 2,
+                NumericPrecision::F32 => 4,
+            }
+            .to_string();
+            Cow::Owned(
+                image_norm_template
+                    .replace("@BT@", &image_norm_bootstrap.batch_tile.to_string())
+                    .replace("@VP@", &image_norm_bootstrap.values_per_thread.to_string())
+                    .replace("@WG@", &image_norm_bootstrap.lane_count.to_string())
+                    .replace("@BV@", &image_norm_vec_width)
+                    .replace("@ST@", &image_norm_bootstrap.spatial_tile.to_string()),
+            )
+        };
+
         let image_normalize = create_pipeline(
             device,
             "runmat-image-normalize-layout",
@@ -729,11 +887,10 @@ impl WgpuPipelines {
                 storage_read_entry(0),
                 storage_read_write_entry(1),
                 uniform_entry(2),
+                storage_read_entry(3),
+                storage_read_write_entry(4),
             ],
-            match precision {
-                NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
-                NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
-            },
+            &image_norm_source,
         );
 
         let polyval = create_pipeline(
@@ -814,6 +971,40 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => DIAG_EXTRACT_SHADER_F64,
                 NumericPrecision::F32 => DIAG_EXTRACT_SHADER_F32,
+            },
+        );
+
+        let gather_linear = create_pipeline(
+            device,
+            "runmat-gather-linear-layout",
+            "runmat-gather-linear-shader",
+            "runmat-gather-linear-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => LINEAR_GATHER_SHADER_F64,
+                NumericPrecision::F32 => LINEAR_GATHER_SHADER_F32,
+            },
+        );
+
+        let scatter_linear = create_pipeline(
+            device,
+            "runmat-scatter-linear-layout",
+            "runmat-scatter-linear-shader",
+            "runmat-scatter-linear-pipeline",
+            vec![
+                storage_read_write_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => LINEAR_SCATTER_SHADER_F64,
+                NumericPrecision::F32 => LINEAR_SCATTER_SHADER_F32,
             },
         );
 
@@ -923,8 +1114,12 @@ impl WgpuPipelines {
             repmat,
             kron,
             matmul,
+            matmul_vec4,
             matmul_smallk,
+            matmul_tall_skinny,
             matmul_epilogue,
+            centered_gram,
+            qr_power_iter,
             syrk,
             reduce_global,
             reduce_dim_sum_mean,
@@ -935,6 +1130,7 @@ impl WgpuPipelines {
             random_int,
             random_uniform,
             random_normal,
+            stochastic_evolution,
             randperm,
             fspecial,
             imfilter,
@@ -944,6 +1140,8 @@ impl WgpuPipelines {
             polyint,
             diag_from_vector,
             diag_extract,
+            gather_linear,
+            scatter_linear,
             find,
             bandwidth,
             symmetry,

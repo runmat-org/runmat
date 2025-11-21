@@ -363,7 +363,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> Result<ParsedOptions, String> {
     if rest.is_empty() {
         return Ok(ParsedOptions::default());
     }
-    if rest.len() % 2 != 0 {
+    if !rest.len().is_multiple_of(2) {
         return Err(runtime_error(
             MESSAGE_ID_INVALID_NAME_VALUE,
             "tcpserver: name-value arguments must appear in pairs".to_string(),

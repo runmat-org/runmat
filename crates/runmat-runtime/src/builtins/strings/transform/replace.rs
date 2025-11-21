@@ -416,10 +416,7 @@ impl ReplacementSpec {
         }
 
         let pairs = if replacements.len() == patterns.len() {
-            patterns
-                .into_iter()
-                .zip(replacements.into_iter())
-                .collect::<Vec<_>>()
+            patterns.into_iter().zip(replacements).collect::<Vec<_>>()
         } else if replacements.len() == 1 {
             let replacement = replacements[0].clone();
             patterns

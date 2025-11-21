@@ -466,12 +466,8 @@ fn compute_eigen(
     })
 }
 
-fn maybe_balance(matrix: &DMatrix<Complex64>, balance: bool) -> DMatrix<Complex64> {
-    if balance {
-        matrix.clone()
-    } else {
-        matrix.clone()
-    }
+fn maybe_balance(matrix: &DMatrix<Complex64>, _balance: bool) -> DMatrix<Complex64> {
+    matrix.clone()
 }
 
 fn schur_eigendecompose(
@@ -647,7 +643,7 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> Result<DMatrix<Complex64>
 }
 
 fn vector_to_value(values: &DVector<Complex64>) -> Result<Value, String> {
-    if values.len() == 0 {
+    if values.is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
         return Ok(Value::Tensor(tensor));
     }
@@ -670,7 +666,7 @@ fn vector_to_value(values: &DVector<Complex64>) -> Result<Value, String> {
 }
 
 fn diag_matrix_value(values: &DVector<Complex64>) -> Result<Value, String> {
-    if values.len() == 0 {
+    if values.is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| format!("eig: {e}"))?;
         return Ok(Value::Tensor(tensor));
     }
@@ -905,9 +901,8 @@ mod tests {
                 Value::GpuTensor(_) => panic!("expected host fallback for 'vector' option"),
                 other => panic!("unexpected eigenvalue output: {other:?}"),
             }
-            match eval.right() {
-                Value::GpuTensor(_) => panic!("expected right eigenvectors on host after fallback"),
-                _ => {}
+            if let Value::GpuTensor(_) = eval.right() {
+                panic!("expected right eigenvectors on host after fallback");
             }
         });
     }
@@ -1027,9 +1022,8 @@ mod tests {
         let handle = provider.upload(&view).expect("upload");
         let eval = evaluate(Value::GpuTensor(handle), &[Value::from("nobalance")], false)
             .expect("evaluate");
-        match eval.eigenvalues() {
-            Value::GpuTensor(_) => panic!("expected host fallback for 'nobalance' option"),
-            _ => {}
+        if let Value::GpuTensor(_) = eval.eigenvalues() {
+            panic!("expected host fallback for 'nobalance' option");
         }
     }
 }

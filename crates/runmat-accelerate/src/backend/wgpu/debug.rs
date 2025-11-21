@@ -109,7 +109,8 @@ pub fn probe_kernel_with_buffers(
         });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bg, &[]);
-        pass.dispatch_workgroups(1.max(wg / wg), 1, 1);
+        let groups_x = wg.max(1);
+        pass.dispatch_workgroups(groups_x, 1, 1);
     }
     queue.submit(Some(enc.finish()));
     device.poll(wgpu::Maintain::Wait);

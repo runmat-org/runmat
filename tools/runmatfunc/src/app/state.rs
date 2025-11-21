@@ -307,7 +307,7 @@ impl AppContext {
         let queue = job_queue::add_entry(&self.config, entry)?;
         let model_label = model
             .as_deref()
-            .or_else(|| self.config.default_model.as_deref())
+            .or(self.config.default_model.as_deref())
             .unwrap_or("default");
         println!(
             "[runmatfunc] queued '{}' (category: {}, model: {}, codex: {}) — total jobs: {}",
@@ -353,7 +353,7 @@ impl AppContext {
             let model_label = entry
                 .model
                 .as_deref()
-                .or_else(|| self.config.default_model.as_deref())
+                .or(self.config.default_model.as_deref())
                 .unwrap_or("default");
             println!(
                 "  {:>3}. {:<20} | model: {:<12} | codex: {:<5} | enqueued: {}",

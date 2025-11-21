@@ -1,6 +1,13 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 
-use runmat_accelerate_api::{ProviderDispatchStats, ProviderTelemetry};
+use runmat_accelerate_api::{
+    KernelAttrTelemetry, KernelLaunchTelemetry, ProviderDispatchStats, ProviderTelemetry,
+};
+
+const MAX_KERNEL_LAUNCH_EVENTS: usize = 64;
 
 #[derive(Default)]
 pub struct AccelTelemetry {
@@ -12,6 +19,7 @@ pub struct AccelTelemetry {
     matmul_wall_ns: AtomicU64,
     upload_bytes: AtomicU64,
     download_bytes: AtomicU64,
+    kernel_launches: Mutex<Vec<KernelLaunchTelemetry>>,
 }
 
 impl AccelTelemetry {
@@ -63,9 +71,24 @@ impl AccelTelemetry {
         self.matmul_wall_ns.store(0, Ordering::Relaxed);
         self.upload_bytes.store(0, Ordering::Relaxed);
         self.download_bytes.store(0, Ordering::Relaxed);
+        if let Ok(mut guard) = self.kernel_launches.lock() {
+            guard.clear();
+        }
     }
 
-    pub fn snapshot(&self, cache_hits: u64, cache_misses: u64) -> ProviderTelemetry {
+    pub fn snapshot(
+        &self,
+        fusion_cache_hits: u64,
+        fusion_cache_misses: u64,
+        bind_group_cache_hits: u64,
+        bind_group_cache_misses: u64,
+        bind_group_cache_by_layout: Option<Vec<runmat_accelerate_api::BindGroupLayoutTelemetry>>,
+    ) -> ProviderTelemetry {
+        let kernel_launches = self
+            .kernel_launches
+            .lock()
+            .map(|events| events.clone())
+            .unwrap_or_default();
         ProviderTelemetry {
             fused_elementwise: ProviderDispatchStats {
                 count: self.fused_elementwise_count.load(Ordering::Relaxed),
@@ -81,8 +104,12 @@ impl AccelTelemetry {
             },
             upload_bytes: self.upload_bytes.load(Ordering::Relaxed),
             download_bytes: self.download_bytes.load(Ordering::Relaxed),
-            fusion_cache_hits: cache_hits,
-            fusion_cache_misses: cache_misses,
+            fusion_cache_hits,
+            fusion_cache_misses,
+            bind_group_cache_hits,
+            bind_group_cache_misses,
+            bind_group_cache_by_layout,
+            kernel_launches,
         }
     }
 }
@@ -102,5 +129,37 @@ impl AccelTelemetry {
 
     pub fn record_matmul_duration(&self, duration: std::time::Duration) {
         self.record_matmul(saturating_duration_ns(duration));
+    }
+
+    pub fn record_kernel_launch(
+        &self,
+        kernel: &'static str,
+        precision: Option<&str>,
+        shape: &[(&str, u64)],
+        tuning: &[(&str, u64)],
+    ) {
+        let event = KernelLaunchTelemetry {
+            kernel: kernel.to_string(),
+            precision: precision.map(|p| p.to_string()),
+            shape: Self::pairs_to_attrs(shape),
+            tuning: Self::pairs_to_attrs(tuning),
+        };
+        if let Ok(mut guard) = self.kernel_launches.lock() {
+            if guard.len() >= MAX_KERNEL_LAUNCH_EVENTS {
+                let drop = guard.len() + 1 - MAX_KERNEL_LAUNCH_EVENTS;
+                guard.drain(0..drop);
+            }
+            guard.push(event);
+        }
+    }
+
+    fn pairs_to_attrs(pairs: &[(&str, u64)]) -> Vec<KernelAttrTelemetry> {
+        pairs
+            .iter()
+            .map(|(k, v)| KernelAttrTelemetry {
+                key: (*k).to_string(),
+                value: *v,
+            })
+            .collect()
     }
 }

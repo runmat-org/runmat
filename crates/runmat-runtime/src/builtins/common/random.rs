@@ -141,6 +141,48 @@ pub(crate) fn generate_uniform(len: usize, label: &str) -> Result<Vec<f64>, Stri
     Ok(out)
 }
 
+pub(crate) fn generate_uniform_single(len: usize, label: &str) -> Result<Vec<f64>, String> {
+    generate_uniform(len, label).map(|data| {
+        data.into_iter()
+            .map(|v| {
+                let value = v as f32;
+                value as f64
+            })
+            .collect()
+    })
+}
+
+pub(crate) fn skip_uniform(len: usize, label: &str) -> Result<(), String> {
+    if len == 0 {
+        return Ok(());
+    }
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| format!("{label}: failed to acquire RNG lock"))?;
+    guard.state = advance_state(guard.state, len as u64);
+    Ok(())
+}
+
+fn advance_state(state: u64, mut delta: u64) -> u64 {
+    if delta == 0 {
+        return state;
+    }
+    let mut cur_mult = RNG_MULTIPLIER;
+    let mut cur_plus = RNG_INCREMENT;
+    let mut acc_mult = 1u64;
+    let mut acc_plus = 0u64;
+    while delta > 0 {
+        if (delta & 1) != 0 {
+            acc_mult = acc_mult.wrapping_mul(cur_mult);
+            acc_plus = acc_plus.wrapping_mul(cur_mult).wrapping_add(cur_plus);
+        }
+        cur_plus = cur_plus.wrapping_mul(cur_mult.wrapping_add(1));
+        cur_mult = cur_mult.wrapping_mul(cur_mult);
+        delta >>= 1;
+    }
+    acc_mult.wrapping_mul(state).wrapping_add(acc_plus)
+}
+
 pub(crate) fn generate_complex(len: usize, label: &str) -> Result<Vec<(f64, f64)>, String> {
     let mut guard = rng_state()
         .lock()

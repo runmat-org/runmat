@@ -104,16 +104,40 @@
       },
       "include_impl": ["runmat", "python-numpy", "python-torch"],
       "params": {
-        "defaults": {"M": 1000000, "T": 2048},
-        "scale": {"key": "M", "values": [250000, 500000, 1000000]}
+        "defaults": {},
+        "scale": {"key": "tshirt", "values": ["s", "m", "l", "xl-lite", "xl-mid"]}
       },
-      "env_map": {"M": "IIR_M", "T": "IIR_T"},
+      "env_map": {
+        "tshirt": "IIR_TSHIRT",
+        "M": "IIR_M",
+        "T": "IIR_T"
+      },
       "parity": {
         "metric_regex": "MEAN=([0-9eE+\\-.]+)",
         "rtol": 0.001,
         "atol": 1e-05
       },
       "harness": {"warmup": 1, "timeout_s": 300}
+    },
+    {
+      "id": "reduction-wide-sweep",
+      "label": "Reduction Wide Sweep",
+      "entries": {
+        "runmat": "reduction-wide-sweep/runmat.m"
+      },
+      "include_impl": ["runmat"],
+      "params": {
+        "defaults": {"reduce_len": 4096, "slices": 16},
+        "scale": {
+          "key": "reduce_len",
+          "values": [4096, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304]
+        }
+      },
+      "env_map": {
+        "reduce_len": "REDUCE_SWEEP_LEN",
+        "slices": "REDUCE_SWEEP_SLICES"
+      },
+      "harness": {"warmup": 0, "timeout_s": 120}
     }
   ]
 }

@@ -203,7 +203,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             let zero = match ctx.scalar_ty {
                 ScalarType::F32 => "0.0".to_string(),
                 ScalarType::F64 => "f64(0.0)".to_string(),
@@ -243,7 +246,7 @@ fn angle_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn angle_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(device_result) = provider.unary_angle(&handle) {
             return Ok(Value::GpuTensor(device_result));
         }

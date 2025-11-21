@@ -208,7 +208,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let a = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let a = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             let b = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
             Ok(format!("hypot({a}, {b})"))
         },
@@ -266,7 +266,7 @@ fn hypot_host(lhs: Value, rhs: Value) -> Result<Value, String> {
 
 fn compute_hypot_tensor(a: &Tensor, b: &Tensor) -> Result<Value, String> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| format!("hypot: {e}"))?;
         return Ok(tensor::tensor_into_value(tensor));
@@ -329,7 +329,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected: Vec<f64> = vec![1.0, 3.0, (5.0f64).sqrt(), (17.0f64).sqrt()];
+                let expected = [1.0, 3.0, (5.0f64).sqrt(), (17.0f64).sqrt()];
                 for (actual, expect) in t.data.iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
                 }
@@ -345,7 +345,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected = vec![4.123105625617661, 4.47213595499958, 5.0, 5.656854249492381];
+                let expected = [4.123105625617661, 4.47213595499958, 5.0, 5.656854249492381];
                 for (actual, expect) in t.data.iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1e-12);
                 }
@@ -363,7 +363,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                let expected = vec![
+                let expected = [
                     (1.0f64).hypot(3.0),
                     (4.0f64).hypot(3.0),
                     (2.0f64).hypot(4.0),
@@ -404,7 +404,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                let expected = vec![
+                let expected = [
                     complex_magnitude(3.0, 4.0).hypot(0.0),
                     complex_magnitude(5.0, 12.0).hypot(1.0),
                 ];
@@ -424,7 +424,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                let expected = vec![
+                let expected = [
                     (65.0f64.powi(2) + 1.0).sqrt(),
                     (66.0f64.powi(2) + 1.0).sqrt(),
                 ];
@@ -445,7 +445,7 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                let expected = vec![
+                let expected = [
                     1.0_f64.hypot(0.0),
                     0.0_f64.hypot(1.0),
                     0.0_f64.hypot(2.0),
@@ -496,7 +496,7 @@ mod tests {
             let result =
                 hypot_builtin(Value::GpuTensor(h_lhs), Value::GpuTensor(h_rhs)).expect("gpu hypot");
             let gathered = test_support::gather(result).expect("gathered result");
-            let expected = vec![5.0, 13.0, 17.0, 25.0];
+            let expected = [5.0, 13.0, 17.0, 25.0];
             assert_eq!(gathered.shape, vec![2, 2]);
             for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < 1e-12);

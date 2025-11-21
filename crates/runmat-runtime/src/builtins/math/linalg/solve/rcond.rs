@@ -291,9 +291,7 @@ fn rcond_gpu_via_linsolve(
     order: usize,
 ) -> Result<Option<Value>, String> {
     if order == 0 {
-        return upload_scalar(provider, f64::INFINITY)
-            .map(|gpu| Value::GpuTensor(gpu))
-            .map(Some);
+        return upload_scalar(provider, f64::INFINITY).map(|gpu| Some(Value::GpuTensor(gpu)));
     }
 
     // Attempt to reuse provider linsolve to retrieve an rcond estimate.
@@ -302,8 +300,10 @@ fn rcond_gpu_via_linsolve(
         Err(_) => return Ok(None),
     };
 
-    let mut options = runmat_accelerate_api::ProviderLinsolveOptions::default();
-    options.rcond = None;
+    let options = runmat_accelerate_api::ProviderLinsolveOptions {
+        rcond: None,
+        ..Default::default()
+    };
     let outcome = provider.linsolve(handle, &identity, &options);
 
     let _ = provider.free(&identity);

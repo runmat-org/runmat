@@ -17,6 +17,11 @@ fn get_binary_path() -> PathBuf {
 fn run_runmat_with_env(args: &[&str], env_vars: HashMap<&str, &str>) -> std::process::Output {
     let mut cmd = Command::new(get_binary_path());
     cmd.args(args);
+    // Force deterministic headless configuration so the binary doesn't try to
+    // initialize GPU providers or GUI systems on CI hosts.
+    cmd.env("RUNMAT_ACCEL_ENABLE", "0");
+    cmd.env("RUNMAT_ACCEL_PROVIDER", "inprocess");
+    cmd.env("NO_GUI", "1");
 
     for (key, value) in env_vars {
         cmd.env(key, value);

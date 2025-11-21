@@ -411,7 +411,7 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
                 return CopyfileResult::os_error(
                     source,
                     destination,
-                    &io::Error::new(io::ErrorKind::Other, "Cannot determine source file name"),
+                    &io::Error::other("Cannot determine source file name"),
                 );
             };
             target_path = destination_path.join(name);
@@ -482,7 +482,7 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
 fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileResult {
     let paths = match glob::glob(pattern) {
         Ok(iter) => iter,
-        Err(PatternError { msg, .. }) => return CopyfileResult::glob_pattern_error(pattern, &msg),
+        Err(PatternError { msg, .. }) => return CopyfileResult::glob_pattern_error(pattern, msg),
     };
 
     let mut matches = Vec::new();
@@ -521,7 +521,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
             return CopyfileResult::os_error(
                 &display_source,
                 destination,
-                &io::Error::new(io::ErrorKind::Other, "Cannot determine source name"),
+                &io::Error::other("Cannot determine source name"),
             );
         };
         let target_path = destination_path.join(name);

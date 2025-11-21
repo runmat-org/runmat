@@ -24,9 +24,9 @@ const MAX_FACTORIAL_N: usize = 170;
 static FACT_TABLE: Lazy<[f64; MAX_FACTORIAL_N + 1]> = Lazy::new(|| {
     let mut table = [1.0f64; MAX_FACTORIAL_N + 1];
     let mut acc = 1.0;
-    for n in 1..=MAX_FACTORIAL_N {
+    for (n, slot) in table.iter_mut().enumerate().skip(1) {
         acc *= n as f64;
-        table[n] = acc;
+        *slot = acc;
     }
     table
 });
@@ -302,7 +302,7 @@ fn parse_output_template(args: &[Value]) -> Result<OutputTemplate, String> {
 }
 
 fn factorial_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_factorial(&handle) {
             return Ok(Value::GpuTensor(out));
         }

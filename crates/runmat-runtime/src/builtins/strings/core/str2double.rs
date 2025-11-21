@@ -269,7 +269,7 @@ fn str2double_cell_array(cell: CellArray) -> Result<Value, String> {
     for col in 0..cols {
         for row in 0..rows {
             let idx = row * cols + col;
-            let element = &*data[idx];
+            let element: &Value = &data[idx];
             let numeric = match element {
                 Value::String(text) => parse_numeric_scalar(text),
                 Value::StringArray(sa) if sa.data.len() == 1 => parse_numeric_scalar(&sa.data[0]),
@@ -382,6 +382,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::approx_constant,
+        reason = "Test ensures literal 3.14 text stays 3.14, not π"
+    )]
     fn str2double_cell_array_of_text() {
         let cell = CellArray::new(
             vec![

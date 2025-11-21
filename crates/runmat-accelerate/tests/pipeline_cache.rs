@@ -41,14 +41,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // First run: expect miss and metadata creation
     let _out = provider
-        .fused_elementwise(shader, &[handle.clone()], &[rows * cols], rows * cols)
+        .fused_elementwise(
+            shader,
+            std::slice::from_ref(&handle),
+            &[rows * cols],
+            rows * cols,
+        )
         .expect("fused_elementwise");
     let (hits1, misses1) = provider.fused_cache_counters();
     assert!(misses1 >= before_misses, "misses should not decrease");
 
     // Second run: should hit cache
     let _out2 = provider
-        .fused_elementwise(shader, &[handle.clone()], &[rows * cols], rows * cols)
+        .fused_elementwise(
+            shader,
+            std::slice::from_ref(&handle),
+            &[rows * cols],
+            rows * cols,
+        )
         .expect("fused_elementwise 2");
     let (hits2, _misses2) = provider.fused_cache_counters();
     assert!(

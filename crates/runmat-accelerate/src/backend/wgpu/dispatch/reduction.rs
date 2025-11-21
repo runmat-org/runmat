@@ -58,6 +58,7 @@ pub fn run_single_pass(
     submit(device, queue, enc);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_two_pass(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -67,27 +68,38 @@ pub fn run_two_pass(
     bg2: &wgpu::BindGroup,
     g0: u32,
     g1: u32,
+    g2: u32,
 ) {
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("runmat-reduction-2pass-encoder"),
-    });
+    // Pass 1 in its own encoder
     {
-        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("runmat-reduction-pass1"),
-            timestamp_writes: None,
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runmat-reduction-pass1-enc"),
         });
-        pass.set_pipeline(pipeline_p1);
-        pass.set_bind_group(0, bg1, &[]);
-        pass.dispatch_workgroups(g0, g1, 1);
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-reduction-pass1"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline_p1);
+            pass.set_bind_group(0, bg1, &[]);
+            pass.dispatch_workgroups(g0, g1, g2);
+        }
+        submit(device, queue, enc);
     }
+    // Pass 2 in a fresh encoder to avoid any usage scope overlap on Metal
     {
-        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("runmat-reduction-pass2"),
-            timestamp_writes: None,
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runmat-reduction-pass2-enc"),
         });
-        pass.set_pipeline(pipeline_p2);
-        pass.set_bind_group(0, bg2, &[]);
-        pass.dispatch_workgroups(g0, 1, 1);
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-reduction-pass2"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline_p2);
+            pass.set_bind_group(0, bg2, &[]);
+            pass.dispatch_workgroups(g0, 1, 1);
+        }
+        submit(device, queue, enc);
     }
-    submit(device, queue, enc);
 }

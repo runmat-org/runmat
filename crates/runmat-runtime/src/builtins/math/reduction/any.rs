@@ -229,7 +229,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!(
                 "accumulator = max(accumulator, select(0.0, 1.0, ({input} != 0.0) || ({input} != {input})));"
             ))

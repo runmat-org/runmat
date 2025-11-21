@@ -31,7 +31,7 @@ const LANCZOS_COEFFS: [f64; 8] = [
     -176.6150291621406,
     12.507343278686905,
     -0.13857109526572012,
-    9.9843695780195716e-6,
+    9.984_369_578_019_572e-6,
     1.5056327351493116e-7,
 ];
 
@@ -276,7 +276,7 @@ fn gamma_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
 }
 
 fn gamma_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_gamma(&handle) {
             return Ok(Value::GpuTensor(out));
         }
@@ -367,7 +367,7 @@ fn gamma_complex_scalar(z: Complex64) -> Complex64 {
 
 fn lanczos_gamma(z: Complex64) -> Complex64 {
     let z_minus_one = z - Complex64::new(1.0, 0.0);
-    let mut sum = Complex64::new(0.999_999_999_999_809_93, 0.0);
+    let mut sum = Complex64::new(0.999_999_999_999_809_9, 0.0);
     for (idx, coeff) in LANCZOS_COEFFS.iter().enumerate() {
         let denom = z_minus_one + Complex64::new((idx + 1) as f64, 0.0);
         sum += Complex64::new(*coeff, 0.0) / denom;

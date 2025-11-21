@@ -284,7 +284,7 @@ fn parse_name_value_pairs(rest: Vec<Value>) -> Result<TcpClientOptions, String> 
     if rest.is_empty() {
         return Ok(TcpClientOptions::default());
     }
-    if rest.len() % 2 != 0 {
+    if !rest.len().is_multiple_of(2) {
         return Err(runtime_error(
             MESSAGE_ID_INVALID_NAME_VALUE,
             "tcpclient: name-value arguments must appear in pairs".to_string(),
@@ -415,9 +415,8 @@ fn connect_with_timeout(
     port: u16,
     timeout: f64,
 ) -> io::Result<(TcpStream, SocketAddr)> {
-    let mut addrs = (host, port).to_socket_addrs()?;
     let mut last_err: Option<io::Error> = None;
-    while let Some(addr) = addrs.next() {
+    for addr in (host, port).to_socket_addrs()? {
         let attempt = if timeout.is_infinite() {
             TcpStream::connect(addr)
         } else {

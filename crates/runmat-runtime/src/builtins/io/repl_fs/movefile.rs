@@ -400,7 +400,7 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
                 return MovefileResult::os_error(
                     source,
                     destination,
-                    &io::Error::new(io::ErrorKind::Other, "Cannot determine source file name"),
+                    &io::Error::other("Cannot determine source file name"),
                 );
             };
             target_path = destination_path.join(name);
@@ -456,7 +456,7 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
 fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileResult {
     let paths = match glob::glob(pattern) {
         Ok(iter) => iter,
-        Err(PatternError { msg, .. }) => return MovefileResult::glob_pattern_error(pattern, &msg),
+        Err(PatternError { msg, .. }) => return MovefileResult::glob_pattern_error(pattern, msg),
     };
 
     let mut matches = Vec::new();
@@ -494,7 +494,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
             return MovefileResult::os_error(
                 &display_source,
                 destination,
-                &io::Error::new(io::ErrorKind::Other, "Cannot determine source name"),
+                &io::Error::other("Cannot determine source name"),
             );
         };
         let target_path = destination_path.join(name);

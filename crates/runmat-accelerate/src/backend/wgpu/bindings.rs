@@ -82,6 +82,20 @@ pub fn build_bgl_for_layout_tag(device: &wgpu::Device, tag: &str) -> Option<wgpu
                 }),
             );
         }
+        "runmat-centered-gram-layout" => {
+            let entries = [
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ];
+            return Some(
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("warmup-centered-gram-bgl"),
+                    entries: &entries,
+                }),
+            );
+        }
         "runmat-fill-layout" => {
             let entries = [storage_read_write_entry(0), uniform_entry(1)];
             return Some(

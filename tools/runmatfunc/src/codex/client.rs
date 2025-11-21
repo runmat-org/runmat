@@ -131,7 +131,7 @@ fn run_via_cli(
     let mut child = command.spawn().context("failed to spawn codex CLI")?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        let bytes = prompt.as_bytes().len();
+        let bytes = prompt.len();
         stdin
             .write_all(prompt.as_bytes())
             .and_then(|_| stdin.write_all(b"\n"))
@@ -466,7 +466,7 @@ impl Drop for EnvVarGuard {
 #[cfg(feature = "embedded-codex")]
 fn load_runtime_context() -> Result<RuntimeContext> {
     match attempt_user_context()? {
-        UserContextStatus::Ready(context) => Ok(context),
+        UserContextStatus::Ready(context) => Ok(*context),
         UserContextStatus::MissingConfig if should_use_fixture() => load_fixture_context(),
         UserContextStatus::MissingAuth if should_use_fixture() => load_fixture_context(),
         UserContextStatus::MissingConfig => bail!(
@@ -505,10 +505,10 @@ fn attempt_user_context() -> Result<UserContextStatus> {
         return Ok(UserContextStatus::MissingAuth);
     }
 
-    Ok(UserContextStatus::Ready(RuntimeContext {
+    Ok(UserContextStatus::Ready(Box::new(RuntimeContext {
         config: Arc::new(config),
         _fixture_guard: None,
-    }))
+    })))
 }
 
 #[cfg(feature = "embedded-codex")]
@@ -546,7 +546,7 @@ fn load_fixture_context() -> Result<RuntimeContext> {
 
 #[cfg(feature = "embedded-codex")]
 enum UserContextStatus {
-    Ready(RuntimeContext),
+    Ready(Box<RuntimeContext>),
     MissingConfig,
     MissingAuth,
 }
@@ -583,7 +583,6 @@ mod tests {
 #[cfg(all(test, feature = "embedded-codex"))]
 mod embedded_tests {
     use std::fs;
-    use std::path::PathBuf;
 
     use super::{default_client, CodexRequest, EnvVarGuard};
     use tempfile::TempDir;

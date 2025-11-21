@@ -239,8 +239,8 @@ fn tui_loop(
         terminal.draw(|frame| draw_ui(frame, &state, &mut list_state))?;
 
         if event::poll(Duration::from_millis(200))? {
-            match event::read()? {
-                Event::Key(key) => match key.code {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
                     KeyCode::Char('q') => break,
                     KeyCode::Down => {
                         state.move_selection(1)?;
@@ -258,8 +258,7 @@ fn tui_loop(
                         state.toggle_diff();
                     }
                     _ => {}
-                },
-                _ => {}
+                }
             }
         }
     }

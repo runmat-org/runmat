@@ -224,7 +224,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!("({input})"))
         },
     }),
@@ -283,7 +283,7 @@ fn double_from_char_array(chars: CharArray) -> Result<Value, String> {
 }
 
 fn double_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    let provider = runmat_accelerate_api::provider();
+    let provider = runmat_accelerate_api::provider_for_handle(&handle);
 
     if let Some(provider) = provider {
         if provider.precision() == ProviderPrecision::F64 {

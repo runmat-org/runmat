@@ -4,6 +4,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -240,7 +241,8 @@ fn logspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value
         parse_count(&rest[0])?
     };
 
-    let prefer_gpu = start_gpu || stop_gpu;
+    let prefer_gpu =
+        sequence_gpu_preference(count, SequenceIntent::Logspace, start_gpu || stop_gpu).prefer_gpu;
     build_sequence(start_scalar, stop_scalar, count, prefer_gpu)
 }
 

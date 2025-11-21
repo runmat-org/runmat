@@ -156,7 +156,7 @@ fn residency_pca_center_and_normalize() {
     let var = runmat_runtime::call_builtin("mean", &[sq, Value::Num(1.0)]).unwrap();
     assert!(matches!(var, Value::GpuTensor(_)));
     // cast to single then back to double to check residency of casts
-    let single = runmat_runtime::call_builtin("single", &[var.clone()]).unwrap();
+    let single = runmat_runtime::call_builtin("single", std::slice::from_ref(&var)).unwrap();
     assert!(matches!(single, Value::GpuTensor(_)));
     let dbl = runmat_runtime::call_builtin("double", &[single]).unwrap();
     assert!(matches!(dbl, Value::GpuTensor(_)));

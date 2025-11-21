@@ -770,7 +770,7 @@ fn circshift_generic<T: Clone>(
     let mut result = vec![data[0].clone(); total];
     let mut coords = vec![0usize; shape.len()];
 
-    for dest_idx in 0..total {
+    for (dest_idx, slot) in result.iter_mut().enumerate() {
         let mut remainder = dest_idx;
         for axis in 0..shape.len() {
             let size = shape[axis];
@@ -794,7 +794,7 @@ fn circshift_generic<T: Clone>(
                 src_idx += src_coord * stride;
             }
         }
-        result[dest_idx] = data[src_idx].clone();
+        *slot = data[src_idx].clone();
     }
 
     Ok(result)

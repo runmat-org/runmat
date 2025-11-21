@@ -376,9 +376,11 @@ mod tests {
         )
         .expect("filter2");
         let gathered = test_support::gather(value).expect("gather");
-        let mut options = ImfilterOptions::default();
-        options.shape = ImfilterShape::Same;
-        options.mode = ImfilterMode::Correlation;
+        let options = ImfilterOptions {
+            shape: ImfilterShape::Same,
+            mode: ImfilterMode::Correlation,
+            ..Default::default()
+        };
         let expected = apply_imfilter_tensor(&image, &kernel, &options).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
@@ -395,8 +397,10 @@ mod tests {
         )
         .expect("filter2");
         let gathered = test_support::gather(value).expect("gather");
-        let mut options = ImfilterOptions::default();
-        options.shape = ImfilterShape::Full;
+        let options = ImfilterOptions {
+            shape: ImfilterShape::Full,
+            ..Default::default()
+        };
         let expected = apply_imfilter_tensor(&image, &kernel, &options).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
@@ -413,8 +417,10 @@ mod tests {
         )
         .expect("filter2");
         let gathered = test_support::gather(value).expect("gather");
-        let mut options = ImfilterOptions::default();
-        options.shape = ImfilterShape::Valid;
+        let options = ImfilterOptions {
+            shape: ImfilterShape::Valid,
+            ..Default::default()
+        };
         let expected = apply_imfilter_tensor(&image, &kernel, &options).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
@@ -431,8 +437,10 @@ mod tests {
         )
         .expect("filter2");
         let gathered = test_support::gather(value).expect("gather");
-        let mut options = ImfilterOptions::default();
-        options.mode = ImfilterMode::Convolution;
+        let options = ImfilterOptions {
+            mode: ImfilterMode::Convolution,
+            ..Default::default()
+        };
         let expected = apply_imfilter_tensor(&image, &kernel, &options).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.data, expected.data);
@@ -701,9 +709,11 @@ mod tests {
         .expect("filter2 wgpu full conv");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu result");
 
-        let mut options = ImfilterOptions::default();
-        options.shape = ImfilterShape::Full;
-        options.mode = ImfilterMode::Convolution;
+        let options = ImfilterOptions {
+            shape: ImfilterShape::Full,
+            mode: ImfilterMode::Convolution,
+            ..Default::default()
+        };
         let expected =
             apply_imfilter_tensor(&image, &kernel, &options).expect("expected host result");
 

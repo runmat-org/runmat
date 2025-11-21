@@ -213,7 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!("abs({input})"))
         },
     }),
@@ -246,7 +246,7 @@ fn abs_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn abs_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_abs(&handle) {
             return Ok(Value::GpuTensor(out));
         }

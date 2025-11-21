@@ -1,13 +1,12 @@
-use crate::backend::wgpu::pipelines::PipelineBundle;
-
 use super::common;
 
 pub fn run(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    pipeline: &PipelineBundle,
+    pipeline: &wgpu::ComputePipeline,
     bind_group: &wgpu::BindGroup,
     batches: u32,
+    batch_tile: u32,
 ) {
     if batches == 0 {
         return;
@@ -21,9 +20,10 @@ pub fn run(
             label: Some("runmat-image-normalize-pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&pipeline.pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, bind_group, &[]);
-        pass.dispatch_workgroups(common::dispatch_groups(batches), 1, 1);
+        let groups = common::dispatch_size(batches, batch_tile.max(1));
+        pass.dispatch_workgroups(groups, 1, 1);
     }
 
     queue.submit(Some(encoder.finish()));

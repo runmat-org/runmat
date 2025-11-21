@@ -18,17 +18,21 @@ pub mod fusion_residency;
 pub mod graph;
 mod host_lu;
 pub mod native_auto;
+pub mod precision;
+mod reduction_meta;
 pub mod simple_provider;
 mod sortrows_host;
 pub mod telemetry;
 pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
-    auto_offload_report, is_sink, prepare_builtin_args, promote_binary, promote_reduction_args,
-    promote_unary, reset_auto_offload_log, AutoOffloadDecisionEntry, AutoOffloadDisposition,
-    AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason, ReductionOp, ThresholdBase,
-    ThresholdSnapshot, UnaryOp,
+    apply_auto_offload_calibration_from_file, auto_offload_report, is_sink, prepare_builtin_args,
+    promote_binary, promote_reduction_args, promote_unary, reset_auto_offload_log,
+    AutoOffloadCalibrationOutcome, AutoOffloadCalibrationSummary, AutoOffloadDecisionEntry,
+    AutoOffloadDisposition, AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason,
+    ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
 };
+pub use reduction_meta::{value_is_all_keyword, ReductionAxes};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;
 use serde::{Deserialize, Serialize};
@@ -66,18 +70,13 @@ impl Default for AccelPowerPreference {
 }
 
 /// Logging verbosity for auto-offload promotion decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum AutoOffloadLogLevel {
     Off,
     Info,
+    #[default]
     Trace,
-}
-
-impl Default for AutoOffloadLogLevel {
-    fn default() -> Self {
-        AutoOffloadLogLevel::Trace
-    }
 }
 
 /// Configuration passed to the native auto-offload planner.
@@ -105,12 +104,17 @@ impl Default for AutoOffloadOptions {
 static AUTO_OFFLOAD_OPTIONS: Lazy<RwLock<AutoOffloadOptions>> =
     Lazy::new(|| RwLock::new(AutoOffloadOptions::default()));
 
-static RESIDENCY_HOOKS: Lazy<()> = Lazy::new(|| {
+static API_HOOKS: Lazy<()> = Lazy::new(|| {
     runmat_accelerate_api::register_residency_clear(fusion_residency::clear);
+    runmat_accelerate_api::register_sequence_threshold_provider(sequence_threshold_hint_bridge);
 });
 
 pub(crate) fn ensure_residency_hooks() {
-    Lazy::force(&RESIDENCY_HOOKS);
+    Lazy::force(&API_HOOKS);
+}
+
+fn sequence_threshold_hint_bridge() -> Option<usize> {
+    native_auto::sequence_threshold_hint()
 }
 
 pub fn configure_auto_offload(options: AutoOffloadOptions) {
@@ -246,17 +250,14 @@ pub fn initialize_acceleration_provider() {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "wgpu")]
-    use crate::backend::wgpu::provider as wgpu_backend;
+    use crate::backend::wgpu::cache::key::compute_pipeline_hash_bytes;
 
     #[test]
     #[cfg(feature = "wgpu")]
     fn elementwise_hash_varies_with_arity() {
-        wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
-            .expect("wgpu provider");
-        let p = wgpu_backend::ensure_wgpu_provider().unwrap().unwrap();
         let wg = 256u32;
-        let h2 = p.compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-2", Some(wg));
-        let h3 = p.compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-3", Some(wg));
+        let h2 = compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-2", Some(wg));
+        let h3 = compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-3", Some(wg));
         assert_ne!(h2, h3, "hash should differ with input arity");
     }
 }

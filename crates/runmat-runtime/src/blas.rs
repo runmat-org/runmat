@@ -1,12 +1,7 @@
 //! BLAS-accelerated matrix operations
 //!
 //! High-performance linear algebra using BLAS (Basic Linear Algebra Subprograms).
-
-#[cfg(test)]
-use crate::lapack::value_vector_to_f64;
 use runmat_builtins::Tensor as Matrix;
-#[cfg(test)]
-use runmat_builtins::Value;
 
 /// Helper function to transpose a matrix from row-major to column-major
 fn transpose_to_column_major(matrix: &Matrix) -> Vec<f64> {
@@ -150,26 +145,4 @@ pub fn blas_vector_add(alpha: f64, x: &[f64], y: &mut [f64]) -> Result<(), Strin
         blas::daxpy(n, alpha, x, 1, y, 1);
     }
     Ok(())
-}
-
-// Builtin functions for BLAS operations
-#[cfg(test)]
-#[allow(dead_code)]
-fn blas_matmul_builtin(a: Matrix, b: Matrix) -> Result<Matrix, String> {
-    blas_matrix_mul(&a, &b)
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn dot_builtin(a: Vec<Value>, b: Vec<Value>) -> Result<f64, String> {
-    let a_f64 = value_vector_to_f64(&a)?;
-    let b_f64 = value_vector_to_f64(&b)?;
-    blas_dot_product(&a_f64, &b_f64)
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn norm_builtin(vector: Vec<Value>) -> Result<f64, String> {
-    let vector_f64 = value_vector_to_f64(&vector)?;
-    Ok(blas_vector_norm(&vector_f64))
 }

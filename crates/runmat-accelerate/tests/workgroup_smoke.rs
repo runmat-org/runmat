@@ -27,12 +27,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
     let out = provider
-        .fused_elementwise(shader, &[handle.clone()], shape, len)
+        .fused_elementwise(shader, std::slice::from_ref(&handle), shape, len)
         .expect("fused_elementwise");
     let host = provider.download(&out).expect("download");
     assert_eq!(host.data.len(), len);
-    for i in 0..len {
-        assert_eq!(host.data[i], data[i], "mismatch at {}", i);
+    for (i, (got, want)) in host.data.iter().zip(data.iter()).enumerate().take(len) {
+        assert_eq!(got, want, "mismatch at {}", i);
     }
 }
 

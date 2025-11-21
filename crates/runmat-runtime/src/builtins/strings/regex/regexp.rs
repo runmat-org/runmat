@@ -510,7 +510,7 @@ fn collect_cell_array(
 ) -> Result<SubjectCollection, String> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
-        let value = gather_if_needed(&**ptr).map_err(|e| format!("regexp: {e}"))?;
+        let value = gather_if_needed(ptr).map_err(|e| format!("regexp: {e}"))?;
         let text = extract_string(&value).ok_or_else(|| {
             format!(
                 "regexp: cell array elements must be character vectors or string scalars, got {value:?}"

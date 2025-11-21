@@ -333,7 +333,6 @@ impl ParsedRandPerm {
             return Err("randperm: too many input arguments".to_string());
         }
 
-        let n = n;
         let k = k.unwrap_or(n);
 
         if k > n {
@@ -562,7 +561,7 @@ mod tests {
         sorted.dedup();
         assert_eq!(sorted.len(), 4);
         for value in expected {
-            assert!(value >= 1.0 && value <= 10.0);
+            assert!((1.0..=10.0).contains(&value));
         }
     }
 
@@ -721,7 +720,7 @@ mod tests {
         }
         for value in host.data {
             assert!(
-                value >= 1.0 && value <= 12.0,
+                (1.0..=12.0).contains(&value),
                 "value {value} outside expected range 1..12"
             );
         }

@@ -310,7 +310,7 @@ fn ctranspose_logical_array(la: LogicalArray) -> Result<LogicalArray, String> {
         return Ok(la);
     }
     if rank <= 2 {
-        let rows = la.shape.get(0).copied().unwrap_or(1);
+        let rows = la.shape.first().copied().unwrap_or(1);
         let cols = if rank >= 2 {
             la.shape.get(1).copied().unwrap_or(1)
         } else {
@@ -438,7 +438,18 @@ fn ctranspose_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 
         if let Some(transposed_handle) = transposed {
             match provider.unary_conj(&transposed_handle) {
-                Ok(conjugated) => return Ok(Value::GpuTensor(conjugated)),
+                Ok(conjugated) => {
+                    if let Some(info) =
+                        runmat_accelerate_api::handle_transpose_info(&transposed_handle)
+                    {
+                        runmat_accelerate_api::record_handle_transpose(
+                            &conjugated,
+                            info.base_rows,
+                            info.base_cols,
+                        );
+                    }
+                    return Ok(Value::GpuTensor(conjugated));
+                }
                 Err(err) => {
                     let info = provider.device_info_struct();
                     warn!(
@@ -671,8 +682,8 @@ mod tests {
     #[test]
     fn ctranspose_scalar_types_identity() {
         assert_eq!(
-            ctranspose_builtin(Value::Num(3.14)).unwrap(),
-            Value::Num(3.14)
+            ctranspose_builtin(Value::Num(std::f64::consts::PI)).unwrap(),
+            Value::Num(std::f64::consts::PI)
         );
         assert_eq!(
             ctranspose_builtin(Value::Int(IntValue::I32(5))).unwrap(),

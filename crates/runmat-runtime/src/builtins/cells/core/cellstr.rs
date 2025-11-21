@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn rejects_non_text_input() {
-        let err = cellstr_builtin(Value::Num(3.14)).expect_err("expected error");
+        let err = cellstr_builtin(Value::Num(std::f64::consts::PI)).expect_err("expected error");
         assert!(err.contains("input must be"));
     }
 

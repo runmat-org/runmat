@@ -17,6 +17,8 @@ use runmat_macros::runtime_builtin;
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 
+type ComplexMatrixData = (Vec<(f64, f64)>, usize, usize);
+
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
 title: "pagefun"
@@ -275,13 +277,13 @@ fn pagefun_builtin(func: Value, first: Value, rest: Vec<Value>) -> Result<Value,
         operation.output_matrix_shape(&prepared_inputs, output_kind)?;
 
     if page_volume == 0 {
-        return Ok(finalise_empty_output(
+        return finalise_empty_output(
             &operation,
             &prepared_inputs,
             &result_page_dims,
             output_kind,
             all_gpu,
-        )?);
+        );
     }
 
     let mut real_data: Option<Vec<f64>> = None;
@@ -533,7 +535,7 @@ fn assemble_shape(rows: usize, cols: usize, page_dims: &[usize]) -> Vec<usize> {
 }
 
 fn increment_multi_index(indices: &mut [usize], dims: &[usize]) -> Result<(), String> {
-    if dims.iter().any(|&d| d == 0) {
+    if dims.contains(&0) {
         return Ok(());
     }
     for (dim, &limit) in dims.iter().enumerate() {
@@ -788,7 +790,7 @@ fn tensor_matrix_data(value: Value) -> Result<(Vec<f64>, usize, usize), String> 
     }
 }
 
-fn complex_matrix_data(value: Value) -> Result<(Vec<(f64, f64)>, usize, usize), String> {
+fn complex_matrix_data(value: Value) -> Result<ComplexMatrixData, String> {
     match value {
         Value::ComplexTensor(t) => {
             if t.shape.len() > 2 {

@@ -642,7 +642,7 @@ mod tests {
             text.split(PATH_LIST_SEPARATOR).collect()
         };
 
-        let expected = vec![
+        let expected = [
             canonical(base.path()),
             canonical(&alpha),
             canonical(&gamma),
@@ -789,7 +789,7 @@ mod tests {
             text.split(PATH_LIST_SEPARATOR).collect()
         };
 
-        let expected = vec![canonical(base.path()), canonical(&beta)];
+        let expected = [canonical(base.path()), canonical(&beta)];
 
         assert_eq!(segments.len(), expected.len());
         for (seg, exp) in segments.iter().zip(expected.iter()) {

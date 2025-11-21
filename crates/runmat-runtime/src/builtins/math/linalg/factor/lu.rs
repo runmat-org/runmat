@@ -362,9 +362,8 @@ fn evaluate_host_value(value: Value, pivot_mode: PivotMode) -> Result<LuEval, St
 
 fn evaluate_gpu(handle: &GpuTensorHandle, pivot_mode: PivotMode) -> Result<Option<LuEval>, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.lu(handle) {
-            Ok(result) => return Ok(Some(LuEval::from_provider(result, pivot_mode))),
-            Err(_) => {}
+        if let Ok(result) = provider.lu(handle) {
+            return Ok(Some(LuEval::from_provider(result, pivot_mode)));
         }
     }
     Ok(None)

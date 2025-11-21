@@ -17,7 +17,7 @@ except ImportError:
     sys.path.append(str(Path(__file__).parent))
     from utils import ensure_output_path, which  # type: ignore
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 def _prebuild_runmat() -> None:
     bin_path = ROOT / "target" / "release" / "runmat"
     if bin_path.exists():
@@ -26,8 +26,13 @@ def _prebuild_runmat() -> None:
     if os.environ.get("SKIP_PREBUILD_RUNMAT"):
         return
     cmd = [
-        "cargo", "build", "-p", "runmat", "--release",
-        "-F", "runmat-accelerate/wgpu", "-F", "runmat-runtime/wgpu",
+        "cargo",
+        "build",
+        "-p",
+        "runmat",
+        "--release",
+        "--features",
+        "wgpu",
     ]
     proc = subprocess.run(cmd, cwd=str(ROOT), text=True)
     if proc.returncode != 0 or not bin_path.exists():
@@ -133,6 +138,24 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
     total_fused_red_ms = 0.0
     total_matmul_count = 0
     total_matmul_ms = 0.0
+    total_fusion_hits = 0
+    total_fusion_misses = 0
+    total_bind_hits = 0
+    total_bind_misses = 0
+    kernel_launch_totals: Dict[str, int] = defaultdict(int)
+
+    telemetry_error_counts: Dict[str, int] = defaultdict(int)
+    missing_device_runs = 0
+    missing_telemetry_runs = 0
+
+    calib_elem_time = 0.0
+    calib_elem_units = 0.0
+    calib_red_time = 0.0
+    calib_red_units = 0.0
+    calib_matmul_time = 0.0
+    calib_matmul_units = 0.0
+    calibration_runs = 0
+    calibration_provider: Optional[Dict[str, Any]] = None    
 
     auto_thresholds: Optional[Dict[str, Any]] = None
     auto_base_source: Optional[str] = None
@@ -145,15 +168,28 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         telemetry_payload = entry.get("provider_telemetry") or {}
         if not telemetry_payload:
             continue
-        if device_info is None and telemetry_payload.get("device"):
-            device_info = telemetry_payload.get("device")
 
-        telemetry = telemetry_payload.get("telemetry") or {}
+        device_entry = telemetry_payload.get("device")
+        if device_entry:
+            if device_info is None:
+                device_info = device_entry
+        else:
+            missing_device_runs += 1
+
+        error_msg = telemetry_payload.get("error")
+        telemetry_raw = telemetry_payload.get("telemetry")
+        if telemetry_raw is None:
+            missing_telemetry_runs += 1
+        telemetry = telemetry_raw or {}
         fused_elem = telemetry.get("fused_elementwise") or {}
         fused_red = telemetry.get("fused_reduction") or {}
         matmul = telemetry.get("matmul") or {}
         upload_bytes = int(telemetry.get("upload_bytes") or 0)
         download_bytes = int(telemetry.get("download_bytes") or 0)
+        fusion_hits = int(telemetry.get("fusion_cache_hits") or 0)
+        fusion_misses = int(telemetry.get("fusion_cache_misses") or 0)
+        bind_hits = int(telemetry.get("bind_group_cache_hits") or 0)
+        bind_misses = int(telemetry.get("bind_group_cache_misses") or 0)
 
         fe_count = int(fused_elem.get("count") or 0)
         fe_ms = _ns_to_ms(fused_elem.get("total_wall_time_ns"))
@@ -170,15 +206,42 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
         total_fused_red_ms += fr_ms
         total_matmul_count += mm_count
         total_matmul_ms += mm_ms
+        total_fusion_hits += fusion_hits
+        total_fusion_misses += fusion_misses
+        total_bind_hits += bind_hits
+        total_bind_misses += bind_misses
+
+        median_raw = entry.get("median_ms")
+        median_ms = float(median_raw) if isinstance(median_raw, (int, float)) else 0.0
+
+        status = "ok"
+        kernel_launches = telemetry.get("kernel_launches") or []
+        for launch in kernel_launches:
+            name = str(launch.get("kernel") or "").strip()
+            if name:
+                kernel_launch_totals[name] += 1
 
         point_entry: Dict[str, Any] = {
-            "median_ms": entry.get("median_ms"),
+            "median_ms": median_raw,
             "upload_bytes": upload_bytes,
             "download_bytes": download_bytes,
             "fused_elementwise": {"count": fe_count, "wall_ms": fe_ms},
             "fused_reduction": {"count": fr_count, "wall_ms": fr_ms},
             "matmul": {"count": mm_count, "wall_ms": mm_ms},
+            "fusion_cache": {"hits": fusion_hits, "misses": fusion_misses},
+            "bind_group_cache": {"hits": bind_hits, "misses": bind_misses},
         }
+        if kernel_launches:
+            point_entry["kernel_launches"] = kernel_launches
+        if error_msg:
+            msg = str(error_msg)
+            telemetry_error_counts[msg] += 1
+            status = "error"
+            point_entry["error"] = msg
+        elif telemetry_raw is None:
+            status = "missing"
+        point_entry["status"] = status
+
         param_key = x_param or "n"
         param_val = entry.get(param_key)
         if param_val is not None:
@@ -198,6 +261,7 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
             if decisions:
                 reason_counts: Dict[str, int] = defaultdict(int)
                 disposition_counts: Dict[str, int] = defaultdict(int)
+                cpu_decisions: List[Dict[str, Any]] = []
                 for d in decisions:
                     reason = d.get("reason")
                     if reason:
@@ -207,11 +271,60 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
                     if disposition:
                         auto_decision_counts[str(disposition)] += 1
                         disposition_counts[str(disposition)] += 1
+                    if str(disposition).lower() == "cpu":
+                        cpu_decisions.append(d)
                 point_entry["auto_offload"] = {
                     "decisions_total": len(decisions),
                     "by_reason": dict(reason_counts),
                     "by_decision": dict(disposition_counts),
                 }
+
+                if cpu_decisions:
+                    cat_units = {"elementwise": 0.0, "reduction": 0.0, "matmul": 0.0}
+                    for d in cpu_decisions:
+                        op = str(d.get("operation") or "").lower()
+                        if op in ("elementwise", "unary", "transpose"):
+                            elems = d.get("elements")
+                            if elems is not None:
+                                try:
+                                    cat_units["elementwise"] += float(elems)
+                                except (TypeError, ValueError):
+                                    pass
+                        elif op == "reduction":
+                            elems = d.get("elements")
+                            if elems is not None:
+                                try:
+                                    cat_units["reduction"] += float(elems)
+                                except (TypeError, ValueError):
+                                    pass
+                        elif op == "matmul":
+                            flops = d.get("flops")
+                            if flops is not None:
+                                try:
+                                    cat_units["matmul"] += float(flops)
+                                except (TypeError, ValueError):
+                                    pass
+
+                    total_units = sum(cat_units.values())
+                    if total_units > 0.0:
+                        cpu_time_ms = max(0.0, median_ms - (fe_ms + fr_ms + mm_ms))
+                        if cpu_time_ms > 0.0:
+                            calibration_runs += 1
+                            if calibration_provider is None and device_info is not None:
+                                calibration_provider = dict(device_info)
+                            for cat, units in cat_units.items():
+                                if units <= 0.0:
+                                    continue
+                                share = cpu_time_ms * (units / total_units)
+                                if cat == "elementwise":
+                                    calib_elem_time += share
+                                    calib_elem_units += units
+                                elif cat == "reduction":
+                                    calib_red_time += share
+                                    calib_red_units += units
+                                elif cat == "matmul":
+                                    calib_matmul_time += share
+                                    calib_matmul_units += units
 
         per_point.append(point_entry)
 
@@ -236,6 +349,14 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
                 "count": total_matmul_count,
                 "wall_ms": total_matmul_ms,
             },
+            "fusion_cache": {
+                "hits": total_fusion_hits,
+                "misses": total_fusion_misses,
+            },
+            "bind_group_cache": {
+                "hits": total_bind_hits,
+                "misses": total_bind_misses,
+            },
         },
     }
 
@@ -251,6 +372,44 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
             "decision_counts_by_reason": dict(auto_reason_counts),
             "decision_counts_by_disposition": dict(auto_decision_counts),
         }
+
+    if calibration_runs:
+        calib_payload: Dict[str, Any] = {
+            "runs": calibration_runs,
+            "cpu_time_ms": {
+                "elementwise": calib_elem_time,
+                "reduction": calib_red_time,
+                "matmul": calib_matmul_time,
+            },
+            "units": {
+                "elementwise": calib_elem_units,
+                "reduction": calib_red_units,
+                "matmul_flops": calib_matmul_units,
+            },
+        }
+        if calibration_provider is not None:
+            calib_payload["provider"] = calibration_provider
+        summary["auto_offload_calibration"] = calib_payload
+
+    warnings: List[str] = []
+    if telemetry_error_counts:
+        issues = ", ".join(
+            f"{msg} (runs={count})" for msg, count in telemetry_error_counts.items()
+        )
+        warnings.append(f"provider telemetry errors detected: {issues}")
+    if missing_telemetry_runs and not telemetry_error_counts:
+        warnings.append(
+            f"provider telemetry payload missing in {missing_telemetry_runs} run(s)"
+        )
+    if device_info is None and missing_device_runs:
+        warnings.append(
+            "no GPU device information recorded; verify WGPU-enabled build is in use"
+        )
+    if kernel_launch_totals:
+        summary["kernel_launch_totals"] = dict(kernel_launch_totals)
+
+    if warnings:
+        summary["warnings"] = warnings
 
     return summary
 
@@ -324,11 +483,101 @@ def _run_bench(case: str, iterations: int, timeout: int, out_path: Path, variant
     except Exception:
         return json.loads(out_path.read_text())
 
+def _accumulate_calibration(target: Dict[str, Any], sample: Dict[str, Any]) -> None:
+    runs = int(sample.get("runs") or 0)
+    if runs <= 0:
+        return
+    target["runs"] = target.get("runs", 0) + runs
+
+    times = sample.get("cpu_time_ms") or {}
+    units = sample.get("units") or {}
+
+    target.setdefault("cpu_time_ms", {"elementwise": 0.0, "reduction": 0.0, "matmul": 0.0})
+    target.setdefault("units", {"elementwise": 0.0, "reduction": 0.0, "matmul_flops": 0.0})
+
+    target["cpu_time_ms"]["elementwise"] += float(times.get("elementwise") or 0.0)
+    target["cpu_time_ms"]["reduction"] += float(times.get("reduction") or 0.0)
+    target["cpu_time_ms"]["matmul"] += float(times.get("matmul") or 0.0)
+
+    target["units"]["elementwise"] += float(units.get("elementwise") or 0.0)
+    target["units"]["reduction"] += float(units.get("reduction") or 0.0)
+    target["units"]["matmul_flops"] += float(units.get("matmul_flops") or 0.0)
+
+    provider = sample.get("provider")
+    if provider:
+        existing = target.get("provider")
+        if existing is None:
+            target["provider"] = provider
+        elif existing != provider:
+            target["provider_conflict"] = True
+            target["provider"] = None
+
+def _run_auto_calibrate(results_path: Path, dry_run: bool, json_report: Optional[Path]) -> None:
+    bin_path = ROOT / "target" / "release" / "runmat"
+    if not bin_path.exists():
+        raise SystemExit(
+            f"runmat binary not found at {bin_path}. Re-run without --auto-calibrate or build the release binary."
+        )
+
+    cmd = [str(bin_path), "accel-calibrate", str(results_path)]
+    if dry_run:
+        cmd.append("--dry-run")
+
+    if json_report:
+        ensure_output_path(json_report)
+        cmd.append("--json")
+        proc = subprocess.run(cmd, cwd=str(ROOT), text=True, capture_output=True)
+        if proc.returncode != 0:
+            print(proc.stdout)
+            print(proc.stderr, file=sys.stderr)
+            raise SystemExit(
+                f"runmat accel calibrate failed (dry_run={dry_run}) for {results_path}"
+            )
+        payload = proc.stdout.strip() or "{}"
+        json_report.write_text(payload)
+        print(
+            json.dumps(
+                {
+                    "AUTO_CALIBRATION": {
+                        "input": str(results_path),
+                        "dry_run": dry_run,
+                        "report": str(json_report),
+                    }
+                },
+                indent=2,
+            )
+        )
+    else:
+        proc = subprocess.run(cmd, cwd=str(ROOT), text=True)
+        if proc.returncode != 0:
+            raise SystemExit(
+                f"runmat accel calibrate failed (dry_run={dry_run}) for {results_path}"
+            )
+
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Run full benchmark suite with parity checks")
+    ap = argparse.ArgumentParser(description="Run full benchmark suite with parity or perf variants")
     ap.add_argument("--suite", default=str(HARNESS_DIR / "suite.yaml"))
     ap.add_argument("--output", default=str(CASES_DIR / "../results/suite_results.json"))
+    ap.add_argument(
+        "--variant",
+        default="parity",
+        help="Benchmark variant to run (parity|perf); overrides per-case config.",
+    )
+    ap.add_argument(
+        "--auto-calibrate",
+        action="store_true",
+        help="After the suite finishes, apply auto-offload calibration using runmat accel calibrate.",
+    )
+    ap.add_argument(
+        "--auto-calibration-dry-run",
+        action="store_true",
+        help="Preview calibration adjustments without persisting them (requires --auto-calibrate).",
+    )
+    ap.add_argument(
+        "--auto-calibration-report",
+        help="Optional path to write the JSON report from `runmat accel calibrate --json`.",
+    )
     args = ap.parse_args()
 
     # Ensure runmat is prebuilt once so build time is not included in any run
@@ -348,16 +597,28 @@ def main() -> None:
         "cases": [],
     }
 
+    suite_calibration: Dict[str, Any] = {
+        "runs": 0,
+        "cpu_time_ms": {"elementwise": 0.0, "reduction": 0.0, "matmul": 0.0},
+        "units": {"elementwise": 0.0, "reduction": 0.0, "matmul_flops": 0.0},
+        "provider": None,
+    }
+
     for case in cfg.get("cases", []):
         case_id = case.get("id")
         if not case_id:
             continue
         label = case.get("label", case_id)
         case_dir = case.get("case", case_id)  # directory name under benchmarks/benchmarks
-        parity = case.get("parity", {})
-        metric_regex = parity.get("metric_regex")
-        rtol = float(parity.get("rtol", 1e-3))
-        atol = float(parity.get("atol", 1e-5))
+        parity_cfg = case.get("parity")
+        if isinstance(parity_cfg, dict):
+            metric_regex = parity_cfg.get("metric_regex")
+            rtol = float(parity_cfg.get("rtol", 1e-3))
+            atol = float(parity_cfg.get("atol", 1e-5))
+        else:
+            metric_regex = None
+            rtol = float(1e-3)
+            atol = float(1e-5)
         harness = case.get("harness", {})
         warmup = int(harness.get("warmup", 0))
         per_case_timeout = int(harness.get("timeout_s", timeout_s))
@@ -376,7 +637,8 @@ def main() -> None:
                 elif isinstance(v, int):
                     overrides[k] = v
         include_impl = case.get("include_impl") or [impl for impl in essential_impls if impl in case.get("entries", {})]
-        variant = case.get("variant", "default")
+        case_variant = case.get("variant")
+        variant = case_variant if case_variant else args.variant
 
         # Parameterization: support new schema with defaults + scale
         params = case.get("params", {})
@@ -443,14 +705,14 @@ def main() -> None:
                     if xkey in r:
                         val = _extract_metric(r.get("stdout_tail", ""), metric_regex)
                         if val is not None:
-                            ref_vals[int(r[xkey])] = val
+                            ref_vals[str(r[xkey])] = val
             for r in case_result.get("results", []):
                 impl = r.get("impl")
                 xkey = scale_key or "n"
                 nval = r.get(xkey)
                 if impl == "python-numpy" or nval is None:
                     continue
-                ref = ref_vals.get(int(nval)) if ref_vals else None
+                ref = ref_vals.get(str(nval)) if ref_vals else None
                 got = _extract_metric(r.get("stdout_tail", ""), metric_regex)
                 ok = True
                 if ref is not None and got is not None:
@@ -471,13 +733,47 @@ def main() -> None:
         summary_payload = _case_summary(case_result, scale_key)
         if summary_payload:
             case_entry["summary"] = summary_payload
+            telemetry_summary = summary_payload.get("telemetry") or {}
+            calibration_sample = telemetry_summary.get("auto_offload_calibration")
+            if calibration_sample:
+                _accumulate_calibration(suite_calibration, calibration_sample)            
         results["cases"].append(case_entry)
 
     out = Path(args.output)
     ensure_output_path(out)
     results["suite"]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+    if suite_calibration.get("runs", 0) > 0:
+        suite_calib_payload: Dict[str, Any] = {
+            "runs": suite_calibration["runs"],
+            "cpu_time_ms": suite_calibration["cpu_time_ms"],
+            "units": suite_calibration["units"],
+        }
+        provider_info = suite_calibration.get("provider")
+        if provider_info:
+            suite_calib_payload["provider"] = provider_info
+        if suite_calibration.get("provider_conflict"):
+            suite_calib_payload["provider_conflict"] = True
+        results["suite"]["auto_offload_calibration"] = suite_calib_payload    
     out.write_text(json.dumps(results, indent=2))
     print(json.dumps({"WROTE": str(out)}, indent=2))
+
+    if args.auto_calibrate:
+        calib_exists = "auto_offload_calibration" in results["suite"]
+        if not calib_exists:
+            print(
+                json.dumps(
+                    {
+                        "AUTO_CALIBRATION": {
+                            "status": "skipped",
+                            "reason": "no auto_offload_calibration sample present",
+                        }
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            report_path = Path(args.auto_calibration_report).resolve() if args.auto_calibration_report else None
+            _run_auto_calibrate(out, args.auto_calibration_dry_run, report_path)
 
 
 if __name__ == "__main__":

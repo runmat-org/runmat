@@ -4,9 +4,7 @@ pub fn maybe_run_apply_patch_from_env() -> Option<i32> {
 
     let mut args = std::env::args();
     let _program = args.next();
-    let Some(flag) = args.next() else {
-        return None;
-    };
+    let flag = args.next()?;
 
     if flag != codex_core::CODEX_APPLY_PATCH_ARG1 {
         return None;
@@ -46,9 +44,7 @@ pub fn maybe_run_apply_patch_from_env() -> Option<i32> {
 pub fn maybe_run_apply_patch_from_env() -> Option<i32> {
     let mut args = std::env::args();
     let _program = args.next();
-    let Some(flag) = args.next() else {
-        return None;
-    };
+    let flag = args.next()?;
 
     if flag != "--codex-run-as-apply-patch" {
         return None;

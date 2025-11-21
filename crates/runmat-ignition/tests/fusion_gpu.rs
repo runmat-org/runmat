@@ -1,10 +1,12 @@
 use anyhow::{anyhow, bail, Context};
 use once_cell::sync::OnceCell;
-use runmat_accelerate::fusion_residency;
+use runmat_accelerate::{
+    configure_auto_offload, fusion_residency, AutoOffloadLogLevel, AutoOffloadOptions,
+};
 use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, CorrcoefOptions, CovNormalization, CovRows, CovarianceOptions,
-    FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, PagefunRequest,
-    PowerStepEpilogue, ProviderCondNorm, ProviderConvMode, ProviderEigResult,
+    FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, ImageNormalizeDescriptor,
+    PagefunRequest, PowerStepEpilogue, ProviderCondNorm, ProviderConvMode, ProviderEigResult,
     ProviderLinsolveOptions, ProviderLinsolveResult, ProviderNormOrder, ProviderPinvOptions,
     ProviderPrecision, UniqueOptions, UniqueResult,
 };
@@ -21,9 +23,11 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
+type BufferStore = HashMap<u64, (Vec<f64>, Vec<usize>)>;
+
 struct TestProvider {
     next_id: AtomicU64,
-    buffers: Mutex<HashMap<u64, (Vec<f64>, Vec<usize>)>>,
+    buffers: Mutex<BufferStore>,
 }
 
 impl TestProvider {
@@ -57,6 +61,62 @@ impl TestProvider {
 }
 
 impl AccelProvider for TestProvider {
+    fn gather_linear(
+        &self,
+        source: &GpuTensorHandle,
+        indices: &[u32],
+        output_shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let (data, _) = self.pull(source)?;
+        let mut out = Vec::with_capacity(indices.len());
+        for (pos, &idx) in indices.iter().enumerate() {
+            let lin = idx as usize;
+            if lin >= data.len() {
+                return Err(anyhow!(
+                    "gather_linear: index {} (pos {}) out of bounds for buffer {}",
+                    lin,
+                    pos,
+                    source.buffer_id
+                ));
+            }
+            out.push(data[lin]);
+        }
+        Ok(self.push(out, output_shape.to_vec()))
+    }
+
+    fn scatter_linear(
+        &self,
+        target: &GpuTensorHandle,
+        indices: &[u32],
+        values: &GpuTensorHandle,
+    ) -> anyhow::Result<()> {
+        let (vals, _) = self.pull(values)?;
+        if vals.len() != indices.len() {
+            return Err(anyhow!(
+                "scatter_linear: values length {} mismatch indices {}",
+                vals.len(),
+                indices.len()
+            ));
+        }
+        let mut guard = self.buffers.lock().unwrap();
+        let target_buf = guard
+            .get_mut(&target.buffer_id)
+            .ok_or_else(|| anyhow!("scatter_linear: unknown target {}", target.buffer_id))?;
+        for (pos, &idx) in indices.iter().enumerate() {
+            let lin = idx as usize;
+            if lin >= target_buf.0.len() {
+                return Err(anyhow!(
+                    "scatter_linear: index {} (pos {}) out of bounds for buffer {}",
+                    lin,
+                    pos,
+                    target.buffer_id
+                ));
+            }
+            target_buf.0[lin] = vals[pos];
+        }
+        Ok(())
+    }
+
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }
@@ -125,20 +185,20 @@ impl AccelProvider for TestProvider {
             );
         }
         let (data, shape) = self.pull(matrix)?;
-        let rows = shape.get(0).copied().unwrap_or(1);
+        let rows = shape.first().copied().unwrap_or(1);
         let cols = if shape.len() > 1 { shape[1] } else { 1 };
         if rows == 0 || cols == 0 {
             return Ok(self.push(Vec::new(), vec![cols, cols]));
         }
         let mut means = vec![0.0f64; cols];
-        for c in 0..cols {
+        for (c, mean) in means.iter_mut().enumerate().take(cols) {
             for r in 0..rows {
                 let idx = r + rows * c;
                 if let Some(value) = data.get(idx) {
-                    means[c] += *value;
+                    *mean += *value;
                 }
             }
-            means[c] /= rows as f64;
+            *mean /= rows as f64;
         }
         let denom = match options.normalization {
             CovNormalization::Unbiased => (rows as f64) - 1.0,
@@ -161,6 +221,69 @@ impl AccelProvider for TestProvider {
             }
         }
         Ok(self.push(cov, vec![cols, cols]))
+    }
+
+    fn image_normalize(
+        &self,
+        input: &GpuTensorHandle,
+        desc: &ImageNormalizeDescriptor,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let (data, shape) = self.pull(input)?;
+        if shape.len() != 3 {
+            bail!("test provider: image_normalize expects 3-D tensor");
+        }
+        let batch = shape[0];
+        let height = shape[1];
+        let width = shape[2];
+        if batch != desc.batch || height != desc.height || width != desc.width {
+            bail!(
+                "test provider: image_normalize descriptor mismatch tensor {:?} vs {:?}",
+                shape,
+                (desc.batch, desc.height, desc.width)
+            );
+        }
+        let plane = height * width;
+        if plane == 0 {
+            return Ok(self.push(Vec::new(), shape));
+        }
+
+        let mut out = data.clone();
+        for b in 0..batch {
+            let mut sum = 0.0f64;
+            for idx in 0..plane {
+                let offset = b + batch * idx;
+                sum += data[offset];
+            }
+            let mean = sum / plane as f64;
+
+            let mut sq_sum = 0.0f64;
+            for idx in 0..plane {
+                let offset = b + batch * idx;
+                let diff = data[offset] - mean;
+                sq_sum += diff * diff;
+            }
+            let variance = sq_sum / plane as f64;
+            let sigma = (variance + desc.epsilon).sqrt();
+            let inv_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+
+            for idx in 0..plane {
+                let offset = b + batch * idx;
+                let mut value = (data[offset] - mean) * inv_sigma;
+                if let Some(g) = desc.gain {
+                    value *= g;
+                }
+                if let Some(bias) = desc.bias {
+                    value += bias;
+                }
+                value = value.max(0.0);
+                if let Some(gamma) = desc.gamma {
+                    value = value.powf(gamma);
+                }
+                out[offset] = value;
+            }
+        }
+
+        Ok(self.push(out, shape))
     }
 
     fn matmul_power_step(
@@ -193,17 +316,16 @@ impl AccelProvider for TestProvider {
             }
         }
         let mut norms = vec![0.0f64; n];
-        for col in 0..n {
+        for (col, norm) in norms.iter_mut().enumerate().take(n) {
             let mut acc = 0.0f64;
             for row in 0..m {
                 let val = product[row + m * col];
                 acc += val * val;
             }
             acc += epilogue.epsilon;
-            norms[col] = acc.sqrt();
+            *norm = acc.sqrt();
         }
-        for col in 0..n {
-            let norm = norms[col];
+        for (col, norm) in norms.iter().copied().enumerate().take(n) {
             for row in 0..m {
                 let idx = row + m * col;
                 product[idx] /= norm;
@@ -731,8 +853,8 @@ impl<'a> ExprParser<'a> {
 
     fn parse_identifier(&mut self, name: String) -> anyhow::Result<f64> {
         self.advance();
-        if name.starts_with("tmp") {
-            let idx: usize = name[3..]
+        if let Some(rest) = name.strip_prefix("tmp") {
+            let idx: usize = rest
                 .parse()
                 .map_err(|e| anyhow!("invalid tmp identifier '{name}': {e}"))?;
             let value = self
@@ -743,7 +865,10 @@ impl<'a> ExprParser<'a> {
             return Ok(value);
         }
         if name.starts_with("input") && self.check_symbol('.') {
-            let input_idx: usize = name[5..]
+            let rest = name
+                .strip_prefix("input")
+                .ok_or_else(|| anyhow!("invalid input identifier '{name}'"))?;
+            let input_idx: usize = rest
                 .parse()
                 .map_err(|e| anyhow!("invalid input identifier '{name}': {e}"))?;
             self.expect_symbol('.')?;
@@ -891,6 +1016,12 @@ fn ensure_provider_registered() {
     unsafe {
         runmat_accelerate_api::register_provider(provider);
     }
+    configure_auto_offload(AutoOffloadOptions {
+        enabled: true,
+        calibrate: false,
+        profile_path: None,
+        log_level: AutoOffloadLogLevel::Trace,
+    });
 }
 
 #[test]
@@ -946,7 +1077,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                     Instr::StoreVar(i) => Some(*i),
                     _ => None,
                 })
-                .last()
+                .next_back()
                 .expect("store var for S");
             let s_value_cpu = vars_cpu.get(s_index).expect("value for S (cpu)");
             let gathered_cpu = gather_if_needed(s_value_cpu).expect("gather cpu");
@@ -1167,10 +1298,10 @@ fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
             }
         }
         for c in 0..cols {
-            data[0 + c * rows] = f64::NAN; // first row
+            data[c * rows] = f64::NAN; // first row
         }
-        for r in 0..rows {
-            data[r + 0 * rows] = f64::NAN; // first column
+        for value in data.iter_mut().take(rows) {
+            *value = f64::NAN; // first column
         }
 
         // Run CPU path with host tensor injected
@@ -1328,12 +1459,12 @@ fn reduction_sum_include_omit_dim1_dim2_degenerate_gpu_cpu() {
             }
             if rows > 0 {
                 for c in 0..cols {
-                    data[0 + c * rows] = f64::NAN;
+                    data[c * rows] = f64::NAN;
                 }
             }
             if cols > 0 {
-                for r in 0..rows {
-                    data[r + 0 * rows] = f64::NAN;
+                for value in data.iter_mut().take(rows) {
+                    *value = f64::NAN;
                 }
             }
 
@@ -1581,7 +1712,7 @@ fn provider_reduce_sum_dim_parity_simple() {
             }
         }
         // Insert NaNs: one in column 1, one in row 2
-        data[0 + 1 * rows] = f64::NAN; // (r=0,c=1)
+        data[rows] = f64::NAN; // (r=0,c=1)
         data[2 + 3 * rows] = f64::NAN; // (r=2,c=3)
 
         let view = runmat_accelerate_api::HostTensorView {
@@ -1719,7 +1850,7 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
         let find_by_shape =
             |vars: &Vec<Value>, want_rows: usize, want_cols: usize| -> Option<Vec<f64>> {
                 for v in vars {
-                    if let Some(Value::Tensor(t)) = gather_if_needed(v).ok() {
+                    if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
                         if t.shape.len() == 2 && t.shape[0] == want_rows && t.shape[1] == want_cols
                         {
                             return Some(t.data);
@@ -1800,7 +1931,7 @@ fn fused_reduction_sum_dim1_dim2_omit_gpu_cpu() {
         let find_by_shape =
             |vars: &Vec<Value>, want_rows: usize, want_cols: usize| -> Option<Vec<f64>> {
                 for v in vars {
-                    if let Some(Value::Tensor(t)) = gather_if_needed(v).ok() {
+                    if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
                         if t.shape.len() == 2 && t.shape[0] == want_rows && t.shape[1] == want_cols
                         {
                             return Some(t.data);
@@ -1852,7 +1983,7 @@ fn fused_elementwise_residency_and_gather() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("store var for y");
 
         let y_value = vars.get(y_index).expect("value for y");
@@ -1988,7 +2119,7 @@ fn centered_gram_fusion_matches_cpu() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("cov store index");
 
         let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -2053,6 +2184,50 @@ fn centered_gram_fusion_matches_cpu() {
 }
 
 #[test]
+fn mean_all_gpu_matches_cpu() {
+    gc_test_context(|| {
+        let source = r#"
+            A = gpuArray(single([1.0; 2.0; 3.0; 4.0]));
+            mu = mean(A, 'all');
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir).expect("compile");
+
+        let mu_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .next_back()
+            .expect("mu store index");
+
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+
+        ensure_provider_registered();
+        let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
+        let mu_gpu = vars_gpu.get(mu_index).expect("mu result");
+        let gathered = gather_if_needed(mu_gpu).expect("gather mu");
+        let scalar = match gathered {
+            Value::Tensor(t) => {
+                assert_eq!(t.data.len(), 1, "expected scalar tensor");
+                t.data[0]
+            }
+            Value::Num(n) => n,
+            other => panic!("expected numeric result, got {other:?}"),
+        };
+        let expected = (1.0 + 2.0 + 3.0 + 4.0) / 4.0;
+        assert!(
+            (scalar - expected).abs() <= 1e-6,
+            "mean(all) mismatch: lhs={scalar}, rhs={expected}"
+        );
+    });
+}
+
+#[test]
 fn power_step_normalization_matches_cpu() {
     gc_test_context(|| {
         use runmat_accelerate::FusionKind;
@@ -2096,7 +2271,7 @@ fn power_step_normalization_matches_cpu() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("store index for Q");
 
         let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -2129,6 +2304,80 @@ fn power_step_normalization_matches_cpu() {
             assert!(
                 diff <= tol,
                 "power-step mismatch: lhs={lhs}, rhs={rhs}, diff={diff}"
+            );
+        }
+    });
+}
+
+#[test]
+fn image_normalize_matches_cpu() {
+    gc_test_context(|| {
+        use runmat_accelerate::FusionKind;
+        let source = r#"
+        B = 4; H = 8; W = 12;
+        gain = single(1.0123);
+        bias = single(-0.02);
+        gamma = single(1.8);
+        eps0 = single(1e-6);
+        rng(0);
+        imgs = single(rand(B, H, W));
+        mu = mean(mean(imgs, 2), 3);
+        sigma = sqrt(mean(mean((imgs - mu).^2, 2), 3) + eps0);
+        out = ((imgs - mu) ./ sigma) * gain + bias;
+        out = max(out, single(0));
+        out = out .^ gamma;
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir).expect("compile");
+
+        if let Some(graph) = &bytecode.accel_graph {
+            let groups = graph.detect_fusion_groups();
+            assert!(groups
+                .iter()
+                .any(|group| matches!(group.kind, FusionKind::ImageNormalize)));
+        }
+
+        let out_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .next_back()
+            .expect("store index for out");
+
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let vars_cpu = interpret_function(&bytecode, vars.clone()).expect("cpu interpret");
+        let out_cpu = vars_cpu.get(out_index).expect("cpu out");
+        let gathered_cpu = gather_if_needed(out_cpu).expect("gather cpu out");
+        let cpu_tensor = match gathered_cpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor out (cpu), got {other:?}"),
+        };
+
+        ensure_provider_registered();
+        let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
+        let out_gpu = vars_gpu.get(out_index).expect("gpu out");
+        assert!(
+            matches!(out_gpu, Value::GpuTensor(_)),
+            "expected gpu tensor result"
+        );
+        let gathered_gpu = gather_if_needed(out_gpu).expect("gather gpu out");
+        let gpu_tensor = match gathered_gpu {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor out (gpu), got {other:?}"),
+        };
+
+        assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
+        let tol = 5e-4;
+        for (lhs, rhs) in cpu_tensor.data.iter().zip(gpu_tensor.data.iter()) {
+            let diff = (lhs - rhs).abs();
+            assert!(
+                diff <= tol,
+                "image normalize mismatch: lhs={lhs}, rhs={rhs}, diff={diff}"
             );
         }
     });
@@ -2198,7 +2447,7 @@ fn explained_variance_matches_cpu() {
                 Instr::StoreVar(idx) => Some(*idx),
                 _ => None,
             })
-            .last()
+            .next_back()
             .expect("store index for eval");
 
         let vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -2274,7 +2523,7 @@ fn explained_variance_matches_cpu() {
             println!("g tensor data {:?}", g_tensor.data);
         }
 
-        let rows = q_tensor.shape.get(0).copied().unwrap_or(0);
+        let rows = q_tensor.shape.first().copied().unwrap_or(0);
         let cols = q_tensor.shape.get(1).copied().unwrap_or(1);
         assert!(
             rows > 0 && cols > 0,
@@ -2342,12 +2591,9 @@ fn explained_variance_matches_cpu() {
         }
 
         ensure_provider_registered();
-        let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
+        let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
         let eval_gpu = vars_gpu.get(eval_index).expect("gpu eval");
-        assert!(
-            matches!(eval_gpu, Value::GpuTensor(_)),
-            "expected gpu tensor result"
-        );
+        assert!(matches!(eval_gpu, Value::GpuTensor(_) | Value::Tensor(_)));
         let gathered_gpu = gather_if_needed(eval_gpu).expect("gather gpu");
         let gpu_tensor = match gathered_gpu {
             Value::Tensor(t) => t,

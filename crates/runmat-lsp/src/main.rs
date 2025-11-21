@@ -12,7 +12,7 @@ async fn main() {
     let stdin = stdin();
     let stdout = stdout();
 
-    let (service, socket) = LspService::new(|client| RunMatLanguageServer::new(client));
+    let (service, socket) = LspService::new(RunMatLanguageServer::new);
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 

@@ -216,7 +216,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             Ok(format!("exp({input} * {:.17})", LN_2))
         },
     }),
@@ -277,7 +280,7 @@ fn pow2_binary(mantissa: Value, exponent: Value) -> Result<Value, String> {
 }
 
 fn pow2_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_pow2(&handle) {
             return Ok(Value::GpuTensor(out));
         }
@@ -287,10 +290,12 @@ fn pow2_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 }
 
 fn pow2_gpu_scale(mantissa: GpuTensorHandle, exponent: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if mantissa.shape == exponent.shape {
-            if let Ok(out) = provider.pow2_scale(&mantissa, &exponent) {
-                return Ok(Value::GpuTensor(out));
+    if mantissa.device_id == exponent.device_id {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&mantissa) {
+            if mantissa.shape == exponent.shape {
+                if let Ok(out) = provider.pow2_scale(&mantissa, &exponent) {
+                    return Ok(Value::GpuTensor(out));
+                }
             }
         }
     }
@@ -333,7 +338,7 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> Result<Value, String> {
     let mantissa_array = value_into_numeric_array(mantissa, "pow2")?;
     let exponent_array = value_into_numeric_array(exponent, "pow2")?;
     let plan = BroadcastPlan::new(mantissa_array.shape(), exponent_array.shape())?;
-    if plan.len() == 0 {
+    if plan.is_empty() {
         if mantissa_array.is_complex() || exponent_array.is_complex() {
             let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
                 .map_err(|e| format!("pow2: {e}"))?;
@@ -475,7 +480,7 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                let expected = vec![0.5, 1.0, 2.0, 4.0];
+                let expected = [0.5, 1.0, 2.0, 4.0];
                 for (a, b) in out.data.iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }

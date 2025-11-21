@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -200,10 +200,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
-            Ok(format!(
-                "accumulator = max(accumulator, {input});"
-            ))
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
+            Ok(format!("accumulator = max(accumulator, {input});"))
         },
     }),
     emits_nan: true,
@@ -252,7 +250,19 @@ fn max_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub fn evaluate(value: Value, rest: &[Value]) -> Result<MaxEvaluation, String> {
-    match parse_call(rest)? {
+    let parsed = parse_call(rest)?;
+    if std::env::var("RUNMAT_DEBUG_MAX").is_ok() {
+        let call_label = match &parsed {
+            ParsedCall::Reduction(_) => "reduction",
+            ParsedCall::Elementwise(_) => "elementwise",
+        };
+        let first_arg = rest.first().map(debug_value_kind).unwrap_or("None");
+        eprintln!(
+            "[runmat-debug-max] call_type={call_label} rest_len={} first_arg={first_arg}",
+            rest.len()
+        );
+    }
+    match parsed {
         ParsedCall::Elementwise(args) => elementwise_max(value, args),
         ParsedCall::Reduction(args) => reduction_max(value, args),
     }
@@ -321,6 +331,46 @@ fn parse_call(rest: &[Value]) -> Result<ParsedCall, String> {
     let mut args = ReductionArgs::default();
     parse_reduction_options(&mut args, &rest[1..])?;
     Ok(ParsedCall::Reduction(args))
+}
+
+fn debug_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Num(_) => "Num",
+        Value::Int(_) => "Int",
+        Value::Bool(_) => "Bool",
+        Value::Tensor(t) => {
+            if t.data.is_empty() {
+                "Tensor(empty)"
+            } else {
+                "Tensor"
+            }
+        }
+        Value::GpuTensor(_) => "GpuTensor",
+        Value::String(_) => "String",
+        Value::CharArray(_) => "CharArray",
+        Value::StringArray(sa) => {
+            if sa.data.is_empty() {
+                "StringArray(empty)"
+            } else {
+                "StringArray"
+            }
+        }
+        Value::LogicalArray(l) => {
+            if l.data.is_empty() {
+                "LogicalArray(empty)"
+            } else {
+                "LogicalArray"
+            }
+        }
+        Value::Cell(c) => {
+            if c.data.is_empty() {
+                "Cell(empty)"
+            } else {
+                "Cell"
+            }
+        }
+        _ => "Other",
+    }
 }
 
 fn is_empty_placeholder(value: &Value) -> bool {
@@ -892,9 +942,7 @@ fn resolve_output_shape(
     let mut output = shape.to_vec();
     match selection {
         DimSelection::All => {
-            for dim in 0..output.len() {
-                output[dim] = 1;
-            }
+            output.fill(1);
         }
         _ => {
             for &dim in reduced_dims {
@@ -1271,6 +1319,38 @@ fn elementwise_max(value: Value, args: ElementwiseArgs) -> Result<MaxEvaluation,
     let ElementwiseArgs { other, comparison } = args;
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
+            if gpu_tensor_is_scalar(&handle_b) {
+                if let Some(num) = gpu_tensor_scalar_value(&handle_b) {
+                    let scalar = Value::Num(num);
+                    return elementwise_max_gpu_scalar_left(&handle_a, &scalar, comparison)
+                        .or_else(|| {
+                            let ta = gpu_helpers::gather_tensor(&handle_a).ok()?;
+                            elementwise_real_or_complex(
+                                Value::Tensor(ta),
+                                scalar.clone(),
+                                comparison,
+                            )
+                            .ok()
+                        })
+                        .ok_or_else(|| "max: elementwise GPU scalar path failed".to_string());
+                }
+            }
+            if gpu_tensor_is_scalar(&handle_a) {
+                if let Some(num) = gpu_tensor_scalar_value(&handle_a) {
+                    let scalar = Value::Num(num);
+                    return elementwise_max_gpu_scalar_right(&scalar, &handle_b, comparison)
+                        .or_else(|| {
+                            let tb = gpu_helpers::gather_tensor(&handle_b).ok()?;
+                            elementwise_real_or_complex(
+                                scalar.clone(),
+                                Value::Tensor(tb),
+                                comparison,
+                            )
+                            .ok()
+                        })
+                        .ok_or_else(|| "max: elementwise GPU scalar path failed".to_string());
+                }
+            }
             elementwise_max_gpu_pair(&handle_a, &handle_b, comparison)
                 .or_else(|| {
                     // Fallback to host path if provider path unavailable or unsupported
@@ -1315,16 +1395,11 @@ fn elementwise_max_gpu_pair(
         let values = provider.elem_max(a, b).ok()?;
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
         if let Ok(mask) = provider.elem_ge(a, b) {
-            let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+            let indices = gpu_mask_indices(provider, &mask)?;
             let _ = provider.free(&mask);
-            let mut indices = Vec::with_capacity(mask_host.data.len());
-            for &m in &mask_host.data {
-                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-            }
-            let index_tensor = Tensor::new(indices, mask_host.shape.clone()).ok()?;
             return Some(MaxEvaluation {
                 values: Value::GpuTensor(values),
-                indices: tensor::tensor_into_value(index_tensor),
+                indices: Value::GpuTensor(indices),
             });
         } else {
             // Host path for indices only
@@ -1442,13 +1517,12 @@ fn elementwise_max_gpu_scalar_left(
     let index_tensor = if let Ok(fill) = provider.fill_like(a, scalar) {
         if let Ok(mask) = provider.elem_ge(a, &fill) {
             let _ = provider.free(&fill);
-            let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+            let indices = gpu_mask_indices(provider, &mask)?;
             let _ = provider.free(&mask);
-            let mut indices = Vec::with_capacity(mask_host.data.len());
-            for &m in &mask_host.data {
-                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, mask_host.shape.clone()).ok()?
+            return Some(MaxEvaluation {
+                values: Value::GpuTensor(values),
+                indices: Value::GpuTensor(indices),
+            });
         } else {
             let _ = provider.free(&fill);
             let ta = gpu_helpers::gather_tensor(a).ok()?;
@@ -1493,13 +1567,12 @@ fn elementwise_max_gpu_scalar_right(
     let index_tensor = if let Ok(fill) = provider.fill_like(b, scalar) {
         if let Ok(mask) = provider.elem_ge(&fill, b) {
             let _ = provider.free(&fill);
-            let mask_host = gpu_helpers::gather_tensor(&mask).ok()?;
+            let indices = gpu_mask_indices(provider, &mask)?;
             let _ = provider.free(&mask);
-            let mut indices = Vec::with_capacity(mask_host.data.len());
-            for &m in &mask_host.data {
-                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, mask_host.shape.clone()).ok()?
+            return Some(MaxEvaluation {
+                values: Value::GpuTensor(values),
+                indices: Value::GpuTensor(indices),
+            });
         } else {
             let _ = provider.free(&fill);
             let tb = gpu_helpers::gather_tensor(b).ok()?;
@@ -1532,6 +1605,25 @@ fn extract_scalar(v: &Value) -> Option<f64> {
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }
+}
+
+fn gpu_tensor_is_scalar(handle: &GpuTensorHandle) -> bool {
+    handle.shape.iter().copied().product::<usize>().max(1) == 1
+}
+
+fn gpu_tensor_scalar_value(handle: &GpuTensorHandle) -> Option<f64> {
+    let tensor = gpu_helpers::gather_tensor(handle).ok()?;
+    tensor.data.first().copied()
+}
+
+fn gpu_mask_indices(
+    provider: &dyn AccelProvider,
+    mask: &GpuTensorHandle,
+) -> Option<GpuTensorHandle> {
+    let scaled = provider.scalar_mul(mask, -1.0).ok()?;
+    let shifted = provider.scalar_add(&scaled, 2.0).ok()?;
+    let _ = provider.free(&scaled);
+    Some(shifted)
 }
 
 fn elementwise_real_or_complex(

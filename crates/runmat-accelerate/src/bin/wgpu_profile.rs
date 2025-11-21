@@ -9,7 +9,9 @@ use log::info;
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate::provider_cache_stats;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView, ReductionFlavor,
+};
 use serde::Serialize;
 #[cfg(feature = "wgpu")]
 use wgpu::PowerPreference;
@@ -432,7 +434,7 @@ fn setup_wgpu_provider() -> Result<()> {
     };
 
     match provider::register_wgpu_provider(high_perf) {
-        Ok(_) => return Ok(()),
+        Ok(_) => Ok(()),
         Err(err_hp) => {
             let fallback_opts = WgpuProviderOptions {
                 power_preference: PowerPreference::LowPower,
@@ -558,11 +560,12 @@ fn run_fused_wgsl_case(
         let compute_start = Instant::now();
         let _ = provider.fused_reduction(
             &shader,
-            &[handle_matrix.clone()],
+            std::slice::from_ref(&handle_matrix),
             &[cols],
             rows,
             cols,
             wg_size,
+            ReductionFlavor::Sum,
         )?;
         let compute_time = compute_start.elapsed();
         let (_out_matrix, download_time) = download_matrix(provider, &handle_matrix)?;
@@ -825,11 +828,12 @@ fn run_reduction_sweep_case(
         let compute_start = Instant::now();
         let _ = provider.fused_reduction(
             &shader,
-            &[handle_matrix.clone()],
+            std::slice::from_ref(&handle_matrix),
             &[cols],
             rows,
             cols,
             wg_size,
+            ReductionFlavor::Sum,
         )?;
         let compute_time = compute_start.elapsed();
         info!(
@@ -1091,6 +1095,7 @@ fn run_composite_atda_case(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generic_single_output_case<FGpu, FCpu>(
     provider: &'static dyn AccelProvider,
     name: &str,
@@ -1340,12 +1345,12 @@ fn cpu_reduce_sum_dim(matrix: &Matrix, dim: usize) -> Matrix {
     match dim {
         1 => {
             let mut data = vec![0.0; matrix.cols];
-            for c in 0..matrix.cols {
+            for (c, out) in data.iter_mut().enumerate().take(matrix.cols) {
                 let mut acc = 0.0;
                 for r in 0..matrix.rows {
                     acc += matrix.data[r + c * matrix.rows];
                 }
-                data[c] = acc;
+                *out = acc;
             }
             Matrix {
                 rows: 1,
@@ -1355,12 +1360,12 @@ fn cpu_reduce_sum_dim(matrix: &Matrix, dim: usize) -> Matrix {
         }
         2 => {
             let mut data = vec![0.0; matrix.rows];
-            for r in 0..matrix.rows {
+            for (r, out) in data.iter_mut().enumerate().take(matrix.rows) {
                 let mut acc = 0.0;
                 for c in 0..matrix.cols {
                     acc += matrix.data[r + c * matrix.rows];
                 }
-                data[r] = acc;
+                *out = acc;
             }
             Matrix {
                 rows: matrix.rows,

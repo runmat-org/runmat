@@ -354,7 +354,7 @@ fn erase_cell_array(cell: CellArray, patterns: &PatternList) -> Result<Value, St
     let shape = cell.shape.clone();
     let mut values = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
-        values.push(erase_cell_element(&*handle, patterns)?);
+        values.push(erase_cell_element(handle, patterns)?);
     }
     make_cell_with_shape(values, shape).map_err(|e| format!("erase: {e}"))
 }

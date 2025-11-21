@@ -26,17 +26,15 @@ fn indexing_with_end_and_member_method() {
     let program = parse("A(5:end); obj.method(a,b)").unwrap();
     assert_eq!(program.body.len(), 2);
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::Index(base, idxs), true) => {
-            assert!(matches!(**base, Expr::Ident(ref n) if n == "A"));
+        Stmt::ExprStmt(Expr::FuncCall(name, args), true) => {
+            assert_eq!(name, "A");
+            assert_eq!(args.len(), 1);
             assert!(matches!(
-                idxs.as_slice(),
-                [Expr::Binary(_, BinOp::Colon, _)]
-                    | [Expr::Range(_, _, _)]
-                    | [Expr::Number(_), Expr::EndKeyword]
-                    | [Expr::Number(_), Expr::Colon, Expr::EndKeyword]
+                args.as_slice(),
+                [Expr::Binary(_, BinOp::Colon, _)] | [Expr::Range(_, _, _)]
             ));
         }
-        _ => panic!("expected indexing with end"),
+        _ => panic!("expected deferred call form for A(5:end)"),
     }
     match &program.body[1] {
         Stmt::ExprStmt(Expr::MethodCall(obj, name, args), false) => {

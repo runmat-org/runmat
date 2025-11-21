@@ -1537,10 +1537,10 @@ mod tests {
         };
         use runmat_accelerate_api::HostTensorView;
 
-        if runmat_accelerate_api::provider().is_none() {
-            if register_wgpu_provider(WgpuProviderOptions::default()).is_err() {
-                runmat_accelerate::simple_provider::register_inprocess_provider();
-            }
+        if runmat_accelerate_api::provider().is_none()
+            && register_wgpu_provider(WgpuProviderOptions::default()).is_err()
+        {
+            runmat_accelerate::simple_provider::register_inprocess_provider();
         }
 
         let provider = runmat_accelerate_api::provider().expect("accel provider");

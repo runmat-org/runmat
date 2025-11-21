@@ -4,8 +4,8 @@ use crate::instr::Instr;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram, execute_elementwise, execute_explained_variance,
-    execute_matmul_epilogue, execute_power_step_normalize, execute_reduction,
-    FusionExecutionRequest,
+    execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
+    execute_reduction, FusionExecutionRequest,
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
@@ -14,17 +14,36 @@ use runmat_accelerate::{
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
-    active_group_plan_clone, FusionKind, FusionOp as AccelFusionOp, ShapeInfo, ValueOrigin, VarKind,
+    active_group_plan_clone, value_is_all_keyword, FusionKind, ReductionAxes, ShapeInfo,
+    ValueOrigin, VarKind,
 };
 use runmat_builtins::{Type, Value};
 use runmat_runtime::{
-    call_builtin,
+    builtins::common::tensor,
+    builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
+    call_builtin, gather_if_needed,
     workspace::{self as runtime_workspace, WorkspaceResolver},
 };
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::sync::Once;
+#[cfg(feature = "native-accel")]
+use std::sync::OnceLock;
+
+thread_local! {
+    static CURRENT_PC: Cell<usize> = const { Cell::new(0) };
+}
+
+#[inline]
+fn set_vm_pc(pc: usize) {
+    CURRENT_PC.with(|cell| cell.set(pc));
+}
+
+#[inline]
+fn current_pc() -> usize {
+    CURRENT_PC.with(|cell| cell.get())
+}
 
 #[cfg(feature = "native-accel")]
 struct FusionPlanGuard;
@@ -33,6 +52,84 @@ struct FusionPlanGuard;
 impl Drop for FusionPlanGuard {
     fn drop(&mut self) {
         deactivate_fusion_plan();
+    }
+}
+
+struct InterpreterTiming {
+    enabled: bool,
+    host_span_start: Option<(std::time::Instant, usize)>,
+    host_span_last_pc: Option<usize>,
+    host_span_instrs: u64,
+    seq: u64,
+}
+
+impl InterpreterTiming {
+    fn new() -> Self {
+        let enabled = std::env::var("RUNMAT_INTERPRETER_TIMING")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+            .unwrap_or(false);
+        Self {
+            enabled,
+            host_span_start: None,
+            host_span_last_pc: None,
+            host_span_instrs: 0,
+            seq: 0,
+        }
+    }
+
+    fn note_host_instr(&mut self, pc: usize) {
+        if !self.enabled {
+            return;
+        }
+        if self.host_span_start.is_none() {
+            self.host_span_start = Some((std::time::Instant::now(), pc));
+            self.host_span_instrs = 0;
+        }
+        self.host_span_instrs += 1;
+        self.host_span_last_pc = Some(pc);
+    }
+
+    fn flush_host_span(&mut self, reason: &str, detail: Option<&str>) {
+        if !self.enabled {
+            return;
+        }
+        let Some((start, start_pc)) = self.host_span_start.take() else {
+            return;
+        };
+        let duration = start.elapsed();
+        let end_pc = self.host_span_last_pc.unwrap_or(start_pc);
+        let instrs = self.host_span_instrs.max(1);
+        if let Some(extra) = detail {
+            log::debug!(
+                "interpreter_host_span seq={} reason={} detail={} pc_span=[{}..{}] instrs={} duration_ns={}",
+                self.seq,
+                reason,
+                extra,
+                start_pc,
+                end_pc,
+                instrs,
+                duration.as_nanos()
+            );
+        } else {
+            log::debug!(
+                "interpreter_host_span seq={} reason={} pc_span=[{}..{}] instrs={} duration_ns={}",
+                self.seq,
+                reason,
+                start_pc,
+                end_pc,
+                instrs,
+                duration.as_nanos()
+            );
+        }
+        self.seq += 1;
+        self.host_span_last_pc = None;
+        self.host_span_instrs = 0;
+    }
+}
+
+impl Drop for InterpreterTiming {
+    fn drop(&mut self) {
+        self.flush_host_span("drop", None);
     }
 }
 
@@ -91,6 +188,68 @@ fn call_builtin_auto(name: &str, args: &[Value]) -> Result<Value, String> {
     runmat_runtime::call_builtin(name, &prepared)
 }
 
+#[cfg(feature = "native-accel")]
+#[inline]
+fn fusion_debug_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| match std::env::var("RUNMAT_DEBUG_FUSION") {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"),
+        Err(_) => false,
+    })
+}
+
+#[cfg(feature = "native-accel")]
+fn log_fusion_span_window(
+    plan: &runmat_accelerate::FusionGroupPlan,
+    bytecode: &Bytecode,
+    pc: usize,
+) {
+    if !fusion_debug_enabled() || !log::log_enabled!(log::Level::Debug) {
+        return;
+    }
+    if bytecode.instructions.is_empty() {
+        return;
+    }
+    let window = 3usize;
+    let span = plan.group.span.clone();
+    let total = bytecode.instructions.len();
+    let start = span.start.saturating_sub(window);
+    let mut end = span.end + window;
+    if end >= total {
+        end = total.saturating_sub(1);
+    }
+    if end < span.end {
+        end = span.end;
+    }
+    let mut ops: Vec<String> = Vec::new();
+    for idx in start..=end {
+        let instr = &bytecode.instructions[idx];
+        let mut tags: Vec<&'static str> = Vec::new();
+        if idx == pc {
+            tags.push("pc");
+        }
+        if idx == span.start {
+            tags.push("start");
+        }
+        if idx == span.end {
+            tags.push("end");
+        }
+        let tag_str = if tags.is_empty() {
+            String::new()
+        } else {
+            format!("<{}>", tags.join(","))
+        };
+        ops.push(format!("{}{} {:?}", idx, tag_str, instr));
+    }
+    log::debug!(
+        "fusion plan {} span window [{}..{}]: {}",
+        plan.index,
+        start,
+        end,
+        ops.join(" | ")
+    );
+}
+
 // Namespace used for error identifiers (e.g., "MATLAB:..." or "RunMat:...")
 const ERROR_NAMESPACE: &str = "MATLAB";
 
@@ -103,7 +262,688 @@ fn mex(id: &str, msg: &str) -> String {
         None => id,
     };
     let ident = format!("{ERROR_NAMESPACE}:{suffix}");
-    format!("{ident}: {msg}")
+    let pc = current_pc();
+    format!("{ident} (pc={pc}): {msg}")
+}
+
+#[derive(Clone)]
+enum SliceSelector {
+    Colon,
+    Scalar(usize),
+    Indices(Vec<usize>),
+}
+
+#[derive(Debug, Clone)]
+struct SlicePlan {
+    indices: Vec<u32>,
+    output_shape: Vec<usize>,
+    selection_lengths: Vec<usize>,
+    dims: usize,
+}
+
+fn cartesian_product<F: FnMut(&[usize])>(lists: &[Vec<usize>], mut f: F) {
+    let dims = lists.len();
+    if dims == 0 {
+        return;
+    }
+    let mut idx = vec![0usize; dims];
+    loop {
+        let current: Vec<usize> = (0..dims).map(|d| lists[d][idx[d]]).collect();
+        f(&current);
+        let mut d = 0usize;
+        while d < dims {
+            idx[d] += 1;
+            if idx[d] < lists[d].len() {
+                break;
+            }
+            idx[d] = 0;
+            d += 1;
+        }
+        if d == dims {
+            break;
+        }
+    }
+}
+
+fn cartesian_positions<F: FnMut(&[usize])>(lengths: &[usize], mut f: F) {
+    if lengths.is_empty() || lengths.contains(&0) {
+        return;
+    }
+    let dims = lengths.len();
+    let mut idx = vec![0usize; dims];
+    loop {
+        f(&idx);
+        let mut d = 0usize;
+        while d < dims {
+            idx[d] += 1;
+            if idx[d] < lengths[d] {
+                break;
+            }
+            idx[d] = 0;
+            d += 1;
+        }
+        if d == dims {
+            break;
+        }
+    }
+}
+
+fn total_len_from_shape(shape: &[usize]) -> usize {
+    if shape.is_empty() {
+        1
+    } else {
+        shape.iter().copied().product()
+    }
+}
+
+fn indices_from_value_linear(value: &Value, total_len: usize) -> Result<Vec<usize>, String> {
+    match value {
+        Value::Num(n) => {
+            let idx = *n as isize;
+            if idx < 1 || (idx as usize) > total_len {
+                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+            }
+            Ok(vec![idx as usize])
+        }
+        Value::Int(int_val) => {
+            let idx = int_val.to_i64();
+            if idx < 1 || (idx as usize) > total_len {
+                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+            }
+            Ok(vec![idx as usize])
+        }
+        Value::Tensor(idx_t) => {
+            let len = idx_t.shape.iter().product::<usize>();
+            if len == total_len {
+                let mut indices = Vec::new();
+                for (i, &val) in idx_t.data.iter().enumerate() {
+                    if val != 0.0 {
+                        indices.push(i + 1);
+                    }
+                }
+                Ok(indices)
+            } else {
+                let mut indices = Vec::with_capacity(len);
+                for &val in &idx_t.data {
+                    let idx = val as isize;
+                    if idx < 1 || (idx as usize) > total_len {
+                        return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                    }
+                    indices.push(idx as usize);
+                }
+                Ok(indices)
+            }
+        }
+        Value::LogicalArray(la) => {
+            if la.data.len() != total_len {
+                return Err(mex(
+                    "IndexShape",
+                    "Logical mask length mismatch for linear indexing",
+                ));
+            }
+            let mut indices = Vec::new();
+            for (i, &b) in la.data.iter().enumerate() {
+                if b != 0 {
+                    indices.push(i + 1);
+                }
+            }
+            Ok(indices)
+        }
+        _ => Err(mex(
+            "UnsupportedIndexType",
+            "Unsupported index type for linear indexing",
+        )),
+    }
+}
+
+fn selector_from_value_dim(value: &Value, dim_len: usize) -> Result<SliceSelector, String> {
+    match value {
+        Value::Num(n) => {
+            let idx = *n as isize;
+            if idx < 1 || (idx as usize) > dim_len {
+                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+            }
+            Ok(SliceSelector::Scalar(idx as usize))
+        }
+        Value::Int(int_val) => {
+            let idx = int_val.to_i64();
+            if idx < 1 || (idx as usize) > dim_len {
+                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+            }
+            Ok(SliceSelector::Scalar(idx as usize))
+        }
+        Value::Tensor(idx_t) => {
+            let len = idx_t.shape.iter().product::<usize>();
+            if len == dim_len {
+                let mut indices = Vec::new();
+                for (i, &val) in idx_t.data.iter().enumerate() {
+                    if val != 0.0 {
+                        indices.push(i + 1);
+                    }
+                }
+                Ok(SliceSelector::Indices(indices))
+            } else {
+                let mut indices = Vec::with_capacity(len);
+                for &val in &idx_t.data {
+                    let idx = val as isize;
+                    if idx < 1 || (idx as usize) > dim_len {
+                        return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                    }
+                    indices.push(idx as usize);
+                }
+                Ok(SliceSelector::Indices(indices))
+            }
+        }
+        Value::LogicalArray(la) => {
+            if la.data.len() != dim_len {
+                return Err(mex(
+                    "IndexShape",
+                    "Logical mask length mismatch for dimension",
+                ));
+            }
+            let mut indices = Vec::new();
+            for (i, &b) in la.data.iter().enumerate() {
+                if b != 0 {
+                    indices.push(i + 1);
+                }
+            }
+            Ok(SliceSelector::Indices(indices))
+        }
+        _ => Err(mex(
+            "UnsupportedIndexType",
+            "Unsupported index type for slicing",
+        )),
+    }
+}
+
+fn build_slice_selectors(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+) -> Result<Vec<SliceSelector>, String> {
+    let mut selectors = Vec::with_capacity(dims);
+    if dims == 1 {
+        let total_len = total_len_from_shape(base_shape);
+        if (colon_mask & 1u32) != 0 {
+            selectors.push(SliceSelector::Indices((1..=total_len).collect()));
+            return Ok(selectors);
+        }
+        if (end_mask & 1u32) != 0 {
+            selectors.push(SliceSelector::Scalar(total_len.max(1)));
+            return Ok(selectors);
+        }
+        let value = numeric.first().ok_or_else(|| {
+            mex(
+                "MissingNumericIndex",
+                "missing numeric index for linear slice",
+            )
+        })?;
+        let idxs = indices_from_value_linear(value, total_len)?;
+        selectors.push(SliceSelector::Indices(idxs));
+        return Ok(selectors);
+    }
+
+    let mut numeric_iter = 0usize;
+    for d in 0..dims {
+        let is_colon = (colon_mask & (1u32 << d)) != 0;
+        if is_colon {
+            selectors.push(SliceSelector::Colon);
+            continue;
+        }
+        let dim_len = base_shape.get(d).copied().unwrap_or(1);
+        let is_end = (end_mask & (1u32 << d)) != 0;
+        if is_end {
+            selectors.push(SliceSelector::Scalar(dim_len));
+            continue;
+        }
+        let value = numeric
+            .get(numeric_iter)
+            .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
+        numeric_iter += 1;
+        selectors.push(selector_from_value_dim(value, dim_len)?);
+    }
+    Ok(selectors)
+}
+
+fn build_slice_plan(
+    selectors: &[SliceSelector],
+    dims: usize,
+    base_shape: &[usize],
+) -> Result<SlicePlan, String> {
+    let total_len = total_len_from_shape(base_shape);
+    if dims == 1 {
+        let list = selectors
+            .first()
+            .cloned()
+            .unwrap_or(SliceSelector::Indices(Vec::new()));
+        let indices = match list {
+            SliceSelector::Colon => (1..=total_len).collect::<Vec<usize>>(),
+            SliceSelector::Scalar(i) => vec![i],
+            SliceSelector::Indices(v) => v,
+        };
+        if indices.iter().any(|&i| i == 0 || i > total_len) {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        let zero_based: Vec<u32> = indices.iter().map(|&i| (i - 1) as u32).collect();
+        let count = zero_based.len();
+        let shape = if count <= 1 {
+            vec![1, 1]
+        } else {
+            vec![count, 1]
+        };
+        return Ok(SlicePlan {
+            indices: zero_based,
+            output_shape: shape,
+            selection_lengths: vec![count],
+            dims,
+        });
+    }
+
+    let mut selection_lengths = Vec::with_capacity(dims);
+    let mut per_dim_lists: Vec<Vec<usize>> = Vec::with_capacity(dims);
+    for (d, sel) in selectors.iter().enumerate().take(dims) {
+        let dim_len = base_shape.get(d).copied().unwrap_or(1);
+        let idxs = match sel {
+            SliceSelector::Colon => (1..=dim_len).collect::<Vec<usize>>(),
+            SliceSelector::Scalar(i) => vec![*i],
+            SliceSelector::Indices(v) => v.clone(),
+        };
+        if idxs.iter().any(|&i| i == 0 || i > dim_len) {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        selection_lengths.push(idxs.len());
+        per_dim_lists.push(idxs);
+    }
+
+    if selection_lengths.contains(&0) {
+        let mut out_shape = selection_lengths.clone();
+        if dims == 2 {
+            if selection_lengths[0] > 1 && selection_lengths[1] == 1 {
+                out_shape = vec![selection_lengths[0], 1];
+            } else if selection_lengths[0] == 1 && selection_lengths[1] > 1 {
+                out_shape = vec![1, selection_lengths[1]];
+            }
+        }
+        return Ok(SlicePlan {
+            indices: Vec::new(),
+            output_shape: out_shape,
+            selection_lengths,
+            dims,
+        });
+    }
+
+    let mut base_norm = base_shape.to_vec();
+    if base_norm.len() < dims {
+        base_norm.resize(dims, 1);
+    }
+
+    let mut strides = vec![1usize; dims];
+    for d in 1..dims {
+        strides[d] = strides[d - 1] * base_norm[d - 1].max(1);
+    }
+
+    let mut indices = Vec::new();
+    cartesian_product(&per_dim_lists, |multi| {
+        let mut lin = 0usize;
+        for d in 0..dims {
+            let idx = multi[d] - 1;
+            lin += idx * strides[d];
+        }
+        indices.push(lin as u32);
+    });
+
+    let mut out_shape = selection_lengths.clone();
+    if dims == 2 {
+        if selection_lengths[0] > 1 && selection_lengths[1] == 1 {
+            out_shape = vec![selection_lengths[0], 1];
+        } else if selection_lengths[0] == 1 && selection_lengths[1] > 1 {
+            out_shape = vec![1, selection_lengths[1]];
+        }
+    }
+    let total_out: usize = selection_lengths.iter().product();
+    if total_out == 1 {
+        out_shape = vec![1, 1];
+    }
+
+    Ok(SlicePlan {
+        indices,
+        output_shape: out_shape,
+        selection_lengths,
+        dims,
+    })
+}
+
+fn gather_string_slice(
+    sa: &runmat_builtins::StringArray,
+    plan: &SlicePlan,
+) -> Result<Value, String> {
+    if plan.indices.is_empty() {
+        let empty = runmat_builtins::StringArray::new(Vec::new(), plan.output_shape.clone())
+            .map_err(|e| format!("Slice error: {e}"))?;
+        return Ok(Value::StringArray(empty));
+    }
+    if plan.indices.len() == 1 {
+        let lin = plan.indices[0] as usize;
+        let value = sa
+            .data
+            .get(lin)
+            .cloned()
+            .ok_or_else(|| "Slice error: string index out of bounds".to_string())?;
+        return Ok(Value::String(value));
+    }
+    let mut out = Vec::with_capacity(plan.indices.len());
+    for &lin in &plan.indices {
+        let idx = lin as usize;
+        let value = sa
+            .data
+            .get(idx)
+            .cloned()
+            .ok_or_else(|| "Slice error: string index out of bounds".to_string())?;
+        out.push(value);
+    }
+    let out_sa = runmat_builtins::StringArray::new(out, plan.output_shape.clone())
+        .map_err(|e| format!("Slice error: {e}"))?;
+    Ok(Value::StringArray(out_sa))
+}
+
+enum StringAssignView {
+    Scalar(String),
+    Array {
+        data: Vec<String>,
+        shape: Vec<usize>,
+        strides: Vec<usize>,
+    },
+}
+
+fn build_string_rhs_view(
+    rhs: &Value,
+    selection_lengths: &[usize],
+) -> Result<StringAssignView, String> {
+    let dims = selection_lengths.len().max(1);
+    match rhs {
+        Value::String(s) => Ok(StringAssignView::Scalar(s.clone())),
+        Value::Num(n) => Ok(StringAssignView::Scalar(n.to_string())),
+        Value::Int(i) => Ok(StringAssignView::Scalar(i.to_i64().to_string())),
+        Value::Tensor(t) => {
+            let mut shape = t.shape.clone();
+            if shape.len() < dims {
+                shape.resize(dims, 1);
+            } else if shape.len() > dims {
+                if shape.iter().skip(dims).any(|&s| s != 1) {
+                    return Err("shape mismatch for slice assign".to_string());
+                }
+                shape.truncate(dims);
+            }
+            for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
+                if !(*rhs_len == 1 || *rhs_len == *sel_len) {
+                    return Err("shape mismatch for slice assign".to_string());
+                }
+            }
+            let mut strides = vec![1usize; dims];
+            for d in 1..dims {
+                strides[d] = strides[d - 1] * shape[d - 1].max(1);
+            }
+            let data = t.data.iter().map(|v| v.to_string()).collect();
+            Ok(StringAssignView::Array {
+                data,
+                shape,
+                strides,
+            })
+        }
+        Value::StringArray(sa) => {
+            let mut shape = sa.shape.clone();
+            if shape.len() < dims {
+                shape.resize(dims, 1);
+            } else if shape.len() > dims {
+                if shape.iter().skip(dims).any(|&s| s != 1) {
+                    return Err("shape mismatch for slice assign".to_string());
+                }
+                shape.truncate(dims);
+            }
+            for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
+                if !(*rhs_len == 1 || *rhs_len == *sel_len) {
+                    return Err("shape mismatch for slice assign".to_string());
+                }
+            }
+            let mut strides = vec![1usize; dims];
+            for d in 1..dims {
+                strides[d] = strides[d - 1] * shape[d - 1].max(1);
+            }
+            Ok(StringAssignView::Array {
+                data: sa.data.clone(),
+                shape,
+                strides,
+            })
+        }
+        _ => Err("rhs must be string or string array".to_string()),
+    }
+}
+
+fn scatter_string_with_plan(
+    sa: &mut runmat_builtins::StringArray,
+    plan: &SlicePlan,
+    view: &StringAssignView,
+) -> Result<(), String> {
+    if plan.indices.is_empty() {
+        return Ok(());
+    }
+    let mut idx_iter = plan.indices.iter();
+    cartesian_positions(&plan.selection_lengths, |position| {
+        if let Some(&lin) = idx_iter.next() {
+            let replacement = match view {
+                StringAssignView::Scalar(s) => s.clone(),
+                StringAssignView::Array {
+                    data,
+                    shape,
+                    strides,
+                } => {
+                    let mut rlin = 0usize;
+                    for (d, &pos_val) in position.iter().enumerate() {
+                        let rhs_len = shape.get(d).copied().unwrap_or(1);
+                        let pos = if rhs_len == 1 { 0 } else { pos_val };
+                        rlin += pos * strides.get(d).copied().unwrap_or(1);
+                    }
+                    data.get(rlin).cloned().unwrap_or_default()
+                }
+            };
+            if let Some(slot) = sa.data.get_mut(lin as usize) {
+                *slot = replacement;
+            }
+        }
+    });
+    Ok(())
+}
+
+fn apply_end_offsets_to_numeric(
+    numeric: &[Value],
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    end_offsets: &[(usize, i64)],
+    base_shape: &[usize],
+) -> Vec<Value> {
+    let mut adjusted = numeric.to_vec();
+    for (position, offset) in end_offsets {
+        if let Some(value) = adjusted.get_mut(*position) {
+            let mut seen_numeric = 0usize;
+            let mut dim_for_pos = 0usize;
+            for d in 0..dims {
+                let is_colon = (colon_mask & (1u32 << d)) != 0;
+                let is_end = (end_mask & (1u32 << d)) != 0;
+                if is_colon || is_end {
+                    continue;
+                }
+                if seen_numeric == *position {
+                    dim_for_pos = d;
+                    break;
+                }
+                seen_numeric += 1;
+            }
+            let dim_len = base_shape.get(dim_for_pos).copied().unwrap_or(1);
+            let idx_val = (dim_len as isize) - (*offset as isize);
+            *value = Value::Num(idx_val as f64);
+        }
+    }
+    adjusted
+}
+
+fn materialize_rhs_linear(rhs: &Value, count: usize) -> Result<Vec<f64>, String> {
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let host_rhs = runmat_runtime::gather_if_needed(rhs)?;
+    match host_rhs {
+        Value::Num(n) => Ok(vec![n; count]),
+        Value::Int(int_val) => Ok(vec![int_val.to_f64(); count]),
+        Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }; count]),
+        Value::Tensor(t) => {
+            if t.data.len() == count {
+                Ok(t.data)
+            } else if t.data.len() == 1 {
+                Ok(vec![t.data[0]; count])
+            } else {
+                Err("shape mismatch for slice assign".to_string())
+            }
+        }
+        Value::LogicalArray(la) => {
+            if la.data.len() == count {
+                let out: Vec<f64> = la
+                    .data
+                    .into_iter()
+                    .map(|b| if b != 0 { 1.0 } else { 0.0 })
+                    .collect();
+                Ok(out)
+            } else if la.data.len() == 1 {
+                let val = if la.data[0] != 0 { 1.0 } else { 0.0 };
+                Ok(vec![val; count])
+            } else {
+                Err("shape mismatch for slice assign".to_string())
+            }
+        }
+        other => Err(format!("slice assign: unsupported RHS type {:?}", other)),
+    }
+}
+
+fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> Result<Vec<f64>, String> {
+    let total: usize = selection_lengths.iter().copied().product();
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+    let rhs_host = runmat_runtime::gather_if_needed(rhs)?;
+    enum RhsView {
+        Scalar(f64),
+        Tensor {
+            data: Vec<f64>,
+            shape: Vec<usize>,
+            strides: Vec<usize>,
+        },
+    }
+    let view = match rhs_host {
+        Value::Num(n) => RhsView::Scalar(n),
+        Value::Int(iv) => RhsView::Scalar(iv.to_f64()),
+        Value::Bool(b) => RhsView::Scalar(if b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) => {
+            let mut shape = t.shape.clone();
+            if shape.len() < selection_lengths.len() {
+                shape.resize(selection_lengths.len(), 1);
+            }
+            if shape.len() > selection_lengths.len() {
+                if shape.iter().skip(selection_lengths.len()).any(|&s| s != 1) {
+                    return Err("shape mismatch for slice assign".to_string());
+                }
+                shape.truncate(selection_lengths.len());
+            }
+            for (dim_len, &sel_len) in shape.iter().zip(selection_lengths.iter()) {
+                if *dim_len != 1 && *dim_len != sel_len {
+                    return Err("shape mismatch for slice assign".to_string());
+                }
+            }
+            let mut strides = vec![1usize; selection_lengths.len()];
+            for d in 1..selection_lengths.len() {
+                strides[d] = strides[d - 1] * shape[d - 1].max(1);
+            }
+            if t.data.len()
+                != shape
+                    .iter()
+                    .copied()
+                    .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
+            {
+                return Err("shape mismatch for slice assign".to_string());
+            }
+            RhsView::Tensor {
+                data: t.data,
+                shape,
+                strides,
+            }
+        }
+        Value::LogicalArray(la) => {
+            if la.shape.len() > selection_lengths.len()
+                && la
+                    .shape
+                    .iter()
+                    .skip(selection_lengths.len())
+                    .any(|&s| s != 1)
+            {
+                return Err("shape mismatch for slice assign".to_string());
+            }
+            let mut shape = la.shape.clone();
+            if shape.len() < selection_lengths.len() {
+                shape.resize(selection_lengths.len(), 1);
+            } else {
+                shape.truncate(selection_lengths.len());
+            }
+            for (dim_len, &sel_len) in shape.iter().zip(selection_lengths.iter()) {
+                if *dim_len != 1 && *dim_len != sel_len {
+                    return Err("shape mismatch for slice assign".to_string());
+                }
+            }
+            let mut strides = vec![1usize; selection_lengths.len()];
+            for d in 1..selection_lengths.len() {
+                strides[d] = strides[d - 1] * shape[d - 1].max(1);
+            }
+            if la.data.len()
+                != shape
+                    .iter()
+                    .copied()
+                    .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
+            {
+                return Err("shape mismatch for slice assign".to_string());
+            }
+            let data: Vec<f64> = la
+                .data
+                .into_iter()
+                .map(|b| if b != 0 { 1.0 } else { 0.0 })
+                .collect();
+            RhsView::Tensor {
+                data,
+                shape,
+                strides,
+            }
+        }
+        other => return Err(format!("slice assign: unsupported RHS type {:?}", other)),
+    };
+
+    let mut out = Vec::with_capacity(total);
+    cartesian_positions(selection_lengths, |positions| match &view {
+        RhsView::Scalar(val) => out.push(*val),
+        RhsView::Tensor {
+            data,
+            shape,
+            strides,
+        } => {
+            let mut rlin = 0usize;
+            for d in 0..positions.len() {
+                let rhs_len = shape[d];
+                let pos = if rhs_len == 1 { 0 } else { positions[d] };
+                rlin += pos * strides[d];
+            }
+            let value = data.get(rlin).copied().unwrap_or(0.0);
+            out.push(value);
+        }
+    });
+    Ok(out)
 }
 
 thread_local! {
@@ -120,14 +960,17 @@ thread_local! {
 
 struct WorkspaceState {
     names: HashMap<String, usize>,
+    assigned: HashSet<String>,
     data_ptr: *const Value,
     len: usize,
 }
 
+type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
+
 thread_local! {
-    static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = RefCell::new(None);
-    static PENDING_WORKSPACE: RefCell<Option<HashMap<String, usize>>> = RefCell::new(None);
-    static LAST_WORKSPACE_NAMES: RefCell<Option<HashMap<String, usize>>> = RefCell::new(None);
+    static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = const { RefCell::new(None) };
+    static PENDING_WORKSPACE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
+    static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
 }
 
 struct WorkspaceStateGuard;
@@ -137,18 +980,23 @@ impl Drop for WorkspaceStateGuard {
         WORKSPACE_STATE.with(|state| {
             let mut state_mut = state.borrow_mut();
             if let Some(ws) = state_mut.take() {
-                LAST_WORKSPACE_NAMES.with(|slot| {
-                    *slot.borrow_mut() = Some(ws.names);
+                LAST_WORKSPACE_STATE.with(|slot| {
+                    *slot.borrow_mut() = Some((ws.names, ws.assigned));
                 });
             }
         });
     }
 }
 
-fn set_workspace_state(names: HashMap<String, usize>, vars: &Vec<Value>) -> WorkspaceStateGuard {
+fn set_workspace_state(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+    vars: &[Value],
+) -> WorkspaceStateGuard {
     WORKSPACE_STATE.with(|state| {
         *state.borrow_mut() = Some(WorkspaceState {
             names,
+            assigned,
             data_ptr: vars.as_ptr(),
             len: vars.len(),
         });
@@ -156,7 +1004,7 @@ fn set_workspace_state(names: HashMap<String, usize>, vars: &Vec<Value>) -> Work
     WorkspaceStateGuard
 }
 
-fn refresh_workspace_state(vars: &Vec<Value>) {
+fn refresh_workspace_state(vars: &[Value]) {
     WORKSPACE_STATE.with(|state| {
         if let Some(ws) = state.borrow_mut().as_mut() {
             ws.data_ptr = vars.as_ptr();
@@ -170,6 +1018,9 @@ fn workspace_lookup(name: &str) -> Option<Value> {
         let state_ref = state.borrow();
         let ws = state_ref.as_ref()?;
         let idx = ws.names.get(name)?;
+        if !ws.assigned.contains(name) {
+            return None;
+        }
         if *idx >= ws.len {
             return None;
         }
@@ -188,6 +1039,9 @@ fn workspace_snapshot() -> Vec<(String, Value)> {
                 .iter()
                 .filter_map(|(name, idx)| {
                     if *idx >= ws.len {
+                        return None;
+                    }
+                    if !ws.assigned.contains(name) {
                         return None;
                     }
                     unsafe {
@@ -237,6 +1091,7 @@ fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> Re
                 vars[idx] = value;
                 ws.data_ptr = vars.as_ptr();
                 ws.len = vars.len();
+                ws.assigned.insert(name.to_string());
             }
             None => {
                 result = Err("load: workspace state unavailable".to_string());
@@ -278,15 +1133,18 @@ impl Drop for PendingWorkspaceGuard {
     }
 }
 
-pub fn push_pending_workspace(names: HashMap<String, usize>) -> PendingWorkspaceGuard {
+pub fn push_pending_workspace(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+) -> PendingWorkspaceGuard {
     PENDING_WORKSPACE.with(|slot| {
-        *slot.borrow_mut() = Some(names);
+        *slot.borrow_mut() = Some((names, assigned));
     });
     PendingWorkspaceGuard
 }
 
-pub fn take_updated_workspace_names() -> Option<HashMap<String, usize>> {
-    LAST_WORKSPACE_NAMES.with(|slot| slot.borrow_mut().take())
+pub fn take_updated_workspace_state() -> Option<(HashMap<String, usize>, HashSet<String>)> {
+    LAST_WORKSPACE_STATE.with(|slot| slot.borrow_mut().take())
 }
 
 thread_local! {
@@ -320,8 +1178,14 @@ pub fn interpret_with_vars(
     if vars.len() < bytecode.var_count {
         vars.resize(bytecode.var_count, Value::Num(0.0));
     }
-    let pending_names = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
-    let _workspace_guard = pending_names.map(|names| set_workspace_state(names, &vars));
+    let pending_state = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
+    let _workspace_guard = pending_state.map(|(names, assigned)| {
+        let filtered_assigned: HashSet<String> = assigned
+            .into_iter()
+            .filter(|name| names.contains_key(name))
+            .collect();
+        set_workspace_state(names, filtered_assigned, &vars)
+    });
     refresh_workspace_state(&vars);
     let mut pc: usize = 0;
     let mut context = ExecutionContext {
@@ -385,6 +1249,10 @@ pub fn interpret_with_vars(
     }
     #[inline]
     fn bench_end(_label: &str, _start: Option<std::time::Instant>) {}
+    let debug_stack = std::env::var("RUNMAT_DEBUG_STACK")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let mut interpreter_timing = InterpreterTiming::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
             let e: String = $err.to_string();
@@ -406,6 +1274,7 @@ pub fn interpret_with_vars(
         }};
     }
     while pc < bytecode.instructions.len() {
+        set_vm_pc(pc);
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
         #[cfg(feature = "native-accel")]
@@ -413,6 +1282,16 @@ pub fn interpret_with_vars(
             (active_group_plan_clone(), bytecode.accel_graph.as_ref())
         {
             if plan.group.span.start == pc {
+                #[cfg(feature = "native-accel")]
+                {
+                    let detail = format!(
+                        "plan={} kind={:?} span=[{}..{}]",
+                        plan.index, plan.group.kind, plan.group.span.start, plan.group.span.end
+                    );
+                    interpreter_timing.flush_host_span("before_fusion", Some(detail.as_str()));
+                }
+                #[cfg(feature = "native-accel")]
+                log_fusion_span_window(&plan, bytecode, pc);
                 match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context) {
                     Ok(result) => {
                         stack.push(result);
@@ -424,6 +1303,15 @@ pub fn interpret_with_vars(
                     }
                 }
             }
+        }
+        interpreter_timing.note_host_instr(pc);
+        if debug_stack {
+            eprintln!(
+                "Instr pc={} {:?} stack_len={}",
+                pc,
+                &bytecode.instructions[pc],
+                stack.len()
+            );
         }
         match bytecode.instructions[pc].clone() {
             Instr::AndAnd(target) => {
@@ -628,7 +1516,12 @@ pub fn interpret_with_vars(
             Instr::CallFevalExpandMulti(_specs) => {
                 vm_bail!("feval expand not supported in this execution mode".to_string());
             }
-            Instr::LoadConst(c) => stack.push(Value::Num(c)),
+            Instr::LoadConst(c) => {
+                stack.push(Value::Num(c));
+                if debug_stack {
+                    eprintln!("  -> LoadConst pushed {}, new_len={}", c, stack.len());
+                }
+            }
             Instr::LoadBool(b) => stack.push(Value::Bool(b)),
             Instr::LoadString(s) => stack.push(Value::String(s)),
             Instr::LoadCharRow(s) => {
@@ -658,6 +1551,18 @@ pub fn interpret_with_vars(
                 let val = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                if let Ok(filter) = std::env::var("RUNMAT_DEBUG_STORE_VAR") {
+                    let log_this = if filter.trim().eq_ignore_ascii_case("*") {
+                        true
+                    } else if let Ok(target) = filter.trim().parse::<usize>() {
+                        target == i
+                    } else {
+                        false
+                    };
+                    if log_this {
+                        eprintln!("StoreVar pc={} var={} value={:?}", pc, i, val);
+                    }
+                }
                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                     match &val {
                         Value::GpuTensor(h) => {
@@ -855,7 +1760,7 @@ pub fn interpret_with_vars(
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("plus", &vec![a.clone(), b.clone()])?;
+                                let v = call_builtin("plus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -869,7 +1774,7 @@ pub fn interpret_with_vars(
                         match call_builtin("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("plus", &vec![a.clone(), b.clone()])?;
+                                let v = call_builtin("plus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -877,7 +1782,7 @@ pub fn interpret_with_vars(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = call_builtin("plus", &vec![a_acc, b_acc])?;
+                        let v = call_builtin("plus", &[a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -895,7 +1800,7 @@ pub fn interpret_with_vars(
                         match call_builtin("minus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("minus", &vec![a.clone(), b.clone()])?;
+                                let v = call_builtin("minus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -905,7 +1810,7 @@ pub fn interpret_with_vars(
                         match call_builtin("uminus", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
-                                let v = call_builtin("minus", &vec![a.clone(), b.clone()])?;
+                                let v = call_builtin("minus", &[a.clone(), b.clone()])?;
                                 stack.push(v)
                             }
                         }
@@ -913,7 +1818,7 @@ pub fn interpret_with_vars(
                     _ => {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b)?;
-                        let v = call_builtin("minus", &vec![a_acc, b_acc])?;
+                        let v = call_builtin("minus", &[a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }
@@ -1766,7 +2671,38 @@ pub fn interpret_with_vars(
                 pc = target;
                 continue;
             }
+            Instr::StochasticEvolution => {
+                let steps_value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let scale_value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let drift_value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let state_value = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let evolved = stochastic_evolution_dispatch(
+                    state_value,
+                    drift_value,
+                    scale_value,
+                    steps_value,
+                )?;
+                stack.push(evolved);
+            }
             Instr::CallBuiltin(name, arg_count) => {
+                if debug_stack {
+                    eprintln!(
+                        "CallBuiltin pc={} name={} arg_count={} stack_len={} top={:?}",
+                        pc,
+                        name,
+                        arg_count,
+                        stack.len(),
+                        stack.last()
+                    );
+                }
                 if name == "nargin" {
                     if arg_count != 0 {
                         vm_bail!(mex("TooManyInputs", "nargin takes no arguments").to_string());
@@ -1811,9 +2747,8 @@ pub fn interpret_with_vars(
                             if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
                                 let qual = path.join(".");
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
-                                match runmat_runtime::call_builtin(&qual, &qual_args) {
-                                    Ok(value) => specific_matches.push((qual, qual_args, value)),
-                                    Err(_) => {}
+                                if let Ok(value) = runmat_runtime::call_builtin(&qual, &qual_args) {
+                                    specific_matches.push((qual, qual_args, value));
                                 }
                             }
                         }
@@ -1848,9 +2783,8 @@ pub fn interpret_with_vars(
                                 qual.push('.');
                                 qual.push_str(&name);
                                 let qual_args = accel_prepare_args(&qual, &prepared_primary)?;
-                                match runmat_runtime::call_builtin(&qual, &qual_args) {
-                                    Ok(value) => wildcard_matches.push((qual, qual_args, value)),
-                                    Err(_) => {}
+                                if let Ok(value) = runmat_runtime::call_builtin(&qual, &qual_args) {
+                                    wildcard_matches.push((qual, qual_args, value));
                                 }
                             }
                             if wildcard_matches.len() > 1 {
@@ -4318,9 +5252,24 @@ pub fn interpret_with_vars(
                     );
                 }
                 numeric.reverse();
-                let base = stack
+                let mut base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let mut logical_base = false;
+                base = match base {
+                    Value::LogicalArray(la) => {
+                        logical_base = true;
+                        let data: Vec<f64> = la
+                            .data
+                            .iter()
+                            .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                            .collect();
+                        let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+                            .map_err(|e| format!("slice: {e}"))?;
+                        Value::Tensor(tensor)
+                    }
+                    other => other,
+                };
                 match base {
                     Value::Object(obj) => {
                         let cell =
@@ -4738,6 +5687,38 @@ pub fn interpret_with_vars(
                             }
                         }
                     }
+                    Value::GpuTensor(handle) => {
+                        let provider = runmat_accelerate_api::provider()
+                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let base_shape = handle.shape.clone();
+                        let selectors = build_slice_selectors(
+                            dims,
+                            colon_mask,
+                            end_mask,
+                            &numeric,
+                            &base_shape,
+                        )
+                        .map_err(|e| format!("slice: {e}"))?;
+                        let plan =
+                            build_slice_plan(&selectors, dims, &base_shape).map_err(|e| {
+                                if e.contains("IndexOutOfBounds") {
+                                    e.clone()
+                                } else {
+                                    format!("slice: {e}")
+                                }
+                            })?;
+                        if plan.indices.is_empty() {
+                            let zeros = provider
+                                .zeros(&plan.output_shape)
+                                .map_err(|e| format!("slice: {e}"))?;
+                            stack.push(Value::GpuTensor(zeros));
+                        } else {
+                            let result = provider
+                                .gather_linear(&handle, &plan.indices, &plan.output_shape)
+                                .map_err(|e| format!("slice: {e}"))?;
+                            stack.push(Value::GpuTensor(result));
+                        }
+                    }
                     Value::StringArray(sa) => {
                         let rank = sa.shape.len();
                         #[derive(Clone)]
@@ -4997,9 +5978,38 @@ pub fn interpret_with_vars(
                                 )),
                             };
                             stack.push(v);
+                        } else {
+                            vm_bail!(mex("SliceNonTensor", "Slicing only supported on tensors"));
                         }
-                        vm_bail!(mex("SliceNonTensor", "Slicing only supported on tensors"));
                     }
+                }
+                if logical_base {
+                    let result = stack
+                        .pop()
+                        .ok_or(mex("SliceNonTensor", "logical slice missing result"))?;
+                    let converted = match result {
+                        Value::Tensor(t) => {
+                            let logical_data: Vec<u8> = t
+                                .data
+                                .iter()
+                                .map(|&v| if v != 0.0 { 1 } else { 0 })
+                                .collect();
+                            if logical_data.len() <= 1 {
+                                Value::Bool(logical_data.first().copied().unwrap_or(0) != 0)
+                            } else {
+                                let logical = runmat_builtins::LogicalArray::new(
+                                    logical_data,
+                                    t.shape.clone(),
+                                )
+                                .map_err(|e| mex("SliceNonTensor", &format!("slice: {e}")))?;
+                                Value::LogicalArray(logical)
+                            }
+                        }
+                        Value::Num(n) => Value::Bool(n != 0.0),
+                        Value::Bool(_) | Value::LogicalArray(_) => result,
+                        other => other,
+                    };
+                    stack.push(converted);
                 }
                 bench_end("IndexSlice", __b);
             }
@@ -5246,190 +6256,19 @@ pub fn interpret_with_vars(
                         }
                     }
                     Value::StringArray(sa) => {
-                        let rank = sa.shape.len();
-                        #[derive(Clone)]
-                        enum Sel {
-                            Colon,
-                            Scalar(usize),
-                            Indices(Vec<usize>),
-                            Range { start: i64, step: i64, end_off: i64 },
-                        }
-                        let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
-                        let mut num_iter = 0usize;
-                        let mut rp_iter = 0usize;
-                        for d in 0..dims {
-                            let is_colon = (colon_mask & (1u32 << d)) != 0;
-                            let is_end = (end_mask & (1u32 << d)) != 0;
-                            if is_colon {
-                                selectors.push(Sel::Colon);
-                            } else if is_end {
-                                selectors.push(Sel::Scalar(*sa.shape.get(d).unwrap_or(&1)));
-                            } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                                let (st, sp) = range_params[rp_iter];
-                                rp_iter += 1;
-                                let off = end_offsets[pos];
-                                selectors.push(Sel::Range {
-                                    start: st as i64,
-                                    step: if sp >= 0.0 {
-                                        sp as i64
-                                    } else {
-                                        -(sp.abs() as i64)
-                                    },
-                                    end_off: off,
-                                });
+                        let selectors =
+                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &sa.shape)
+                                .map_err(|e| format!("slice: {e}"))?;
+                        let plan = build_slice_plan(&selectors, dims, &sa.shape).map_err(|e| {
+                            if e.contains("IndexOutOfBounds") {
+                                e.clone()
                             } else {
-                                let v = numeric
-                                    .get(num_iter)
-                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
-                                num_iter += 1;
-                                match v {
-                                    Value::Num(n) => {
-                                        let idx = *n as isize;
-                                        if idx < 1 {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
-                                        }
-                                        selectors.push(Sel::Scalar(idx as usize));
-                                    }
-                                    Value::Tensor(idx_t) => {
-                                        let dim_len = *sa.shape.get(d).unwrap_or(&1);
-                                        let len = idx_t.shape.iter().product::<usize>();
-                                        if len == dim_len {
-                                            let mut v = Vec::new();
-                                            for (i, &val) in idx_t.data.iter().enumerate() {
-                                                if val != 0.0 {
-                                                    v.push(i + 1);
-                                                }
-                                            }
-                                            selectors.push(Sel::Indices(v));
-                                        } else {
-                                            let mut v = Vec::with_capacity(len);
-                                            for &val in &idx_t.data {
-                                                let idx = val as isize;
-                                                if idx < 1 {
-                                                    vm_bail!(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds"
-                                                    ));
-                                                }
-                                                v.push(idx as usize);
-                                            }
-                                            selectors.push(Sel::Indices(v));
-                                        }
-                                    }
-                                    _ => vm_bail!(mex(
-                                        "UnsupportedIndexType",
-                                        "Unsupported index type"
-                                    )),
-                                }
+                                format!("slice: {e}")
                             }
-                        }
-                        let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                        let full_shape: Vec<usize> = if rank < dims {
-                            let mut s = sa.shape.clone();
-                            s.resize(dims, 1);
-                            s
-                        } else {
-                            sa.shape.clone()
-                        };
-                        for d in 0..dims {
-                            let dim_len = full_shape[d] as i64;
-                            let idxs: Vec<usize> = match &selectors[d] {
-                                Sel::Colon => (1..=full_shape[d]).collect(),
-                                Sel::Scalar(i) => vec![*i],
-                                Sel::Indices(v) => v.clone(),
-                                Sel::Range {
-                                    start,
-                                    step,
-                                    end_off,
-                                } => {
-                                    let mut v = Vec::new();
-                                    let mut cur = *start;
-                                    let stp = *step;
-                                    let end_i = dim_len - *end_off;
-                                    if stp == 0 {
-                                        vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
-                                    }
-                                    if stp > 0 {
-                                        while cur <= end_i {
-                                            if cur < 1 || cur > dim_len {
-                                                break;
-                                            }
-                                            v.push(cur as usize);
-                                            cur += stp;
-                                        }
-                                    } else {
-                                        while cur >= end_i {
-                                            if cur < 1 || cur > dim_len {
-                                                break;
-                                            }
-                                            v.push(cur as usize);
-                                            cur += stp;
-                                        }
-                                    }
-                                    v
-                                }
-                            };
-                            if idxs.iter().any(|&i| i == 0 || i > full_shape[d]) {
-                                vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                            }
-                            per_dim_indices.push(idxs);
-                        }
-                        let mut strides: Vec<usize> = vec![0; dims];
-                        let mut acc = 1usize;
-                        for d in 0..dims {
-                            strides[d] = acc;
-                            acc *= full_shape[d];
-                        }
-                        let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
-                        if total_out == 0 {
-                            stack.push(Value::StringArray(
-                                runmat_builtins::StringArray::new(Vec::new(), vec![0, 0])
-                                    .map_err(|e| format!("Slice error: {e}"))?,
-                            ));
-                            continue;
-                        }
-                        let mut out_data: Vec<String> = Vec::with_capacity(total_out);
-                        fn cartesian<F: FnMut(&[usize])>(lists: &[Vec<usize>], mut f: F) {
-                            let dims = lists.len();
-                            let mut idx = vec![0usize; dims];
-                            loop {
-                                let current: Vec<usize> =
-                                    (0..dims).map(|d| lists[d][idx[d]]).collect();
-                                f(&current);
-                                let mut d = 0usize;
-                                while d < dims {
-                                    idx[d] += 1;
-                                    if idx[d] < lists[d].len() {
-                                        break;
-                                    }
-                                    idx[d] = 0;
-                                    d += 1;
-                                }
-                                if d == dims {
-                                    break;
-                                }
-                            }
-                        }
-                        cartesian(&per_dim_indices, |multi| {
-                            let mut lin = 0usize;
-                            for d in 0..dims {
-                                let i0 = multi[d] - 1;
-                                lin += i0 * strides[d];
-                            }
-                            out_data.push(sa.data[lin].clone());
-                        });
-                        if out_data.len() == 1 {
-                            stack.push(Value::String(out_data[0].clone()));
-                        } else {
-                            let shape: Vec<usize> =
-                                per_dim_indices.iter().map(|v| v.len().max(1)).collect();
-                            let sa_out = runmat_builtins::StringArray::new(out_data, shape)
-                                .map_err(|e| format!("Slice error: {e}"))?;
-                            stack.push(Value::StringArray(sa_out));
-                        }
+                        })?;
+                        let result =
+                            gather_string_slice(&sa, &plan).map_err(|e| format!("slice: {e}"))?;
+                        stack.push(result);
                     }
                     _ => vm_bail!(mex("SliceNonTensor", "Slicing only supported on tensors")),
                 }
@@ -5446,37 +6285,66 @@ pub fn interpret_with_vars(
                     );
                 }
                 numeric.reverse();
-                let base = stack
+                let mut base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match base {
-                    Value::Tensor(t) => {
-                        // Adjust numeric indices where specified: end - k
-                        let mut adjusted = numeric.clone();
-                        for (pos, off) in end_offsets {
-                            if let Some(v) = adjusted.get_mut(pos) {
-                                // Determine dimension length to apply 'end'
-                                // Map numeric positions to dims by skipping colons and 'end' markers
-                                let mut seen_numeric = 0usize;
-                                let mut dim_for_pos = 0usize;
-                                for (d, _) in (0..dims).enumerate().take(dims) {
-                                    let is_colon = (colon_mask & (1u32 << d)) != 0;
-                                    let is_end = (end_mask & (1u32 << d)) != 0;
-                                    if is_colon || is_end {
-                                        continue;
-                                    }
-                                    if seen_numeric == pos {
-                                        dim_for_pos = d;
-                                        break;
-                                    }
-                                    seen_numeric += 1;
+                let mut numeric_values = numeric.clone();
+                if let Value::GpuTensor(handle) = &base {
+                    let adjusted = apply_end_offsets_to_numeric(
+                        &numeric_values,
+                        dims,
+                        colon_mask,
+                        end_mask,
+                        &end_offsets,
+                        &handle.shape,
+                    );
+                    if let Some(provider) = runmat_accelerate_api::provider() {
+                        if let Ok(selectors) = build_slice_selectors(
+                            dims,
+                            colon_mask,
+                            end_mask,
+                            &adjusted,
+                            &handle.shape,
+                        ) {
+                            if let Ok(plan) = build_slice_plan(&selectors, dims, &handle.shape) {
+                                if plan.indices.is_empty() {
+                                    let zeros = provider
+                                        .zeros(&plan.output_shape)
+                                        .map_err(|e| format!("slice: {e}"))?;
+                                    stack.push(Value::GpuTensor(zeros));
+                                    pc += 1;
+                                    continue;
+                                } else {
+                                    let result = provider
+                                        .gather_linear(handle, &plan.indices, &plan.output_shape)
+                                        .map_err(|e| format!("slice: {e}"))?;
+                                    stack.push(Value::GpuTensor(result));
+                                    pc += 1;
+                                    continue;
                                 }
-                                let dim_len = *t.shape.get(dim_for_pos).unwrap_or(&1);
-                                let idx_val = (dim_len as isize) - (off as isize);
-                                *v = Value::Num(idx_val as f64);
                             }
                         }
-                        // Now reuse IndexSlice logic: push base back and adjusted numerics
+                        let host = provider
+                            .download(handle)
+                            .map_err(|e| format!("slice: {e}"))?;
+                        let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
+                            .map_err(|e| format!("slice: {e}"))?;
+                        base = Value::Tensor(tensor);
+                        numeric_values = adjusted;
+                    } else {
+                        return Err("No acceleration provider registered".to_string());
+                    }
+                }
+                match base {
+                    Value::Tensor(t) => {
+                        let adjusted = apply_end_offsets_to_numeric(
+                            &numeric_values,
+                            dims,
+                            colon_mask,
+                            end_mask,
+                            &end_offsets,
+                            &t.shape,
+                        );
                         // Build selectors identical to IndexSlice path
                         let mut tmp_stack = Vec::new();
                         tmp_stack.push(Value::Tensor(t));
@@ -6273,10 +7141,67 @@ pub fn interpret_with_vars(
                             }
                         }
                     }
-                    Value::GpuTensor(h) => {
+                    Value::GpuTensor(handle) => {
+                        if let Some(provider) = runmat_accelerate_api::provider() {
+                            let base_shape = handle.shape.clone();
+                            if let Ok(selectors) = build_slice_selectors(
+                                dims,
+                                colon_mask,
+                                end_mask,
+                                &numeric,
+                                &base_shape,
+                            ) {
+                                if let Ok(plan) = build_slice_plan(&selectors, dims, &base_shape) {
+                                    if plan.indices.is_empty() {
+                                        stack.push(Value::GpuTensor(handle));
+                                        bench_end("StoreSlice", __b);
+                                        pc += 1;
+                                        continue;
+                                    }
+                                    let values_result = if plan.dims == 1 {
+                                        let count =
+                                            plan.selection_lengths.first().copied().unwrap_or(0);
+                                        materialize_rhs_linear(&rhs, count)
+                                    } else {
+                                        materialize_rhs_nd(&rhs, &plan.selection_lengths)
+                                    };
+                                    if let Ok(values) = values_result {
+                                        if values.len() == plan.indices.len() {
+                                            let value_shape = vec![values.len().max(1), 1];
+                                            let upload_result = if values.is_empty() {
+                                                provider.zeros(&[0, 1])
+                                            } else {
+                                                provider.upload(
+                                                    &runmat_accelerate_api::HostTensorView {
+                                                        data: &values,
+                                                        shape: &value_shape,
+                                                    },
+                                                )
+                                            };
+                                            if let Ok(values_handle) = upload_result {
+                                                if provider
+                                                    .scatter_linear(
+                                                        &handle,
+                                                        &plan.indices,
+                                                        &values_handle,
+                                                    )
+                                                    .is_ok()
+                                                {
+                                                    stack.push(Value::GpuTensor(handle));
+                                                    bench_end("StoreSlice", __b);
+                                                    pc += 1;
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let h = handle;
                         // Attempt provider fast-paths for contiguous 2D row/col writes with GPU RHS
                         if dims == 2 {
-                            let rows = h.shape.get(0).copied().unwrap_or(1);
+                            let rows = h.shape.first().copied().unwrap_or(1);
                             let cols = h.shape.get(1).copied().unwrap_or(1);
                             // Build minimal selectors using handle shape for 'end'
                             #[derive(Clone)]
@@ -6330,12 +7255,9 @@ pub fn interpret_with_vars(
                                 let j0 = *j - 1;
                                 if j0 < cols {
                                     if let Value::GpuTensor(vh) = &rhs {
-                                        let v_rows = if vh.shape.len() == 1 {
-                                            vh.shape[0]
-                                        } else if vh.shape.len() == 2 {
-                                            vh.shape[0]
-                                        } else {
-                                            0
+                                        let v_rows = match vh.shape.len() {
+                                            1 | 2 => vh.shape[0],
+                                            _ => 0,
                                         };
                                         if v_rows == rows {
                                             if let Some(p) = runmat_accelerate_api::provider() {
@@ -6358,12 +7280,10 @@ pub fn interpret_with_vars(
                                 let i0 = *i - 1;
                                 if i0 < rows {
                                     if let Value::GpuTensor(vh) = &rhs {
-                                        let v_cols = if vh.shape.len() == 1 {
-                                            vh.shape[0]
-                                        } else if vh.shape.len() == 2 {
-                                            vh.shape[1]
-                                        } else {
-                                            0
+                                        let v_cols = match vh.shape.len() {
+                                            1 => vh.shape[0],
+                                            2 => vh.shape[1],
+                                            _ => 0,
                                         };
                                         if v_cols == cols {
                                             if let Some(p) = runmat_accelerate_api::provider() {
@@ -6805,313 +7725,31 @@ pub fn interpret_with_vars(
                         }
                     }
                     Value::StringArray(mut sa) => {
-                        // Linear 1-D indexing assignment on string arrays
-                        if dims == 1 {
-                            let total = sa.data.len();
-                            let mut lin_indices: Vec<usize> = Vec::new();
-                            let is_colon = (colon_mask & 1u32) != 0;
-                            let is_end = (end_mask & 1u32) != 0;
-                            if is_colon {
-                                lin_indices = (1..=total).collect();
-                            } else if is_end {
-                                lin_indices = vec![total];
+                        let selectors =
+                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &sa.shape)
+                                .map_err(|e| format!("slice assign: {e}"))?;
+                        let plan = build_slice_plan(&selectors, dims, &sa.shape).map_err(|e| {
+                            if e.contains("IndexOutOfBounds") {
+                                e.clone()
                             } else {
-                                let v = numeric
-                                    .first()
-                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
-                                match v {
-                                    Value::Num(n) => {
-                                        let i = *n as isize;
-                                        if i < 1 || (i as usize) > total {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
-                                        }
-                                        lin_indices.push(i as usize);
-                                    }
-                                    Value::Tensor(idx_t) => {
-                                        let len = idx_t.shape.iter().product::<usize>();
-                                        if len == total {
-                                            for (i, &val) in idx_t.data.iter().enumerate() {
-                                                if val != 0.0 {
-                                                    lin_indices.push(i + 1);
-                                                }
-                                            }
-                                        } else {
-                                            for &val in &idx_t.data {
-                                                let i = val as isize;
-                                                if i < 1 || (i as usize) > total {
-                                                    vm_bail!(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds"
-                                                    ));
-                                                }
-                                                lin_indices.push(i as usize);
-                                            }
-                                        }
-                                    }
-                                    _ => vm_bail!(mex(
-                                        "UnsupportedIndexType",
-                                        "Unsupported index type"
-                                    )),
-                                }
+                                format!("slice assign: {e}")
                             }
-                            // Scatter RHS
-                            match rhs {
-                                Value::String(s) => {
-                                    for &li in &lin_indices {
-                                        sa.data[li - 1] = s.clone();
-                                    }
-                                }
-                                Value::StringArray(rsa) => {
-                                    if rsa.data.len() == 1 {
-                                        let s = rsa.data[0].clone();
-                                        for &li in &lin_indices {
-                                            sa.data[li - 1] = s.clone();
-                                        }
-                                    } else if rsa.data.len() == lin_indices.len() {
-                                        for (k, &li) in lin_indices.iter().enumerate() {
-                                            sa.data[li - 1] = rsa.data[k].clone();
-                                        }
-                                    } else {
-                                        vm_bail!(
-                                            "shape mismatch for linear slice assign".to_string()
-                                        );
-                                    }
-                                }
-                                Value::Num(n) => {
-                                    let s = n.to_string();
-                                    for &li in &lin_indices {
-                                        sa.data[li - 1] = s.clone();
-                                    }
-                                }
-                                Value::Int(i) => {
-                                    let s = i.to_i64().to_string();
-                                    for &li in &lin_indices {
-                                        sa.data[li - 1] = s.clone();
-                                    }
-                                }
-                                _ => vm_bail!("rhs must be string or string array".to_string()),
-                            }
+                        })?;
+                        if plan.indices.is_empty() {
                             stack.push(Value::StringArray(sa));
-                        } else {
-                            let rank = sa.shape.len();
-                            #[derive(Clone)]
-                            enum Sel {
-                                Colon,
-                                Scalar(usize),
-                                Indices(Vec<usize>),
-                            }
-                            let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
-                            let mut num_iter = 0usize;
-                            for d in 0..dims {
-                                let is_colon = (colon_mask & (1u32 << d)) != 0;
-                                let is_end = (end_mask & (1u32 << d)) != 0;
-                                if is_colon {
-                                    selectors.push(Sel::Colon);
-                                } else if is_end {
-                                    selectors.push(Sel::Scalar(*sa.shape.get(d).unwrap_or(&1)));
-                                } else {
-                                    let v = numeric.get(num_iter).ok_or(mex(
-                                        "MissingNumericIndex",
-                                        "missing numeric index",
-                                    ))?;
-                                    num_iter += 1;
-                                    match v {
-                                        Value::Num(n) => {
-                                            let idx = *n as isize;
-                                            if idx < 1 {
-                                                vm_bail!(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds"
-                                                ));
-                                            }
-                                            selectors.push(Sel::Scalar(idx as usize));
-                                        }
-                                        Value::Tensor(idx_t) => {
-                                            let dim_len = *sa.shape.get(d).unwrap_or(&1);
-                                            let len = idx_t.shape.iter().product::<usize>();
-                                            if len == dim_len {
-                                                let mut v = Vec::new();
-                                                for (i, &val) in idx_t.data.iter().enumerate() {
-                                                    if val != 0.0 {
-                                                        v.push(i + 1);
-                                                    }
-                                                }
-                                                selectors.push(Sel::Indices(v));
-                                            } else {
-                                                let mut v = Vec::with_capacity(len);
-                                                for &val in &idx_t.data {
-                                                    let idx = val as isize;
-                                                    if idx < 1 {
-                                                        vm_bail!(mex(
-                                                            "IndexOutOfBounds",
-                                                            "Index out of bounds"
-                                                        ));
-                                                    }
-                                                    v.push(idx as usize);
-                                                }
-                                                selectors.push(Sel::Indices(v));
-                                            }
-                                        }
-                                        _ => vm_bail!(mex(
-                                            "UnsupportedIndexType",
-                                            "Unsupported index type"
-                                        )),
-                                    }
-                                }
-                            }
-                            // Build per-dim index lists and strides
-                            let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                            let full_shape: Vec<usize> = if rank < dims {
-                                let mut s = sa.shape.clone();
-                                s.resize(dims, 1);
-                                s
-                            } else {
-                                sa.shape.clone()
-                            };
-                            for d in 0..dims {
-                                let dim_len = full_shape[d];
-                                let idxs = match &selectors[d] {
-                                    Sel::Colon => (1..=dim_len).collect(),
-                                    Sel::Scalar(i) => vec![*i],
-                                    Sel::Indices(v) => v.clone(),
-                                };
-                                if idxs.iter().any(|&i| i == 0 || i > dim_len) {
-                                    vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                }
-                                per_dim_indices.push(idxs);
-                            }
-                            // Column-major strides
-                            let mut strides: Vec<usize> = vec![0; dims];
-                            let mut acc = 1usize;
-                            for d in 0..dims {
-                                strides[d] = acc;
-                                acc *= full_shape[d];
-                            }
-                            // Prepare RHS view
-                            enum RhsViewS {
-                                Scalar(String),
-                                Array {
-                                    data: Vec<String>,
-                                    shape: Vec<usize>,
-                                    strides: Vec<usize>,
-                                },
-                            }
-                            let rhs_view = match rhs {
-                                Value::String(s) => RhsViewS::Scalar(s),
-                                Value::StringArray(rsa) => {
-                                    let mut shape = rsa.shape.clone();
-                                    if shape.len() < dims {
-                                        shape.resize(dims, 1);
-                                    }
-                                    if shape.len() > dims {
-                                        if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".to_string());
-                                        }
-                                        shape.truncate(dims);
-                                    }
-                                    for d in 0..dims {
-                                        let out_len = per_dim_indices[d].len();
-                                        let rhs_len = shape[d];
-                                        if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".to_string());
-                                        }
-                                    }
-                                    let mut rstrides = vec![0usize; dims];
-                                    let mut racc = 1usize;
-                                    for d in 0..dims {
-                                        rstrides[d] = racc;
-                                        racc *= shape[d];
-                                    }
-                                    RhsViewS::Array {
-                                        data: rsa.data,
-                                        shape,
-                                        strides: rstrides,
-                                    }
-                                }
-                                Value::Num(n) => RhsViewS::Scalar(n.to_string()),
-                                Value::Int(i) => RhsViewS::Scalar(i.to_i64().to_string()),
-                                Value::Tensor(rt) => {
-                                    // Convert numeric tensor to strings with broadcast
-                                    let mut shape = rt.shape.clone();
-                                    if shape.len() < dims {
-                                        shape.resize(dims, 1);
-                                    }
-                                    if shape.len() > dims {
-                                        if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".to_string());
-                                        }
-                                        shape.truncate(dims);
-                                    }
-                                    for d in 0..dims {
-                                        let out_len = per_dim_indices[d].len();
-                                        let rhs_len = shape[d];
-                                        if !(rhs_len == 1 || rhs_len == out_len) {
-                                            vm_bail!("shape mismatch for slice assign".to_string());
-                                        }
-                                    }
-                                    let mut rstrides = vec![0usize; dims];
-                                    let mut racc = 1usize;
-                                    for d in 0..dims {
-                                        rstrides[d] = racc;
-                                        racc *= shape[d];
-                                    }
-                                    let data: Vec<String> =
-                                        rt.data.iter().map(|x| x.to_string()).collect();
-                                    RhsViewS::Array {
-                                        data,
-                                        shape,
-                                        strides: rstrides,
-                                    }
-                                }
-                                _ => vm_bail!("rhs must be string or string array".to_string()),
-                            };
-                            // Iterate and scatter
-                            let mut idx = vec![0usize; dims];
-                            if per_dim_indices.iter().any(|v| v.is_empty()) {
-                                stack.push(Value::StringArray(sa));
-                            } else {
-                                loop {
-                                    let mut lin = 0usize;
-                                    for d in 0..dims {
-                                        let i0 = per_dim_indices[d][idx[d]] - 1;
-                                        lin += i0 * strides[d];
-                                    }
-                                    match &rhs_view {
-                                        RhsViewS::Scalar(s) => sa.data[lin] = s.clone(),
-                                        RhsViewS::Array {
-                                            data,
-                                            shape,
-                                            strides,
-                                        } => {
-                                            let mut rlin = 0usize;
-                                            for d in 0..dims {
-                                                let rhs_len = shape[d];
-                                                let pos = if rhs_len == 1 { 0 } else { idx[d] };
-                                                rlin += pos * strides[d];
-                                            }
-                                            sa.data[lin] = data[rlin].clone();
-                                        }
-                                    }
-                                    // Increment first dim fastest
-                                    let mut d = 0usize;
-                                    while d < dims {
-                                        idx[d] += 1;
-                                        if idx[d] < per_dim_indices[d].len() {
-                                            break;
-                                        }
-                                        idx[d] = 0;
-                                        d += 1;
-                                    }
-                                    if d == dims {
-                                        break;
-                                    }
-                                }
-                                stack.push(Value::StringArray(sa));
-                            }
+                            bench_end("StoreSlice", __b);
+                            pc += 1;
+                            continue;
                         }
+                        let rhs_view = build_string_rhs_view(&rhs, &plan.selection_lengths)
+                            .map_err(|e| format!("slice assign: {e}"))?;
+                        scatter_string_with_plan(&mut sa, &plan, &rhs_view)
+                            .map_err(|e| format!("slice assign: {e}"))?;
+                        stack.push(Value::StringArray(sa));
+                        bench_end("StoreSlice", __b);
+                        pc += 1;
+                        continue;
+                        // legacy path removed in favor of scatter_string_with_plan
                     }
                     _ => vm_bail!(
                         "Slicing assignment only supported on tensors or string arrays".to_string()
@@ -7132,9 +7770,68 @@ pub fn interpret_with_vars(
                     );
                 }
                 numeric.reverse();
-                let base = stack
+                let mut base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                if let Value::GpuTensor(handle) = &base {
+                    let adjusted = apply_end_offsets_to_numeric(
+                        &numeric,
+                        dims,
+                        colon_mask,
+                        end_mask,
+                        &end_offsets,
+                        &handle.shape,
+                    );
+                    if let Some(provider) = runmat_accelerate_api::provider() {
+                        if let Ok(selectors) = build_slice_selectors(
+                            dims,
+                            colon_mask,
+                            end_mask,
+                            &adjusted,
+                            &handle.shape,
+                        ) {
+                            if let Ok(plan) = build_slice_plan(&selectors, dims, &handle.shape) {
+                                let values = if plan.dims == 1 {
+                                    let count =
+                                        plan.selection_lengths.first().copied().unwrap_or(0);
+                                    materialize_rhs_linear(&rhs, count)
+                                } else {
+                                    materialize_rhs_nd(&rhs, &plan.selection_lengths)
+                                }
+                                .map_err(|e| format!("slice assign: {e}"))?;
+                                if values.len() == plan.indices.len() {
+                                    let value_shape = vec![values.len().max(1), 1];
+                                    let upload_result = if values.is_empty() {
+                                        provider.zeros(&[0, 1])
+                                    } else {
+                                        provider.upload(&runmat_accelerate_api::HostTensorView {
+                                            data: &values,
+                                            shape: &value_shape,
+                                        })
+                                    };
+                                    if let Ok(values_handle) = upload_result {
+                                        if provider
+                                            .scatter_linear(handle, &plan.indices, &values_handle)
+                                            .is_ok()
+                                        {
+                                            stack.push(Value::GpuTensor(handle.clone()));
+                                            pc += 1;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let host = provider
+                            .download(handle)
+                            .map_err(|e| format!("slice assign: {e}"))?;
+                        let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
+                            .map_err(|e| format!("slice assign: {e}"))?;
+                        base = Value::Tensor(tensor);
+                    } else {
+                        return Err("No acceleration provider registered".to_string());
+                    }
+                }
                 match base {
                     Value::Tensor(t) => {
                         // Adjust numeric indices for end offsets, mapping numeric position to actual dimension
@@ -7377,6 +8074,32 @@ pub fn interpret_with_vars(
                                 });
                                 stack.push(Value::Tensor(t));
                             }
+                            Value::StringArray(mut sa) => {
+                                let selectors = build_slice_selectors(
+                                    dims, colon_mask, end_mask, &numeric, &sa.shape,
+                                )
+                                .map_err(|e| format!("slice assign: {e}"))?;
+                                let plan =
+                                    build_slice_plan(&selectors, dims, &sa.shape).map_err(|e| {
+                                        if e.contains("IndexOutOfBounds") {
+                                            e.clone()
+                                        } else {
+                                            format!("slice assign: {e}")
+                                        }
+                                    })?;
+                                if plan.indices.is_empty() {
+                                    stack.push(Value::StringArray(sa));
+                                    pc += 1;
+                                    continue;
+                                }
+                                let rhs_view = build_string_rhs_view(&rhs, &plan.selection_lengths)
+                                    .map_err(|e| format!("slice assign: {e}"))?;
+                                scatter_string_with_plan(&mut sa, &plan, &rhs_view)
+                                    .map_err(|e| format!("slice assign: {e}"))?;
+                                stack.push(Value::StringArray(sa));
+                                pc += 1;
+                                continue;
+                            }
                             other => vm_bail!(format!("StoreSliceEx unsupported base: {other:?}")),
                         }
                     }
@@ -7443,9 +8166,7 @@ pub fn interpret_with_vars(
                         Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_)
                     )
                 {
-                    let tmp = base;
-                    base = rhs;
-                    rhs = tmp;
+                    std::mem::swap(&mut base, &mut rhs);
                 }
                 match base {
                     Value::Tensor(mut t) => {
@@ -8321,9 +9042,11 @@ pub fn interpret_with_vars(
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 stack.push(return_value);
+                interpreter_timing.flush_host_span("return_value", None);
                 break;
             }
             Instr::Return => {
+                interpreter_timing.flush_host_span("return", None);
                 break;
             }
             Instr::StoreIndex(num_indices) => {
@@ -8404,7 +9127,7 @@ pub fn interpret_with_vars(
                 let (rows_opt, cols_opt) = match &base {
                     Value::Tensor(t) => (Some(t.rows()), Some(t.cols())),
                     Value::GpuTensor(h) => (
-                        Some(h.shape.get(0).copied().unwrap_or(1).max(1)),
+                        Some(h.shape.first().copied().unwrap_or(1).max(1)),
                         Some(h.shape.get(1).copied().unwrap_or(1).max(1)),
                     ),
                     _ => (None, None),
@@ -8619,7 +9342,7 @@ pub fn interpret_with_vars(
                             let val: f64 = rhs_to_scalar(&rhs)?;
                             let idx = (i - 1) + (j - 1) * rows;
                             t.data[idx] = val;
-                        } else if indices.len() == 0 {
+                        } else if indices.is_empty() {
                             // Trivial colon slice cases from parser may encode as zero indices; handle full-row/col scalar broadcast
                             let val: f64 = rhs_to_scalar(&rhs)?;
                             for k in 0..t.data.len() {
@@ -9325,8 +10048,12 @@ pub fn interpret_with_vars(
                 runmat_builtins::register_class(def);
             }
         }
+        if debug_stack {
+            eprintln!("After exec pc={} stack_len={}", pc, stack.len());
+        }
         pc += 1;
     }
+    interpreter_timing.flush_host_span("loop_complete", None);
     for (i, var) in vars.iter().enumerate() {
         if i < initial_vars.len() {
             initial_vars[i] = var.clone();
@@ -9334,6 +10061,193 @@ pub fn interpret_with_vars(
     }
     Ok(vars)
 }
+
+fn stochastic_evolution_dispatch(
+    state: Value,
+    drift: Value,
+    scale: Value,
+    steps: Value,
+) -> Result<Value, String> {
+    let steps_u32 = parse_steps_value(&steps)?;
+    if steps_u32 == 0 {
+        return Ok(state);
+    }
+
+    #[cfg(feature = "native-accel")]
+    {
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            let (state_handle, state_owned) = ensure_gpu_tensor_for_stochastic(provider, &state)?;
+            let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
+            let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
+            let output = provider
+                .stochastic_evolution(&state_handle, drift_scalar, scale_scalar, steps_u32)
+                .map_err(|e| format!("stochastic_evolution: {e}"))?;
+            if let Some(temp) = state_owned {
+                let _ = provider.free(&temp);
+            }
+            fusion_residency::mark(&output);
+            return Ok(Value::GpuTensor(output));
+        }
+    }
+
+    let gathered_state =
+        gather_if_needed(&state).map_err(|e| format!("stochastic_evolution: {e}"))?;
+    let mut tensor_value = match gathered_state {
+        Value::Tensor(t) => t,
+        other => tensor::value_into_tensor_for("stochastic_evolution", other)?,
+    };
+    let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
+    let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
+    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)?;
+    Ok(Value::Tensor(tensor_value))
+}
+
+fn scalar_from_value_scalar(value: &Value, label: &str) -> Result<f64, String> {
+    match value {
+        Value::Num(n) => Ok(*n),
+        Value::Int(i) => Ok(i.to_f64()),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) => Err(format!(
+            "{label}: expected scalar tensor, got {} elements",
+            t.data.len()
+        )),
+        Value::GpuTensor(_) => {
+            let gathered = gather_if_needed(value).map_err(|e| format!("{label}: {e}"))?;
+            scalar_from_value_scalar(&gathered, label)
+        }
+        other => Err(format!("{label}: expected numeric scalar, got {:?}", other)),
+    }
+}
+
+fn parse_steps_value(value: &Value) -> Result<u32, String> {
+    let raw = scalar_from_value_scalar(value, "stochastic_evolution steps")?;
+    if !raw.is_finite() || raw < 0.0 {
+        return Err("stochastic_evolution: steps must be a non-negative scalar".to_string());
+    }
+    Ok(raw.round() as u32)
+}
+
+#[cfg(feature = "native-accel")]
+fn ensure_gpu_tensor_for_stochastic(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    value: &Value,
+) -> Result<
+    (
+        runmat_accelerate_api::GpuTensorHandle,
+        Option<runmat_accelerate_api::GpuTensorHandle>,
+    ),
+    String,
+> {
+    match value {
+        Value::GpuTensor(handle) => Ok((handle.clone(), None)),
+        Value::Tensor(tensor) => {
+            let handle = upload_tensor_view(provider, tensor)?;
+            Ok((handle.clone(), Some(handle)))
+        }
+        _ => {
+            let gathered =
+                gather_if_needed(value).map_err(|e| format!("stochastic_evolution: {e}"))?;
+            match gathered {
+                Value::Tensor(t) => {
+                    let handle = upload_tensor_view(provider, &t)?;
+                    Ok((handle.clone(), Some(handle)))
+                }
+                other => {
+                    let tensor = tensor::value_into_tensor_for("stochastic_evolution", other)?;
+                    let handle = upload_tensor_view(provider, &tensor)?;
+                    Ok((handle.clone(), Some(handle)))
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "native-accel")]
+fn upload_tensor_view(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    tensor: &runmat_builtins::Tensor,
+) -> Result<runmat_accelerate_api::GpuTensorHandle, String> {
+    let view = runmat_accelerate_api::HostTensorView {
+        data: &tensor.data,
+        shape: &tensor.shape,
+    };
+    provider.upload(&view).map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "native-accel")]
+#[inline]
+fn value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Int(_) => "Int",
+        Value::Num(_) => "Num",
+        Value::Complex(_, _) => "Complex",
+        Value::Bool(_) => "Bool",
+        Value::LogicalArray(_) => "LogicalArray",
+        Value::String(_) => "String",
+        Value::StringArray(_) => "StringArray",
+        Value::CharArray(_) => "CharArray",
+        Value::Tensor(_) => "Tensor",
+        Value::ComplexTensor(_) => "ComplexTensor",
+        Value::Cell(_) => "Cell",
+        Value::Struct(_) => "Struct",
+        Value::GpuTensor(_) => "GpuTensor",
+        Value::Object(_) => "Object",
+        Value::HandleObject(_) => "HandleObject",
+        Value::Listener(_) => "Listener",
+        Value::FunctionHandle(_) => "FunctionHandle",
+        Value::Closure(_) => "Closure",
+        Value::ClassRef(_) => "ClassRef",
+        Value::MException(_) => "MException",
+    }
+}
+#[cfg(feature = "native-accel")]
+#[inline]
+fn summarize_value(i: usize, v: &Value) -> String {
+    match v {
+        Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape),
+        Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape),
+        Value::String(s) => format!("in#{i}:String({})", s),
+        _ => format!("in#{i}:{}", value_kind(v)),
+    }
+}
+#[cfg(feature = "native-accel")]
+struct StackSliceGuard<'a> {
+    stack: *mut Vec<Value>,
+    slice: Option<Vec<Value>>,
+    _marker: std::marker::PhantomData<&'a mut Vec<Value>>,
+}
+
+#[cfg(feature = "native-accel")]
+impl<'a> StackSliceGuard<'a> {
+    fn new(stack: &'a mut Vec<Value>, slice_start: usize) -> Self {
+        let slice = stack.split_off(slice_start);
+        Self {
+            stack,
+            slice: Some(slice),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn slice(&self) -> &[Value] {
+        self.slice.as_ref().expect("stack slice missing").as_slice()
+    }
+
+    fn commit(mut self) {
+        self.slice = None;
+    }
+}
+
+#[cfg(feature = "native-accel")]
+impl Drop for StackSliceGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(slice) = self.slice.take() {
+            unsafe {
+                (&mut *self.stack).extend(slice);
+            }
+        }
+    }
+}
+
 #[cfg(feature = "native-accel")]
 fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
@@ -9351,31 +10265,6 @@ fn try_execute_fusion_group(
             }
         }
     }
-
-    let describe_value = |value: &Value| -> &'static str {
-        match value {
-            Value::Int(_) => "Int",
-            Value::Num(_) => "Num",
-            Value::Complex(_, _) => "Complex",
-            Value::Bool(_) => "Bool",
-            Value::LogicalArray(_) => "LogicalArray",
-            Value::String(_) => "String",
-            Value::StringArray(_) => "StringArray",
-            Value::CharArray(_) => "CharArray",
-            Value::Tensor(_) => "Tensor",
-            Value::ComplexTensor(_) => "ComplexTensor",
-            Value::Cell(_) => "Cell",
-            Value::Struct(_) => "Struct",
-            Value::GpuTensor(_) => "GpuTensor",
-            Value::Object(_) => "Object",
-            Value::HandleObject(_) => "HandleObject",
-            Value::Listener(_) => "Listener",
-            Value::FunctionHandle(_) => "FunctionHandle",
-            Value::Closure(_) => "Closure",
-            Value::ClassRef(_) => "ClassRef",
-            Value::MException(_) => "MException",
-        }
-    };
 
     for (idx, value_id) in plan.inputs.iter().enumerate() {
         let info = graph
@@ -9414,19 +10303,11 @@ fn try_execute_fusion_group(
         }
     }
 
-    if log::log_enabled!(log::Level::Debug) {
+    if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
         let stack_needed_preview = plan.stack_pattern.len();
-        let stack_snapshot: Vec<&Value> = stack
-            .iter()
-            .rev()
-            .take(stack_needed_preview)
-            .map(|v| v)
-            .collect();
-        let stack_kinds: Vec<&'static str> = stack_snapshot
-            .iter()
-            .rev()
-            .map(|v| describe_value(v))
-            .collect();
+        let stack_snapshot: Vec<&Value> = stack.iter().rev().take(stack_needed_preview).collect();
+        let stack_kinds: Vec<&'static str> =
+            stack_snapshot.iter().rev().map(|v| value_kind(v)).collect();
         let input_meta: Vec<String> = plan
             .inputs
             .iter()
@@ -9450,32 +10331,46 @@ fn try_execute_fusion_group(
         );
     }
 
-    let stack_needed = plan.stack_pattern.len();
-    if stack.len() < stack_needed {
-        println!(
-            "fusion stack underflow: needed {} have {} pattern {:?}",
-            stack_needed,
-            stack.len(),
-            plan.stack_pattern
-        );
+    let pattern_len = plan.stack_pattern.len();
+    if stack.len() < pattern_len {
+        if fusion_debug_enabled() {
+            log::debug!(
+                "fusion stack underflow: plan={} needed={} available={} pattern={:?}",
+                plan.index,
+                pattern_len,
+                stack.len(),
+                plan.stack_pattern
+            );
+        }
         return Err("fusion: stack underflow gathering inputs".to_string());
     }
+    let available = pattern_len;
+    let slice_start = stack.len() - available;
+    let stack_guard = StackSliceGuard::new(stack, slice_start);
+    let slice = stack_guard.slice().to_vec();
+    let mut consumed: Vec<Option<Value>> = vec![None; pattern_len];
+    let skip = 0;
 
-    let slice_start = stack.len() - stack_needed;
-    let slice = stack[slice_start..].to_vec();
-    stack.truncate(slice_start);
-
-    debug_assert_eq!(slice.len(), stack_needed);
-
-    let mut consumed: Vec<Value> = Vec::new();
     for (offset, input_idx) in plan.stack_pattern.iter().enumerate() {
-        let val = slice
-            .get(offset)
-            .cloned()
-            .ok_or_else(|| "fusion: unable to read stack segment".to_string())?;
-        consumed.push(val.clone());
+        if offset < skip {
+            continue;
+        }
+        let slice_idx = offset - skip;
+        let Some(val) = slice.get(slice_idx).cloned() else {
+            continue;
+        };
+        consumed[offset] = Some(val.clone());
         if inputs[*input_idx].is_none() {
-            inputs[*input_idx] = Some(val);
+            // For reductions, only populate from stack if the value is a numeric tensor.
+            // This avoids accidentally binding non-tensor metadata (e.g., dim strings) into the fused kernel inputs.
+            let allow_stack_value = if plan.group.kind.is_reduction() {
+                matches!(val, Value::GpuTensor(_) | Value::Tensor(_))
+            } else {
+                true
+            };
+            if allow_stack_value {
+                inputs[*input_idx] = Some(val);
+            }
         }
     }
 
@@ -9484,7 +10379,8 @@ fn try_execute_fusion_group(
             continue;
         }
         let vid = plan.inputs[idx];
-        if let Some(info) = graph.value(vid) {
+        let info = graph.value(vid);
+        if let Some(info) = info {
             match &info.origin {
                 ValueOrigin::Variable { kind, index } => {
                     let value_opt = match kind {
@@ -9532,6 +10428,29 @@ fn try_execute_fusion_group(
             }
         }
         if slot.is_none() {
+            if let Some(info) = info {
+                if let ValueOrigin::NodeOutput { node, .. } = info.origin {
+                    if let Some(binding) = graph.node_binding(node) {
+                        let value_opt = match binding.kind {
+                            VarKind::Global => vars.get(binding.index).cloned(),
+                            VarKind::Local => {
+                                if let Some(frame) = context.call_stack.last() {
+                                    let absolute = frame.locals_start + binding.index;
+                                    context.locals.get(absolute).cloned()
+                                } else {
+                                    vars.get(binding.index).cloned()
+                                }
+                            }
+                        };
+                        if let Some(value) = value_opt {
+                            *slot = Some(value);
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        if slot.is_none() {
             if let Some(value) = plan.const_values.get(&vid) {
                 *slot = Some(value.clone());
             }
@@ -9543,34 +10462,125 @@ fn try_execute_fusion_group(
         .map(|opt| opt.ok_or_else(|| "fusion: missing input value".to_string()))
         .collect::<Result<_, _>>()?;
 
+    // Debug: summarize runtime input kinds/shapes
+    if log::log_enabled!(log::Level::Debug) {
+        let summaries: Vec<String> = inputs
+            .iter()
+            .enumerate()
+            .map(|(i, v)| summarize_value(i, v))
+            .collect();
+        log::debug!("fusion inputs runtime: [{}]", summaries.join(", "));
+    }
+
     let request = FusionExecutionRequest { plan, inputs };
     log::debug!(
-        "dispatch fusion kind {:?}, supported {} inputs {:?}",
+        "dispatch fusion kind {:?}, supported {}",
         plan.group.kind,
-        plan.kernel.supported,
-        plan.inputs
+        plan.kernel.supported
     );
     if plan.group.kind.is_elementwise() {
         match execute_elementwise(request) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else if plan.group.kind.is_reduction() {
-        // Determine reduction axis from constants if available (MATLAB dim is 1-based).
-        // Default axis: 0 (rows) -> column-wise reduction producing 1 x ncols.
+        // Determine reduction axis or 'all'. Prefer the builtin reduction op's dim argument (inputs[1]).
+        // MATLAB dim is 1-based: dim=1 reduces rows (axis 0), dim=2 reduces cols (axis 1), 'all' reduces all elements.
         let mut axis = 0usize;
-        if let Some(dim_const) = plan.constants.get(&1) {
-            // second argument position in inputs (value, dim)
-            axis = match dim_const {
-                Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
-                Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
-                _ => axis,
-            };
+        let mut reduce_all = matches!(plan.reduction_axes, Some(ReductionAxes::All));
+        if let Some(ReductionAxes::Explicit(dims)) = &plan.reduction_axes {
+            if let Some(first) = dims.first().copied() {
+                axis = first.saturating_sub(1);
+            }
+        }
+        // Debug: show input origins for reduction
+        if log::log_enabled!(log::Level::Debug) {
+            let meta: Vec<String> = plan
+                .inputs
+                .iter()
+                .map(|vid| {
+                    if let Some(info) = graph.value(*vid) {
+                        format!(
+                            "vid={} origin={:?} shape={:?}",
+                            vid, info.origin, info.shape
+                        )
+                    } else {
+                        format!("vid={} origin=<missing>", vid)
+                    }
+                })
+                .collect();
+            log::debug!("reduction gather meta: [{}]", meta.join(", "));
+        }
+        // Detect 'all' in constants or const_values
+        let has_all = reduce_all
+            || plan.constants.values().any(value_is_all_keyword)
+            || plan.const_values.values().any(value_is_all_keyword);
+        if has_all {
+            reduce_all = true;
+        }
+        if reduce_all && fusion_debug_enabled() {
+            log::debug!(
+                "fusion reduction (all) meta: data_vid={:?} inputs={:?} stack_pattern={:?}",
+                plan.reduction_data,
+                plan.inputs,
+                plan.stack_pattern
+            );
+        }
+        if !reduce_all {
+            for node_id in &plan.group.nodes {
+                if let Some(node) = graph.node(*node_id) {
+                    if let runmat_accelerate::graph::AccelNodeLabel::Builtin { name } = &node.label
+                    {
+                        if name.eq_ignore_ascii_case("mean") {
+                            for input_vid in &node.inputs {
+                                if let Some(info) = graph.value(*input_vid) {
+                                    if let Some(constant) = &info.constant {
+                                        if value_is_all_keyword(constant) {
+                                            reduce_all = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if reduce_all {
+                    break;
+                }
+            }
+        }
+        // Prefer plan.reduction_dim if available
+        if !reduce_all {
+            if let Some(dim_vid) = plan.reduction_dim {
+                if let Some(cv) = plan.const_values.get(&dim_vid) {
+                    axis = match cv {
+                        Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
+                        Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
+                        _ => axis,
+                    };
+                } else if let Some(input_idx) = plan.inputs.iter().position(|v| *v == dim_vid) {
+                    if let Some(cv) = plan.constants.get(&input_idx) {
+                        axis = match cv {
+                            Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
+                            Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
+                            _ => axis,
+                        };
+                    }
+                }
+            } else {
+                // Legacy fallback: inspect any constant mapped to the second logical position
+                if let Some(dim_const) = plan.constants.get(&1) {
+                    axis = match dim_const {
+                        Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
+                        Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
+                        _ => axis,
+                    };
+                }
+            }
         }
         let (reduce_len, num_slices) = {
             // Try to get the data tensor's shape via the reduction builtin op input id
@@ -9583,19 +10593,56 @@ fn try_execute_fusion_group(
                     rows_cols = Some((shape[0].max(1), 1));
                 }
             }
+            // Early fallback: inspect runtime variable values for declared plan inputs
+            if rows_cols.is_none() {
+                for &vid in &plan.inputs {
+                    if let Some(binding) = graph.var_binding(vid) {
+                        let value_opt = match binding.kind {
+                            VarKind::Global => vars.get(binding.index).cloned(),
+                            VarKind::Local => {
+                                if let Some(frame) = context.call_stack.last() {
+                                    let absolute = frame.locals_start + binding.index;
+                                    context.locals.get(absolute).cloned()
+                                } else {
+                                    vars.get(binding.index).cloned()
+                                }
+                            }
+                        };
+                        if let Some(value) = value_opt {
+                            match value {
+                                Value::GpuTensor(h) => {
+                                    rows_cols = Some((
+                                        h.shape.first().copied().unwrap_or(1).max(1),
+                                        h.shape.get(1).copied().unwrap_or(1).max(1),
+                                    ));
+                                    break;
+                                }
+                                Value::Tensor(t) => {
+                                    rows_cols = Some((
+                                        t.shape.first().copied().unwrap_or(1).max(1),
+                                        t.shape.get(1).copied().unwrap_or(1).max(1),
+                                    ));
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
             // Prefer immediately-consumed stack values (common for reductions over producer results)
-            for v in &consumed {
+            for v in consumed.iter().filter_map(|v| v.as_ref()) {
                 match v {
                     Value::GpuTensor(h) => {
                         rows_cols = Some((
-                            h.shape.get(0).copied().unwrap_or(1).max(1),
+                            h.shape.first().copied().unwrap_or(1).max(1),
                             h.shape.get(1).copied().unwrap_or(1).max(1),
                         ));
                         break;
                     }
                     Value::Tensor(t) => {
                         rows_cols = Some((
-                            t.shape.get(0).copied().unwrap_or(1).max(1),
+                            t.shape.first().copied().unwrap_or(1).max(1),
                             t.shape.get(1).copied().unwrap_or(1).max(1),
                         ));
                         break;
@@ -9603,15 +10650,7 @@ fn try_execute_fusion_group(
                     _ => {}
                 }
             }
-            let data_value_id: Option<runmat_accelerate::graph::ValueId> =
-                plan.operations.iter().find_map(|op| match op {
-                    AccelFusionOp::Builtin { name, inputs, .. }
-                        if name == "sum" || name == "mean" =>
-                    {
-                        inputs.get(0).copied()
-                    }
-                    _ => None,
-                });
+            let data_value_id: Option<runmat_accelerate::graph::ValueId> = plan.reduction_data;
 
             if let Some(data_id) = data_value_id {
                 // Map data_id to plan input index if external
@@ -9622,15 +10661,15 @@ fn try_execute_fusion_group(
                         .iter()
                         .position(|&idx| idx == input_index)
                     {
-                        if let Some(val) = consumed.get(stack_offset) {
+                        if let Some(val) = consumed.get(stack_offset).and_then(|v| v.as_ref()) {
                             match val {
                                 Value::GpuTensor(h) => {
-                                    let r = h.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let r = h.shape.first().copied().unwrap_or(1).max(1);
                                     let c = h.shape.get(1).copied().unwrap_or(1).max(1);
                                     rows_cols = Some((r, c));
                                 }
                                 Value::Tensor(t) => {
-                                    let r = t.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let r = t.shape.first().copied().unwrap_or(1).max(1);
                                     let c = t.shape.get(1).copied().unwrap_or(1).max(1);
                                     rows_cols = Some((r, c));
                                 }
@@ -9643,12 +10682,12 @@ fn try_execute_fusion_group(
                         if let Some(val) = request.inputs.get(input_index) {
                             match val {
                                 Value::GpuTensor(h) => {
-                                    let r = h.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let r = h.shape.first().copied().unwrap_or(1).max(1);
                                     let c = h.shape.get(1).copied().unwrap_or(1).max(1);
                                     rows_cols = Some((r, c));
                                 }
                                 Value::Tensor(t) => {
-                                    let r = t.shape.get(0).copied().unwrap_or(1).max(1);
+                                    let r = t.shape.first().copied().unwrap_or(1).max(1);
                                     let c = t.shape.get(1).copied().unwrap_or(1).max(1);
                                     rows_cols = Some((r, c));
                                 }
@@ -9660,43 +10699,40 @@ fn try_execute_fusion_group(
                 if rows_cols.is_none() {
                     if let Some(info) = graph.value(data_id) {
                         // Try direct variable lookup to get runtime value shape
-                        match &info.origin {
-                            ValueOrigin::Variable { kind, index } => {
-                                let val = match kind {
-                                    VarKind::Global => vars.get(*index).cloned(),
-                                    VarKind::Local => {
-                                        if let Some(frame) = context.call_stack.last() {
-                                            let absolute = frame.locals_start + index;
-                                            context.locals.get(absolute).cloned()
-                                        } else {
-                                            vars.get(*index).cloned()
-                                        }
-                                    }
-                                };
-                                if let Some(v) = val {
-                                    match v {
-                                        Value::GpuTensor(h) => {
-                                            rows_cols = Some((
-                                                h.shape.get(0).copied().unwrap_or(1).max(1),
-                                                h.shape.get(1).copied().unwrap_or(1).max(1),
-                                            ));
-                                        }
-                                        Value::Tensor(t) => {
-                                            rows_cols = Some((
-                                                t.shape.get(0).copied().unwrap_or(1).max(1),
-                                                t.shape.get(1).copied().unwrap_or(1).max(1),
-                                            ));
-                                        }
-                                        _ => {}
+                        if let ValueOrigin::Variable { kind, index } = &info.origin {
+                            let val = match kind {
+                                VarKind::Global => vars.get(*index).cloned(),
+                                VarKind::Local => {
+                                    if let Some(frame) = context.call_stack.last() {
+                                        let absolute = frame.locals_start + index;
+                                        context.locals.get(absolute).cloned()
+                                    } else {
+                                        vars.get(*index).cloned()
                                     }
                                 }
+                            };
+                            if let Some(v) = val {
+                                match v {
+                                    Value::GpuTensor(h) => {
+                                        rows_cols = Some((
+                                            h.shape.first().copied().unwrap_or(1).max(1),
+                                            h.shape.get(1).copied().unwrap_or(1).max(1),
+                                        ));
+                                    }
+                                    Value::Tensor(t) => {
+                                        rows_cols = Some((
+                                            t.shape.first().copied().unwrap_or(1).max(1),
+                                            t.shape.get(1).copied().unwrap_or(1).max(1),
+                                        ));
+                                    }
+                                    _ => {}
+                                }
                             }
-                            _ => {}
                         }
                         if rows_cols.is_none() {
                             if let ShapeInfo::Tensor(dims) = &info.shape {
                                 if !dims.is_empty() {
-                                    let r = dims.get(0).and_then(|d| *d).unwrap_or(1);
+                                    let r = dims.first().and_then(|d| *d).unwrap_or(1);
                                     let c = dims.get(1).and_then(|d| *d).unwrap_or(1);
                                     rows_cols = Some((r.max(1), c.max(1)));
                                 }
@@ -9708,18 +10744,18 @@ fn try_execute_fusion_group(
 
             // Fallback: any tensor input
             if rows_cols.is_none() {
-                for v in &consumed {
+                for v in consumed.iter().filter_map(|v| v.as_ref()) {
                     match v {
                         Value::GpuTensor(h) => {
                             rows_cols = Some((
-                                h.shape.get(0).copied().unwrap_or(1).max(1),
+                                h.shape.first().copied().unwrap_or(1).max(1),
                                 h.shape.get(1).copied().unwrap_or(1).max(1),
                             ));
                             break;
                         }
                         Value::Tensor(t) => {
                             rows_cols = Some((
-                                t.shape.get(0).copied().unwrap_or(1).max(1),
+                                t.shape.first().copied().unwrap_or(1).max(1),
                                 t.shape.get(1).copied().unwrap_or(1).max(1),
                             ));
                             break;
@@ -9732,14 +10768,14 @@ fn try_execute_fusion_group(
                         match v {
                             Value::GpuTensor(h) => {
                                 rows_cols = Some((
-                                    h.shape.get(0).copied().unwrap_or(1).max(1),
+                                    h.shape.first().copied().unwrap_or(1).max(1),
                                     h.shape.get(1).copied().unwrap_or(1).max(1),
                                 ));
                                 break;
                             }
                             Value::Tensor(t) => {
                                 rows_cols = Some((
-                                    t.shape.get(0).copied().unwrap_or(1).max(1),
+                                    t.shape.first().copied().unwrap_or(1).max(1),
                                     t.shape.get(1).copied().unwrap_or(1).max(1),
                                 ));
                                 break;
@@ -9749,35 +10785,164 @@ fn try_execute_fusion_group(
                     }
                 }
             }
+            // Final fallback: group-level static shape if available
+            if rows_cols.is_none() {
+                if let ShapeInfo::Tensor(dims) = &plan.group.shape {
+                    if !dims.is_empty() {
+                        let r = dims.first().and_then(|d| *d).unwrap_or(1);
+                        let c = dims.get(1).and_then(|d| *d).unwrap_or(1);
+                        rows_cols = Some((r.max(1), c.max(1)));
+                    }
+                }
+            }
 
             let (r, c) = rows_cols.unwrap_or((1, 1));
-            if r == 1 && c == 1 {
-                log::debug!(
+            if reduce_all {
+                let mut total_elems: Option<usize> = None;
+                let mut total_from_operand = false;
+                // Prefer fully-known graph shape for the reduction operand
+                if let Some(shape) = plan.reduction_data_shape(graph) {
+                    let prod = shape.into_iter().fold(1usize, |acc, dim| {
+                        let d = dim.max(1);
+                        acc.saturating_mul(d)
+                    });
+                    total_from_operand = true;
+                    total_elems = Some(prod.max(1));
+                }
+                // Fall back to runtime tensor shapes (consumed stack values first, then inputs)
+                if total_elems.is_none() {
+                    let inspect_value = |value: &Value| -> Option<usize> {
+                        match value {
+                            Value::GpuTensor(handle) => {
+                                if handle.shape.is_empty() {
+                                    Some(1)
+                                } else {
+                                    Some(
+                                        handle
+                                            .shape
+                                            .iter()
+                                            .copied()
+                                            .map(|d| d.max(1))
+                                            .fold(1usize, |acc, dim| acc.saturating_mul(dim)),
+                                    )
+                                }
+                            }
+                            Value::Tensor(tensor) => {
+                                if tensor.shape.is_empty() {
+                                    Some(1)
+                                } else {
+                                    Some(
+                                        tensor
+                                            .shape
+                                            .iter()
+                                            .copied()
+                                            .map(|d| d.max(1))
+                                            .fold(1usize, |acc, dim| acc.saturating_mul(dim)),
+                                    )
+                                }
+                            }
+                            _ => None,
+                        }
+                    };
+                    for value in consumed.iter().filter_map(|v| v.as_ref()) {
+                        if let Some(prod) = inspect_value(value) {
+                            total_from_operand = true;
+                            total_elems = Some(prod.max(1));
+                            break;
+                        }
+                    }
+                    if total_elems.is_none() {
+                        for value in &request.inputs {
+                            if let Some(prod) = inspect_value(value) {
+                                total_from_operand = true;
+                                total_elems = Some(prod.max(1));
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Final fallback: use group-level element count or the 2-D heuristic
+                if total_elems.is_none() {
+                    if let Some(ec) = plan.element_count() {
+                        total_elems = Some(ec.max(1));
+                    }
+                }
+                if total_elems.is_none() || !total_from_operand {
+                    if fusion_debug_enabled() {
+                        log::debug!(
+                            "fusion reduction (all): operand extent unknown (source: {:?}); falling back to provider path",
+                            if total_from_operand { "runtime" } else { "output_shape" }
+                        );
+                    }
+                    return Err("fusion: reduction all extent unknown".to_string());
+                }
+                let total = total_elems.unwrap();
+                if fusion_debug_enabled() {
+                    log::debug!(
+                        "fusion reduction (all): total_elems={} fallback_rows={} fallback_cols={}",
+                        total,
+                        r,
+                        c
+                    );
+                }
+                (total, 1usize)
+            } else {
+                if fusion_debug_enabled() {
+                    if r == 1 && c == 1 {
+                        log::debug!(
                     "fusion reduction: unresolved shape (defaulted to 1x1); axis={}, constants={:?}",
                     axis, plan.constants
                 );
-            } else {
-                log::debug!(
+                    } else {
+                        log::debug!(
                     "fusion reduction: resolved shape rows={} cols={} axis={} constants={:?}",
                     r,
                     c,
                     axis,
                     plan.constants
                 );
-            }
-            if axis == 0 {
-                (r, c)
-            } else {
-                (c, r)
+                    }
+                }
+                if axis == 0 {
+                    (r, c)
+                } else {
+                    (c, r)
+                }
             }
         };
-        log::debug!(
-            "fusion reduction: axis={} reduce_len={} num_slices={} constants={:?}",
-            axis,
-            reduce_len,
-            num_slices,
-            plan.constants
-        );
+        if fusion_debug_enabled() {
+            log::debug!(
+                "fusion reduction: axis={} reduce_len={} num_slices={} constants={:?}",
+                axis,
+                reduce_len,
+                num_slices,
+                plan.constants
+            );
+        }
+        if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
+            let _rt_inputs: Vec<String> = request
+                .inputs
+                .iter()
+                .enumerate()
+                .map(|(i, v)| summarize_value(i, v))
+                .collect();
+            let _plan_inputs: Vec<String> = plan
+                .inputs
+                .iter()
+                .map(|vid| {
+                    if let Some(info) = graph.value(*vid) {
+                        format!(
+                            "vid={} origin={:?} shape={:?}",
+                            vid, info.origin, info.shape
+                        )
+                    } else {
+                        format!("vid={} origin=<missing>", vid)
+                    }
+                })
+                .collect();
+            // Summarize inputs once before execution (omit plan inputs to reduce noise)
+            log::debug!("reduction inputs: [{}]", _rt_inputs.join(", "));
+        }
         // If shape derivation failed (1x1) but inputs/consumed suggest a larger tensor, skip fusion
         let looks_wrong = reduce_len == 1 && num_slices == 1 && {
             let mut big = false;
@@ -9796,7 +10961,7 @@ fn try_execute_fusion_group(
                 }
                 _ => {}
             };
-            for v in &consumed {
+            for v in consumed.iter().filter_map(|v| v.as_ref()) {
                 check_val(v);
             }
             for v in &request.inputs {
@@ -9808,9 +10973,6 @@ fn try_execute_fusion_group(
             log::debug!(
                 "fusion reduction: skipping fusion due to unresolved shape; falling back to provider path"
             );
-            for value in consumed.into_iter().rev() {
-                stack.push(value);
-            }
             return Err("fusion: reduction shape unresolved".to_string());
         }
 
@@ -9820,68 +10982,90 @@ fn try_execute_fusion_group(
             .as_deref()
             == Some("1")
         {
-            for value in consumed.into_iter().rev() {
-                stack.push(value);
-            }
             return Err("fusion: fused reductions disabled".to_string());
         }
         let workgroup_size = 256u32;
+        if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
+            let _rt_inputs: Vec<String> = request
+                .inputs
+                .iter()
+                .enumerate()
+                .map(|(i, v)| summarize_value(i, v))
+                .collect();
+            let _plan_inputs: Vec<String> = plan
+                .inputs
+                .iter()
+                .map(|vid| {
+                    if let Some(info) = graph.value(*vid) {
+                        format!(
+                            "vid={} origin={:?} shape={:?}",
+                            vid, info.origin, info.shape
+                        )
+                    } else {
+                        format!("vid={} origin=<missing>", vid)
+                    }
+                })
+                .collect();
+            log::debug!(
+                "reduction axis={} reduce_len={} num_slices={}",
+                axis,
+                reduce_len,
+                num_slices
+            );
+        }
         match execute_reduction(request, reduce_len, num_slices, workgroup_size) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else if plan.group.kind == FusionKind::CenteredGram {
         match execute_centered_gram(request) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else if plan.group.kind == FusionKind::PowerStepNormalize {
         match execute_power_step_normalize(request) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
         }
     } else if plan.group.kind == FusionKind::ExplainedVariance {
         log::debug!("explained variance plan inputs {:?}", plan.inputs);
         match execute_explained_variance(request) {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
+            }
             Err(err) => {
                 log::debug!("explained variance fusion fallback: {}", err);
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
-                }
                 Err(err.to_string())
             }
         }
     } else if plan.group.kind == FusionKind::MatmulEpilogue {
         match execute_matmul_epilogue(request) {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                for value in consumed.into_iter().rev() {
-                    stack.push(value);
-                }
-                Err(err.to_string())
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
             }
+            Err(err) => Err(err.to_string()),
+        }
+    } else if plan.group.kind == FusionKind::ImageNormalize {
+        match execute_image_normalize(request) {
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
+            }
+            Err(err) => Err(err.to_string()),
         }
     } else {
         // Unknown fusion kind; restore stack and report
-        for value in consumed.into_iter().rev() {
-            stack.push(value);
-        }
         Err("fusion: unsupported fusion kind".to_string())
     }
 }

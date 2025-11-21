@@ -233,31 +233,17 @@ impl QrEval {
 }
 
 /// Size mode for QR outputs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum QrMode {
+    #[default]
     Full,
     Economy,
 }
 
-impl Default for QrMode {
-    fn default() -> Self {
-        QrMode::Full
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 struct QrOptions {
     mode: QrMode,
     pivot: PivotMode,
-}
-
-impl Default for QrOptions {
-    fn default() -> Self {
-        Self {
-            mode: QrMode::Full,
-            pivot: PivotMode::Matrix,
-        }
-    }
 }
 
 /// Evaluate the builtin with full access to multiple outputs.
@@ -288,6 +274,34 @@ fn evaluate_gpu(handle: &GpuTensorHandle, options: &QrOptions) -> Result<Option<
             PivotMode::Vector => runmat_accelerate_api::ProviderQrPivot::Vector,
         },
     };
+    if std::env::var("RUNMAT_DEBUG_QR").is_ok() {
+        log::debug!(
+            "qr evaluate_gpu: handle={} mode={:?} pivot={:?}",
+            handle.buffer_id,
+            options.mode,
+            options.pivot
+        );
+    }
+    if let Some((lhs, rhs)) = provider.take_matmul_sources(handle) {
+        match provider.qr_power_iter(handle, Some(&lhs), &rhs, &provider_options) {
+            Ok(Some(result)) => {
+                return Ok(Some(QrEval {
+                    q: Value::GpuTensor(result.q),
+                    r: Value::GpuTensor(result.r),
+                    perm_matrix: Value::GpuTensor(result.perm_matrix),
+                    perm_vector: Value::GpuTensor(result.perm_vector),
+                    mode: options.mode,
+                    pivot_mode: options.pivot,
+                }));
+            }
+            Ok(None) => {
+                // fall through to standard qr
+            }
+            Err(err) => {
+                log::debug!("qr_power_iter fallback: {}", err);
+            }
+        }
+    }
     match provider.qr(handle, provider_options) {
         Ok(result) => Ok(Some(QrEval {
             q: Value::GpuTensor(result.q),
@@ -519,7 +533,7 @@ fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
         .map(|j| column_norm_sq_from(&matrix, j, 0))
         .collect();
 
-    for k in 0..min_dim {
+    for (k, tau_slot) in taus.iter_mut().enumerate().take(min_dim) {
         let pivot = select_pivot(&col_norms, k);
         if pivot != k {
             matrix.swap_columns(k, pivot);
@@ -531,7 +545,7 @@ fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
             let column_slice = matrix.column_segment_mut(k, k);
             householder(column_slice)
         };
-        taus[k] = tau;
+        *tau_slot = tau;
         if tau.norm() != 0.0 {
             let v = householder_vector(&matrix, k);
             for j in (k + 1)..cols {
@@ -539,8 +553,8 @@ fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
             }
         }
 
-        for j in (k + 1)..cols {
-            col_norms[j] = column_norm_sq_from(&matrix, j, k + 1);
+        for (j, norm) in col_norms.iter_mut().enumerate().skip(k + 1) {
+            *norm = column_norm_sq_from(&matrix, j, k + 1);
         }
     }
 
@@ -552,15 +566,15 @@ fn qr_factor(mut matrix: ColMajorMatrix) -> Result<QrComponents, String> {
 }
 
 fn select_pivot(col_norms: &[f64], start: usize) -> usize {
-    let mut pivot = start;
-    let mut max_norm = 0.0;
-    for (offset, &norm) in col_norms.iter().enumerate().skip(start) {
-        if norm > max_norm {
-            max_norm = norm;
-            pivot = offset;
-        }
-    }
-    pivot
+    use std::cmp::Ordering;
+
+    col_norms
+        .iter()
+        .enumerate()
+        .skip(start)
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+        .map(|(idx, _)| idx)
+        .unwrap_or(start)
 }
 
 fn column_norm_sq_from(matrix: &ColMajorMatrix, col: usize, start_row: usize) -> f64 {
@@ -655,9 +669,7 @@ fn apply_householder(
 fn build_q(reflectors: &ColMajorMatrix, taus: &[Complex64]) -> ColMajorMatrix {
     let rows = reflectors.rows;
     let mut q = ColMajorMatrix::identity(rows);
-    let min_dim = taus.len();
-    for k in (0..min_dim).rev() {
-        let tau = taus[k];
+    for (k, &tau) in taus.iter().enumerate().rev() {
         if tau.norm() == 0.0 {
             continue;
         }
@@ -1036,6 +1048,79 @@ mod tests {
         tensor_close(&gpu_p, &host_p, tol);
         let host_vec = tensor_from_value(host_eval.permutation_vector());
         tensor_close(&gpu_vec, &host_vec, tol);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn qr_wgpu_economy_device_path() {
+        std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("register wgpu provider");
+
+        let tensor = Matrix::new(
+            vec![
+                1.0, 4.0, 2.0, 5.0, 3.0, 6.0, //
+                7.0, 8.0, 1.5, 2.5, 3.5, 4.5,
+            ],
+            vec![6, 2],
+        )
+        .unwrap();
+        let view = runmat_accelerate_api::HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        let provider = runmat_accelerate_api::provider().expect("provider");
+        let handle = provider.upload(&view).expect("upload");
+        let gpu_eval =
+            evaluate(Value::GpuTensor(handle), &[Value::from(0.0)]).expect("gpu economy eval");
+
+        match gpu_eval.q() {
+            Value::GpuTensor(_) => {}
+            other => panic!("expected gpuArray Q, got {:?}", other),
+        }
+        match gpu_eval.r() {
+            Value::GpuTensor(_) => {}
+            other => panic!("expected gpuArray R, got {:?}", other),
+        }
+
+        let gpu_q = test_support::gather(gpu_eval.q()).expect("gather Q");
+        let gpu_r = test_support::gather(gpu_eval.r()).expect("gather R");
+
+        // Q'*Q ≈ I
+        let mut qtq_data = vec![0.0; gpu_q.cols() * gpu_q.cols()];
+        for i in 0..gpu_q.cols() {
+            for j in 0..gpu_q.cols() {
+                let mut sum = 0.0;
+                for k in 0..gpu_q.rows() {
+                    sum += gpu_q.data[k + i * gpu_q.rows()] * gpu_q.data[k + j * gpu_q.rows()];
+                }
+                qtq_data[i + j * gpu_q.cols()] = sum;
+            }
+        }
+        let qtq = Matrix::new(qtq_data, vec![gpu_q.cols(), gpu_q.cols()]).unwrap();
+        let identity = Matrix::new(
+            (0..(gpu_q.cols() * gpu_q.cols()))
+                .map(|idx| {
+                    let row = idx % gpu_q.cols();
+                    let col = idx / gpu_q.cols();
+                    if row == col {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect::<Vec<_>>(),
+            vec![gpu_q.cols(), gpu_q.cols()],
+        )
+        .unwrap();
+        tensor_close(&qtq, &identity, 1e-3);
+
+        // Q*R reconstructs the input (no pivoting)
+        let qr_product = crate::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
+        let a_matrix = Matrix::new(tensor.data.clone(), tensor.shape.clone()).unwrap();
+        tensor_close(&qr_product, &a_matrix, 1e-3);
     }
 
     #[test]

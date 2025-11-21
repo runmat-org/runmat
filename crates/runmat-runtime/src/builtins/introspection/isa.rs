@@ -298,13 +298,8 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
             match value {
                 Value::Object(obj) => class_inherits(&obj.class_name, &requested_lower),
                 Value::HandleObject(handle) => {
-                    if !handle.class_name.is_empty()
+                    !handle.class_name.is_empty()
                         && class_inherits(&handle.class_name, &requested_lower)
-                    {
-                        true
-                    } else {
-                        false
-                    }
                 }
                 _ => false,
             }

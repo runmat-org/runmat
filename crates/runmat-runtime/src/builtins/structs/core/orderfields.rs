@@ -237,7 +237,7 @@ pub fn evaluate(value: Value, rest: &[Value]) -> Result<OrderFieldsEvaluation, S
     if rest.len() > 1 {
         return Err("orderfields: expected at most two input arguments".to_string());
     }
-    let order_arg = rest.get(0);
+    let order_arg = rest.first();
 
     match value {
         Value::Struct(struct_value) => {

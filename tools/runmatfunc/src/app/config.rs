@@ -212,7 +212,7 @@ fn default_config_path() -> Option<PathBuf> {
 
 fn parse_list_env(value: &str) -> Vec<String> {
     value
-        .split(|c| matches!(c, ';' | ',' | ' '))
+        .split([';', ',', ' '])
         .filter_map(|item| {
             let trimmed = item.trim();
             if trimmed.is_empty() {

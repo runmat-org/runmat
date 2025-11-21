@@ -103,7 +103,7 @@ impl TextRange {
         self.start <= offset && offset < self.end
     }
 
-    fn to_lsp_range(&self, text: &str) -> Range {
+    fn to_lsp_range(self, text: &str) -> Range {
         Range {
             start: offset_to_position(text, self.start),
             end: offset_to_position(text, self.end),
@@ -976,7 +976,7 @@ fn diagnostic_for_lowering_error(error: &str, tokens: &[SpannedToken], text: &st
     let message = error.to_string();
     let undefined_var = error
         .split(':')
-        .last()
+        .next_back()
         .map(str::trim)
         .and_then(|s| s.split_whitespace().last())
         .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_'));
@@ -1038,20 +1038,18 @@ fn find_symbol_range(
             start: tok.start,
             end: tok.end,
         })
-        .find(|range| scope.map_or(true, |scope| scope.contains(range.start)))
+        .find(|range| scope.is_none_or(|scope| scope.contains(range.start)))
 }
 
 fn position_to_offset(text: &str, position: &Position) -> usize {
     let mut offset = 0usize;
-    let mut current_line = 0u32;
-    for line in text.split_inclusive('\n') {
-        if current_line == position.line {
+    for (current_line, line) in text.split_inclusive('\n').enumerate() {
+        if current_line as u32 == position.line {
             let line_len = line.strip_suffix('\n').unwrap_or(line).len();
             let character = position.character as usize;
             return offset + character.min(line_len);
         }
         offset += line.len();
-        current_line += 1;
     }
     text.len()
 }

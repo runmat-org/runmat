@@ -286,7 +286,7 @@ fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let host_value = gather_if_needed(&value)?;
     let gathered_args: Vec<Value> = rest
         .iter()
-        .map(|arg| gather_if_needed(arg))
+        .map(gather_if_needed)
         .collect::<Result<_, _>>()?;
 
     let options = parse_options(&gathered_args)?;
@@ -310,7 +310,7 @@ fn parse_options(args: &[Value]) -> Result<JsonEncodeOptions, String> {
         return Err("jsonencode: expected name/value pairs or options struct".to_string());
     }
 
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return Err("jsonencode: name/value pairs must come in pairs".to_string());
     }
 
@@ -463,7 +463,7 @@ fn logical_array_to_json(
         return Ok(JsonValue::Array(Vec::new()));
     }
     if keep_dims.is_empty() {
-        let first = logical.data.get(0).copied().unwrap_or(0) != 0;
+        let first = logical.data.first().copied().unwrap_or(0) != 0;
         return Ok(JsonValue::Bool(first));
     }
     build_strided_array(&logical.shape, &keep_dims, |offset| {
@@ -624,9 +624,7 @@ fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> Result<Jso
 fn compute_keep_dims(shape: &[usize], drop_singletons: bool) -> Vec<usize> {
     let mut keep = Vec::new();
     for (idx, &size) in shape.iter().enumerate() {
-        if size == 0 {
-            keep.push(idx);
-        } else if !drop_singletons || size != 1 {
+        if size != 1 || !drop_singletons {
             keep.push(idx);
         }
     }

@@ -354,7 +354,7 @@ fn collect_file_ids(value: &Value) -> Result<Vec<i32>, String> {
         Value::Cell(ca) => {
             let mut ids = Vec::with_capacity(ca.data.len());
             for ptr in &ca.data {
-                let nested = collect_file_ids(&**ptr)?;
+                let nested = collect_file_ids(ptr)?;
                 ids.extend(nested);
             }
             Ok(ids)

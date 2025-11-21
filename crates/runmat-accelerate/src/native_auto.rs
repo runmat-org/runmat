@@ -1,19 +1,21 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{
     auto_offload_options,
     fusion::{active_fusion, FusionKind},
-    fusion_residency, AutoOffloadLogLevel,
+    fusion_residency,
+    precision::ensure_provider_supports_dtype,
+    AutoOffloadLogLevel,
 };
 use anyhow::{anyhow, Result};
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
-use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
 use runmat_runtime::gather_if_needed;
 use serde::{Deserialize, Serialize};
@@ -101,6 +103,7 @@ pub enum AutoOffloadDisposition {
 #[serde(rename_all = "kebab-case")]
 pub enum DecisionReason {
     FusionOverride,
+    Residency,
     SmallBatchGuard,
     ProfileModel,
     Threshold,
@@ -121,6 +124,48 @@ pub struct ThresholdSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AutoOffloadCalibrationSummary {
+    pub previous: ThresholdSnapshot,
+    pub delta: ThresholdDelta,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ThresholdDelta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_elem_per_elem: Option<ThresholdDeltaEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_reduction_per_elem: Option<ThresholdDeltaEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_matmul_per_flop: Option<ThresholdDeltaEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThresholdDeltaEntry {
+    pub before: f64,
+    pub after: f64,
+    pub absolute: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ratio: Option<f64>,
+}
+
+impl ThresholdDeltaEntry {
+    fn new(before: f64, after: f64) -> Self {
+        let absolute = after - before;
+        let ratio = if before.abs() > f64::EPSILON {
+            Some(after / before)
+        } else {
+            None
+        };
+        Self {
+            before,
+            after,
+            absolute,
+            ratio,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct AutoOffloadReport {
     pub provider: Option<CachedProviderInfo>,
     pub thresholds: ThresholdSnapshot,
@@ -128,6 +173,8 @@ pub struct AutoOffloadReport {
     pub env_overrides_applied: bool,
     pub cache_path: Option<String>,
     pub calibrate_duration_ms: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calibration: Option<AutoOffloadCalibrationSummary>,
     pub decisions: Vec<AutoOffloadDecisionEntry>,
 }
 
@@ -165,6 +212,8 @@ struct AutoOffloadState {
     env_overrides_applied: bool,
     cache_path: Option<String>,
     calibrate_duration_ms: Option<u128>,
+    previous_thresholds: Option<ThresholdConfig>,
+    calibration_delta: Option<ThresholdDelta>,
 }
 
 #[derive(Clone)]
@@ -207,7 +256,7 @@ impl DecisionLog {
 }
 
 static DECISION_LOG: Lazy<Mutex<DecisionLog>> = Lazy::new(|| Mutex::new(DecisionLog::new()));
-static AUTO_STATE: OnceCell<AutoOffloadState> = OnceCell::new();
+static AUTO_STATE: OnceCell<Mutex<AutoOffloadState>> = OnceCell::new();
 
 fn record_decision(entry: AutoOffloadDecisionEntry) {
     if let Ok(mut log) = DECISION_LOG.lock() {
@@ -247,6 +296,247 @@ fn threshold_snapshot(cfg: &ThresholdConfig) -> ThresholdSnapshot {
         small_batch_max_dim: cfg.small_batch_max_dim,
         small_batch_min_elems: cfg.small_batch_min_elems,
     }
+}
+
+fn compute_delta(before: &ThresholdConfig, after: &ThresholdConfig) -> ThresholdDelta {
+    let mut delta = ThresholdDelta::default();
+
+    if (before.cpu_elem_per_elem - after.cpu_elem_per_elem).abs() > f64::EPSILON {
+        delta.cpu_elem_per_elem = Some(ThresholdDeltaEntry::new(
+            before.cpu_elem_per_elem,
+            after.cpu_elem_per_elem,
+        ));
+    }
+
+    if (before.cpu_reduction_per_elem - after.cpu_reduction_per_elem).abs() > f64::EPSILON {
+        delta.cpu_reduction_per_elem = Some(ThresholdDeltaEntry::new(
+            before.cpu_reduction_per_elem,
+            after.cpu_reduction_per_elem,
+        ));
+    }
+
+    if (before.cpu_matmul_per_flop - after.cpu_matmul_per_flop).abs() > f64::EPSILON {
+        delta.cpu_matmul_per_flop = Some(ThresholdDeltaEntry::new(
+            before.cpu_matmul_per_flop,
+            after.cpu_matmul_per_flop,
+        ));
+    }
+
+    delta
+}
+
+#[derive(Debug, Deserialize)]
+struct CalibrationFile {
+    #[serde(default)]
+    suite: Option<CalibrationSuiteSection>,
+    #[serde(default)]
+    auto_offload_calibration: Option<CalibrationSample>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CalibrationSuiteSection {
+    #[serde(default)]
+    auto_offload_calibration: Option<CalibrationSample>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CalibrationSample {
+    #[serde(default)]
+    runs: usize,
+    #[serde(default, rename = "cpu_time_ms")]
+    cpu_time: CalibrationTimes,
+    #[serde(default)]
+    units: CalibrationUnits,
+    #[serde(default)]
+    provider: Option<CalibrationProviderInfo>,
+    #[serde(default)]
+    provider_conflict: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct CalibrationTimes {
+    #[serde(default)]
+    elementwise: f64,
+    #[serde(default)]
+    reduction: f64,
+    #[serde(default)]
+    matmul: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct CalibrationUnits {
+    #[serde(default)]
+    elementwise: f64,
+    #[serde(default)]
+    reduction: f64,
+    #[serde(default, rename = "matmul_flops")]
+    matmul_flops: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CalibrationProviderInfo {
+    name: String,
+    vendor: String,
+    #[serde(default)]
+    backend: Option<String>,
+    device_id: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AutoOffloadCalibrationOutcome {
+    pub runs: usize,
+    pub before: ThresholdSnapshot,
+    pub after: ThresholdSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta: Option<ThresholdDelta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persisted_to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<CachedProviderInfo>,
+    pub commit: bool,
+}
+
+fn load_calibration_sample(path: &Path) -> Result<CalibrationSample> {
+    let payload = fs::read_to_string(path).map_err(|e| anyhow!(e.to_string()))?;
+    let file: CalibrationFile = serde_json::from_str(&payload)
+        .map_err(|e| anyhow!(format!("failed to parse calibration file: {e}")))?;
+    if let Some(suite) = file.suite {
+        if let Some(sample) = suite.auto_offload_calibration {
+            return Ok(sample);
+        }
+    }
+    if let Some(sample) = file.auto_offload_calibration {
+        return Ok(sample);
+    }
+    Err(anyhow!(
+        "calibration file does not contain an auto_offload_calibration section"
+    ))
+}
+
+fn apply_calibration_sample(
+    cfg: &mut ThresholdConfig,
+    sample: &CalibrationSample,
+) -> Option<ThresholdDelta> {
+    let mut delta = ThresholdDelta::default();
+    let mut changed = false;
+
+    if sample.units.elementwise > 0.0 && sample.cpu_time.elementwise > 0.0 {
+        let secs_per_elem = (sample.cpu_time.elementwise / 1_000.0) / sample.units.elementwise;
+        if secs_per_elem.is_finite()
+            && secs_per_elem > 0.0
+            && (cfg.cpu_elem_per_elem - secs_per_elem).abs() > f64::EPSILON
+        {
+            delta.cpu_elem_per_elem = Some(ThresholdDeltaEntry::new(
+                cfg.cpu_elem_per_elem,
+                secs_per_elem,
+            ));
+            cfg.cpu_elem_per_elem = secs_per_elem;
+            changed = true;
+        }
+    }
+
+    if sample.units.reduction > 0.0 && sample.cpu_time.reduction > 0.0 {
+        let secs_per_elem = (sample.cpu_time.reduction / 1_000.0) / sample.units.reduction;
+        if secs_per_elem.is_finite()
+            && secs_per_elem > 0.0
+            && (cfg.cpu_reduction_per_elem - secs_per_elem).abs() > f64::EPSILON
+        {
+            delta.cpu_reduction_per_elem = Some(ThresholdDeltaEntry::new(
+                cfg.cpu_reduction_per_elem,
+                secs_per_elem,
+            ));
+            cfg.cpu_reduction_per_elem = secs_per_elem;
+            changed = true;
+        }
+    }
+
+    if sample.units.matmul_flops > 0.0 && sample.cpu_time.matmul > 0.0 {
+        let secs_per_flop = (sample.cpu_time.matmul / 1_000.0) / sample.units.matmul_flops;
+        if secs_per_flop.is_finite()
+            && secs_per_flop > 0.0
+            && (cfg.cpu_matmul_per_flop - secs_per_flop).abs() > f64::EPSILON
+        {
+            delta.cpu_matmul_per_flop = Some(ThresholdDeltaEntry::new(
+                cfg.cpu_matmul_per_flop,
+                secs_per_flop,
+            ));
+            cfg.cpu_matmul_per_flop = secs_per_flop;
+            changed = true;
+        }
+    }
+
+    if changed {
+        Some(delta)
+    } else {
+        None
+    }
+}
+
+pub fn apply_auto_offload_calibration_from_file(
+    path: &Path,
+    commit: bool,
+) -> Result<AutoOffloadCalibrationOutcome> {
+    let sample = load_calibration_sample(path)?;
+    if sample.runs == 0 {
+        return Err(anyhow!("calibration sample contains zero runs"));
+    }
+
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let device_info = provider.device_info_struct();
+
+    if let Some(ref prov) = sample.provider {
+        if prov.name != device_info.name
+            || prov.vendor != device_info.vendor
+            || prov.backend.as_deref() != device_info.backend.as_deref()
+            || prov.device_id != device_info.device_id
+        {
+            warn!(
+                "Calibration provider mismatch: sample='{} ({})' device='{} ({})'",
+                prov.name, prov.vendor, device_info.name, device_info.vendor
+            );
+        }
+        if sample.provider_conflict {
+            warn!("Calibration sample reported provider conflict across cases");
+        }
+    }
+
+    let (mut cfg, _) = load_cached_thresholds(&device_info)
+        .unwrap_or_else(|| (ThresholdConfig::default(), PathBuf::new()));
+    let before_cfg = cfg.clone();
+
+    let delta = apply_calibration_sample(&mut cfg, &sample)
+        .ok_or_else(|| anyhow!("calibration sample did not produce coefficient updates"))?;
+
+    let mut persisted_to: Option<PathBuf> = None;
+    if commit {
+        persisted_to = Some(persist_thresholds(&device_info, &cfg)?);
+    }
+
+    if let Some(state_mutex) = AUTO_STATE.get() {
+        if let Ok(mut state) = state_mutex.lock() {
+            state.previous_thresholds = Some(before_cfg.clone());
+            state.calibration_delta = Some(delta.clone());
+            if commit {
+                state.thresholds = cfg.clone();
+                state.base_source = ThresholdBase::Calibrated;
+                if let Some(ref path_buf) = persisted_to {
+                    state.cache_path = Some(path_buf.to_string_lossy().into_owned());
+                }
+                state.calibrate_duration_ms = None;
+            }
+        }
+    }
+
+    Ok(AutoOffloadCalibrationOutcome {
+        runs: sample.runs,
+        before: threshold_snapshot(&before_cfg),
+        after: threshold_snapshot(&cfg),
+        delta: Some(delta),
+        persisted_to: persisted_to.map(|p| p.to_string_lossy().into_owned()),
+        provider: Some(cached_provider_info(&device_info)),
+        commit,
+    })
 }
 
 fn cached_provider_info(info: &ApiDeviceInfo) -> CachedProviderInfo {
@@ -369,7 +659,7 @@ fn element_count_pair(a: &Value, b: &Value) -> Option<usize> {
 }
 
 pub fn global() -> Option<&'static NativeAutoOffload> {
-    GLOBAL.get_or_init(|| initialize()).as_ref()
+    GLOBAL.get_or_init(initialize).as_ref()
 }
 
 fn initialize() -> Option<NativeAutoOffload> {
@@ -454,8 +744,10 @@ fn initialize() -> Option<NativeAutoOffload> {
         env_overrides_applied,
         cache_path: cache_path_str,
         calibrate_duration_ms,
+        previous_thresholds: None,
+        calibration_delta: None,
     };
-    let _ = AUTO_STATE.set(state);
+    let _ = AUTO_STATE.set(Mutex::new(state));
 
     Some(NativeAutoOffload::new(provider, config))
 }
@@ -474,6 +766,9 @@ impl NativeAutoOffload {
         match value {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
+                if ensure_provider_supports_dtype(self.provider, t.dtype).is_err() {
+                    return Ok(value.clone());
+                }
                 if t.data.len() >= threshold && threshold > 0 {
                     log_promotion(|| {
                         format!(
@@ -608,8 +903,24 @@ impl NativeAutoOffload {
         let batch = batch_dimension_from_values(values);
         let cpu_secs = cpu_estimate(self.thresholds.cpu_elem_per_elem, elements);
 
+        // Chain-aware residency: if any input is already on GPU, keep the op on GPU
+        if values.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
+            return DecisionEvaluation {
+                recommend_gpu: true,
+                reason: DecisionReason::Residency,
+                cpu_secs,
+                gpu_secs: None,
+                threshold: Some(self.thresholds.binary_min_elems),
+                fusion_kind,
+                batch,
+            };
+        }
+
         if let Some(active) = fusion.as_ref() {
-            if active.kind.is_elementwise() && active.supported {
+            // If an elementwise chain is actively fused OR this elementwise op
+            // participates in a fused reduction group, force GPU to keep the
+            // whole chain resident and avoid host round-trips.
+            if (active.kind.is_elementwise() || active.kind.is_reduction()) && active.supported {
                 return DecisionEvaluation {
                     recommend_gpu: true,
                     reason: DecisionReason::FusionOverride,
@@ -726,6 +1037,18 @@ impl NativeAutoOffload {
     fn evaluate_unary(&self, elements: usize, op: UnaryOp, value: &Value) -> DecisionEvaluation {
         let fusion_kind = active_fusion().map(|f| f.kind.clone());
         let batch = batch_dimension_from_values(&[value]);
+        // Chain-aware residency for unary ops: if operand is already on GPU, keep it on GPU
+        if matches!(value, Value::GpuTensor(_)) {
+            return DecisionEvaluation {
+                recommend_gpu: true,
+                reason: DecisionReason::Residency,
+                cpu_secs: cpu_estimate(self.thresholds.cpu_elem_per_elem, elements),
+                gpu_secs: None,
+                threshold: Some(self.thresholds.unary_min_elems),
+                fusion_kind,
+                batch,
+            };
+        }
         if matches!(op, UnaryOp::Generic) && self.small_batch_guard(elements, batch) {
             return DecisionEvaluation {
                 recommend_gpu: false,
@@ -777,10 +1100,10 @@ impl NativeAutoOffload {
         }
         // Do not attempt to promote 'double' on providers that cannot store f64.
         // Offloading a cast to double requires device-side f64; otherwise keep host.
-        if name.eq_ignore_ascii_case("double") {
-            if self.provider.precision() != runmat_accelerate_api::ProviderPrecision::F64 {
-                return Ok(args.to_vec());
-            }
+        if name.eq_ignore_ascii_case("double")
+            && self.provider.precision() != runmat_accelerate_api::ProviderPrecision::F64
+        {
+            return Ok(args.to_vec());
         }
         if let Some(policy) = builtin_policy(name) {
             if policy.is_sink {
@@ -794,8 +1117,17 @@ impl NativeAutoOffload {
                 .iter()
                 .any(|tag| matches!(tag, AccelTag::Reduction))
             {
-                log_promotion(|| format!("Promoting builtin '{}' as reduction", name));
-                return self.promote_reduction(ReductionOp::Sum, args);
+                if (name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min"))
+                    && !max_or_min_reduction_call(args)
+                {
+                    trace!(
+                        "Skipping reduction promotion for builtin '{}' (detected elementwise form)",
+                        name
+                    );
+                } else {
+                    log_promotion(|| format!("Promoting builtin '{}' as reduction", name));
+                    return self.promote_reduction(reduction_op_hint(name), args);
+                }
             }
 
             if policy
@@ -866,6 +1198,41 @@ fn tensor_rows_cols(value: &Value) -> Option<(usize, usize)> {
     }
 }
 
+#[allow(dead_code)]
+fn should_skip_reduction_promotion(name: &str, args: &[Value]) -> bool {
+    (name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min"))
+        && !max_or_min_reduction_call(args)
+}
+
+fn reduction_op_hint(name: &str) -> ReductionOp {
+    if name.eq_ignore_ascii_case("max") {
+        ReductionOp::Max
+    } else if name.eq_ignore_ascii_case("min") {
+        ReductionOp::Min
+    } else {
+        ReductionOp::Sum
+    }
+}
+
+fn max_or_min_reduction_call(args: &[Value]) -> bool {
+    if args.len() <= 1 {
+        return true;
+    }
+    args.get(1).map(is_empty_placeholder_value).unwrap_or(false)
+}
+
+fn is_empty_placeholder_value(value: &Value) -> bool {
+    match value {
+        Value::Tensor(t) => t.data.is_empty(),
+        Value::LogicalArray(l) => l.data.is_empty(),
+        Value::StringArray(sa) => sa.data.is_empty(),
+        Value::CharArray(ca) => ca.data.is_empty(),
+        Value::Cell(cell) => cell.data.is_empty(),
+        Value::String(s) => s.is_empty(),
+        _ => false,
+    }
+}
+
 fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for value in args {
@@ -877,6 +1244,27 @@ fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
     Ok(out)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_detection_handles_placeholders() {
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let placeholder = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
+        let data = Value::Tensor(tensor);
+        let empty = Value::Tensor(placeholder);
+
+        assert!(max_or_min_reduction_call(std::slice::from_ref(&data)));
+        assert!(max_or_min_reduction_call(&[
+            data.clone(),
+            empty.clone(),
+            Value::Num(1.0)
+        ]));
+        assert!(!max_or_min_reduction_call(&[data.clone(), Value::Num(0.0)]));
+    }
+}
+
 #[derive(Clone, Copy)]
 struct BuiltinPolicy {
     accel_tags: &'static [AccelTag],
@@ -885,20 +1273,22 @@ struct BuiltinPolicy {
 
 static BUILTIN_POLICIES: OnceCell<HashMap<String, BuiltinPolicy>> = OnceCell::new();
 
+fn build_builtin_policy_map() -> HashMap<String, BuiltinPolicy> {
+    let mut map = HashMap::new();
+    for func in builtin_functions() {
+        map.insert(
+            func.name.to_ascii_lowercase(),
+            BuiltinPolicy {
+                accel_tags: func.accel_tags,
+                is_sink: func.is_sink,
+            },
+        );
+    }
+    map
+}
+
 fn builtin_policy(name: &str) -> Option<BuiltinPolicy> {
-    let map = BUILTIN_POLICIES.get_or_init(|| {
-        let mut map = HashMap::new();
-        for func in builtin_functions() {
-            map.insert(
-                func.name.to_ascii_lowercase(),
-                BuiltinPolicy {
-                    accel_tags: func.accel_tags,
-                    is_sink: func.is_sink,
-                },
-            );
-        }
-        map
-    });
+    let map = BUILTIN_POLICIES.get_or_init(build_builtin_policy_map);
     map.get(&name.to_ascii_lowercase()).copied()
 }
 
@@ -1104,10 +1494,19 @@ fn compare_elemwise(
     if elements == 0 {
         return Ok(Some(false));
     }
-    let data: Vec<f64> = (0..elements).map(|i| i as f64).collect();
-    let tensor = Tensor::new(data.clone(), vec![elements, 1]).map_err(|e| anyhow!(e))?;
-    let a = Value::Tensor(tensor.clone());
-    let b = Value::Tensor(tensor.clone());
+    let shape = vec![elements, 1];
+    let template = match provider.precision() {
+        ProviderPrecision::F64 => {
+            Tensor::new((0..elements).map(|i| i as f64).collect(), shape.clone())
+                .map_err(|e| anyhow!(e))?
+        }
+        ProviderPrecision::F32 => {
+            Tensor::from_f32((0..elements).map(|i| i as f32).collect(), shape.clone())
+                .map_err(|e| anyhow!(e))?
+        }
+    };
+    let a = Value::Tensor(template.clone());
+    let b = Value::Tensor(template.clone());
     let cpu_time = time(|| runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]))?;
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
@@ -1123,8 +1522,8 @@ fn compare_elemwise(
         }
     }
     let view = HostTensorView {
-        data: &data,
-        shape: &[elements, 1],
+        data: template.data.as_slice(),
+        shape: template.shape.as_slice(),
     };
     let ha = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let hb = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
@@ -1165,10 +1564,19 @@ fn compare_reduction(
     elements: usize,
     cpu_cost_slot: &mut f64,
 ) -> Result<Option<bool>> {
-    let data: Vec<f64> = (0..elements).map(|i| i as f64).collect();
-    let tensor = Tensor::new(data.clone(), vec![elements, 1]).map_err(|e| anyhow!(e))?;
-    let value = Value::Tensor(tensor.clone());
-    let cpu_time = time(|| runmat_runtime::call_builtin("sum", &[value.clone()]))?;
+    let shape = vec![elements, 1];
+    let template = match provider.precision() {
+        ProviderPrecision::F64 => {
+            Tensor::new((0..elements).map(|i| i as f64).collect(), shape.clone())
+                .map_err(|e| anyhow!(e))?
+        }
+        ProviderPrecision::F32 => {
+            Tensor::from_f32((0..elements).map(|i| i as f32).collect(), shape.clone())
+                .map_err(|e| anyhow!(e))?
+        }
+    };
+    let value = Value::Tensor(template.clone());
+    let cpu_time = time(|| runmat_runtime::call_builtin("sum", std::slice::from_ref(&value)))?;
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
     if let Some(model) = profile_cost_model() {
@@ -1183,8 +1591,8 @@ fn compare_reduction(
         }
     }
     let view = HostTensorView {
-        data: &data,
-        shape: &[elements, 1],
+        data: template.data.as_slice(),
+        shape: template.shape.as_slice(),
     };
     let h = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
     let start = Instant::now();
@@ -1229,10 +1637,23 @@ fn compare_matmul(
         return Ok(Some(false));
     }
     let total = n * n;
-    let data_a: Vec<f64> = (0..total).map(|i| (i % 13) as f64).collect();
-    let data_b: Vec<f64> = (0..total).map(|i| (i % 7) as f64).collect();
-    let ta = Tensor::new(data_a.clone(), vec![n, n]).map_err(|e| anyhow!(e))?;
-    let tb = Tensor::new(data_b.clone(), vec![n, n]).map_err(|e| anyhow!(e))?;
+    let shape = vec![n, n];
+    let (ta, tb) = match provider.precision() {
+        ProviderPrecision::F64 => {
+            let data_a: Vec<f64> = (0..total).map(|i| (i % 13) as f64).collect();
+            let data_b: Vec<f64> = (0..total).map(|i| (i % 7) as f64).collect();
+            let ta = Tensor::new(data_a, shape.clone()).map_err(|e| anyhow!(e))?;
+            let tb = Tensor::new(data_b, shape.clone()).map_err(|e| anyhow!(e))?;
+            (ta, tb)
+        }
+        ProviderPrecision::F32 => {
+            let data_a: Vec<f32> = (0..total).map(|i| (i % 13) as f32).collect();
+            let data_b: Vec<f32> = (0..total).map(|i| (i % 7) as f32).collect();
+            let ta = Tensor::from_f32(data_a, shape.clone()).map_err(|e| anyhow!(e))?;
+            let tb = Tensor::from_f32(data_b, shape.clone()).map_err(|e| anyhow!(e))?;
+            (ta, tb)
+        }
+    };
     let a = Value::Tensor(ta.clone());
     let b = Value::Tensor(tb.clone());
     let cpu_time = time(|| runmat_runtime::matrix::value_matmul(&a, &b))?;
@@ -1250,12 +1671,12 @@ fn compare_matmul(
         }
     }
     let view_a = HostTensorView {
-        data: &data_a,
-        shape: &[n, n],
+        data: ta.data.as_slice(),
+        shape: ta.shape.as_slice(),
     };
     let view_b = HostTensorView {
-        data: &data_b,
-        shape: &[n, n],
+        data: tb.data.as_slice(),
+        shape: tb.shape.as_slice(),
     };
     let ha = provider
         .upload(&view_a)
@@ -1289,7 +1710,18 @@ where
 }
 
 pub fn auto_offload_report() -> Option<AutoOffloadReport> {
-    let state = AUTO_STATE.get()?;
+    let state_guard = AUTO_STATE.get()?;
+    let state = state_guard.lock().ok()?;
+    let calibration = state.previous_thresholds.as_ref().map(|prev| {
+        let delta = state
+            .calibration_delta
+            .clone()
+            .unwrap_or_else(|| compute_delta(prev, &state.thresholds));
+        AutoOffloadCalibrationSummary {
+            previous: threshold_snapshot(prev),
+            delta,
+        }
+    });
     Some(AutoOffloadReport {
         provider: state.provider.clone(),
         thresholds: threshold_snapshot(&state.thresholds),
@@ -1297,8 +1729,16 @@ pub fn auto_offload_report() -> Option<AutoOffloadReport> {
         env_overrides_applied: state.env_overrides_applied,
         cache_path: state.cache_path.clone(),
         calibrate_duration_ms: state.calibrate_duration_ms,
+        calibration,
         decisions: snapshot_decisions(),
     })
+}
+
+pub fn sequence_threshold_hint() -> Option<usize> {
+    AUTO_STATE
+        .get()
+        .and_then(|state| state.lock().ok())
+        .map(|state| state.thresholds.unary_min_elems)
 }
 
 pub fn reset_auto_offload_log() {
@@ -1461,9 +1901,7 @@ fn fit_linear_model(samples: &[(f64, f64)]) -> Option<LinearModel> {
 }
 
 fn profile_cost_model() -> Option<&'static ProfileCostModel> {
-    PROFILE_MODEL
-        .get_or_init(|| load_profile_cost_model())
-        .as_ref()
+    PROFILE_MODEL.get_or_init(load_profile_cost_model).as_ref()
 }
 
 fn load_profile_cost_model() -> Option<ProfileCostModel> {

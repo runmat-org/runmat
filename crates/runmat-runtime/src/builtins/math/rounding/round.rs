@@ -180,7 +180,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!("round({input})"))
         },
     }),
@@ -237,7 +237,7 @@ fn round_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
 
 fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> Result<Value, String> {
     if !strategy.requires_host() {
-        if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             if let Ok(out) = provider.unary_round(&handle) {
                 return Ok(Value::GpuTensor(out));
             }
@@ -318,7 +318,7 @@ fn round_with_significant(value: f64, digits: i32) -> f64 {
     }
     let abs_val = value.abs();
     let order = abs_val.log10().floor();
-    let scale_power = digits as i32 - 1 - order as i32;
+    let scale_power = digits - 1 - order as i32;
     let scale = 10f64.powi(scale_power);
     if !scale.is_finite() || scale == 0.0 {
         return value;
@@ -432,7 +432,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                let expected = vec![1.23, 2.5, 3.5];
+                let expected = [1.23, 2.5, 3.5];
                 for (a, b) in t.data.iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12, "expected {b}, got {a}");
                 }

@@ -269,10 +269,7 @@ fn try_provider_find(
         FindDirection::Last => runmat_accelerate_api::FindDirection::Last,
     };
     let limit = options.effective_limit();
-    match provider.find(handle, limit, direction) {
-        Ok(result) => Some(result),
-        Err(_) => None,
-    }
+    provider.find(handle, limit, direction).ok()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -563,7 +560,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                         if value != 0.0 {
                             indices.push(idx + 1);
                             values.push(value);
-                            if limit.map_or(false, |k| indices.len() >= k) {
+                            if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
                         }
@@ -575,7 +572,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                         if value != 0.0 {
                             indices.push(idx + 1);
                             values.push(value);
-                            if limit.map_or(false, |k| indices.len() >= k) {
+                            if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
                         }
@@ -601,7 +598,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                         if re != 0.0 || im != 0.0 {
                             indices.push(idx + 1);
                             values.push((re, im));
-                            if limit.map_or(false, |k| indices.len() >= k) {
+                            if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
                         }
@@ -613,7 +610,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                         if re != 0.0 || im != 0.0 {
                             indices.push(idx + 1);
                             values.push((re, im));
-                            if limit.map_or(false, |k| indices.len() >= k) {
+                            if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
                         }
@@ -643,7 +640,7 @@ impl FindResult {
 
     fn row_tensor(&self) -> Result<Tensor, String> {
         let mut data = Vec::with_capacity(self.indices.len());
-        let rows = self.shape.get(0).copied().unwrap_or(1).max(1);
+        let rows = self.shape.first().copied().unwrap_or(1).max(1);
         for &idx in &self.indices {
             let zero_based = idx - 1;
             let row = (zero_based % rows) + 1;
@@ -654,7 +651,7 @@ impl FindResult {
 
     fn column_tensor(&self) -> Result<Tensor, String> {
         let mut data = Vec::with_capacity(self.indices.len());
-        let rows = self.shape.get(0).copied().unwrap_or(1).max(1);
+        let rows = self.shape.first().copied().unwrap_or(1).max(1);
         for &idx in &self.indices {
             let zero_based = idx - 1;
             let col = (zero_based / rows) + 1;

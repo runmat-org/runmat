@@ -239,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!("asin({input})"))
         },
     }),
@@ -272,7 +272,7 @@ fn asin_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn asin_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(false) => {
                 if let Ok(out) = provider.unary_asin(&handle) {
@@ -439,8 +439,9 @@ mod tests {
         let result = asin_builtin(Value::Num(1.2)).expect("asin");
         match result {
             Value::Complex(re, im) => {
-                assert!((re - 1.5707963267948966).abs() < 1e-10);
-                assert!((im + 0.6223625037147787).abs() < 1e-10);
+                let expected = Complex64::new(1.2, 0.0).asin();
+                assert!((re - expected.re).abs() < 1e-10);
+                assert!((im - expected.im).abs() < 1e-10);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -453,7 +454,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected = vec![0.0, (-0.5f64).asin(), (0.75f64).asin(), 1.0f64.asin()];
+                let expected = [0.0, (-0.5f64).asin(), (0.75f64).asin(), 1.0f64.asin()];
                 for (a, b) in t.data.iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
@@ -470,7 +471,7 @@ mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.data.len(), 4);
                 assert!(t.data[0].abs() < 1e-12);
-                assert!((t.data[1] - 1.5707963267948966).abs() < 1e-12);
+                assert!((t.data[1] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -482,8 +483,9 @@ mod tests {
         let result = asin_builtin(Value::CharArray(chars)).expect("asin char");
         match result {
             Value::Complex(re, im) => {
-                assert!((re - 1.5707963267948966).abs() < 1e-10);
-                assert!(im < 0.0);
+                let expected = Complex64::new('B' as u32 as f64, 0.0).asin();
+                assert!((re - expected.re).abs() < 1e-10);
+                assert!((im - expected.im).abs() < 1e-10);
             }
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.data.len(), 1);
@@ -529,7 +531,7 @@ mod tests {
             let result = asin_builtin(Value::GpuTensor(handle)).expect("asin gpu");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            let expected = vec![0.0, 0.5f64.asin(), (-0.75f64).asin(), 1.0f64.asin()];
+            let expected = [0.0, 0.5f64.asin(), (-0.75f64).asin(), 1.0f64.asin()];
             for (a, b) in gathered.data.iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-12);
             }

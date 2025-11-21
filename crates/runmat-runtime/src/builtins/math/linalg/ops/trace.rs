@@ -248,7 +248,7 @@ fn trace_numeric(value: Value) -> Result<Value, String> {
 fn trace_complex_tensor(ct: ComplexTensor) -> Result<Value, String> {
     ensure_matrix_shape(NAME, &ct.shape)?;
     let rows = if ct.rows == 0 {
-        ct.shape.get(0).copied().unwrap_or(0)
+        ct.shape.first().copied().unwrap_or(0)
     } else {
         ct.rows
     };

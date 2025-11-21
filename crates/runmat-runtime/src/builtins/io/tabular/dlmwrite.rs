@@ -769,9 +769,7 @@ fn format_numeric(value: f64, precision: &PrecisionSpec) -> Result<String, Strin
             }
             let fmt = format!("%.{digits}g");
             let mut rendered = c_format(value, &fmt)?;
-            if value == 0.0 {
-                rendered = "0".to_string();
-            } else if rendered == "-0" {
+            if value == 0.0 || rendered == "-0" {
                 rendered = "0".to_string();
             }
             Ok(rendered)
@@ -795,7 +793,7 @@ fn c_format(value: f64, spec: &str) -> Result<String, String> {
     loop {
         let mut buffer = vec![0u8; size];
         let written = unsafe {
-            libc::snprintf(
+            platform_snprintf(
                 buffer.as_mut_ptr() as *mut c_char,
                 size as size_t,
                 fmt.as_ptr(),
@@ -814,6 +812,41 @@ fn c_format(value: f64, spec: &str) -> Result<String, String> {
         return String::from_utf8(buffer)
             .map_err(|_| "dlmwrite: formatted output was not valid UTF-8".to_string());
     }
+}
+
+#[cfg(not(windows))]
+unsafe fn platform_snprintf(
+    buffer: *mut c_char,
+    size: size_t,
+    fmt: *const c_char,
+    value: f64,
+) -> libc::c_int {
+    libc::snprintf(buffer, size, fmt, value)
+}
+
+#[cfg(all(windows, target_env = "msvc"))]
+extern "C" {
+    fn _snprintf(buffer: *mut c_char, size: size_t, fmt: *const c_char, ...) -> libc::c_int;
+}
+
+#[cfg(all(windows, target_env = "msvc"))]
+unsafe fn platform_snprintf(
+    buffer: *mut c_char,
+    size: size_t,
+    fmt: *const c_char,
+    value: f64,
+) -> libc::c_int {
+    _snprintf(buffer, size, fmt, value)
+}
+
+#[cfg(all(windows, target_env = "gnu"))]
+unsafe fn platform_snprintf(
+    buffer: *mut c_char,
+    size: size_t,
+    fmt: *const c_char,
+    value: f64,
+) -> libc::c_int {
+    libc::snprintf(buffer, size, fmt, value)
 }
 
 #[cfg(test)]

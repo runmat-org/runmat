@@ -317,10 +317,11 @@ fn tensor_in_index_and_end_arithmetic() {
     } else {
         panic!("expected tensor literal on assignment to A");
     }
-    if let Stmt::Assign(_, Expr::Index(_, idxs), _) = &ast.body[1] {
-        assert_eq!(idxs.len(), 2);
+    if let Stmt::Assign(_, Expr::FuncCall(name, args), _) = &ast.body[1] {
+        assert_eq!(name, "A");
+        assert_eq!(args.len(), 2);
     } else {
-        panic!("expected index expression");
+        panic!("expected deferred call form A( ... )");
     }
 }
 

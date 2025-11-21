@@ -6,6 +6,12 @@ pub struct WgpuMetrics {
     last_warmup_millis: AtomicU64,
 }
 
+impl Default for WgpuMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WgpuMetrics {
     pub fn new() -> Self {
         Self {

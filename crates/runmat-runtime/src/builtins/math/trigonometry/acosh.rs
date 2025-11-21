@@ -232,7 +232,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!("acosh({input})"))
         },
     }),
@@ -267,7 +267,7 @@ fn acosh_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn acosh_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle) {
             Ok(false) => {
                 if let Ok(out) = provider.unary_acosh(&handle) {
@@ -471,9 +471,9 @@ mod tests {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [
                     (0.0, 0.0),
-                    (0.0, 1.5707963267948966),
+                    (0.0, std::f64::consts::FRAC_PI_2),
                     (0.0, 0.0),
-                    (0.0, 1.5707963267948966),
+                    (0.0, std::f64::consts::FRAC_PI_2),
                 ];
                 for (actual, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((actual.0 - exp.0).abs() < 1e-12);

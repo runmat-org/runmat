@@ -18,6 +18,8 @@ fn get_binary_path() -> PathBuf {
 fn run_runmat(args: &[&str]) -> std::process::Output {
     Command::new(get_binary_path())
         .args(args)
+        .env("RUNMAT_ACCEL_ENABLE", "0")
+        .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
         .output()
         .expect("Failed to execute runmat binary")
 }

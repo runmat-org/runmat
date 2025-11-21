@@ -588,7 +588,7 @@ fn logical_array_dimension_length(
         );
     }
     let len = if dim_idx == 0 {
-        logical.shape.get(0).copied().unwrap_or(logical.data.len())
+        logical.shape.first().copied().unwrap_or(logical.data.len())
     } else {
         logical.shape.get(1).copied().unwrap_or(1)
     };

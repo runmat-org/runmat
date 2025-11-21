@@ -546,7 +546,7 @@ mod tests {
         match value {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, expected_shape, "shape mismatch");
-                let expected_rows = expected_shape.get(0).copied().unwrap_or(0);
+                let expected_rows = expected_shape.first().copied().unwrap_or(0);
                 let expected_cols = match expected_shape.len() {
                     0 => 0,
                     1 => 1,

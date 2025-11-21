@@ -1,9 +1,11 @@
 //! MATLAB-compatible `linspace` builtin with GPU-aware semantics for RunMat.
 
+use log::trace;
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -229,7 +231,16 @@ fn linspace_builtin(start: Value, stop: Value, rest: Vec<Value>) -> Result<Value
         parse_count(&rest[0])?
     };
 
-    let prefer_gpu = start_gpu || stop_gpu;
+    let residency = sequence_gpu_preference(count, SequenceIntent::Linspace, start_gpu || stop_gpu);
+    if log::log_enabled!(log::Level::Trace) {
+        trace!(
+            "linspace: len={} prefer_gpu={} reason={:?}",
+            count,
+            residency.prefer_gpu,
+            residency.reason
+        );
+    }
+    let prefer_gpu = residency.prefer_gpu;
     build_sequence(start_scalar, stop_scalar, count, prefer_gpu)
 }
 
@@ -360,11 +371,23 @@ fn build_sequence(
             }
         }
         if let Some(provider) = runmat_accelerate_api::provider() {
-            if count == 0 {
-                // Skip provider.linspace for zero-length; fall back to upload path below.
-            } else {
-                if let Ok(handle) = provider.linspace(start_re, stop_re, count) {
-                    return Ok(Value::GpuTensor(handle));
+            if count > 0 {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "linspace: attempting provider.linspace start={} stop={} count={}",
+                        start_re,
+                        stop_re,
+                        count
+                    );
+                }
+                match provider.linspace(start_re, stop_re, count) {
+                    Ok(handle) => {
+                        trace!("linspace: provider.linspace succeeded");
+                        return Ok(Value::GpuTensor(handle));
+                    }
+                    Err(err) => {
+                        trace!("linspace: provider.linspace failed: {err}");
+                    }
                 }
             }
         }

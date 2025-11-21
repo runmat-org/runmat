@@ -13,6 +13,8 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
+type AlignedShapes = (Vec<usize>, Vec<usize>, Vec<usize>);
+
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
 title: "kron"
@@ -382,7 +384,7 @@ fn value_into_kron_input(value: Value) -> Result<KronInput, String> {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             tensor::value_into_tensor_for("kron", value)
                 .map(KronInput::Real)
-                .map_err(|e| format!("{e}"))
+                .map_err(|e| e.to_string())
         }
         Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
             .map(KronInput::Complex)
@@ -456,10 +458,7 @@ fn kron_complex_tensor(a: &ComplexTensor, b: &ComplexTensor) -> Result<ComplexTe
     ComplexTensor::new(data, shape_out).map_err(|e| format!("kron: {e}"))
 }
 
-fn aligned_shapes(
-    shape_a: &[usize],
-    shape_b: &[usize],
-) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>), String> {
+fn aligned_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<AlignedShapes, String> {
     let rank = shape_a.len().max(shape_b.len()).max(1);
     let mut padded_a = vec![1usize; rank];
     let mut padded_b = vec![1usize; rank];
@@ -511,7 +510,7 @@ fn combine_indices(
     strides_out: &[usize],
 ) -> Result<usize, String> {
     let mut index = 0usize;
-    for dim in 0..strides_out.len() {
+    for (dim, stride) in strides_out.iter().enumerate() {
         let scaled = coords_a
             .get(dim)
             .copied()
@@ -524,7 +523,7 @@ fn combine_indices(
         index = index
             .checked_add(
                 coord
-                    .checked_mul(strides_out[dim])
+                    .checked_mul(*stride)
                     .ok_or_else(|| "kron: index overflow".to_string())?,
             )
             .ok_or_else(|| "kron: index overflow".to_string())?;

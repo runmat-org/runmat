@@ -11,6 +11,20 @@ pub struct LenOpParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct LinearGatherParams {
+    pub count: u32,
+    pub _pad: [u32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct LinearScatterParams {
+    pub count: u32,
+    pub _pad: [u32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ScalarParamsF64 {
     pub len: u32,
     pub op: u32,
@@ -50,24 +64,18 @@ pub struct Conv1dParams {
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct FusionParams {
     pub len: u32,
-    pub _pad0: u32,
+    pub offset: u32,
     pub _pad1: u32,
     pub _pad2: u32,
 }
 
 #[repr(C, align(16))]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
 pub struct PackedI32(pub [i32; 4]);
 
 impl PackedI32 {
     pub fn from_scalar(value: i32) -> Self {
         Self([value, 0, 0, 0])
-    }
-}
-
-impl Default for PackedI32 {
-    fn default() -> Self {
-        Self([0; 4])
     }
 }
 
@@ -328,8 +336,11 @@ pub struct MatmulParams {
     pub offset_a: u32,
     pub offset_b: u32,
     pub offset_out: u32,
-    pub _pad: u32,
+    pub flags: u32,
 }
+
+pub const MATMUL_FLAG_TRANSPOSE_A: u32 = 1 << 0;
+pub const MATMUL_FLAG_TRANSPOSE_B: u32 = 1 << 1;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -371,21 +382,56 @@ pub const MATMUL_EPILOGUE_FLAG_CLAMP_MAX: u32 = 1 << 5;
 pub const MATMUL_EPILOGUE_FLAG_POW: u32 = 1 << 6;
 pub const MATMUL_EPILOGUE_FLAG_DIAG_WRITE: u32 = 1 << 7;
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CenteredGramParamsF64 {
+    pub rows: u32,
+    pub cols: u32,
+    pub lda: u32,
+    pub ldc: u32,
+    pub offset_matrix: u32,
+    pub offset_means: u32,
+    pub offset_out: u32,
+    pub _pad0: u32,
+    pub denom: [f64; 2],
+    pub _pad1: [f64; 2],
+    pub _pad2: [f64; 2],
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CenteredGramParamsF32 {
+    pub rows: u32,
+    pub cols: u32,
+    pub lda: u32,
+    pub ldc: u32,
+    pub offset_matrix: u32,
+    pub offset_means: u32,
+    pub offset_out: u32,
+    pub _pad0: u32,
+    pub denom: [f32; 4],
+    pub _pad1: [f32; 4],
+    pub _pad2: [f32; 4],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ImageNormalizeUniforms {
-    pub batches: u32,
+    pub batch_count: u32,
     pub height: u32,
     pub width: u32,
     pub plane: u32,
     pub stride_h: u32,
     pub stride_w: u32,
     pub flags: u32,
+    pub batch_stride: u32,
+    pub batch_offset: u32,
     pub _pad0: u32,
     pub epsilon: f32,
     pub gain: f32,
     pub bias: f32,
     pub gamma: f32,
+    pub _pad1: u32,
 }
 
 pub const IMAGE_NORMALIZE_FLAG_GAIN: u32 = 1 << 0;
@@ -402,7 +448,7 @@ pub struct SyrkParams {
     pub row_offset: u32,
     pub chunk_rows: u32,
     pub flags: u32,
-    pub _pad: u32,
+    pub offset_out: u32,
 }
 
 pub const SYRK_FLAG_ACCUMULATE: u32 = 1 << 0;
@@ -601,8 +647,38 @@ pub struct RandomIntParamsF32 {
 pub struct RandomScalarParams {
     pub offset: u32,
     pub chunk: u32,
-    pub seed: u32,
-    pub _pad: u32,
+    pub key0: u32,
+    pub key1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct StochasticEvolutionParamsF32 {
+    pub offset: u32,
+    pub chunk: u32,
+    pub len: u32,
+    pub steps: u32,
+    pub key0: u32,
+    pub key1: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub drift: f32,
+    pub scale: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct StochasticEvolutionParamsF64 {
+    pub offset: u32,
+    pub chunk: u32,
+    pub len: u32,
+    pub steps: u32,
+    pub key0: u32,
+    pub key1: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub drift: f64,
+    pub scale: f64,
 }
 
 #[repr(C)]
@@ -667,4 +743,12 @@ pub struct ReduceNdParams {
     pub reduce_sizes: [AlignedU32; BCAST_MAX_RANK],
     pub kept_strides: [AlignedU32; BCAST_MAX_RANK],
     pub reduce_strides: [AlignedU32; BCAST_MAX_RANK],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct QrPowerIterParams {
+    pub cols: u32,
+    pub stride: u32,
+    pub _pad0: [u32; 2],
 }

@@ -661,7 +661,7 @@ impl SpecialCallable {
         match self {
             SpecialCallable::ProdOfSize => {
                 let value = args
-                    .get(0)
+                    .first()
                     .ok_or_else(|| "cellfun: prodofsize requires one input".to_string())?;
                 Ok(Value::Num(value_numel(value) as f64))
             }
@@ -676,7 +676,7 @@ impl SpecialCallable {
                 let class_str = extract_string(&class_value)
                     .ok_or_else(|| "cellfun: failed to evaluate class name".to_string())?;
                 Ok(Value::Bool(
-                    class_str.eq_ignore_ascii_case(&class_name.trim()),
+                    class_str.eq_ignore_ascii_case(class_name.trim()),
                 ))
             }
         }
@@ -1062,7 +1062,7 @@ mod tests {
         let ints = crate::make_cell(
             vec![
                 Value::Int(IntValue::I32(5)),
-                Value::Num(3.14),
+                Value::Num(std::f64::consts::PI),
                 Value::Int(IntValue::I16(2)),
             ],
             1,

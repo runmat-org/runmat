@@ -339,7 +339,7 @@ fn strrep_cell_array(cell: CellArray, old: &str, new: &str) -> Result<Value, Str
     let CellArray { data, shape, .. } = cell;
     let mut replaced = Vec::with_capacity(data.len());
     for ptr in &data {
-        replaced.push(strrep_cell_element(&**ptr, old, new)?);
+        replaced.push(strrep_cell_element(ptr, old, new)?);
     }
     make_cell_with_shape(replaced, shape).map_err(|e| format!("strrep: {e}"))
 }

@@ -456,7 +456,7 @@ mod tests {
 
         let sep = std::path::MAIN_SEPARATOR.to_string();
         assert_eq!(rows.len(), 2);
-        assert!(rows.contains(&format!("alpha.txt")));
+        assert!(rows.contains(&"alpha.txt".to_string()));
         assert!(rows.contains(&format!("beta{sep}")));
 
         drop(guard);
@@ -474,7 +474,7 @@ mod tests {
         rows.sort();
 
         let sep = std::path::MAIN_SEPARATOR.to_string();
-        assert_eq!(rows, vec![format!("data.csv"), format!("nested{sep}")]);
+        assert_eq!(rows, vec!["data.csv".to_string(), format!("nested{sep}")]);
     }
 
     #[test]

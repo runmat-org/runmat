@@ -265,7 +265,7 @@ fn transpose_logical_array(la: LogicalArray) -> Result<LogicalArray, String> {
         return Ok(la);
     }
     if rank <= 2 {
-        let rows = la.shape.get(0).copied().unwrap_or(1);
+        let rows = la.shape.first().copied().unwrap_or(1);
         let cols = if rank >= 2 {
             la.shape.get(1).copied().unwrap_or(1)
         } else {
@@ -281,11 +281,7 @@ fn transpose_logical_array(la: LogicalArray) -> Result<LogicalArray, String> {
                 }
             }
         }
-        let new_shape = if rank >= 2 {
-            vec![cols, rows]
-        } else {
-            vec![cols, rows]
-        };
+        let new_shape = vec![cols, rows];
         LogicalArray::new(out, new_shape).map_err(|e| format!("{NAME}: {e}"))
     } else {
         let order = transpose_order(rank);
@@ -587,8 +583,8 @@ mod tests {
     #[test]
     fn transpose_scalar_types_identity() {
         assert_eq!(
-            transpose_builtin(Value::Num(3.14)).unwrap(),
-            Value::Num(3.14)
+            transpose_builtin(Value::Num(std::f64::consts::PI)).unwrap(),
+            Value::Num(std::f64::consts::PI)
         );
         assert_eq!(
             transpose_builtin(Value::Complex(1.0, -2.0)).unwrap(),

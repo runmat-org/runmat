@@ -139,7 +139,6 @@ fn append_mod_decl_if_missing(mod_rs: &Path, decl: &str) -> Result<()> {
         return Ok(());
     }
     let mut file = OpenOptions::new()
-        .write(true)
         .append(true)
         .create(true)
         .open(mod_rs)

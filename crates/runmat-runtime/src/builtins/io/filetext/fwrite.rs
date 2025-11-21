@@ -337,9 +337,9 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
     Ok(scalar as i32)
 }
 
-fn classify_arguments(
-    args: &[Value],
-) -> Result<(Option<&Value>, Option<&Value>, Option<&Value>), String> {
+type FwriteArgs<'a> = (Option<&'a Value>, Option<&'a Value>, Option<&'a Value>);
+
+fn classify_arguments(args: &[Value]) -> Result<FwriteArgs<'_>, String> {
     match args.len() {
         0 => Ok((None, None, None)),
         1 => {
@@ -625,43 +625,43 @@ fn write_elements(
         match spec.input {
             InputType::UInt8 => {
                 let byte = to_u8(value);
-                write_bytes(&mut **file, &[byte])?;
+                write_bytes(file, &[byte])?;
             }
             InputType::Int8 => {
                 let byte = to_i8(value) as u8;
-                write_bytes(&mut **file, &[byte])?;
+                write_bytes(file, &[byte])?;
             }
             InputType::UInt16 => {
                 let bytes = encode_u16(value, endianness);
-                write_bytes(&mut **file, &bytes)?;
+                write_bytes(file, &bytes)?;
             }
             InputType::Int16 => {
                 let bytes = encode_i16(value, endianness);
-                write_bytes(&mut **file, &bytes)?;
+                write_bytes(file, &bytes)?;
             }
             InputType::UInt32 => {
                 let bytes = encode_u32(value, endianness);
-                write_bytes(&mut **file, &bytes)?;
+                write_bytes(file, &bytes)?;
             }
             InputType::Int32 => {
                 let bytes = encode_i32(value, endianness);
-                write_bytes(&mut **file, &bytes)?;
+                write_bytes(file, &bytes)?;
             }
             InputType::UInt64 => {
                 let bytes = encode_u64(value, endianness);
-                write_bytes(&mut **file, &bytes)?;
+                write_bytes(file, &bytes)?;
             }
             InputType::Int64 => {
                 let bytes = encode_i64(value, endianness);
-                write_bytes(&mut **file, &bytes)?;
+                write_bytes(file, &bytes)?;
             }
             InputType::Float32 => {
                 let bytes = encode_f32(value, endianness);
-                write_bytes(&mut **file, &bytes)?;
+                write_bytes(file, &bytes)?;
             }
             InputType::Float64 => {
                 let bytes = encode_f64(value, endianness);
-                write_bytes(&mut **file, &bytes)?;
+                write_bytes(file, &bytes)?;
             }
         }
 

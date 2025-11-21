@@ -19,6 +19,7 @@ use runmat_repl::ReplEngine;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -260,7 +261,18 @@ enum Commands {
         #[arg(long)]
         reset: bool,
     },
-
+    /// Apply auto-offload calibration from suite telemetry results
+    #[cfg(feature = "wgpu")]
+    AccelCalibrate {
+        /// Path to suite results JSON produced by the benchmark harness
+        input: PathBuf,
+        /// Preview updates without persisting the calibration cache
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit calibration outcome as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Garbage collection utilities
     Gc {
         #[command(subcommand)]
@@ -535,6 +547,7 @@ async fn main() -> Result<()> {
 
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .filter_level(log_level)
+        .format(format_log_record)
         .init();
 
     // Initialize acceleration provider based on unified configuration
@@ -548,9 +561,13 @@ async fn main() -> Result<()> {
     configure_gc_from_config(&config)?;
 
     // Initialize GUI system if needed
-    let _gui_initialized = if config.plotting.mode == PlotMode::Gui
-        || (config.plotting.mode == PlotMode::Auto && !config.plotting.force_headless)
-    {
+    let wants_gui = match config.plotting.mode {
+        PlotMode::Gui => true,
+        PlotMode::Auto => !config.plotting.force_headless && is_gui_available(),
+        PlotMode::Headless | PlotMode::Jupyter => false,
+    };
+
+    let _gui_initialized = if wants_gui {
         info!("Initializing GUI plotting system");
 
         // Register this thread as the main thread for GUI operations
@@ -828,6 +845,12 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
         }
         Commands::Info => show_system_info(cli).await,
         Commands::AccelInfo { json, reset } => show_accel_info(json, reset).await,
+        #[cfg(feature = "wgpu")]
+        Commands::AccelCalibrate {
+            input,
+            dry_run,
+            json,
+        } => execute_accel_calibrate(input, dry_run, json).await,
         Commands::Gc { gc_command } => execute_gc_command(gc_command).await,
         Commands::Benchmark {
             file,
@@ -1129,15 +1152,11 @@ async fn execute_script_with_args(
         error!("Script execution failed: {error}");
         std::process::exit(1);
     } else {
-        info!(
-            "Script executed successfully in {:?} ({})",
-            execution_time,
-            if result.used_jit {
-                "JIT"
-            } else {
-                "interpreter"
-            }
-        );
+        if result.used_jit {
+            info!("Script executed successfully in {:?} (JIT)", execution_time);
+        } else {
+            info!("Script executed successfully in {:?}", execution_time);
+        }
         if let Some(value) = result.value {
             // For script execution, suppress implicit value printing unless verbose is enabled.
             // Scripts should print their own outputs (e.g., RESULT_ok ...).
@@ -1147,7 +1166,72 @@ async fn execute_script_with_args(
         }
     }
 
+    #[cfg(feature = "wgpu")]
+    dump_provider_telemetry_if_requested();
+
     Ok(())
+}
+
+#[cfg(feature = "wgpu")]
+fn dump_provider_telemetry_if_requested() {
+    use std::fs;
+
+    let path = match std::env::var("RUNMAT_TELEMETRY_OUT") {
+        Ok(p) if !p.trim().is_empty() => p,
+        _ => return,
+    };
+
+    let provider = match runmat_accelerate_api::provider() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let info = provider.device_info_struct();
+    let telemetry = provider.telemetry_snapshot();
+
+    let mut payload = serde_json::Map::new();
+    match serde_json::to_value(&info) {
+        Ok(value) => {
+            payload.insert("device".to_string(), value);
+        }
+        Err(err) => log::warn!("Failed to serialize device info for telemetry dump: {err}"),
+    }
+    match serde_json::to_value(&telemetry) {
+        Ok(value) => {
+            payload.insert("telemetry".to_string(), value);
+        }
+        Err(err) => log::warn!("Failed to serialize telemetry snapshot: {err}"),
+    }
+    if let Some(report) = runmat_accelerate::auto_offload_report() {
+        match serde_json::to_value(&report) {
+            Ok(value) => {
+                payload.insert("auto_offload".to_string(), value);
+            }
+            Err(err) => log::warn!("Failed to serialize auto-offload report: {err}"),
+        }
+    }
+
+    let json_payload = serde_json::Value::Object(payload);
+    if let Err(err) = fs::write(
+        &path,
+        serde_json::to_string_pretty(&json_payload).unwrap_or_default(),
+    ) {
+        log::warn!("Failed to write telemetry snapshot to {path}: {err}");
+    }
+
+    let reset_flag = std::env::var("RUNMAT_TELEMETRY_RESET")
+        .map(|v| {
+            matches!(
+                v.as_str(),
+                "1" | "true" | "TRUE" | "True" | "yes" | "YES" | "Yes" | "on" | "ON"
+            )
+        })
+        .unwrap_or(false);
+
+    if reset_flag {
+        provider.reset_telemetry();
+        runmat_accelerate::reset_auto_offload_log();
+    }
 }
 
 async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
@@ -1889,7 +1973,12 @@ async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
                 telemetry.fusion_cache_hits, telemetry.fusion_cache_misses
             );
             println!(
-                "Reduction defaults: two_pass_threshold={}, workgroup_size={} (overridable via RUNMAT_TWO_PASS_THRESHOLD / RUNMAT_REDUCTION_WG)",
+                "Bind group cache: hits={}, misses={}",
+                telemetry.bind_group_cache_hits, telemetry.bind_group_cache_misses
+            );
+            println!(
+                "Reduction defaults: two_pass_mode={}, two_pass_threshold={}, workgroup_size={} (env: RUNMAT_REDUCTION_TWO_PASS / RUNMAT_TWO_PASS_THRESHOLD / RUNMAT_REDUCTION_WG)",
+                p.reduction_two_pass_mode().as_str(),
                 p.two_pass_threshold(),
                 p.default_reduction_workgroup_size()
             );
@@ -1990,6 +2079,100 @@ async fn show_accel_info(json: bool, _reset: bool) -> Result<()> {
         println!("==========================");
         println!("This build was compiled without the 'wgpu' feature. No GPU provider available.");
     }
+    Ok(())
+}
+
+#[cfg(feature = "wgpu")]
+fn print_threshold_delta(label: &str, entry: &runmat_accelerate::ThresholdDeltaEntry) {
+    let percent = entry.ratio.map(|r| (r - 1.0) * 100.0);
+    match percent {
+        Some(p) => println!(
+            "  {:<28} {:>12.6e} -> {:>12.6e} (Δ {:>+12.6e}, {:+6.2}%)",
+            label, entry.before, entry.after, entry.absolute, p
+        ),
+        None => println!(
+            "  {:<28} {:>12.6e} -> {:>12.6e} (Δ {:>+12.6e})",
+            label, entry.before, entry.after, entry.absolute
+        ),
+    }
+}
+
+#[cfg(feature = "wgpu")]
+async fn execute_accel_calibrate(input: PathBuf, dry_run: bool, json: bool) -> Result<()> {
+    let commit = !dry_run;
+    let outcome = runmat_accelerate::apply_auto_offload_calibration_from_file(&input, commit)
+        .with_context(|| format!("failed to apply calibration from {}", input.display()))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&outcome)?);
+        return Ok(());
+    }
+
+    println!("Auto-offload calibration");
+    println!("========================");
+    println!("Input: {}", input.display());
+    if let Some(provider) = &outcome.provider {
+        println!(
+            "Provider: {} ({}) device_id={}",
+            provider.name,
+            provider.backend.clone().unwrap_or_default(),
+            provider.device_id
+        );
+    }
+    println!("Runs considered: {}", outcome.runs);
+    println!("Mode: {}", if commit { "commit" } else { "dry-run" });
+
+    if let Some(delta) = &outcome.delta {
+        println!("\nUpdated coefficients (seconds per unit):");
+        let mut printed = false;
+        if let Some(entry) = &delta.cpu_elem_per_elem {
+            print_threshold_delta("cpu_elem_per_elem", entry);
+            printed = true;
+        }
+        if let Some(entry) = &delta.cpu_reduction_per_elem {
+            print_threshold_delta("cpu_reduction_per_elem", entry);
+            printed = true;
+        }
+        if let Some(entry) = &delta.cpu_matmul_per_flop {
+            print_threshold_delta("cpu_matmul_per_flop", entry);
+            printed = true;
+        }
+        if !printed {
+            println!("  (no coefficient changes)");
+        }
+    } else {
+        println!("\nCalibration sample did not yield coefficient adjustments.");
+    }
+
+    println!("\nThreshold snapshots:");
+    println!(
+        "  unary={} -> {}",
+        outcome.before.unary_min_elems, outcome.after.unary_min_elems
+    );
+    println!(
+        "  binary={} -> {}",
+        outcome.before.binary_min_elems, outcome.after.binary_min_elems
+    );
+    println!(
+        "  reduction={} -> {}",
+        outcome.before.reduction_min_elems, outcome.after.reduction_min_elems
+    );
+    println!(
+        "  matmul_flops={} -> {}",
+        outcome.before.matmul_min_flops, outcome.after.matmul_min_flops
+    );
+
+    if commit {
+        if let Some(path) = &outcome.persisted_to {
+            println!("\nPersisted calibration cache: {path}");
+        }
+        println!("Restart RunMat sessions to load the updated thresholds.");
+    } else {
+        println!(
+            "\nDry-run: thresholds were not persisted. Re-run without --dry-run to commit changes."
+        );
+    }
+
     Ok(())
 }
 
@@ -2162,4 +2345,19 @@ fn create_kernel_logos(kernel_dir: &std::path::Path) -> Result<()> {
     .context("Failed to create logo info file")?;
 
     Ok(())
+}
+
+fn format_log_record(
+    buf: &mut env_logger::fmt::Formatter,
+    record: &log::Record,
+) -> std::io::Result<()> {
+    let timestamp = buf.timestamp_nanos();
+    writeln!(
+        buf,
+        "[{} {:>5} {}] {}",
+        timestamp,
+        record.level(),
+        record.target(),
+        record.args()
+    )
 }

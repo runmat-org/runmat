@@ -357,8 +357,17 @@ fn randn_double(shape: &[usize]) -> Result<Value, String> {
 }
 
 fn randn_single(shape: &[usize]) -> Result<Value, String> {
-    let _ = shape;
-    Err("randn: single precision generation is not yet supported".to_string())
+    let len = tensor::element_count(shape);
+    let data = random::generate_normal(len, "randn")?
+        .into_iter()
+        .map(|v| {
+            let f32_val = v as f32;
+            f32_val as f64
+        })
+        .collect::<Vec<f64>>();
+    let tensor = Tensor::new_with_dtype(data, shape.to_vec(), NumericDType::F32)
+        .map_err(|e| format!("randn: {e}"))?;
+    Ok(Value::Tensor(tensor))
 }
 
 fn randn_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {

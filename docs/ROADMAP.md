@@ -40,9 +40,9 @@ The below tracks the progress of the project towards the 1.0 release to date.
 
 - [x] Full language coverage (`docs/LANGUAGE_COVERAGE.md`).
 - [x] v0.2 release.
-- [ ] Finish plotting library integration.
-- [x] Extensive built-in function coverage (arrays, linalg, FFT/signal, stats, strings, I/O).
-- [ ] Implement package manager.
-- [ ] Implement LSP server.
+- [x] Full standard library pass for canonical built-ins ((arrays, linalg, FFT/signal, stats, strings, I/O, ...).
+- [x] Implement LSP server.
+- [x] Implement VSCode / Cursor extension.
 - [x] Complete Accelerate (GPU) support.
-- [ ] MEX/C API (`runmat-ffi`).
+- [ ] Finish plotting library integration.
+- [ ] Implement package manager.

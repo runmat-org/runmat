@@ -688,10 +688,10 @@ fn apply_normalization_2d(
         }
         HistogramNormalization::CountDensity => {
             let mut out = vec![0.0; counts.len()];
-            for iy in 0..y_bins {
-                for ix in 0..x_bins {
+            for (iy, y_width) in y_widths.iter().enumerate().take(y_bins) {
+                for (ix, x_width) in x_widths.iter().enumerate().take(x_bins) {
                     let idx = ix + iy * x_bins;
-                    let area = x_widths[ix] * y_widths[iy];
+                    let area = x_width * y_width;
                     out[idx] = if area > 0.0 { counts[idx] / area } else { 0.0 };
                 }
             }
@@ -700,10 +700,10 @@ fn apply_normalization_2d(
         HistogramNormalization::Pdf => {
             if total > 0.0 {
                 let mut out = vec![0.0; counts.len()];
-                for iy in 0..y_bins {
-                    for ix in 0..x_bins {
+                for (iy, y_width) in y_widths.iter().enumerate().take(y_bins) {
+                    for (ix, x_width) in x_widths.iter().enumerate().take(x_bins) {
                         let idx = ix + iy * x_bins;
-                        let area = x_widths[ix] * y_widths[iy];
+                        let area = x_width * y_width;
                         out[idx] = if area > 0.0 {
                             counts[idx] / (total * area)
                         } else {
@@ -859,21 +859,11 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Histcounts2Options {
     x: AxisOptions,
     y: AxisOptions,
     normalization: HistogramNormalization,
-}
-
-impl Default for Histcounts2Options {
-    fn default() -> Self {
-        Self {
-            x: AxisOptions::default(),
-            y: AxisOptions::default(),
-            normalization: HistogramNormalization::Count,
-        }
-    }
 }
 
 impl Histcounts2Options {
@@ -884,7 +874,7 @@ impl Histcounts2Options {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct AxisOptions {
     explicit_edges: Option<Vec<f64>>,
     num_bins: Option<usize>,
@@ -893,34 +883,23 @@ struct AxisOptions {
     bin_method: Option<BinMethod>,
 }
 
-impl Default for AxisOptions {
-    fn default() -> Self {
-        Self {
-            explicit_edges: None,
-            num_bins: None,
-            bin_width: None,
-            bin_limits: None,
-            bin_method: None,
-        }
-    }
-}
-
 impl AxisOptions {
     fn validate(&self, axis: &str) -> Result<(), String> {
-        if self.explicit_edges.is_some() {
-            if self.num_bins.is_some() || self.bin_width.is_some() || self.bin_limits.is_some() {
-                return Err(format!(
-                    "{NAME}: {axis}BinEdges cannot be combined with NumBins, {axis}BinWidth, or {axis}BinLimits"
-                ));
-            }
+        if self.explicit_edges.is_some()
+            && (self.num_bins.is_some() || self.bin_width.is_some() || self.bin_limits.is_some())
+        {
+            return Err(format!(
+                "{NAME}: {axis}BinEdges cannot be combined with NumBins, {axis}BinWidth, or {axis}BinLimits"
+            ));
         }
-        if self.bin_method.is_some() {
-            if self.explicit_edges.is_some() || self.bin_width.is_some() || self.num_bins.is_some()
-            {
-                return Err(format!(
-                    "{NAME}: {axis}BinMethod cannot be combined with {axis}BinEdges, NumBins, or {axis}BinWidth"
-                ));
-            }
+        if self.bin_method.is_some()
+            && (self.explicit_edges.is_some()
+                || self.bin_width.is_some()
+                || self.num_bins.is_some())
+        {
+            return Err(format!(
+                "{NAME}: {axis}BinMethod cannot be combined with {axis}BinEdges, NumBins, or {axis}BinWidth"
+            ));
         }
         if self.num_bins.is_some() && self.bin_width.is_some() {
             return Err(format!(
@@ -949,8 +928,9 @@ enum BinMethod {
     Integers,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 enum HistogramNormalization {
+    #[default]
     Count,
     Probability,
     CountDensity,
@@ -1470,13 +1450,12 @@ mod tests {
         )
         .expect("histcounts2 countdensity");
         let density = tensor_from_value(density_eval.into_counts_value());
-        let rows = density.shape[0];
         let positives: Vec<f64> = density.data.iter().copied().filter(|v| *v > 0.0).collect();
         assert!(!positives.is_empty());
         for value in positives {
             assert!((value - 2.0).abs() < 1e-12);
         }
-        assert_eq!(density.data[0 + 0 * rows], 2.0);
+        assert_eq!(density.data[0], 2.0);
     }
 
     #[test]

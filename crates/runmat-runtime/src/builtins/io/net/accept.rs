@@ -462,7 +462,7 @@ fn parse_accept_options(rest: Vec<Value>) -> Result<AcceptOptions, String> {
     if rest.is_empty() {
         return Ok(AcceptOptions::default());
     }
-    if rest.len() % 2 != 0 {
+    if !rest.len().is_multiple_of(2) {
         return Err(runtime_error(
             MESSAGE_ID_INVALID_NAME_VALUE,
             "accept: name-value arguments must appear in pairs".to_string(),

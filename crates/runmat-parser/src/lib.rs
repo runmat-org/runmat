@@ -259,6 +259,10 @@ struct Parser {
 }
 
 impl Parser {
+    fn skip_newlines(&mut self) {
+        while self.consume(&Token::Newline) {}
+    }
+
     fn is_simple_assignment_ahead(&self) -> bool {
         // Heuristic: at statement start, if we see Ident ... '=' before a terminator, treat as assignment
         self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
@@ -451,6 +455,12 @@ impl Parser {
     fn can_start_command_form(&self) -> bool {
         // At entry, peek_token() is Some(Ident) for callee
         let mut i = 1;
+        while matches!(
+            self.peek_token_at(i),
+            Some(Token::Newline | Token::Ellipsis)
+        ) {
+            i += 1;
+        }
         // At least one simple arg must follow
         if !matches!(
             self.peek_token_at(i),
@@ -459,11 +469,16 @@ impl Parser {
             return false;
         }
         // Consume all contiguous simple args
-        while matches!(
-            self.peek_token_at(i),
-            Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)
-        ) {
-            i += 1;
+        loop {
+            match self.peek_token_at(i) {
+                Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End) => {
+                    i += 1;
+                }
+                Some(Token::Newline | Token::Ellipsis) => {
+                    i += 1;
+                }
+                _ => break,
+            }
         }
         // If the next token begins indexing/member or other expression syntax, do not use command-form
         match self.peek_token_at(i) {
@@ -484,6 +499,12 @@ impl Parser {
     fn parse_command_args(&mut self) -> Vec<Expr> {
         let mut args = Vec::new();
         loop {
+            if self.consume(&Token::Newline) {
+                continue;
+            }
+            if self.consume(&Token::Ellipsis) {
+                continue;
+            }
             match self.peek_token() {
                 Some(Token::Ident) => {
                     let ident = self.next().unwrap().lexeme;
@@ -766,22 +787,14 @@ impl Parser {
                         return Err("expected ')' after arguments".into());
                     }
                 }
-                // Heuristic: Prefer function-call for identifiers when clear function hints exist
-                // even if a range appears among arguments (e.g., reshape(0:9, [2 5])).
-                let has_index_hint = args.iter().any(|a| self.expr_suggests_indexing(a));
-                let has_end_keyword = args.iter().any(|a| self.expr_contains_end(a));
-                let has_func_hint = matches!(expr, Expr::Ident(_))
-                    && !has_end_keyword
-                    && args
-                        .iter()
-                        .any(|a| matches!(a, Expr::Tensor(_) | Expr::Cell(_) | Expr::String(_)));
-                if has_index_hint && !has_func_hint {
-                    expr = Expr::Index(Box::new(expr), args);
+                // Binder-based disambiguation:
+                // If the callee is an identifier, defer call vs. index to HIR binding.
+                // Parse as a function call now; HIR will rewrite to Index if a variable shadows the function.
+                if let Expr::Ident(ref name) = expr {
+                    expr = Expr::FuncCall(name.clone(), args);
                 } else {
-                    match expr {
-                        Expr::Ident(ref name) => expr = Expr::FuncCall(name.clone(), args),
-                        _ => expr = Expr::Index(Box::new(expr), args),
-                    }
+                    // For non-ident bases (e.g., X(1), (A+B)(1)), this is indexing.
+                    expr = Expr::Index(Box::new(expr), args);
                 }
             } else if self.consume(&Token::LBracket) {
                 // Array indexing
@@ -856,64 +869,6 @@ impl Parser {
     fn parse_postfix(&mut self) -> Result<Expr, String> {
         let expr = self.parse_primary()?;
         self.parse_postfix_with_base(expr)
-    }
-
-    fn expr_suggests_indexing(&self, e: &Expr) -> bool {
-        match e {
-            Expr::Colon | Expr::EndKeyword | Expr::Range(_, _, _) => true,
-            Expr::Binary(_, op, _) => matches!(
-                op,
-                BinOp::Colon
-                    | BinOp::Equal
-                    | BinOp::NotEqual
-                    | BinOp::Less
-                    | BinOp::LessEqual
-                    | BinOp::Greater
-                    | BinOp::GreaterEqual
-                    | BinOp::AndAnd
-                    | BinOp::OrOr
-                    | BinOp::BitAnd
-                    | BinOp::BitOr
-            ),
-            _ => false,
-        }
-    }
-
-    fn expr_contains_end(&self, e: &Expr) -> bool {
-        match e {
-            Expr::EndKeyword => true,
-            Expr::Binary(lhs, _, rhs) => self.expr_contains_end(lhs) || self.expr_contains_end(rhs),
-            Expr::Range(start, step, end) => {
-                self.expr_contains_end(start)
-                    || step.as_deref().map_or(false, |s| self.expr_contains_end(s))
-                    || self.expr_contains_end(end)
-            }
-            Expr::Tensor(rows) => rows
-                .iter()
-                .flatten()
-                .any(|expr| self.expr_contains_end(expr)),
-            Expr::Cell(rows) => rows
-                .iter()
-                .flatten()
-                .any(|expr| self.expr_contains_end(expr)),
-            Expr::Index(base, args) => {
-                self.expr_contains_end(base) || args.iter().any(|arg| self.expr_contains_end(arg))
-            }
-            Expr::MethodCall(base, _, args) => {
-                self.expr_contains_end(base) || args.iter().any(|arg| self.expr_contains_end(arg))
-            }
-            Expr::FuncCall(_, args) => args.iter().any(|arg| self.expr_contains_end(arg)),
-            Expr::Unary(_, expr) => self.expr_contains_end(expr),
-            Expr::Member(base, _) => self.expr_contains_end(base),
-            Expr::MemberDynamic(base, field) => {
-                self.expr_contains_end(base) || self.expr_contains_end(field)
-            }
-            Expr::IndexCell(base, args) => {
-                self.expr_contains_end(base) || args.iter().any(|arg| self.expr_contains_end(arg))
-            }
-            Expr::AnonFunc { body, .. } => self.expr_contains_end(body),
-            _ => false,
-        }
     }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
@@ -1061,16 +1016,24 @@ impl Parser {
     }
 
     fn parse_matrix(&mut self) -> Result<Expr, String> {
+        self.skip_newlines();
         let mut rows = Vec::new();
         if self.peek_token() == Some(&Token::RBracket) {
             return Ok(Expr::Tensor(rows));
         }
         loop {
+            self.skip_newlines();
+            if self.peek_token() == Some(&Token::RBracket) {
+                break;
+            }
             let mut row = Vec::new();
             // First element in the row
             row.push(self.parse_expr()?);
             // Accept either comma-separated or whitespace-separated elements until ';' or ']'
             loop {
+                if self.consume(&Token::Newline) {
+                    continue;
+                }
                 if self.consume(&Token::Comma) {
                     row.push(self.parse_expr()?);
                     continue;
@@ -1109,11 +1072,13 @@ impl Parser {
             }
             rows.push(row);
             if self.consume(&Token::Semicolon) {
+                self.skip_newlines();
                 continue;
             } else {
                 break;
             }
         }
+        self.skip_newlines();
         Ok(Expr::Tensor(rows))
     }
 
@@ -1277,10 +1242,7 @@ impl Parser {
             }
             // Fast-path: handle multi-assign LHS at statement start inside blocks reliably
             let stmt = if self.peek_token() == Some(&Token::LBracket) {
-                match self.try_parse_multi_assign() {
-                    Ok(stmt) => stmt,
-                    Err(msg) => return Err(msg),
-                }
+                self.try_parse_multi_assign()?
             } else {
                 self.parse_stmt().map_err(|e| e.message)?
             };
@@ -1301,10 +1263,15 @@ impl Parser {
 
     fn parse_cell(&mut self) -> Result<Expr, String> {
         let mut rows = Vec::new();
+        self.skip_newlines();
         if self.peek_token() == Some(&Token::RBrace) {
             return Ok(Expr::Cell(rows));
         }
         loop {
+            self.skip_newlines();
+            if self.peek_token() == Some(&Token::RBrace) {
+                break;
+            }
             let mut row = Vec::new();
             row.push(self.parse_expr()?);
             while self.consume(&Token::Comma) {
@@ -1312,11 +1279,13 @@ impl Parser {
             }
             rows.push(row);
             if self.consume(&Token::Semicolon) {
+                self.skip_newlines();
                 continue;
             } else {
                 break;
             }
         }
+        self.skip_newlines();
         Ok(Expr::Cell(rows))
     }
 
@@ -1326,6 +1295,9 @@ impl Parser {
         let mut cases = Vec::new();
         let mut otherwise: Option<Vec<Stmt>> = None;
         loop {
+            if self.consume(&Token::Newline) || self.consume(&Token::Semicolon) {
+                continue;
+            }
             if self.consume(&Token::Case) {
                 let val = self.parse_expr()?;
                 let body =
@@ -1334,6 +1306,8 @@ impl Parser {
             } else if self.consume(&Token::Otherwise) {
                 let body = self.parse_block(|t| matches!(t, Token::End))?;
                 otherwise = Some(body);
+            } else if self.consume(&Token::Comma) {
+                continue;
             } else {
                 break;
             }
@@ -1407,7 +1381,10 @@ impl Parser {
         let mut members: Vec<ClassMember> = Vec::new();
         loop {
             // Skip layout separators between member blocks
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             match self.peek_token() {
@@ -1491,7 +1468,10 @@ impl Parser {
             if matches!(tok, Token::End) {
                 break;
             }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             if let Some(Token::Ident) = self.peek_token() {
@@ -1510,7 +1490,10 @@ impl Parser {
             if matches!(tok, Token::End) {
                 break;
             }
-            if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+            if self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {
                 continue;
             }
             if let Some(Token::Ident) = self.peek_token() {

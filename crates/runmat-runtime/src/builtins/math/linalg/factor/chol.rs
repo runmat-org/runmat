@@ -350,9 +350,8 @@ fn evaluate_gpu(
 ) -> Result<Option<CholEval>, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         let lower = matches!(triangle, CholTriangle::Lower);
-        match provider.chol(handle, lower) {
-            Ok(result) => return Ok(Some(CholEval::from_provider(result, triangle))),
-            Err(_) => {}
+        if let Ok(result) = provider.chol(handle, lower) {
+            return Ok(Some(CholEval::from_provider(result, triangle)));
         }
     }
     Ok(None)

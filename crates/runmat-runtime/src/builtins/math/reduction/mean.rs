@@ -1,7 +1,9 @@
 //! MATLAB-compatible `mean` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision};
+use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
+const NAME: &str = "mean";
+
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -286,6 +288,7 @@ enum IntClass {
 struct InputMeta {
     class: InputClass,
     device: DevicePreference,
+    numeric_dtype: Option<NumericDType>,
 }
 
 impl InputMeta {
@@ -301,7 +304,35 @@ impl InputMeta {
             Value::GpuTensor(_) => DevicePreference::Gpu,
             _ => DevicePreference::Host,
         };
-        Self { class, device }
+        let numeric_dtype = numeric_dtype_from_value(value);
+        Self {
+            class,
+            device,
+            numeric_dtype,
+        }
+    }
+}
+
+fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
+    match value {
+        Value::Tensor(t) => Some(t.dtype),
+        Value::GpuTensor(handle) => {
+            let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
+                runmat_accelerate_api::provider_for_handle(handle)
+                    .map(|provider| provider.precision())
+            });
+            precision.map(precision_to_dtype)
+        }
+        Value::Num(_) => Some(NumericDType::F64),
+        Value::LogicalArray(_) => Some(NumericDType::F64),
+        _ => None,
+    }
+}
+
+fn precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
+    match precision {
+        ProviderPrecision::F32 => NumericDType::F32,
+        ProviderPrecision::F64 => NumericDType::F64,
     }
 }
 
@@ -356,6 +387,12 @@ enum MeanAxes {
     accel = "reduction"
 )]
 fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
+    // Normalise argument order defensively:
+    // If the primary 'value' is not data-like (e.g., 'all'), but a data-like
+    // argument exists in 'rest', swap them so we interpret calls like
+    // mean('all', X) as mean(X, 'all').
+    let (value, rest) = normalise_mean_call_args(value, rest);
+
     let input_meta = InputMeta::from_value(&value);
     let parsed = parse_arguments(&rest)?;
     let raw = match value {
@@ -365,6 +402,37 @@ fn mean_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
         other => mean_host(other, &parsed)?,
     };
     apply_output_template(raw, &parsed.output, &input_meta)
+}
+
+fn normalise_mean_call_args(value: Value, rest: Vec<Value>) -> (Value, Vec<Value>) {
+    if is_data_like(&value) {
+        return (value, rest);
+    }
+    if let Some(idx) = rest.iter().position(is_data_like) {
+        let mut rest_mut = rest;
+        let new_value = rest_mut.remove(idx);
+        let mut new_rest = Vec::with_capacity(rest_mut.len() + 1);
+        // Keep the original non-data 'value' (e.g., 'all') in rest so it can be parsed as a keyword
+        new_rest.push(value);
+        // Append the remaining rest args
+        new_rest.extend(rest_mut);
+        return (new_value, new_rest);
+    }
+    (value, rest)
+}
+
+fn is_data_like(v: &Value) -> bool {
+    matches!(
+        v,
+        Value::Tensor(_)
+            | Value::GpuTensor(_)
+            | Value::Num(_)
+            | Value::Int(_)
+            | Value::LogicalArray(_)
+            | Value::Bool(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+    )
 }
 
 fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
@@ -395,6 +463,10 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
                             "mean: 'all' cannot be combined with an explicit dimension".to_string()
                         );
                     }
+                    axes = MeanAxes::All;
+                    axes_set = true;
+                    idx += 1;
+                    continue;
                 }
                 "double" | "default" => {
                     if output_set {
@@ -440,22 +512,19 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
         }
 
         if !axes_set || matches!(axes, MeanAxes::Default) {
-            match parse_axes(arg)? {
-                Some(selection) => {
-                    if matches!(selection, MeanAxes::All)
-                        && axes_set
-                        && !matches!(axes, MeanAxes::Default)
-                    {
-                        return Err(
-                            "mean: 'all' cannot be combined with an explicit dimension".to_string()
-                        );
-                    }
-                    axes = selection;
-                    axes_set = true;
-                    idx += 1;
-                    continue;
+            if let Some(selection) = parse_axes(arg)? {
+                if matches!(selection, MeanAxes::All)
+                    && axes_set
+                    && !matches!(axes, MeanAxes::Default)
+                {
+                    return Err(
+                        "mean: 'all' cannot be combined with an explicit dimension".to_string()
+                    );
                 }
-                None => {}
+                axes = selection;
+                axes_set = true;
+                idx += 1;
+                continue;
             }
         }
 
@@ -543,13 +612,15 @@ fn parse_dimension_vector(tensor: &Tensor) -> Result<Vec<usize>, String> {
             return Err("mean: dimension entries must be finite integers".to_string());
         }
         let rounded = val.round();
-        if (rounded - val).abs() > f64::EPSILON {
-            return Err("mean: dimension entries must be integers".to_string());
-        }
-        if rounded < 1.0 {
+        let adjusted = if (0.0..1.0).contains(&rounded) {
+            1.0
+        } else {
+            rounded
+        };
+        if adjusted < 1.0 {
             return Err("mean: dimension entries must be >= 1".to_string());
         }
-        dims.push(rounded as usize);
+        dims.push(adjusted as usize);
     }
     if dims.is_empty() {
         return Err("mean: dimension vector must not be empty".to_string());
@@ -651,9 +722,26 @@ fn mean_gpu_try(
         }
         MeanAxes::All => {
             if handle.shape.is_empty() {
-                Some(handle.clone())
-            } else {
-                provider.reduce_mean(handle).ok()
+                return Some(handle.clone());
+            }
+            match provider.reduce_mean(handle) {
+                Ok(out) => Some(out),
+                Err(err) => {
+                    log::trace!("mean: provider reduce_mean fallback triggered: {err}");
+                    let rank = handle.shape.len();
+                    if rank == 0 {
+                        Some(handle.clone())
+                    } else {
+                        let dims: Vec<usize> = (1..=rank).collect();
+                        reduce_mean_vecdim_nd_gpu(provider, handle, &dims).or_else(|| {
+                            let mut result = handle.clone();
+                            for dim in 1..=rank {
+                                result = reduce_mean_dim_gpu(provider, result, dim)?;
+                            }
+                            Some(result)
+                        })
+                    }
+                }
             }
         }
     }
@@ -686,7 +774,7 @@ fn reduce_mean_dim_gpu(
 fn reduce_mean_vecdim_nd_gpu(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
-    dims_1based: &Vec<usize>,
+    dims_1based: &[usize],
 ) -> Option<GpuTensorHandle> {
     let rank = handle.shape.len();
     if rank == 0 || dims_1based.is_empty() {
@@ -723,7 +811,7 @@ fn reduce_mean_vecdim_nd_gpu(
     let total_elems: usize = handle.shape.iter().copied().product();
     if reduce_len == 0 || total_elems == 0 {
         let _ = provider.free(&permuted);
-        return provider.fill(&vec![1, 1], f64::NAN).ok();
+        return provider.fill(&[1, 1], f64::NAN).ok();
     }
     let num_slices = total_elems / reduce_len;
     // Reshape permuted view to [rows, cols]
@@ -745,7 +833,7 @@ fn reduce_mean_vecdim_nd_gpu(
     let _ = provider.free(&reduced_rows);
     // Expand permuted shape by inserting ones for reduced axes
     let mut expanded_perm_shape: Vec<usize> = Vec::with_capacity(rank);
-    expanded_perm_shape.extend(std::iter::repeat(1usize).take(reduce_dims.len()));
+    expanded_perm_shape.extend(std::iter::repeat_n(1usize, reduce_dims.len()));
     expanded_perm_shape.extend_from_slice(&kept_sizes);
     let expanded = provider
         .reshape(&reshaped_kept, &expanded_perm_shape)
@@ -848,16 +936,56 @@ fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> Result
             }
             Ok(current)
         }
-        MeanAxes::All => {
-            if tensor.shape.is_empty() {
-                Ok(tensor)
-            } else {
-                let mut current = tensor;
-                for dim in 1..=current.shape.len() {
-                    current = reduce_tensor_mean_dim(&current, dim, nan_mode)?;
+        MeanAxes::All => mean_tensor_all(&tensor, nan_mode),
+    }
+}
+
+fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, String> {
+    if tensor.shape.is_empty() {
+        return Ok(tensor.clone());
+    }
+    let total_elems = tensor
+        .shape
+        .iter()
+        .copied()
+        .map(|dim| dim.max(1))
+        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
+    if total_elems == 0 || tensor.data.is_empty() {
+        return Tensor::new(vec![f64::NAN], vec![1, 1]).map_err(|e| format!("mean: {e}"));
+    }
+    let mut sum = 0.0f64;
+    let mut count = 0usize;
+    let mut saw_nan = false;
+    match nan_mode {
+        ReductionNaN::Include => {
+            for &value in &tensor.data {
+                if value.is_nan() {
+                    saw_nan = true;
+                    break;
                 }
-                Ok(current)
+                sum += value;
             }
+            let result = if saw_nan {
+                f64::NAN
+            } else {
+                sum / (total_elems as f64)
+            };
+            Tensor::new(vec![result], vec![1, 1]).map_err(|e| format!("mean: {e}"))
+        }
+        ReductionNaN::Omit => {
+            for &value in &tensor.data {
+                if value.is_nan() {
+                    continue;
+                }
+                sum += value;
+                count += 1;
+            }
+            let result = if count == 0 {
+                f64::NAN
+            } else {
+                sum / (count as f64)
+            };
+            Tensor::new(vec![result], vec![1, 1]).map_err(|e| format!("mean: {e}"))
         }
     }
 }
@@ -872,7 +1000,7 @@ fn reduce_tensor_mean_dim(
     }
 
     if tensor.shape.is_empty() {
-        let value = tensor.data.get(0).copied().unwrap_or(f64::NAN);
+        let value = tensor.data.first().copied().unwrap_or(f64::NAN);
         let result = match nan_mode {
             ReductionNaN::Include => value,
             ReductionNaN::Omit => {
@@ -1003,7 +1131,7 @@ fn reduce_complex_tensor_mean_dim(
     };
 
     if shape.is_empty() {
-        let (re, im) = tensor.data.get(0).copied().unwrap_or((f64::NAN, f64::NAN));
+        let (re, im) = tensor.data.first().copied().unwrap_or((f64::NAN, f64::NAN));
         let result = match nan_mode {
             ReductionNaN::Include => (re, im),
             ReductionNaN::Omit => {
@@ -1152,8 +1280,58 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String
             Value::Tensor(t) if t.data.len() == 1 => class.to_value(t.data[0]),
             other => Ok(other),
         },
-        _ => Ok(value),
+        _ => {
+            if let Some(dtype) = meta.numeric_dtype {
+                coerce_value_to_dtype(value, dtype)
+            } else {
+                Ok(value)
+            }
+        }
     }
+}
+
+fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> Result<Value, String> {
+    match dtype {
+        NumericDType::F64 => Ok(value),
+        NumericDType::F32 => match value {
+            Value::Tensor(tensor) => {
+                let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
+                Ok(Value::Tensor(tensor))
+            }
+            Value::Num(n) => {
+                let tensor = Tensor::new_with_dtype(vec![n], vec![1, 1], NumericDType::F32)
+                    .map_err(|e| format!("{NAME}: {e}"))?;
+                Ok(Value::Tensor(tensor))
+            }
+            Value::LogicalArray(logical) => {
+                let tensor =
+                    tensor::logical_to_tensor(&logical).map_err(|e| format!("{NAME}: {e}"))?;
+                let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
+                Ok(Value::Tensor(tensor))
+            }
+            Value::GpuTensor(handle) => {
+                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
+                Ok(Value::Tensor(tensor))
+            }
+            other => Ok(other),
+        },
+    }
+}
+
+fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
+    match dtype {
+        NumericDType::F64 => {
+            tensor.dtype = NumericDType::F64;
+        }
+        NumericDType::F32 => {
+            for value in &mut tensor.data {
+                *value = (*value as f32) as f64;
+            }
+            tensor.dtype = NumericDType::F32;
+        }
+    }
+    tensor
 }
 
 fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String> {
@@ -1414,6 +1592,24 @@ mod tests {
     }
 
     #[test]
+    fn mean_all_keyword_first_arg_swapped_ok() {
+        let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let a = mean_builtin(Value::Tensor(tensor.clone()), vec![Value::from("all")]).unwrap();
+        // Provide 'all' as the first argument (char/string), then the tensor
+        let b = mean_builtin(Value::from("all"), vec![Value::Tensor(tensor)]).unwrap();
+        match (a, b) {
+            (Value::Num(x), Value::Num(y)) => assert!((x - y).abs() < 1e-12),
+            (Value::Tensor(tx), Value::Tensor(ty)) => {
+                assert_eq!(tx.shape, ty.shape);
+                for (x, y) in tx.data.iter().zip(ty.data.iter()) {
+                    assert!((x - y).abs() < 1e-12);
+                }
+            }
+            (ax, bx) => panic!("shape mismatch a={ax:?} b={bx:?}"),
+        }
+    }
+
+    #[test]
     fn mean_all_with_omit_nan() {
         let tensor = Tensor::new(vec![f64::NAN, 2.0, 4.0, f64::NAN], vec![2, 2]).expect("tensor");
         let result = mean_builtin(
@@ -1424,6 +1620,29 @@ mod tests {
         match result {
             Value::Num(v) => assert!((v - 3.0).abs() < 1e-12),
             other => panic!("expected numeric result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mean_all_matches_sequential_for_nd_tensor() {
+        let data: Vec<f64> = (1..=24).map(|v| v as f64).collect();
+        let tensor = Tensor::new(data, vec![2, 3, 4]).expect("tensor");
+        let fused =
+            mean_builtin(Value::Tensor(tensor.clone()), vec![Value::from("all")]).expect("mean");
+        let sequential = mean_builtin(
+            mean_builtin(Value::Tensor(tensor.clone()), vec![Value::Num(1.0)]).expect("mean"),
+            vec![Value::Num(2.0)],
+        )
+        .and_then(|v| mean_builtin(v, vec![Value::Num(3.0)]))
+        .expect("mean");
+        assert_eq!(fused, sequential);
+        if let Value::Num(v) = fused {
+            assert!((v - 12.5).abs() < 1e-12);
+        } else if let Value::Tensor(t) = fused {
+            assert_eq!(t.data.len(), 1);
+            assert!((t.data[0] - 12.5).abs() < 1e-12);
+        } else {
+            panic!("unexpected result {fused:?}");
         }
     }
 
@@ -1466,7 +1685,7 @@ mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                let expected = vec![(3.0, 0.0), (4.0, 0.0)];
+                let expected = [(3.0, 0.0), (4.0, 0.0)];
                 for (got, exp) in out.data.iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < 1e-12);
                     assert!((got.1 - exp.1).abs() < 1e-12);
@@ -1583,6 +1802,16 @@ mod tests {
                 assert!((a - b).abs() < 1e-12);
             }
         });
+    }
+
+    #[test]
+    fn mean_nested_dim2_then_dim3_host_matches_vecdim() {
+        let t = Tensor::new((0..(2 * 3 * 4)).map(|i| i as f64).collect(), vec![2, 3, 4]).unwrap();
+        let vecdim = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let a = mean_builtin(Value::Tensor(t.clone()), vec![Value::Tensor(vecdim)]).unwrap();
+        let b1 = mean_builtin(Value::Tensor(t), vec![Value::Num(2.0)]).unwrap();
+        let b2 = mean_builtin(b1, vec![Value::Num(3.0)]).unwrap();
+        assert_eq!(a, b2);
     }
 
     #[test]

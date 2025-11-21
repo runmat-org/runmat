@@ -16,10 +16,10 @@ except ImportError:
 
 
 # Resolve repo root and cases dir robustly regardless of how this script is invoked.
-# This file lives at: <repo>/benchmarks/benchmarks/.harness/run_bench.py
-# So the repo root is three parents up.
-ROOT = Path(__file__).resolve().parents[3]
-CASES_DIR = ROOT / "benchmarks" / "benchmarks"
+# This file lives at: <repo>/benchmarks/.harness/run_bench.py
+# So the repo root is two parents up.
+ROOT = Path(__file__).resolve().parents[2]
+CASES_DIR = ROOT / "benchmarks"
 
 
 def detect_runmat_command() -> List[str]:
@@ -33,12 +33,12 @@ def detect_runmat_command() -> List[str]:
     # No implicit build here to avoid counting build time in runs
     raise SystemExit(
         "runmat binary not found. Please prebuild with:\n"
-        "  cargo build -p runmat --release -F runmat-accelerate/wgpu -F runmat-runtime/wgpu\n"
+        "  cargo build -p runmat --release --features wgpu\n"
         "or install runmat in PATH."
     )
 
 
-def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
+def build_impl_commands(case: str, variant: str = "default", include_impl: Optional[List[str]] = None) -> List[Dict]:
     """Return a list of implementations with command invocations and metadata.
 
     If variant != "default", prefer variant-specific files when present, e.g.:
@@ -55,7 +55,7 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
     runmat_m_variant = casedir / f"runmat_{variant}.m"
     runmat_m_default = casedir / "runmat.m"
     runmat_m = runmat_m_variant if runmat_m_variant.exists() else runmat_m_default
-    if runmat_m.exists():
+    if runmat_m.exists() and (include_impl is None or "runmat" in include_impl):
         impls.append(
             {
                 "name": "runmat",
@@ -66,7 +66,7 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
         )
 
     # GNU Octave (reuse the same .m file)
-    if runmat_m.exists() and which("octave"):
+    if runmat_m.exists() and which("octave") and (include_impl is None or "octave" in include_impl):
         impls.append(
             {
                 "name": "octave",
@@ -89,7 +89,11 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
     numpy_py_variant = casedir / f"python_numpy_{variant}.py"
     numpy_py_default = casedir / "python_numpy.py"
     numpy_py = numpy_py_variant if numpy_py_variant.exists() else numpy_py_default
-    if numpy_py.exists() and (which("python3") or (ROOT / ".bench_venv").exists()):
+    if (
+        numpy_py.exists()
+        and (which("python3") or (ROOT / ".bench_venv").exists())
+        and (include_impl is None or "python-numpy" in include_impl)
+    ):
         impls.append(
             {
                 "name": "python-numpy",
@@ -103,7 +107,11 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
     torch_py_variant = casedir / f"python_torch_{variant}.py"
     torch_py_default = casedir / "python_torch.py"
     torch_py = torch_py_variant if torch_py_variant.exists() else torch_py_default
-    if torch_py.exists() and (which("python3") or (ROOT / ".bench_venv").exists()):
+    if (
+        torch_py.exists()
+        and (which("python3") or (ROOT / ".bench_venv").exists())
+        and (include_impl is None or "python-torch" in include_impl)
+    ):
         impls.append(
             {
                 "name": "python-torch",
@@ -117,7 +125,7 @@ def build_impl_commands(case: str, variant: str = "default") -> List[Dict]:
     julia_jl_variant = casedir / f"julia_{variant}.jl"
     julia_jl_default = casedir / "julia.jl"
     julia_jl = julia_jl_variant if julia_jl_variant.exists() else julia_jl_default
-    if julia_jl.exists() and which("julia"):
+    if julia_jl.exists() and which("julia") and (include_impl is None or "julia" in include_impl):
         impls.append(
             {
                 "name": "julia",
@@ -147,6 +155,23 @@ def _collect_runmat_telemetry(cmd: List[str], reset: bool = False) -> Optional[D
             return None
 
 
+def _load_runmat_telemetry_file(path: Optional[Path]) -> Optional[Dict]:
+    if path is None:
+        return None
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+    if not text.strip():
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
 def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[Dict[str, str]] = None) -> Dict:
     env = default_env()
     if env_overrides:
@@ -173,7 +198,17 @@ def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[
     last_stdout = ""
     last_stderr = ""
     telemetry_payload: Optional[Dict] = None
+    telemetry_path: Optional[Path] = None
     if impl.get("name") == "runmat":
+        tmp_dir = ROOT / "target" / "bench_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        telemetry_path = tmp_dir / "provider_telemetry.json"
+        try:
+            telemetry_path.unlink()
+        except FileNotFoundError:
+            pass
+        env["RUNMAT_TELEMETRY_OUT"] = str(telemetry_path)
+        env["RUNMAT_TELEMETRY_RESET"] = "1"
         _collect_runmat_telemetry(impl["cmd"], reset=True)
     for _ in range(iterations):
         cmd = list(impl["cmd"])
@@ -204,7 +239,9 @@ def run_impl(impl: Dict, iterations: int, timeout: int, env_overrides: Optional[
     if dev:
         result["device"] = dev
     if impl.get("name") == "runmat":
-        telemetry_payload = _collect_runmat_telemetry(impl["cmd"], reset=False)
+        telemetry_payload = _load_runmat_telemetry_file(telemetry_path)
+        if telemetry_payload is None:
+            telemetry_payload = _collect_runmat_telemetry(impl["cmd"], reset=False)
         if telemetry_payload is not None:
             result["provider_telemetry"] = telemetry_payload
     return result
@@ -235,17 +272,25 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    impls = build_impl_commands(args.case, args.variant)
+    def variant_tag(name: str) -> str:
+        lowered = name.lower()
+        if lowered == "parity":
+            return "lcg"
+        if lowered == "perf":
+            return "rng"
+        if lowered in ("", "default"):
+            return "lcg"
+        return lowered
+
+    include_list: List[str] = [s.strip() for s in args.include_impl.split(",") if s.strip()]
+    impls = build_impl_commands(
+        args.case, variant_tag(args.variant), include_impl=(include_list or None)
+    )
     if not impls:
         raise SystemExit(f"No implementations found for case: {args.case}")
 
-    include: List[str] = [s.strip() for s in args.include_impl.split(",") if s.strip()]
     exclude: List[str] = [s.strip() for s in args.exclude_impl.split(",") if s.strip()]
 
-    if include:
-        impls = [impl for impl in impls if impl["name"] in include]
-        if not impls:
-            raise SystemExit(f"No implementations remain after include filter: {include}")
     if exclude:
         impls = [impl for impl in impls if impl["name"] not in exclude]
         if not impls:
@@ -289,8 +334,16 @@ def main() -> None:
             "case": args.case,
             "results": [],
         }
+        # Variant-aware env overrides (parity vs perf)
+        variant_env: Dict[str, str] = {}
+        if args.variant.lower() == "parity":
+            # Force CPU path for RNG and ops to keep host-deterministic behavior
+            variant_env["RUNMAT_ACCEL_THRESHOLD_ALL"] = str(1_000_000_000)
+            variant_env["RUNMAT_DISABLE_RNG"] = "1"
         for impl in impls:
-            suite_result["results"].append(run_impl(impl, args.iterations, args.timeout))
+            suite_result["results"].append(
+                run_impl(impl, args.iterations, args.timeout, env_overrides=variant_env or None)
+            )
 
     with open(args.output, "w") as f:
         json.dump(suite_result, f, indent=2)

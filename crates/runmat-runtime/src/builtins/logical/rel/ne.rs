@@ -200,7 +200,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let lhs = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let lhs = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             let rhs = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
             let (zero, one) = match ctx.scalar_ty {
                 ScalarType::F32 => ("0.0", "1.0"),
@@ -748,7 +748,11 @@ mod tests {
                     ProviderPrecision::F32 => 1e-5,
                 };
                 for (a, b) in gt.data.iter().zip(cp.data.iter()) {
-                    assert!(((*a as f64) - (*b as f64)).abs() < tol);
+                    let diff = *a - f64::from(*b);
+                    assert!(
+                        diff.abs() < tol,
+                        "mismatch between GPU and CPU logical results"
+                    );
                 }
             }
             _ => panic!("unexpected result variants"),

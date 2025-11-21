@@ -366,13 +366,8 @@ fn normalize_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 fn read_csv_rows(path: &Path) -> Result<(Vec<Vec<f64>>, usize), String> {
-    let file = File::open(path).map_err(|e| {
-        format!(
-            "csvread: unable to open '{}': {}",
-            path.display(),
-            e.to_string()
-        )
-    })?;
+    let file = File::open(path)
+        .map_err(|e| format!("csvread: unable to open '{}': {e}", path.display()))?;
     let mut reader = BufReader::new(file);
     let mut buffer = String::new();
     let mut rows = Vec::new();
@@ -602,7 +597,7 @@ fn parse_cell_reference(token: &str) -> Result<CellReference, String> {
 fn column_index_from_letters(letters: &str) -> Result<usize, String> {
     let mut value: usize = 0;
     for ch in letters.chars() {
-        if !(('A'..='Z').contains(&ch)) {
+        if !ch.is_ascii_uppercase() {
             return Err(format!(
                 "csvread: invalid column designator '{letters}' in Range"
             ));
@@ -655,8 +650,7 @@ fn apply_offsets(
 
     let mut subset_rows = Vec::new();
     let mut col_count = 0usize;
-    for row_idx in start_row..rows.len() {
-        let row = &rows[row_idx];
+    for row in rows.iter().skip(start_row) {
         if start_col >= row.len() && row.len() < max_cols {
             // Entire row missing required columns; fill zeros of remaining width.
             let width = max_cols - start_col;

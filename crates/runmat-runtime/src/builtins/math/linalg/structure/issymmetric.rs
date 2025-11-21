@@ -406,7 +406,7 @@ fn parse_mode_flag(value: &Value) -> Result<Option<SymmetryMode>, String> {
 }
 
 fn parse_single_tolerance(arg: &Value) -> Result<f64, String> {
-    match parse_tolerance_arg("issymmetric", &[arg.clone()])? {
+    match parse_tolerance_arg("issymmetric", std::slice::from_ref(arg))? {
         Some(value) => Ok(value),
         None => Err("issymmetric: tolerance must be a real scalar".to_string()),
     }

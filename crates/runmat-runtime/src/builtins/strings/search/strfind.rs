@@ -353,7 +353,7 @@ fn parse_force_cell_output(rest: &[Value]) -> Result<bool, String> {
     if rest.is_empty() {
         return Ok(false);
     }
-    if rest.len() % 2 != 0 {
+    if !rest.len().is_multiple_of(2) {
         return Err(
             "strfind: expected name-value pairs after the pattern (e.g., 'ForceCellOutput', true)"
                 .to_string(),

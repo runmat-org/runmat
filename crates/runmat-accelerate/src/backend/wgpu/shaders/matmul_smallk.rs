@@ -10,7 +10,7 @@ struct Params {
     offset_a: u32,
     offset_b: u32,
     offset_out: u32,
-    _pad: u32,
+    flags: u32,
 };
 
 const SMALL_K_MAX: u32 = 8u;
@@ -39,6 +39,8 @@ fn main(
     let base_a = params.offset_a;
     let base_b = params.offset_b;
     let base_out = params.offset_out;
+    let transpose_a = (params.flags & 1u) != 0u;
+    let transpose_b = (params.flags & 2u) != 0u;
 
     var acc: f64 = 0.0;
     let k = params.k;
@@ -46,8 +48,14 @@ fn main(
         if (kk >= k) {
             break;
         }
-        let a_idx = base_a + global_row + kk * lda;
-        let b_idx = base_b + kk + global_col * ldb;
+        var a_idx = base_a + global_row + kk * lda;
+        if (transpose_a) {
+            a_idx = base_a + kk + global_row * lda;
+        }
+        var b_idx = base_b + kk + global_col * ldb;
+        if (transpose_b) {
+            b_idx = base_b + global_col + kk * ldb;
+        }
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
 
@@ -68,7 +76,7 @@ struct Params {
     offset_a: u32,
     offset_b: u32,
     offset_out: u32,
-    _pad: u32,
+    flags: u32,
 };
 
 const SMALL_K_MAX: u32 = 8u;
@@ -97,6 +105,8 @@ fn main(
     let base_a = params.offset_a;
     let base_b = params.offset_b;
     let base_out = params.offset_out;
+    let transpose_a = (params.flags & 1u) != 0u;
+    let transpose_b = (params.flags & 2u) != 0u;
 
     var acc: f32 = 0.0;
     let k = params.k;
@@ -104,8 +114,14 @@ fn main(
         if (kk >= k) {
             break;
         }
-        let a_idx = base_a + global_row + kk * lda;
-        let b_idx = base_b + kk + global_col * ldb;
+        var a_idx = base_a + global_row + kk * lda;
+        if (transpose_a) {
+            a_idx = base_a + kk + global_row * lda;
+        }
+        var b_idx = base_b + kk + global_col * ldb;
+        if (transpose_b) {
+            b_idx = base_b + global_col + kk * ldb;
+        }
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
 

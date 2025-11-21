@@ -12,6 +12,7 @@ pub mod path_search;
 pub mod path_state;
 pub mod random;
 pub mod random_args;
+pub mod residency;
 pub mod shape;
 pub mod spec;
 pub mod tensor;

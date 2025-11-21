@@ -8,11 +8,8 @@ pub mod arrays;
 pub mod builtins;
 pub mod comparison;
 pub mod concatenation;
-pub mod constants;
 pub mod elementwise;
 pub mod indexing;
-pub mod introspection;
-pub mod mathematics;
 pub mod matrix;
 pub mod plotting;
 pub mod workspace;
@@ -73,98 +70,6 @@ fn make_cell_builtin(rest: Vec<Value>) -> Result<Value, String> {
     let cols = rest.len();
     make_cell(rest, rows, cols)
 }
-
-// size builtin centralized in introspection.rs
-
-// -------- String constructors/conversions --------
-
-#[runmat_macros::runtime_builtin(name = "strings")]
-fn strings_ctor(rest: Vec<Value>) -> Result<Value, String> {
-    let mut shape: Vec<usize> = Vec::new();
-    if rest.is_empty() {
-        shape = vec![1, 1];
-    } else {
-        for v in rest {
-            let n: f64 = (&v).try_into()?;
-            if n < 0.0 {
-                return Err("strings: dimensions must be non-negative".to_string());
-            }
-            shape.push(n as usize);
-        }
-        if shape.is_empty() {
-            shape = vec![1, 1];
-        }
-    }
-    let total: usize = shape.iter().product();
-    let data = vec![String::new(); total];
-    Ok(Value::StringArray(
-        runmat_builtins::StringArray::new(data, shape).map_err(|e| format!("strings: {e}"))?,
-    ))
-}
-
-// -------- Logical constructors / conversions --------
-
-#[runmat_macros::runtime_builtin(name = "logical")]
-fn logical_ctor(a: Value) -> Result<Value, String> {
-    match a {
-        Value::Bool(b) => Ok(Value::Bool(b)),
-        Value::Num(n) => Ok(Value::Bool(n != 0.0)),
-        Value::Complex(re, im) => Ok(Value::Bool(!(re == 0.0 && im == 0.0))),
-        Value::Int(i) => Ok(Value::Bool(!i.is_zero())),
-        Value::Tensor(t) => {
-            let data: Vec<u8> = t
-                .data
-                .iter()
-                .map(|&x| if x != 0.0 { 1 } else { 0 })
-                .collect();
-            Ok(Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(data, t.shape)
-                    .map_err(|e| format!("logical: {e}"))?,
-            ))
-        }
-        Value::StringArray(sa) => {
-            let data: Vec<u8> = sa
-                .data
-                .iter()
-                .map(|s| if !s.is_empty() { 1 } else { 0 })
-                .collect();
-            Ok(Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(data, sa.shape)
-                    .map_err(|e| format!("logical: {e}"))?,
-            ))
-        }
-        Value::CharArray(ca) => {
-            let non_empty = !(ca.rows == 0 || ca.cols == 0);
-            Ok(Value::Bool(non_empty))
-        }
-        Value::LogicalArray(la) => Ok(Value::LogicalArray(la)),
-        Value::ComplexTensor(t) => {
-            // Element-wise logical array from complex tensor (non-zero magnitude)
-            let data: Vec<u8> = t
-                .data
-                .iter()
-                .map(|(re, im)| if *re != 0.0 || *im != 0.0 { 1 } else { 0 })
-                .collect();
-            Ok(Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(data, t.shape)
-                    .map_err(|e| format!("logical: {e}"))?,
-            ))
-        }
-        Value::Cell(_)
-        | Value::Struct(_)
-        | Value::Object(_)
-        | Value::GpuTensor(_)
-        | Value::FunctionHandle(_)
-        | Value::Closure(_)
-        | Value::ClassRef(_)
-        | Value::MException(_)
-        | Value::String(_)
-        | Value::HandleObject(_)
-        | Value::Listener(_) => Err("logical: unsupported conversion".to_string()),
-    }
-}
-
-// -------- String functions --------
 
 fn to_string_scalar(v: &Value) -> Result<String, String> {
     let s: String = v.try_into()?;
@@ -1123,62 +1028,6 @@ pub fn transpose(value: Value) -> Result<Value, String> {
     }
 }
 
-// Explicit GPU usage builtins (scaffolding)
-#[runmat_macros::runtime_builtin(name = "gpuArray")]
-fn gpu_array_builtin(x: Value) -> Result<Value, String> {
-    match x {
-        Value::Tensor(t) => {
-            // Placeholder: mark as GPU handle; device/buffer ids are dummies for now
-            if let Some(p) = runmat_accelerate_api::provider() {
-                let view = runmat_accelerate_api::HostTensorView {
-                    data: &t.data,
-                    shape: &t.shape,
-                };
-                let h = p
-                    .upload(&view)
-                    .map_err(|e| format!("gpuArray upload: {e}"))?;
-                Ok(Value::GpuTensor(h))
-            } else {
-                Ok(Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                    shape: t.shape.clone(),
-                    device_id: 0,
-                    buffer_id: 0,
-                }))
-            }
-        }
-        Value::Num(_n) => Ok(Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 0,
-        })),
-        other => Err(format!("gpuArray unsupported for {other:?}")),
-    }
-}
-
-#[runmat_macros::runtime_builtin(name = "gather")]
-fn gather_builtin(x: Value) -> Result<Value, String> {
-    match x {
-        Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider() {
-                let ht = p
-                    .download(&h)
-                    .map_err(|e| format!("gather download: {e}"))?;
-                Ok(Value::Tensor(
-                    runmat_builtins::Tensor::new(ht.data, ht.shape)
-                        .map_err(|e| format!("gather build: {e}"))?,
-                ))
-            } else {
-                let total: usize = h.shape.iter().product();
-                Ok(Value::Tensor(
-                    runmat_builtins::Tensor::new(vec![0.0; total], h.shape)
-                        .map_err(|e| format!("gather: {e}"))?,
-                ))
-            }
-        }
-        v => Ok(v),
-    }
-}
-
 // -------- Reductions: sum/prod/mean/any/all --------
 
 #[allow(dead_code)]
@@ -1267,90 +1116,6 @@ fn prod_var_builtin(a: Value, rest: Vec<Value>) -> Result<Value, String> {
     }
     Err("prod: unsupported arguments".to_string())
 }
-
-#[allow(dead_code)]
-fn mean_all_or_cols(a: Value) -> Result<Value, String> {
-    match a {
-        Value::GpuTensor(h) => {
-            if let Some(p) = runmat_accelerate_api::provider() {
-                if let Ok(hc) = p.reduce_mean(&h) {
-                    return Ok(Value::GpuTensor(hc));
-                }
-            }
-            Err("mean: unsupported for gpuArray".to_string())
-        }
-        Value::Tensor(t) => {
-            let rows = t.rows();
-            let cols = t.cols();
-            if rows > 1 && cols > 1 {
-                let mut out = vec![0.0f64; cols];
-                for (c, oc) in out.iter_mut().enumerate().take(cols) {
-                    let mut s = 0.0;
-                    for r in 0..rows {
-                        s += t.data[r + c * rows];
-                    }
-                    *oc = s / (rows as f64);
-                }
-                Ok(Value::Tensor(
-                    runmat_builtins::Tensor::new(out, vec![1, cols])
-                        .map_err(|e| format!("mean: {e}"))?,
-                ))
-            } else {
-                Ok(Value::Num(tensor_sum_all(&t) / (t.data.len() as f64)))
-            }
-        }
-        _ => Err("mean: expected tensor".to_string()),
-    }
-}
-
-#[allow(dead_code)]
-fn mean_dim(a: Value, dim: f64) -> Result<Value, String> {
-    if let Value::GpuTensor(h) = a {
-        if let Some(p) = runmat_accelerate_api::provider() {
-            let d = if dim < 1.0 { 1 } else { dim as usize };
-            if let Ok(hc) = p.reduce_mean_dim(&h, d) {
-                return Ok(Value::GpuTensor(hc));
-            }
-        }
-        return Err("mean: unsupported for gpuArray".to_string());
-    }
-    let t = match a {
-        Value::Tensor(t) => t,
-        _ => return Err("mean: expected tensor".to_string()),
-    };
-    let dim = if dim < 1.0 { 1usize } else { dim as usize };
-    let rows = t.rows();
-    let cols = t.cols();
-    if dim == 1 {
-        let mut out = vec![0.0f64; cols];
-        for (c, oc) in out.iter_mut().enumerate().take(cols) {
-            let mut s = 0.0;
-            for r in 0..rows {
-                s += t.data[r + c * rows];
-            }
-            *oc = s / (rows as f64);
-        }
-        Ok(Value::Tensor(
-            runmat_builtins::Tensor::new(out, vec![1, cols]).map_err(|e| format!("mean: {e}"))?,
-        ))
-    } else if dim == 2 {
-        let mut out = vec![0.0f64; rows];
-        for (r, orow) in out.iter_mut().enumerate().take(rows) {
-            let mut s = 0.0;
-            for c in 0..cols {
-                s += t.data[r + c * rows];
-            }
-            *orow = s / (cols as f64);
-        }
-        Ok(Value::Tensor(
-            runmat_builtins::Tensor::new(out, vec![rows, 1]).map_err(|e| format!("mean: {e}"))?,
-        ))
-    } else {
-        Err("mean: dim out of range".to_string())
-    }
-}
-
-// legacy mean removed; new implementation lives under builtins/math/reduction/mean.rs
 
 fn any_all_or_cols(a: Value) -> Result<Value, String> {
     match a {

@@ -308,7 +308,7 @@ fn try_gpu_polyfit(
         return Ok(None);
     }
 
-    let weight_handle = match rest.get(0) {
+    let weight_handle = match rest.first() {
         Some(Value::GpuTensor(handle)) => Some(handle),
         Some(_) => return Ok(None),
         None => None,
@@ -677,8 +677,8 @@ fn apply_weights_matrix(
     cols: usize,
     weights: &[f64],
 ) -> Result<(), String> {
-    for row in 0..rows {
-        let sqrt_w = weights[row].sqrt();
+    for (row, weight) in weights.iter().enumerate().take(rows) {
+        let sqrt_w = weight.sqrt();
         if !sqrt_w.is_finite() {
             return Err(format!(
                 "polyfit: weight at position {} must be finite",

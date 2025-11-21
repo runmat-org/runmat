@@ -1,8 +1,11 @@
 //! MATLAB-compatible `std` builtin with GPU-aware semantics for RunMat.
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, HostTensorView, ProviderNanMode, ProviderStdNormalization,
+    AccelProvider, GpuTensorHandle, HostTensorView, ProviderNanMode, ProviderPrecision,
+    ProviderStdNormalization,
 };
-use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
+const NAME: &str = "std";
+
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -280,6 +283,7 @@ enum IntClass {
 struct InputMeta {
     class: InputClass,
     device: DevicePreference,
+    numeric_dtype: Option<NumericDType>,
 }
 
 impl InputMeta {
@@ -295,7 +299,35 @@ impl InputMeta {
             Value::GpuTensor(_) => DevicePreference::Gpu,
             _ => DevicePreference::Host,
         };
-        Self { class, device }
+        let numeric_dtype = numeric_dtype_from_value(value);
+        Self {
+            class,
+            device,
+            numeric_dtype,
+        }
+    }
+}
+
+fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
+    match value {
+        Value::Tensor(t) => Some(t.dtype),
+        Value::GpuTensor(handle) => {
+            let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
+                runmat_accelerate_api::provider_for_handle(handle)
+                    .map(|provider| provider.precision())
+            });
+            precision.map(precision_to_dtype)
+        }
+        Value::Num(_) => Some(NumericDType::F64),
+        Value::LogicalArray(_) => Some(NumericDType::F64),
+        _ => None,
+    }
+}
+
+fn precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
+    match precision {
+        ProviderPrecision::F32 => NumericDType::F32,
+        ProviderPrecision::F64 => NumericDType::F64,
     }
 }
 
@@ -452,22 +484,19 @@ fn parse_arguments(args: &[Value]) -> Result<ParsedArguments, String> {
         }
 
         if !axes_set || matches!(axes, StdAxes::Default) {
-            match parse_axes(arg)? {
-                Some(selection) => {
-                    if matches!(selection, StdAxes::All)
-                        && axes_set
-                        && !matches!(axes, StdAxes::Default)
-                    {
-                        return Err(
-                            "std: 'all' cannot be combined with an explicit dimension".to_string()
-                        );
-                    }
-                    axes = selection;
-                    axes_set = true;
-                    idx += 1;
-                    continue;
+            if let Some(selection) = parse_axes(arg)? {
+                if matches!(selection, StdAxes::All)
+                    && axes_set
+                    && !matches!(axes, StdAxes::Default)
+                {
+                    return Err(
+                        "std: 'all' cannot be combined with an explicit dimension".to_string()
+                    );
                 }
-                None => {}
+                axes = selection;
+                axes_set = true;
+                idx += 1;
+                continue;
             }
         } else if let Some(selection) = parse_axes(arg)? {
             if matches!(selection, StdAxes::All) {
@@ -635,7 +664,7 @@ fn std_tensor(
 }
 
 fn std_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> Result<Tensor, String> {
-    let value = tensor.data.get(0).copied().unwrap_or(f64::NAN);
+    let value = tensor.data.first().copied().unwrap_or(f64::NAN);
     let result = if value.is_nan() {
         f64::NAN
     } else {
@@ -704,24 +733,23 @@ fn std_tensor_reduce(
 
     let mut output = vec![0.0f64; out_len];
     for idx in 0..out_len {
-        output[idx] = if saw_nan[idx] && matches!(nan_mode, ReductionNaN::Include) {
-            f64::NAN
-        } else if counts[idx] == 0 {
-            f64::NAN
-        } else {
-            let count = counts[idx];
-            let variance = match normalization {
-                StdNormalization::Sample => {
-                    if count > 1 {
-                        (m2[idx] / (count - 1) as f64).max(0.0)
-                    } else {
-                        0.0
+        output[idx] =
+            if (saw_nan[idx] && matches!(nan_mode, ReductionNaN::Include)) || counts[idx] == 0 {
+                f64::NAN
+            } else {
+                let count = counts[idx];
+                let variance = match normalization {
+                    StdNormalization::Sample => {
+                        if count > 1 {
+                            (m2[idx] / (count - 1) as f64).max(0.0)
+                        } else {
+                            0.0
+                        }
                     }
-                }
-                StdNormalization::Population => (m2[idx] / (count as f64)).max(0.0),
+                    StdNormalization::Population => (m2[idx] / (count as f64)).max(0.0),
+                };
+                variance.sqrt()
             };
-            variance.sqrt()
-        };
     }
 
     Tensor::new(output, output_shape).map_err(|e| format!("std: {e}"))
@@ -937,8 +965,58 @@ fn apply_native_template(value: Value, meta: &InputMeta) -> Result<Value, String
             Value::Tensor(t) if t.data.len() == 1 => class.to_value(t.data[0]),
             other => Ok(other),
         },
-        _ => Ok(value),
+        _ => {
+            if let Some(dtype) = meta.numeric_dtype {
+                coerce_value_to_dtype(value, dtype)
+            } else {
+                Ok(value)
+            }
+        }
     }
+}
+
+fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> Result<Value, String> {
+    match dtype {
+        NumericDType::F64 => Ok(value),
+        NumericDType::F32 => match value {
+            Value::Tensor(tensor) => {
+                let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
+                Ok(Value::Tensor(tensor))
+            }
+            Value::Num(n) => {
+                let tensor = Tensor::new_with_dtype(vec![n], vec![1, 1], NumericDType::F32)
+                    .map_err(|e| format!("{NAME}: {e}"))?;
+                Ok(Value::Tensor(tensor))
+            }
+            Value::LogicalArray(logical) => {
+                let tensor =
+                    tensor::logical_to_tensor(&logical).map_err(|e| format!("{NAME}: {e}"))?;
+                let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
+                Ok(Value::Tensor(tensor))
+            }
+            Value::GpuTensor(handle) => {
+                let tensor = gpu_helpers::gather_tensor(&handle)?;
+                let tensor = coerce_tensor_dtype(tensor, NumericDType::F32);
+                Ok(Value::Tensor(tensor))
+            }
+            other => Ok(other),
+        },
+    }
+}
+
+fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
+    match dtype {
+        NumericDType::F64 => {
+            tensor.dtype = NumericDType::F64;
+        }
+        NumericDType::F32 => {
+            for value in &mut tensor.data {
+                *value = (*value as f32) as f64;
+            }
+            tensor.dtype = NumericDType::F32;
+        }
+    }
+    tensor
 }
 
 fn ensure_device(value: Value, device: DevicePreference) -> Result<Value, String> {
@@ -1054,7 +1132,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, Tensor};
+    use std::f64::consts::{FRAC_1_SQRT_2, SQRT_2};
 
     #[test]
     fn std_vector_sample_default() {
@@ -1135,7 +1214,7 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
-                let expected = [0.70710678119, 0.0, 0.0];
+                let expected = [FRAC_1_SQRT_2, 0.0, 0.0];
                 for (value, exp) in out.data.iter().zip(expected.iter()) {
                     let diff = (value - exp).abs();
                     assert!(diff < 1e-9, "value={value}, expected={exp}, diff={diff}");
@@ -1270,7 +1349,7 @@ mod tests {
             .expect("std");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert!((gathered.data[0] - 1.41421356237).abs() < 1e-8);
+            assert!((gathered.data[0] - SQRT_2).abs() < 1e-8);
             provider.free(&handle).ok();
         });
     }

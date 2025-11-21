@@ -196,7 +196,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             let one = match ctx.scalar_ty {
                 ScalarType::F32 => "1.0".to_string(),
                 ScalarType::F64 => "f64(1.0)".to_string(),
@@ -239,7 +242,7 @@ fn expm1_builtin(value: Value) -> Result<Value, String> {
 }
 
 fn expm1_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_expm1(&handle) {
             return Ok(Value::GpuTensor(out));
         }
@@ -329,7 +332,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                let expected = vec![0.0, 1.0f64.exp_m1(), (-1.0f64).exp_m1()];
+                let expected = [0.0, 1.0f64.exp_m1(), (-1.0f64).exp_m1()];
                 for (out, exp) in t.data.iter().zip(expected.iter()) {
                     assert!((out - exp).abs() < 1e-12);
                 }

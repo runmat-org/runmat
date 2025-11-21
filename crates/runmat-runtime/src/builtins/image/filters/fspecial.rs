@@ -358,33 +358,33 @@ fn build_filter_spec(kind: &Value, rest: &[Value]) -> Result<FspecialFilterSpec,
     match filter_kind {
         FilterKind::Average => {
             ensure_arg_count("average", rest, 0, 1)?;
-            let (rows, cols) = parse_average_dims(rest.get(0))?;
+            let (rows, cols) = parse_average_dims(rest.first())?;
             Ok(FspecialFilterSpec::Average { rows, cols })
         }
         FilterKind::Disk => {
             ensure_arg_count("disk", rest, 0, 1)?;
-            let (radius, size) = parse_disk_params(rest.get(0))?;
+            let (radius, size) = parse_disk_params(rest.first())?;
             Ok(FspecialFilterSpec::Disk { radius, size })
         }
         FilterKind::Gaussian => {
             ensure_arg_count("gaussian", rest, 0, 2)?;
-            let (rows, cols, sigma) = parse_gaussian_params(rest.get(0), rest.get(1))?;
+            let (rows, cols, sigma) = parse_gaussian_params(rest.first(), rest.get(1))?;
             Ok(FspecialFilterSpec::Gaussian { rows, cols, sigma })
         }
         FilterKind::Laplacian => {
             ensure_arg_count("laplacian", rest, 0, 1)?;
-            let alpha = parse_laplacian_alpha(rest.get(0))?;
+            let alpha = parse_laplacian_alpha(rest.first())?;
             Ok(FspecialFilterSpec::Laplacian { alpha })
         }
         FilterKind::Log => {
             ensure_arg_count("log", rest, 0, 2)?;
-            let (rows, cols, sigma) = parse_log_params(rest.get(0), rest.get(1))?;
+            let (rows, cols, sigma) = parse_log_params(rest.first(), rest.get(1))?;
             Ok(FspecialFilterSpec::Log { rows, cols, sigma })
         }
         FilterKind::Motion => {
             ensure_arg_count("motion", rest, 0, 2)?;
             let (length, kernel_size, angle, oversample) =
-                parse_motion_params(rest.get(0), rest.get(1))?;
+                parse_motion_params(rest.first(), rest.get(1))?;
             Ok(FspecialFilterSpec::Motion {
                 length,
                 kernel_size,
@@ -402,7 +402,7 @@ fn build_filter_spec(kind: &Value, rest: &[Value]) -> Result<FspecialFilterSpec,
         }
         FilterKind::Unsharp => {
             ensure_arg_count("unsharp", rest, 0, 1)?;
-            let alpha = parse_unsharp_alpha(rest.get(0))?;
+            let alpha = parse_unsharp_alpha(rest.first())?;
             Ok(FspecialFilterSpec::Unsharp { alpha })
         }
     }
@@ -891,7 +891,7 @@ fn parse_lengths_inner(
                 .iter()
                 .map(|&v| parse_numeric_dimension(v))
                 .collect::<Result<Vec<_>, _>>()?;
-            if enforce_positive && dims.iter().any(|&d| d == 0) {
+            if enforce_positive && dims.contains(&0) {
                 return Err(err.to_string());
             }
             Ok(dims)
@@ -905,7 +905,7 @@ fn parse_lengths_inner(
                 .iter()
                 .map(|&v| parse_numeric_dimension(v as f64))
                 .collect::<Result<Vec<_>, _>>()?;
-            if enforce_positive && dims.iter().any(|&d| d == 0) {
+            if enforce_positive && dims.contains(&0) {
                 return Err(err.to_string());
             }
             Ok(dims)
@@ -949,10 +949,8 @@ fn circle_rect_area(radius: f64, x1: f64, x2: f64, y1: f64, y2: f64) -> f64 {
         return 0.0;
     }
     let r = radius;
-    if x1 >= r || y1 >= r || x2 <= -r || y2 <= -r {
-        if min_distance_to_circle(x1, y1, x2, y2) >= r {
-            return 0.0;
-        }
+    if (x1 >= r || y1 >= r || x2 <= -r || y2 <= -r) && min_distance_to_circle(x1, y1, x2, y2) >= r {
+        return 0.0;
     }
 
     if x1 < 0.0 && x2 > 0.0 {
@@ -1125,19 +1123,19 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                let expected = [
-                    0.01134373655849507,
-                    0.08381950580221061,
-                    0.01134373655849507,
-                    0.08381950580221061,
-                    0.61934703055717721,
-                    0.08381950580221061,
-                    0.01134373655849507,
-                    0.08381950580221061,
-                    0.01134373655849507,
+                const EXPECTED: [f64; 9] = [
+                    0.011_343_736_558_495,
+                    0.083_819_505_802_211,
+                    0.011_343_736_558_495,
+                    0.083_819_505_802_211,
+                    0.619_347_030_557_177,
+                    0.083_819_505_802_211,
+                    0.011_343_736_558_495,
+                    0.083_819_505_802_211,
+                    0.011_343_736_558_495,
                 ];
                 for (idx, value) in t.data.iter().enumerate() {
-                    assert_close(*value, expected[idx], 1e-12);
+                    assert_close(*value, EXPECTED[idx], 1e-12);
                 }
             }
             other => panic!("expected tensor, got {other:?}"),

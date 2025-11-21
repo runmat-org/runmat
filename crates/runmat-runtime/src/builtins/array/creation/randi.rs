@@ -728,7 +728,7 @@ mod tests {
         let expected = expected_sequence(&Bounds::new(1, 6).unwrap(), 1)[0] as f64;
         match result {
             Value::Num(v) => {
-                assert!(v >= 1.0 && v <= 6.0);
+                assert!((1.0..=6.0).contains(&v));
                 assert!((v - expected).abs() < 1e-12);
             }
             other => panic!("expected scalar double, got {other:?}"),
@@ -765,7 +765,7 @@ mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 for v in &t.data {
-                    assert!(*v >= 1.0 && *v <= 5.0);
+                    assert!((1.0..=5.0).contains(v));
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -880,7 +880,7 @@ mod tests {
                         test_support::gather(Value::GpuTensor(gpu)).expect("gather to host");
                     assert_eq!(gathered.shape, vec![2, 2]);
                     for value in gathered.data {
-                        assert!(value >= 1.0 && value <= 4.0);
+                        assert!((1.0..=4.0).contains(&value));
                     }
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -914,7 +914,7 @@ mod tests {
                         test_support::gather(Value::GpuTensor(gpu)).expect("gather override");
                     assert_eq!(gathered.shape, vec![3, 1]);
                     for value in gathered.data {
-                        assert!(value >= 1.0 && value <= 4.0);
+                        assert!((1.0..=4.0).contains(&value));
                     }
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -964,7 +964,7 @@ mod tests {
                 assert_eq!(gathered.shape, vec![2, 3]);
                 for value in gathered.data {
                     assert!(
-                        value >= 1.0 && value <= 8.0,
+                        (1.0..=8.0).contains(&value),
                         "expected value within [1, 8], got {value}"
                     );
                 }

@@ -372,11 +372,7 @@ fn gpu_binary_exponentiation(
         None => return Ok(None),
     };
 
-    if result_state.owned {
-        Ok(Some(Value::GpuTensor(result_state.handle)))
-    } else {
-        Ok(Some(Value::GpuTensor(result_state.handle)))
-    }
+    Ok(Some(Value::GpuTensor(result_state.handle)))
 }
 
 fn parse_integer_exponent(value: &Value) -> Result<Option<i32>, String> {

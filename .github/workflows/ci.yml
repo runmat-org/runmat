@@ -25,18 +25,18 @@ jobs:
       max-parallel: 8
       matrix:
         include:
-          - os: ubuntu-latest-m
+          - runner: self-hosted
             name: linux-x86_64
-          - os: ubuntu-latest-arm-l
-            name: linux-aarch64
-          - os: windows-latest-l
+          - runner: windows-latest-l
             name: windows-x86_64
-          - os: macos-latest
+          - runner: macos-latest
             name: macos-universal
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     env:
       # Ensure single-threaded tests for GC stability
       RUST_TEST_THREADS: 1
+      # Enable backtraces on CI to aid debugging of panics/segfaults
+      RUST_BACKTRACE: 1
       MATRIX_NAME: ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v3
@@ -48,9 +48,27 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # TEMPORARY: gather GPU/OS diagnostics on Linux runners while investigating CI segfaults.
+      # Remove this step once the root cause is resolved.
+      - name: TEMP diagnose linux gpu runner
+        if: runner.os == 'Linux'
+        run: |
+          set -x
+          uname -a
+          if command -v lsb_release >/dev/null 2>&1; then
+            lsb_release -a
+          fi
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            nvidia-smi
+            nvidia-smi -q
+          else
+            echo "nvidia-smi not available on this runner"
+          fi
+
       - name: Install Linux system dependencies (BLAS/LAPACK, ZMQ, GUI, OpenSSL)
         if: runner.os == 'Linux'
         run: |
+          # TEMP: include gdb while investigating Linux GPU segfaults (remove once resolved)
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             libopenblas-dev liblapack-dev libssl-dev \
@@ -58,7 +76,8 @@ jobs:
             libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
             libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev \
             libegl1-mesa-dev libgl1-mesa-dev \
-            libudev-dev libdbus-1-dev ca-certificates
+            libudev-dev libdbus-1-dev ca-certificates \
+            gdb
 
       - name: Install macOS dependencies (ZMQ)
         if: runner.os == 'macOS'
@@ -129,15 +148,32 @@ jobs:
         if: runner.os != 'Windows'
         env:
           RUST_TEST_THREADS: 1
+          RUST_BACKTRACE: 1
         run: |
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 -- --test-threads=1 | tee test.log
+
+      # TEMPORARY: rerun the flaky fused reduction test with native backtraces when Linux CI fails.
+      # Remove once the SIGSEGV root cause has been fixed.
+      - name: TEMP capture fused_reduction_dim_n backtrace (linux)
+        if: failure() && runner.os == 'Linux'
+        env:
+          RUST_TEST_THREADS: 1
+          RUST_BACKTRACE: 1
+        run: |
+          set -o pipefail
+          echo "::group::Re-running fused_reduction_dim_n under gdb"
+          # Ensure cores are allowed
+          ulimit -c unlimited || true
+          gdb --batch -ex "run" -ex "bt" --args cargo test -p runmat-accelerate fused_reduction_dim_n -- --test-threads=1
+          echo "::endgroup::"
 
       - name: Test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           RUST_TEST_THREADS: 1
+          RUST_BACKTRACE: 1
         run: |
           $ErrorActionPreference = 'Stop'
           cargo test --all-targets --all-features -- --test-threads=1 2>&1 | Tee-Object -FilePath test.log
@@ -205,7 +241,7 @@ jobs:
             target: aarch64-apple-darwin
             command: build
           - release_for: linux-x86_64
-            os: ubuntu-latest-m
+            os: ubuntu-latest-gpu
             target: x86_64-unknown-linux-gnu
             command: build
     runs-on: ${{ matrix.platform.os }}

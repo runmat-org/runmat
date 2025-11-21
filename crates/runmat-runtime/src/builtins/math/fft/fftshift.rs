@@ -221,7 +221,7 @@ fn fftshift_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     if rest.len() > 1 {
         return Err("fftshift: too many input arguments".to_string());
     }
-    let dims_arg = rest.get(0);
+    let dims_arg = rest.first();
 
     match value {
         Value::Tensor(tensor) => {

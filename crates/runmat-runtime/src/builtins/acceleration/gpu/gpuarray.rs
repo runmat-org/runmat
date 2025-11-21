@@ -698,21 +698,15 @@ fn convert_to_single(data: &mut [f64]) {
 fn convert_to_int_range(data: &mut [f64], min: f64, max: f64) {
     for value in data.iter_mut() {
         if value.is_nan() {
-            *value = if min == 0.0 { 0.0 } else { 0.0 };
+            *value = min;
             continue;
         }
         if value.is_infinite() {
             *value = if value.is_sign_negative() { min } else { max };
             continue;
         }
-        let mut rounded = value.round();
-        if rounded < min {
-            rounded = min;
-        }
-        if rounded > max {
-            rounded = max;
-        }
-        *value = rounded;
+        let rounded = value.round();
+        *value = rounded.clamp(min, max);
     }
 }
 
@@ -914,7 +908,7 @@ mod tests {
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather single");
-            let expected: Vec<f64> = vec![(1.23456789f32) as f64, (-9.87654321f32) as f64];
+            let expected = [1.234_567_9_f32 as f64, (-9.876_543_f32) as f64];
             for (observed, expected) in gathered.data.iter().zip(expected.iter()) {
                 assert!((observed - expected).abs() < 1e-6);
             }

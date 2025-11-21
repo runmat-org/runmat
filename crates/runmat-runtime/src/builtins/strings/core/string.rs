@@ -456,9 +456,7 @@ fn resolve_target_shape(
     args: &[ArgumentData],
 ) -> Result<(usize, Vec<usize>), String> {
     let mut target_len = spec.specs.len();
-    let mut target_shape = if target_len > 1 {
-        spec.shape.clone()
-    } else if target_len == 1 && !spec.shape.is_empty() {
+    let mut target_shape = if target_len > 1 || (target_len == 1 && !spec.shape.is_empty()) {
         spec.shape.clone()
     } else {
         Vec::new()
@@ -471,11 +469,7 @@ fn resolve_target_shape(
         }
         if target_len == 0 {
             target_len = len;
-            target_shape = if len > 1 {
-                arg.shape.clone()
-            } else {
-                arg.shape.clone()
-            };
+            target_shape = arg.shape.clone();
             continue;
         }
         if len == 1 {
@@ -507,21 +501,13 @@ fn resolve_target_shape(
     }
 
     if target_shape.is_empty() {
-        if spec.specs.len() > 1 {
-            target_shape = if spec.shape.is_empty() {
-                vec![target_len, 1]
-            } else {
-                spec.shape.clone()
-            };
+        target_shape = if spec.shape.is_empty() {
+            vec![target_len, 1]
         } else {
-            target_shape = if spec.shape.is_empty() {
-                vec![target_len, 1]
-            } else {
-                spec.shape.clone()
-            };
-            if tensor::element_count(&target_shape) != target_len {
-                target_shape = vec![target_len, 1];
-            }
+            spec.shape.clone()
+        };
+        if spec.specs.len() == 1 && tensor::element_count(&target_shape) != target_len {
+            target_shape = vec![target_len, 1];
         }
     }
 

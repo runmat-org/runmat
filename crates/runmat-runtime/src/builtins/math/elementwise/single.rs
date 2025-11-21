@@ -2,7 +2,7 @@
 
 use log::trace;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
@@ -198,7 +198,7 @@ See MathWorks’ documentation linked above or inspect this builtin’s source f
 implementation.
 
 ## See Also
-[gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather), [logical](../../../logical/logical), [single (MathWorks)](https://www.mathworks.com/help/matlab/ref/single.html)
+[gpuArray](../../../acceleration/gpu/gpuArray), [gather](../../../acceleration/gpu/gather), [logical](../../../logical/ops), [single (MathWorks)](https://www.mathworks.com/help/matlab/ref/single.html)
 
 ## Source & Feedback
 - Implementation: `crates/runmat-runtime/src/builtins/math/elementwise/single.rs`
@@ -231,7 +231,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.get(0).ok_or(FusionError::MissingInput(0))?;
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             match ctx.scalar_ty {
                 ScalarType::F32 => Ok(input.to_string()),
                 ScalarType::F64 => Ok(format!("f64(f32({input}))")),
@@ -303,7 +303,7 @@ fn single_from_char_array(chars: CharArray) -> Result<Value, String> {
 }
 
 fn single_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match provider.unary_single(&handle) {
             Ok(result) => {
                 let _ = provider.free(&handle);
@@ -317,7 +317,7 @@ fn single_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 
     let tensor = gpu_helpers::gather_tensor(&handle)?;
     let converted = single_tensor_to_host(tensor)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let _ = provider.free(&handle);
         let view = HostTensorView {
             data: &converted.data,
@@ -337,6 +337,7 @@ fn single_from_gpu(handle: GpuTensorHandle) -> Result<Value, String> {
 
 fn single_tensor_to_host(mut tensor: Tensor) -> Result<Tensor, String> {
     cast_slice_to_single(&mut tensor.data);
+    tensor.dtype = NumericDType::F32;
     Ok(tensor)
 }
 

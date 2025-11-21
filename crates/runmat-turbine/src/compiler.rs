@@ -412,6 +412,11 @@ impl BytecodeCompiler {
                         local_stack.push(result);
                     }
                     Instr::CallBuiltin(name, arg_count) => {
+                        if matches!(name.as_str(), "max" | "min") {
+                            return Err(TurbineError::ExecutionError(format!(
+                                "Builtin '{name}' is not yet supported in Turbine JIT; falling back to interpreter"
+                            )));
+                        }
                         let mut args = Vec::new();
                         for _ in 0..*arg_count {
                             args.push(local_stack.pop()?);
@@ -419,6 +424,12 @@ impl BytecodeCompiler {
                         args.reverse();
                         let result = Self::call_runtime_builtin_static(builder, name, &args);
                         local_stack.push(result);
+                    }
+                    Instr::StochasticEvolution => {
+                        return Err(TurbineError::ExecutionError(
+                            "StochasticEvolution loops require the interpreter (JIT not yet supported)"
+                                .to_string(),
+                        ));
                     }
                     Instr::CreateMatrix(rows, cols) => {
                         let total_elements = rows * cols;

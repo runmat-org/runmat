@@ -1,17 +1,31 @@
 use anyhow::anyhow;
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
 
 type ResidencyClearFn = fn(&GpuTensorHandle);
+type SequenceThresholdFn = fn() -> Option<usize>;
 
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
+static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
 
 static LOGICAL_HANDLES: Lazy<RwLock<HashSet<u64>>> = Lazy::new(|| RwLock::new(HashSet::new()));
+static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<u64, u64>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransposeInfo {
+    pub base_rows: usize,
+    pub base_cols: usize,
+}
 
 /// Register a callback used to clear residency tracking when GPU tensors are
 /// gathered back to the host. Backends that maintain residency metadata should
@@ -26,6 +40,20 @@ pub fn clear_residency(handle: &GpuTensorHandle) {
     if let Some(handler) = RESIDENCY_CLEAR.get() {
         handler(handle);
     }
+}
+
+/// Register a callback that exposes the current sequence length threshold
+/// derived from the auto-offload planner. Array constructors can use this hint
+/// to decide when to prefer GPU residency automatically.
+pub fn register_sequence_threshold_provider(provider: SequenceThresholdFn) {
+    let _ = SEQUENCE_THRESHOLD_PROVIDER.set(provider);
+}
+
+/// Query the currently registered sequence threshold hint, if any.
+pub fn sequence_threshold_hint() -> Option<usize> {
+    SEQUENCE_THRESHOLD_PROVIDER
+        .get()
+        .and_then(|provider| provider())
 }
 
 /// Record the precision associated with a GPU tensor handle so host operations can
@@ -57,8 +85,14 @@ pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
     if let Ok(mut guard) = LOGICAL_HANDLES.write() {
         if logical {
             guard.insert(handle.buffer_id);
+            if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
+                *hits.entry(handle.buffer_id).or_insert(0) += 1;
+            }
         } else {
             guard.remove(&handle.buffer_id);
+            if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
+                hits.remove(&handle.buffer_id);
+            }
         }
     }
 }
@@ -74,6 +108,42 @@ pub fn handle_is_logical(handle: &GpuTensorHandle) -> bool {
         .read()
         .map(|guard| guard.contains(&handle.buffer_id))
         .unwrap_or(false)
+}
+
+pub fn handle_logical_hits(buffer_id: u64) -> Option<u64> {
+    LOGICAL_HANDLE_HITS
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&buffer_id).copied())
+}
+
+pub fn record_handle_transpose(handle: &GpuTensorHandle, base_rows: usize, base_cols: usize) {
+    if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
+        guard.insert(
+            handle.buffer_id,
+            TransposeInfo {
+                base_rows,
+                base_cols,
+            },
+        );
+    }
+}
+
+pub fn clear_handle_transpose(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
+        guard.remove(&handle.buffer_id);
+    }
+}
+
+pub fn handle_transpose_info(handle: &GpuTensorHandle) -> Option<TransposeInfo> {
+    TRANSPOSED_HANDLES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).copied())
+}
+
+pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
+    handle_transpose_info(handle).is_some()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -180,7 +250,15 @@ pub struct ProviderQrResult {
     pub perm_vector: GpuTensorHandle,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderQrPowerIterResult {
+    pub q: GpuTensorHandle,
+    pub r: GpuTensorHandle,
+    pub perm_matrix: GpuTensorHandle,
+    pub perm_vector: GpuTensorHandle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProviderLinsolveOptions {
     pub lower: bool,
     pub upper: bool,
@@ -192,36 +270,15 @@ pub struct ProviderLinsolveOptions {
     pub rcond: Option<f64>,
 }
 
-impl Default for ProviderLinsolveOptions {
-    fn default() -> Self {
-        Self {
-            lower: false,
-            upper: false,
-            rectangular: false,
-            transposed: false,
-            conjugate: false,
-            symmetric: false,
-            posdef: false,
-            rcond: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderLinsolveResult {
     pub solution: GpuTensorHandle,
     pub reciprocal_condition: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProviderPinvOptions {
     pub tolerance: Option<f64>,
-}
-
-impl Default for ProviderPinvOptions {
-    fn default() -> Self {
-        Self { tolerance: None }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -230,15 +287,9 @@ pub struct ProviderPolyvalMu {
     pub scale: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProviderPolyvalOptions {
     pub mu: Option<ProviderPolyvalMu>,
-}
-
-impl Default for ProviderPolyvalOptions {
-    fn default() -> Self {
-        Self { mu: None }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -315,6 +366,50 @@ impl Default for ProviderQrOptions {
 pub enum ProviderPrecision {
     F32,
     F64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReductionTwoPassMode {
+    Auto,
+    ForceOn,
+    ForceOff,
+}
+
+impl ReductionTwoPassMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReductionTwoPassMode::Auto => "auto",
+            ReductionTwoPassMode::ForceOn => "force_on",
+            ReductionTwoPassMode::ForceOff => "force_off",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ReductionFlavor {
+    Sum,
+    Mean,
+    CustomScale(f64),
+}
+
+impl ReductionFlavor {
+    pub fn is_mean(self) -> bool {
+        matches!(self, ReductionFlavor::Mean)
+    }
+
+    pub fn scale(self, reduce_len: usize) -> f64 {
+        match self {
+            ReductionFlavor::Sum => 1.0,
+            ReductionFlavor::Mean => {
+                if reduce_len == 0 {
+                    1.0
+                } else {
+                    1.0 / reduce_len as f64
+                }
+            }
+            ReductionFlavor::CustomScale(scale) => scale,
+        }
+    }
 }
 
 /// Normalisation mode for correlation coefficients.
@@ -668,6 +763,33 @@ pub struct ProviderTelemetry {
     pub download_bytes: u64,
     pub fusion_cache_hits: u64,
     pub fusion_cache_misses: u64,
+    pub bind_group_cache_hits: u64,
+    pub bind_group_cache_misses: u64,
+    /// Optional per-layout bind group cache counters (layout tags and their hit/miss counts)
+    pub bind_group_cache_by_layout: Option<Vec<BindGroupLayoutTelemetry>>,
+    /// Recent kernel launch metadata (bounded log; newest last)
+    pub kernel_launches: Vec<KernelLaunchTelemetry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BindGroupLayoutTelemetry {
+    pub tag: String,
+    pub hits: u64,
+    pub misses: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KernelAttrTelemetry {
+    pub key: String,
+    pub value: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KernelLaunchTelemetry {
+    pub kernel: String,
+    pub precision: Option<String>,
+    pub shape: Vec<KernelAttrTelemetry>,
+    pub tuning: Vec<KernelAttrTelemetry>,
 }
 
 /// Device/provider interface that backends implement and register into the runtime layer
@@ -676,6 +798,32 @@ pub trait AccelProvider: Send + Sync {
     fn download(&self, h: &GpuTensorHandle) -> anyhow::Result<crate::HostTensorOwned>;
     fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
     fn device_info(&self) -> String;
+    fn device_id(&self) -> u32 {
+        0
+    }
+
+    /// Gather elements from `source` at the provided zero-based linear `indices`, materialising
+    /// a dense tensor with the specified `output_shape`.
+    fn gather_linear(
+        &self,
+        _source: &GpuTensorHandle,
+        _indices: &[u32],
+        _output_shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("gather_linear not supported by provider"))
+    }
+
+    /// Scatter the contents of `values` into `target` at the provided zero-based linear `indices`.
+    ///
+    /// The provider must ensure `values.len() == indices.len()` and update `target` in place.
+    fn scatter_linear(
+        &self,
+        _target: &GpuTensorHandle,
+        _indices: &[u32],
+        _values: &GpuTensorHandle,
+    ) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("scatter_linear not supported by provider"))
+    }
 
     /// Structured device information (optional to override). Default adapts from `device_info()`.
     fn device_info_struct(&self) -> ApiDeviceInfo {
@@ -880,6 +1028,18 @@ pub trait AccelProvider: Send + Sync {
     /// Allocate a tensor of standard normal values matching a prototype's shape.
     fn random_normal_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         self.random_normal(&prototype.shape)
+    }
+
+    fn stochastic_evolution(
+        &self,
+        _state: &GpuTensorHandle,
+        _drift: f64,
+        _scale: f64,
+        _steps: u32,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "stochastic_evolution not supported by provider"
+        ))
     }
 
     /// Set the provider RNG state to align with the host RNG.
@@ -1270,6 +1430,10 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("matmul not supported by provider"))
     }
+
+    fn syrk(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("syrk not supported by provider"))
+    }
     fn pagefun(&self, _request: &PagefunRequest) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("pagefun not supported by provider"))
     }
@@ -1384,6 +1548,22 @@ pub trait AccelProvider: Send + Sync {
         _options: ProviderQrOptions,
     ) -> anyhow::Result<ProviderQrResult> {
         Err(anyhow::anyhow!("qr not supported by provider"))
+    }
+    fn take_matmul_sources(
+        &self,
+        _product: &GpuTensorHandle,
+    ) -> Option<(GpuTensorHandle, GpuTensorHandle)> {
+        None
+    }
+    fn qr_power_iter(
+        &self,
+        product: &GpuTensorHandle,
+        _product_lhs: Option<&GpuTensorHandle>,
+        q_handle: &GpuTensorHandle,
+        options: &ProviderQrOptions,
+    ) -> anyhow::Result<Option<ProviderQrPowerIterResult>> {
+        let _ = (product, q_handle, options);
+        Ok(None)
     }
     fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("transpose not supported by provider"))
@@ -1707,6 +1887,7 @@ pub trait AccelProvider: Send + Sync {
     /// `num_slices` independent slices (e.g., columns). Providers should create a uniform buffer
     /// compatible with the expected `Params/MParams` struct in the shader and dispatch
     /// `num_slices` workgroups with `workgroup_size` threads, or an equivalent strategy.
+    #[allow(clippy::too_many_arguments)]
     fn fused_reduction(
         &self,
         _shader: &str,
@@ -1715,6 +1896,7 @@ pub trait AccelProvider: Send + Sync {
         _reduce_len: usize,
         _num_slices: usize,
         _workgroup_size: u32,
+        _flavor: ReductionFlavor,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("fused_reduction not supported by provider"))
     }
@@ -1743,6 +1925,10 @@ pub trait AccelProvider: Send + Sync {
             download_bytes: 0,
             fusion_cache_hits: hits,
             fusion_cache_misses: misses,
+            bind_group_cache_hits: 0,
+            bind_group_cache_misses: 0,
+            bind_group_cache_by_layout: None,
+            kernel_launches: Vec::new(),
         }
     }
 
@@ -1757,6 +1943,11 @@ pub trait AccelProvider: Send + Sync {
     /// Threshold above which provider will prefer two-pass reduction.
     fn two_pass_threshold(&self) -> usize {
         1024
+    }
+
+    /// Current two-pass mode preference (auto/forced on/off).
+    fn reduction_two_pass_mode(&self) -> ReductionTwoPassMode {
+        ReductionTwoPassMode::Auto
     }
 
     /// Fast-path: write a GPU column in a matrix from a GPU vector, returning a new handle.
@@ -1851,6 +2042,12 @@ pub trait AccelProvider: Send + Sync {
 
 static GLOBAL_PROVIDER: Lazy<RwLock<Option<&'static dyn AccelProvider>>> =
     Lazy::new(|| RwLock::new(None));
+static PROVIDER_REGISTRY: Lazy<RwLock<HashMap<u32, &'static dyn AccelProvider>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+static DEVICE_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
+thread_local! {
+    static THREAD_PROVIDER: Cell<Option<&'static dyn AccelProvider>> = Cell::new(None);
+}
 
 /// Register a global acceleration provider.
 ///
@@ -1863,9 +2060,19 @@ pub unsafe fn register_provider(p: &'static dyn AccelProvider) {
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = Some(p);
     }
+    register_provider_for_device(p.device_id(), p);
+}
+
+unsafe fn register_provider_for_device(device_id: u32, provider: &'static dyn AccelProvider) {
+    if let Ok(mut guard) = PROVIDER_REGISTRY.write() {
+        guard.insert(device_id, provider);
+    }
 }
 
 pub fn provider() -> Option<&'static dyn AccelProvider> {
+    if let Some(p) = THREAD_PROVIDER.with(|cell| cell.get()) {
+        return Some(p);
+    }
     GLOBAL_PROVIDER
         .read()
         .ok()
@@ -1877,6 +2084,51 @@ pub fn clear_provider() {
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = None;
     }
+    if let Ok(mut map) = PROVIDER_REGISTRY.write() {
+        map.clear();
+    }
+}
+
+pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider> {
+    PROVIDER_REGISTRY
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&device_id).copied())
+        .or_else(|| provider())
+}
+
+pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
+    provider_for_device(handle.device_id)
+}
+
+pub fn next_device_id() -> u32 {
+    DEVICE_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+pub struct ThreadProviderGuard {
+    prev: Option<&'static dyn AccelProvider>,
+}
+
+impl ThreadProviderGuard {
+    pub fn set(provider: Option<&'static dyn AccelProvider>) -> Self {
+        let prev = THREAD_PROVIDER.with(|cell| {
+            let old = cell.get();
+            cell.set(provider);
+            old
+        });
+        ThreadProviderGuard { prev }
+    }
+}
+
+impl Drop for ThreadProviderGuard {
+    fn drop(&mut self) {
+        let prev = self.prev.take();
+        THREAD_PROVIDER.with(|cell| cell.set(prev));
+    }
+}
+
+pub fn set_thread_provider(provider: Option<&'static dyn AccelProvider>) {
+    THREAD_PROVIDER.with(|cell| cell.set(provider));
 }
 
 /// Convenience: perform elementwise add via provider if possible; otherwise return None

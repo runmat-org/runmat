@@ -760,7 +760,7 @@ fn approx_equal(a: f64, b: f64) -> bool {
     (a - b).abs() <= RANGE_EPS * (a.abs().max(b.abs()).max(1.0))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct HistcountsOptions {
     explicit_edges: Option<Vec<f64>>,
     num_bins: Option<usize>,
@@ -770,37 +770,25 @@ struct HistcountsOptions {
     normalization: HistogramNormalization,
 }
 
-impl Default for HistcountsOptions {
-    fn default() -> Self {
-        Self {
-            explicit_edges: None,
-            num_bins: None,
-            bin_width: None,
-            bin_limits: None,
-            bin_method: None,
-            normalization: HistogramNormalization::Count,
-        }
-    }
-}
-
 impl HistcountsOptions {
     fn validate(&self) -> Result<(), String> {
-        if self.explicit_edges.is_some() {
-            if self.num_bins.is_some() || self.bin_width.is_some() || self.bin_limits.is_some() {
-                return Err(
-                    "histcounts: BinEdges cannot be combined with NumBins, BinWidth, or BinLimits"
-                        .to_string(),
-                );
-            }
+        if self.explicit_edges.is_some()
+            && (self.num_bins.is_some() || self.bin_width.is_some() || self.bin_limits.is_some())
+        {
+            return Err(
+                "histcounts: BinEdges cannot be combined with NumBins, BinWidth, or BinLimits"
+                    .to_string(),
+            );
         }
-        if self.bin_method.is_some() {
-            if self.explicit_edges.is_some() || self.bin_width.is_some() || self.num_bins.is_some()
-            {
-                return Err(
-                    "histcounts: BinMethod cannot be combined with BinEdges, NumBins, or BinWidth"
-                        .to_string(),
-                );
-            }
+        if self.bin_method.is_some()
+            && (self.explicit_edges.is_some()
+                || self.bin_width.is_some()
+                || self.num_bins.is_some())
+        {
+            return Err(
+                "histcounts: BinMethod cannot be combined with BinEdges, NumBins, or BinWidth"
+                    .to_string(),
+            );
         }
         if self.num_bins.is_some() && self.bin_width.is_some() {
             return Err("histcounts: specify only one of NumBins or BinWidth".to_string());
@@ -827,8 +815,9 @@ enum BinMethod {
     Integers,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 enum HistogramNormalization {
+    #[default]
     Count,
     Probability,
     CountDensity,

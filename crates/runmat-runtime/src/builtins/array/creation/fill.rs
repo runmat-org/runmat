@@ -268,7 +268,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         wgsl_body: |ctx: &FusionExprContext| {
             let constant = ctx
                 .constants
-                .get(0)
+                .first()
                 .ok_or(crate::builtins::common::spec::FusionError::MissingInput(0))?;
             Ok(constant.to_string())
         },
