@@ -45,7 +45,7 @@ jobs:
             command: build
 
           - release_for: linux-x86_64
-            os: ubuntu-latest-m
+            os: ubuntu-latest-gpu
             target: x86_64-unknown-linux-gnu
             bin: runmat
             name: runmat-linux-x86_64.tar.gz
