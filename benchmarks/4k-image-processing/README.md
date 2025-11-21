@@ -1,8 +1,8 @@
-# RunMat Benchmark: 4K Image Preprocessing, GPU‑accelerated
+# 4K Image Preprocessing, GPU‑accelerated
 
 If you ship geospatial or vision workloads, you’ve likely written this stage countless times: standardize each 4K tile, apply a small radiometric correction, gamma‑correct, and run a quick QC metric. On CPUs this is fine—until the batch grows and your wall‑clock explodes. 
 
-In this article, we benchmark the performance of RunMat against NumPy, PyTorch, and Julia.
+In this article, we benchmark the performance of RunMat against NumPy, and PyTorch.
 
 The math is deliberately simple and realistic: compute a per‑image mean and standard deviation, normalize, apply a modest gain/bias and a gamma curve, then validate with a mean‑squared error.
 
@@ -10,7 +10,8 @@ The math is deliberately simple and realistic: compute a per‑image mean and st
 
 ## Results
 
-![Relative speed (higher is better), normalized to NumPy = 1×](./4k-image-processing_speedup.svg)
+![RunMat is 8.1x faster than NumPy](https://web.runmatstatic.com/4k-image-processing_speedup.svg)
+
 
 ---
 
@@ -33,10 +34,10 @@ fprintf('RESULT_ok MSE=%.6e\n', double(mse));
 ```
 
 Full sources:
-- RunMat / Octave: [`runmat.m`](https://github.com/runmat-org/runmat/blob/main/benchmarks/benchmarks/4k-image-processing/runmat.m)
-- Python (NumPy): [`python_numpy.py`](https://github.com/runmat-org/runmat/blob/main/benchmarks/benchmarks/4k-image-processing/python_numpy.py)
-- Python (PyTorch): [`python_torch.py`](https://github.com/runmat-org/runmat/blob/main/benchmarks/benchmarks/4k-image-processing/python_torch.py)
-- Julia: [`julia.jl`](https://github.com/runmat-org/runmat/blob/main/benchmarks/benchmarks/4k-image-processing/julia.jl)
+- RunMat / Octave: [`runmat_rng.m`](https://github.com/runmat-org/runmat/blob/main/benchmarks/4k-image-processing/runmat_rng.m)
+- Python (NumPy): [`python_numpy_rng.py`](https://github.com/runmat-org/runmat/blob/main/benchmarks/4k-image-processing/python_numpy_rng.py)
+- Python (PyTorch): [`python_torch_rng.py`](https://github.com/runmat-org/runmat/blob/main/benchmarks/4k-image-processing/python_torch_rng.py)
+- Julia: [`julia.jl`](https://github.com/runmat-org/runmat/blob/main/benchmarks/4k-image-processing/julia.jl)
 
 Note: MATLAB’s license agreement restricts usage of their runtime for benchmarking, so we do not include MATLAB runs. If you have numbers, consider sharing them on GitHub Discussions.
 

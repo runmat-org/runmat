@@ -125,6 +125,13 @@ export default function HomePage() {
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center">
               <Link 
+                href="/docs/accelerate/how-it-works" 
+                className="text-sm hover:text-foreground text-muted-foreground transition-colors underline"
+              >
+                Accelerate Architecture
+              </Link>
+              <span className="hidden sm:inline text-blue-500">•</span>
+              <Link 
                 href="/docs/accelerate/fusion-intro" 
                 className="text-sm hover:text-foreground text-muted-foreground transition-colors underline"
               >

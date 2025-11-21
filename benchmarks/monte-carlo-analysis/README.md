@@ -1,6 +1,6 @@
-# RunMat Benchmark: Monte Carlo GBM Risk Simulation
+# Monte Carlo GBM Risk Simulation
 
-Geometric Brownian Motion (GBM) is a staple in intraday risk and options pricing. At realistic scales (millions of paths, hundreds of steps), throughput wins matter. This benchmark compares RunMat against NumPy, PyTorch, and Julia for a batched GBM simulation with a simple call option payoff.
+Geometric Brownian Motion (GBM) is a staple in intraday risk and options pricing. At realistic scales (millions of paths, hundreds of steps), throughput wins matter. This benchmark compares RunMat against NumPy, and PyTorch for a batched GBM simulation with a simple call option payoff.
 
 We simulate `M` paths over `T` steps:
 
@@ -14,7 +14,7 @@ price  = mean(payoff) · exp(−μ T Δt)
 
 ## Results
 
-![Relative speed (higher is better), normalized to NumPy = 1×](./monte-carlo-analysis_speedup.svg)
+![RunMat is up to 138x faster than NumPy](https://web.runmatstatic.com/monte-carlo-analysis_speedup.svg)
 
 ---
 
@@ -42,10 +42,10 @@ fprintf('RESULT_ok PRICE=%.6f\n', double(price));
 ```
 
 Full sources:
-- RunMat / Octave: [`runmat.m`](https://github.com/runmat-org/runmat/blob/main/benchmarks/benchmarks/monte-carlo-analysis/runmat.m)
-- Python (NumPy): [`python_numpy.py`](https://github.com/runmat-org/runmat/blob/main/benchmarks/benchmarks/monte-carlo-analysis/python_numpy.py)
-- Python (PyTorch): [`python_torch.py`](https://github.com/runmat-org/runmat/blob/main/benchmarks/benchmarks/monte-carlo-analysis/python_torch.py)
-- Julia: [`julia.jl`](https://github.com/runmat-org/runmat/blob/main/benchmarks/benchmarks/monte-carlo-analysis/julia.jl)
+- RunMat / Octave: [`runmat_rng.m`](https://github.com/runmat-org/runmat/blob/main/benchmarks/monte-carlo-analysis/runmat_rng.m)
+- Python (NumPy): [`python_numpy_rng.py`](https://github.com/runmat-org/runmat/blob/main/benchmarks/monte-carlo-analysis/python_numpy_rng.py)
+- Python (PyTorch): [`python_torch_rng.py`](https://github.com/runmat-org/runmat/blob/main/benchmarks/monte-carlo-analysis/python_torch_rng.py)
+- Julia: [`julia.jl`](https://github.com/runmat-org/runmat/blob/main/benchmarks/monte-carlo-analysis/julia.jl)
 
 ---
 
