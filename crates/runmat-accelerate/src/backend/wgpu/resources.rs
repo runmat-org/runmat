@@ -68,9 +68,15 @@ impl KernelResourceRegistry {
             return existing;
         }
 
+        const UNIFORM_ALIGN: u64 = 256;
+        let alloc_size = if size == 0 {
+            UNIFORM_ALIGN
+        } else {
+            ((size + UNIFORM_ALIGN - 1) / UNIFORM_ALIGN) * UNIFORM_ALIGN
+        };
         let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
-            size,
+            size: alloc_size,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));

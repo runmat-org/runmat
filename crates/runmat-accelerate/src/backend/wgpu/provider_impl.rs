@@ -220,6 +220,7 @@ impl WorkgroupConfig {
         let align = if allowed_max < align { 1 } else { align };
         value = value.min(allowed_max);
         value = Self::align_down(value, align).max(1);
+        value = Self::floor_power_of_two(value);
         if value == 0 {
             value = allowed_max;
         }
@@ -3809,6 +3810,7 @@ impl WgpuProvider {
                 return Err(anyhow!("fused_reduction(single-pass): input/output alias"));
             }
         }
+        let groups = (num_slices as u32).max(1);
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
             for (i, buf) in input_bufs.iter().enumerate() {
                 eprintln!(
@@ -3826,6 +3828,10 @@ impl WgpuProvider {
                 "[fused-reduction] binding={} role=uniform ptr={:p}",
                 inputs.len() + 1,
                 params_buffer.as_ref()
+            );
+            eprintln!(
+                "[fused-reduction] reduce_len={} slices={} wg={} groups={}",
+                reduce_len, num_slices, workgroup_size, groups
             );
         }
         let disable_bg_cache = std::env::var("RUNMAT_DISABLE_FUSED_BG_CACHE").is_ok();
@@ -3851,7 +3857,6 @@ impl WgpuProvider {
                     )
                 })
         };
-        let groups = (num_slices as u32).max(1);
         crate::backend::wgpu::dispatch::reduction::run_single_pass(
             self.device_ref(),
             self.queue_ref(),
@@ -3859,6 +3864,9 @@ impl WgpuProvider {
             bg.as_ref(),
             groups,
         );
+        if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
+            eprintln!("[fused-reduction] single-pass dispatch complete");
+        }
         Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len))
     }
 

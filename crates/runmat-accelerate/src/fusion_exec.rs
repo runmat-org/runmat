@@ -485,12 +485,26 @@ pub fn execute_reduction(
         .generate_reduction_wgsl(scalar_ty)
         .ok_or_else(|| anyhow!("fusion: reduction WGSL generation failed"))?;
     timer.mark("generate_wgsl");
+    if std::env::var("RUNMAT_DEBUG_DUMP_FUSED_WGSL").is_ok() {
+        println!(
+            "---- fused reduction WGSL ----\n{}\n------------------------------",
+            shader
+        );
+    }
 
-    let wg = if workgroup_size == 0 {
+    let mut wg = if workgroup_size == 0 {
         provider.default_reduction_workgroup_size()
     } else {
         workgroup_size
     };
+    if let Ok(raw) = std::env::var("RUNMAT_FUSED_WG") {
+        if let Ok(val) = raw.trim().parse::<u32>() {
+            if val > 0 {
+                let capped = val.min(provider.default_reduction_workgroup_size());
+                wg = capped.max(1);
+            }
+        }
+    }
     let flavor = request
         .plan
         .reduction_flavor

@@ -1,4 +1,4 @@
-use super::provider_impl::host_tensor_from_value;
+use crate::backend::wgpu::provider_impl::host_tensor_from_value;
 use anyhow::{anyhow, Result};
 use runmat_builtins::{NumericDType, Tensor, Value};
 
@@ -54,7 +54,7 @@ fn invert_upper_triangular_produces_identity() {
     let idx = |row: usize, col: usize| -> usize { row + col * 3 };
     for col in 0..3 {
         for row in 0..3 {
-            let mut acc = 0.0;
+            let mut acc: f64 = 0.0;
             for k in 0..3 {
                 acc += data[idx(row, k)] * inv[idx(k, col)];
             }
@@ -79,7 +79,7 @@ fn cholesky_qr_matches_host_qr() {
     let mut gram = vec![0.0f64; cols * cols];
     for j in 0..cols {
         for i in 0..=j {
-            let mut sum = 0.0;
+            let mut sum: f64 = 0.0;
             for r in 0..rows {
                 let y_ri = data[r + i * rows];
                 let y_rj = data[r + j * rows];
