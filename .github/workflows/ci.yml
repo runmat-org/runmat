@@ -42,13 +42,11 @@ jobs:
       - uses: actions/checkout@v3
 
       - uses: actions-rs/toolchain@v1
-        if: runner.os == 'Linux' || runner.os == 'macOS'
         with:
           toolchain: 1.90.0
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
-        if: runner.os == 'Linux' || runner.os == 'macOS'
 
       - name: Install Linux system dependencies (BLAS/LAPACK, ZMQ, GUI, OpenSSL)
         if: runner.os == 'Linux'
