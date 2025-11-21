@@ -23,7 +23,7 @@ The scripts scale the number of samples via `ELM_POINTS` (default
 ---
 
 
-Full sources:
+Full sources: 
 
 - [`runmat.m`](https://github.com/runmat-org/runmat/blob/main/benchmarks/elementwise-math/runmat.m) – RunMat / MATLAB syntax implementation.
 - [`python_numpy.py`](https://github.com/runmat-org/runmat/blob/main/benchmarks/elementwise-math/python_numpy.py) – NumPy implementation.

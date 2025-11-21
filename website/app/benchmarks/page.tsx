@@ -99,7 +99,7 @@ function getAllBenchmarks(): Benchmark[] {
     
     const benchmarks = entries
       .filter(entry => entry.isDirectory() && entry.name !== '.harness' && entry.name !== 'wgpu_profile')
-      .map(entry => {
+      .map((entry): Benchmark | null => {
         const slug = entry.name;
         const readmePath = join(benchmarksDir, slug, 'README.md');
         
