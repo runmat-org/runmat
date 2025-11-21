@@ -64,7 +64,8 @@ raising descriptive errors for unsupported combinations like spreadsheet output.
   default) embedded quotes are doubled (`"Alice"` becomes `""Alice""`).
 - `'DecimalSeparator'` swaps the decimal point for locales that require `','` or other
   characters. Thousands separators are not inserted automatically, matching MATLAB.
-- `'LineEnding'` supports `'auto'` (platform default), `'unix'`, `'pc'`/`'windows'`, and `'mac'`.
+- `'LineEnding'` supports `'auto'` (normalized `\n` for cross-platform portability), `'unix'`,
+  `'pc'`/`'windows'`, and `'mac'`.
 - `'FileType'` accepts `'delimitedtext'` or `'text'`. Spreadsheet output (`'spreadsheet'`)
   is not yet available and triggers a descriptive error consistent with MATLAB's messaging.
 - Unsupported options are ignored for forward compatibility. Errors indicate which argument was
@@ -283,14 +284,7 @@ enum LineEnding {
 impl LineEnding {
     fn as_str(&self) -> &'static str {
         match self {
-            LineEnding::Auto => {
-                if cfg!(windows) {
-                    "\r\n"
-                } else {
-                    "\n"
-                }
-            }
-            LineEnding::Unix => "\n",
+            LineEnding::Auto | LineEnding::Unix => "\n",
             LineEnding::Windows => "\r\n",
             LineEnding::Mac => "\r",
         }

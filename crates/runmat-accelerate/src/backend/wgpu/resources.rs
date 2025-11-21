@@ -72,7 +72,7 @@ impl KernelResourceRegistry {
         let alloc_size = if size == 0 {
             UNIFORM_ALIGN
         } else {
-            ((size + UNIFORM_ALIGN - 1) / UNIFORM_ALIGN) * UNIFORM_ALIGN
+            size.div_ceil(UNIFORM_ALIGN) * UNIFORM_ALIGN
         };
         let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
