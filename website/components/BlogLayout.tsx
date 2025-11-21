@@ -13,6 +13,7 @@ interface BlogLayoutProps {
   tags: string[];
   rightAside?: React.ReactNode;
   backLink?: { href: string; text: string };
+  descriptionPlacement?: 'beforeMeta' | 'afterMeta';
 }
 
 export function BlogLayout({
@@ -24,8 +25,53 @@ export function BlogLayout({
   author,
   tags,
   rightAside,
-  backLink = { href: '/blog', text: 'Back to Blog' }
+  backLink = { href: '/blog', text: 'Back to Blog' },
+  descriptionPlacement = 'beforeMeta'
 }: BlogLayoutProps) {
+  const descriptionSpacingClass =
+    descriptionPlacement === 'afterMeta' ? 'mt-6 mb-6' : 'mb-6';
+
+  const descriptionElement = (
+    <p className={`${descriptionSpacingClass} text-base sm:text-xl text-muted-foreground leading-relaxed break-words`}>
+      {description}
+    </p>
+  );
+
+  const headerContent = (
+    <>
+      <div className="mb-4 flex flex-wrap gap-2">
+        {tags.map((tag) => (
+          <Badge key={tag} variant="secondary">
+            {tag}
+          </Badge>
+        ))}
+      </div>
+      
+      <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl break-words">
+        {title}
+      </h1>
+      
+      {descriptionPlacement === 'beforeMeta' && descriptionElement}
+      
+      <div className="flex flex-wrap items-center gap-6 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4" />
+          {date}
+        </div>
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4" />
+          {readTime}
+        </div>
+        <div className="flex items-center gap-2">
+          <User className="h-4 w-4" />
+          By {author}
+        </div>
+      </div>
+
+      {descriptionPlacement === 'afterMeta' && descriptionElement}
+    </>
+  );
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container px-4 py-8 md:px-6 md:py-16">
@@ -42,36 +88,7 @@ export function BlogLayout({
 
               {/* Article Header */}
               <header className="mb-12 max-w-4xl break-words">
-                <div className="mb-4 flex flex-wrap gap-2">
-                  {tags.map((tag) => (
-                    <Badge key={tag} variant="secondary">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-                
-                <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl break-words">
-                  {title}
-                </h1>
-                
-                <p className="mb-6 text-base sm:text-xl text-muted-foreground leading-relaxed break-words">
-                  {description}
-                </p>
-                
-                <div className="flex flex-wrap items-center gap-6 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4" />
-                    {date}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
-                    {readTime}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <User className="h-4 w-4" />
-                    By {author}
-                  </div>
-                </div>
+                {headerContent}
               </header>
 
               {/* Article Content */}
@@ -95,36 +112,7 @@ export function BlogLayout({
 
             {/* Article Header */}
             <header className="mb-12 break-words">
-              <div className="mb-4 flex flex-wrap gap-2">
-                {tags.map((tag) => (
-                  <Badge key={tag} variant="secondary">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-              
-              <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl break-words">
-                {title}
-              </h1>
-              
-              <p className="mb-6 text-base sm:text-xl text-muted-foreground leading-relaxed break-words">
-                {description}
-              </p>
-              
-              <div className="flex flex-wrap items-center gap-6 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4" />
-                  {date}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4" />
-                  {readTime}
-                </div>
-                <div className="flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  By {author}
-                </div>
-              </div>
+              {headerContent}
             </header>
 
             {/* Article Content */}

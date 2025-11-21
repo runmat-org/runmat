@@ -28,6 +28,7 @@ interface Benchmark {
     canonical?: string;
   };
   content: string;
+  introParagraph: string;
 }
 
 function extractTitleFromMarkdown(content: string): string {
@@ -41,36 +42,35 @@ function extractTitleFromMarkdown(content: string): string {
   return 'Untitled Benchmark';
 }
 
-function extractDescriptionFromMarkdown(content: string): string {
+function extractFirstParagraph(content: string): string {
   const lines = content.split('\n');
   let inParagraph = false;
-  let description = '';
+  const paragraphLines: string[] = [];
   
   for (const line of lines) {
     const trimmed = line.trim();
-    // Skip frontmatter if present
-    if (trimmed === '---') continue;
-    // Skip headings
     if (trimmed.startsWith('#')) {
       if (inParagraph) break;
       continue;
     }
-    // Skip empty lines at start
     if (!trimmed && !inParagraph) continue;
-    // Collect first paragraph
     if (trimmed) {
       inParagraph = true;
-      description += (description ? ' ' : '') + trimmed;
-      if (description.length > 200) {
-        description = description.substring(0, 200) + '...';
-        break;
-      }
+      paragraphLines.push(trimmed);
     } else if (inParagraph) {
       break;
     }
   }
   
-  return description || 'Performance benchmark comparing RunMat against alternatives.';
+  const paragraph = paragraphLines.join(' ');
+  return paragraph || 'Performance benchmark comparing RunMat against alternatives.';
+}
+
+function truncateText(text: string, limit: number = 200): string {
+  if (text.length <= limit) {
+    return text;
+  }
+  return text.substring(0, limit).trimEnd() + '...';
 }
 
 function stripFirstHeadingAndParagraph(content: string): string {
@@ -130,13 +130,14 @@ function getBenchmark(slug: string): Benchmark | null {
     const filePath = join(process.cwd(), '..', 'benchmarks', slug, 'README.md');
     const fileContent = readFileSync(filePath, 'utf-8');
     const { data: frontmatter, content } = matter(fileContent);
+    const firstParagraph = extractFirstParagraph(content);
+    const introParagraph = (frontmatter as Record<string, unknown>)?.intro as string | undefined || firstParagraph;
+    const safeIntroParagraph = introParagraph || 'Performance benchmark comparing RunMat against alternatives.';
+    const excerpt = frontmatter.excerpt || frontmatter.description || truncateText(safeIntroParagraph);
+    const description = frontmatter.description || excerpt;
     
     // Extract title from frontmatter or first heading
     const title = frontmatter.title || extractTitleFromMarkdown(content);
-    
-    // Extract description/excerpt from frontmatter or first paragraph
-    const description = frontmatter.description || frontmatter.excerpt || extractDescriptionFromMarkdown(content);
-    const excerpt = frontmatter.excerpt || frontmatter.description || extractDescriptionFromMarkdown(content);
     
     // Strip the first H1 and first paragraph from content since BlogLayout displays them
     const strippedContent = stripFirstHeadingAndParagraph(content);
@@ -160,6 +161,7 @@ function getBenchmark(slug: string): Benchmark | null {
         canonical: frontmatter.canonical,
       },
       content: strippedContent,
+      introParagraph: safeIntroParagraph,
     };
   } catch {
     return null;
@@ -232,7 +234,8 @@ export default async function BenchmarkPage({ params }: { params: Promise<{ slug
   return (
     <BlogLayout
       title={benchmark.frontmatter.title}
-      description={benchmark.frontmatter.excerpt}
+      description={benchmark.introParagraph}
+      descriptionPlacement="afterMeta"
       date={new Date(benchmark.frontmatter.date).toLocaleDateString()}
       readTime={benchmark.frontmatter.readTime}
       author={benchmark.frontmatter.author}
@@ -274,4 +277,6 @@ export default async function BenchmarkPage({ params }: { params: Promise<{ slug
     </BlogLayout>
   );
 }
+
+
 

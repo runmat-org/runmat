@@ -2,11 +2,9 @@ import { Metadata } from "next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Calculator, TrendingUp, Hash, ArrowUpDown, BarChart3, Zap } from "lucide-react";
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
+import { join, extname } from 'path';
 import matter from 'gray-matter';
-import type { LucideIcon } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "RunMat Benchmarks - Performance Comparisons",
@@ -22,6 +20,8 @@ interface Benchmark {
   slug: string;
   title: string;
   description: string;
+  summary: string;
+  imageUrl?: string;
   date: string;
   readTime: string;
   author: string;
@@ -39,47 +39,57 @@ function extractTitleFromMarkdown(content: string): string {
   return 'Untitled Benchmark';
 }
 
-function extractDescriptionFromMarkdown(content: string): string {
+function extractFirstParagraph(content: string): string {
   const lines = content.split('\n');
   let inParagraph = false;
-  let description = '';
+  const paragraphLines: string[] = [];
   
   for (const line of lines) {
     const trimmed = line.trim();
-    // Skip frontmatter if present
-    if (trimmed === '---') continue;
-    // Skip headings
     if (trimmed.startsWith('#')) {
       if (inParagraph) break;
       continue;
     }
-    // Skip empty lines at start
     if (!trimmed && !inParagraph) continue;
-    // Collect first paragraph
     if (trimmed) {
       inParagraph = true;
-      description += (description ? ' ' : '') + trimmed;
-      if (description.length > 200) {
-        description = description.substring(0, 200) + '...';
-        break;
-      }
+      paragraphLines.push(trimmed);
     } else if (inParagraph) {
       break;
     }
   }
   
-  return description || 'Performance benchmark comparing RunMat against alternatives.';
+  const paragraph = paragraphLines.join(' ');
+  return paragraph || 'Performance benchmark comparing RunMat against alternatives.';
 }
 
-function getBenchmarkIcon(slug: string): LucideIcon {
-  const iconMap: Record<string, LucideIcon> = {
-    '4k-image-processing': BarChart3,
-    'monte-carlo-analysis': TrendingUp,
-    'pca': Calculator,
-    'batched-nlms': Hash,
-    'batched-iir-smoothing': ArrowUpDown,
-  };
-  return iconMap[slug] || Zap;
+function truncateText(text: string, limit: number = 200): string {
+  if (text.length <= limit) {
+    return text;
+  }
+  return text.substring(0, limit).trimEnd() + '...';
+}
+
+function extractFirstImageUrl(content: string): string | undefined {
+  const imageRegex = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/;
+  const match = imageRegex.exec(content);
+  return match ? match[1] : undefined;
+}
+
+function getMimeTypeFromExtension(extension: string): string | undefined {
+  switch (extension.toLowerCase()) {
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.webp':
+      return 'image/webp';
+    default:
+      return undefined;
+  }
 }
 
 function getAllBenchmarks(): Benchmark[] {
@@ -89,7 +99,7 @@ function getAllBenchmarks(): Benchmark[] {
     
     const benchmarks = entries
       .filter(entry => entry.isDirectory() && entry.name !== '.harness' && entry.name !== 'wgpu_profile')
-      .map(entry => {
+      .map((entry): Benchmark | null => {
         const slug = entry.name;
         const readmePath = join(benchmarksDir, slug, 'README.md');
         
@@ -101,7 +111,31 @@ function getAllBenchmarks(): Benchmark[] {
           const title = frontmatter.title || extractTitleFromMarkdown(content);
           
           // Extract description from frontmatter or first paragraph
-          const description = frontmatter.description || frontmatter.excerpt || extractDescriptionFromMarkdown(content);
+          const rawDescription = frontmatter.description || frontmatter.excerpt || extractFirstParagraph(content);
+          const description = rawDescription || 'Performance benchmark comparing RunMat against alternatives.';
+          const summary = truncateText(description);
+
+          const frontmatterImage = typeof frontmatter.image === 'string' ? frontmatter.image : undefined;
+          const markdownImage = extractFirstImageUrl(content);
+          const resolvedImagePath = frontmatterImage || markdownImage;
+
+          let imageUrl: string | undefined;
+          if (resolvedImagePath) {
+            if (resolvedImagePath.startsWith('http://') || resolvedImagePath.startsWith('https://')) {
+              imageUrl = resolvedImagePath;
+            } else {
+              const sanitizedPath = resolvedImagePath.replace(/^\.?\//, '');
+              const absolutePath = join(benchmarksDir, slug, sanitizedPath);
+              if (existsSync(absolutePath)) {
+                const mimeType = getMimeTypeFromExtension(extname(absolutePath));
+                if (mimeType) {
+                  const fileBuffer = readFileSync(absolutePath);
+                  const base64 = fileBuffer.toString('base64');
+                  imageUrl = `data:${mimeType};base64,${base64}`;
+                }
+              }
+            }
+          }
           
           // Get file modification date as fallback
           const stats = statSync(readmePath);
@@ -111,6 +145,8 @@ function getAllBenchmarks(): Benchmark[] {
             slug,
             title,
             description,
+            summary,
+            imageUrl,
             date: frontmatter.date || defaultDate,
             readTime: frontmatter.readTime || '5 min read',
             author: frontmatter.author || 'RunMat Team',
@@ -154,45 +190,55 @@ export default function BenchmarksPage() {
         </div>
 
         <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {benchmarks.map((benchmark) => {
-            const Icon = getBenchmarkIcon(benchmark.slug);
-            return (
-              <Link key={benchmark.slug} href={`/benchmarks/${benchmark.slug}`} className="block">
-                <Card className="group overflow-hidden transition-all hover:shadow-lg cursor-pointer h-full flex flex-col">
-                  <CardContent className="p-6 flex flex-col h-full">
-                    {/* Icon and Title */}
-                    <div className="flex items-start gap-3 mb-4">
-                      <Icon className="h-6 w-6 text-foreground flex-shrink-0 mt-1" />
-                      <h3 className="text-2xl font-semibold leading-tight sm:text-3xl flex-1">
-                        {benchmark.title}
-                      </h3>
-                    </div>
+          {benchmarks.map((benchmark) => (
+            <Link key={encodeURIComponent(benchmark.slug)} href={`/benchmarks/${encodeURIComponent(benchmark.slug)}`} className="block">
+              <Card className="group overflow-hidden transition-all hover:shadow-lg cursor-pointer h-full flex flex-col">
+                <CardContent className="p-6 flex flex-col h-full">
+                  {/* Thumbnail */}
+                  <div
+                    className={`w-full h-48 rounded-lg mb-4 transition-all ${
+                      benchmark.imageUrl
+                        ? 'bg-muted/10'
+                        : 'bg-gradient-to-br from-purple-500 via-purple-600 to-blue-600 group-hover:from-purple-600 group-hover:via-purple-700 group-hover:to-blue-700'
+                    }`}
+                    style={
+                      benchmark.imageUrl
+                        ? {
+                            backgroundImage: `url(${benchmark.imageUrl})`,
+                            backgroundSize: 'contain',
+                            backgroundPosition: 'center',
+                            backgroundRepeat: 'no-repeat',
+                          }
+                        : undefined
+                    }
+                  />
+
+                  {/* Title */}
+                  <h3 className="text-2xl font-semibold leading-tight sm:text-3xl mb-4">
+                    {benchmark.title}
+                  </h3>
                     
-                    {/* Purple/Blue Gradient Area */}
-                    <div className="w-full h-48 rounded-lg mb-4 bg-gradient-to-br from-purple-500 via-purple-600 to-blue-600 group-hover:from-purple-600 group-hover:via-purple-700 group-hover:to-blue-700 transition-all" />
+                  {/* Description */}
+                  <p className="text-sm text-muted-foreground mb-4 flex-grow line-clamp-3">
+                    {benchmark.summary}
+                  </p>
                     
-                    {/* Description */}
-                    <p className="text-sm text-muted-foreground mb-4 flex-grow">
-                      {benchmark.description}
-                    </p>
-                    
-                    {/* View Benchmark Link */}
-                    <div className="flex items-center text-sm text-foreground group-hover:text-primary transition-colors">
-                      View Benchmark
-                      <svg 
-                        className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" 
-                        fill="none" 
-                        stroke="currentColor" 
-                        viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            );
-          })}
+                  {/* View Benchmark Link */}
+                  <div className="flex items-center text-sm text-foreground group-hover:text-primary transition-colors">
+                    View Benchmark
+                    <svg 
+                      className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
         </div>
 
         {/* Call to Action */}
