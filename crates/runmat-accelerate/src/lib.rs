@@ -250,17 +250,14 @@ pub fn initialize_acceleration_provider() {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "wgpu")]
-    use crate::backend::wgpu::provider as wgpu_backend;
+    use crate::backend::wgpu::cache::key::compute_pipeline_hash_bytes;
 
     #[test]
     #[cfg(feature = "wgpu")]
     fn elementwise_hash_varies_with_arity() {
-        wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
-            .expect("wgpu provider");
-        let p = wgpu_backend::ensure_wgpu_provider().unwrap().unwrap();
         let wg = 256u32;
-        let h2 = p.compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-2", Some(wg));
-        let h3 = p.compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-3", Some(wg));
+        let h2 = compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-2", Some(wg));
+        let h3 = compute_pipeline_hash_bytes(b"shader", "runmat-fusion-layout-3", Some(wg));
         assert_ne!(h2, h3, "hash should differ with input arity");
     }
 }

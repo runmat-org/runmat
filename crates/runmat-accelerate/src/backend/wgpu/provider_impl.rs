@@ -362,7 +362,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let lhs = input0.data[idx];
     let rhs = input1.data[idx];
-    let cond = (lhs != 0.0) && (rhs != 0.0);
+    let lhs_true = !(lhs == 0.0);
+    let rhs_true = !(rhs == 0.0);
+    let cond = lhs_true && rhs_true;
     output.data[idx] = select(0.0, 1.0, cond);
 }
 "#;
@@ -392,7 +394,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let lhs = input0.data[idx];
     let rhs = input1.data[idx];
-    let cond = (lhs != f64(0.0)) && (rhs != f64(0.0));
+    let lhs_true = !(lhs == f64(0.0));
+    let rhs_true = !(rhs == f64(0.0));
+    let cond = lhs_true && rhs_true;
     output.data[idx] = select(f64(0.0), f64(1.0), cond);
 }
 "#;
@@ -482,7 +486,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let lhs = input0.data[idx];
     let rhs = input1.data[idx];
-    let cond = lhs != rhs;
+    let cond = !(lhs == rhs);
     output.data[idx] = select(0.0, 1.0, cond);
 }
 "#;
@@ -512,7 +516,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let lhs = input0.data[idx];
     let rhs = input1.data[idx];
-    let cond = lhs != rhs;
+    let cond = !(lhs == rhs);
     output.data[idx] = select(f64(0.0), f64(1.0), cond);
 }
 "#;
@@ -781,7 +785,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let lhs = input0.data[idx];
     let rhs = input1.data[idx];
-    let cond = (lhs != 0.0) || (rhs != 0.0);
+    let lhs_true = !(lhs == 0.0);
+    let rhs_true = !(rhs == 0.0);
+    let cond = lhs_true || rhs_true;
     output.data[idx] = select(0.0, 1.0, cond);
 }
 "#;
@@ -809,7 +815,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let lhs = input0.data[idx];
     let rhs = input1.data[idx];
-    let cond = (lhs != f64(0.0)) || (rhs != f64(0.0));
+    let lhs_true = !(lhs == f64(0.0));
+    let rhs_true = !(rhs == f64(0.0));
+    let cond = lhs_true || rhs_true;
     output.data[idx] = select(f64(0.0), f64(1.0), cond);
 }
 "#;
@@ -839,7 +847,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let lhs = input0.data[idx];
     let rhs = input1.data[idx];
-    let cond = ((lhs != 0.0) != (rhs != 0.0));
+    let lhs_true = !(lhs == 0.0);
+    let rhs_true = !(rhs == 0.0);
+    let cond = lhs_true != rhs_true;
     output.data[idx] = select(0.0, 1.0, cond);
 }
 "#;
@@ -869,7 +879,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let lhs = input0.data[idx];
     let rhs = input1.data[idx];
-    let cond = ((lhs != f64(0.0)) != (rhs != f64(0.0)));
+    let lhs_true = !(lhs == f64(0.0));
+    let rhs_true = !(rhs == f64(0.0));
+    let cond = lhs_true != rhs_true;
     output.data[idx] = select(f64(0.0), f64(1.0), cond);
 }
 "#;
@@ -2271,6 +2283,7 @@ impl WgpuProvider {
         }))
         .ok_or_else(|| anyhow!("wgpu: no compatible adapter found"))?;
 
+        let adapter_info = adapter.get_info();
         let adapter_features = adapter.features();
         let forced_precision = std::env::var("RUNMAT_WGPU_FORCE_PRECISION")
             .ok()
@@ -2280,11 +2293,7 @@ impl WgpuProvider {
                 _ => None,
             });
 
-        let mut precision = if adapter_features.contains(wgpu::Features::SHADER_F64) {
-            NumericPrecision::F64
-        } else {
-            NumericPrecision::F32
-        };
+        let mut precision = NumericPrecision::F32;
 
         if let Some(requested) = forced_precision {
             if requested == NumericPrecision::F64
@@ -2297,6 +2306,11 @@ impl WgpuProvider {
             } else {
                 precision = requested;
             }
+        } else {
+            info!(
+                "RunMat Accelerate: defaulting to f32 kernels for adapter '{}'",
+                adapter_info.name
+            );
         }
 
         // Tunables with env overrides
@@ -2338,7 +2352,6 @@ impl WgpuProvider {
         ))?;
 
         let pipelines = WgpuPipelines::new(&device, precision);
-        let adapter_info = adapter.get_info();
         let cache_device_id = adapter_info.device;
         let runtime_device_id = runmat_accelerate_api::next_device_id();
         let element_size = match precision {
@@ -2351,10 +2364,9 @@ impl WgpuProvider {
                 "WGPU adapter '{}' supports shader-f64; using f64 kernels",
                 adapter_info.name
             ),
-            NumericPrecision::F32 => info!(
-                "WGPU adapter '{}' lacks shader-f64; falling back to f32 kernels",
-                adapter_info.name
-            ),
+            NumericPrecision::F32 => {
+                info!("WGPU adapter '{}' using f32 kernels", adapter_info.name)
+            }
         }
 
         // Choose a cache dir: prefer RUNMAT_PIPELINE_CACHE_DIR, else OS cache dir
