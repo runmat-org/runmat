@@ -8,17 +8,32 @@ eps0_default = single(1e-6);
 if ~exist('seed','var'), seed = seed_default; end
 rng(seed);
 
-env_B = getenv('IMG_B');
-if numel(env_B)
-  B_default = str2double(env_B);
+if ~exist('B','var')
+  env_B = getenv('IMG_B');
+  if numel(env_B)
+    override = str2double(env_B);
+    if ~isnan(override)
+      B = override;
+    end
+  end
 end
-env_H = getenv('IMG_H');
-if numel(env_H)
-  H_default = str2double(env_H);
+if ~exist('H','var')
+  env_H = getenv('IMG_H');
+  if numel(env_H)
+    override = str2double(env_H);
+    if ~isnan(override)
+      H = override;
+    end
+  end
 end
-env_W = getenv('IMG_W');
-if numel(env_W)
-  W_default = str2double(env_W);
+if ~exist('W','var')
+  env_W = getenv('IMG_W');
+  if numel(env_W)
+    override = str2double(env_W);
+    if ~isnan(override)
+      W = override;
+    end
+  end
 end
 
 if ~exist('B','var'), B = B_default; end

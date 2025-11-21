@@ -730,6 +730,9 @@ def main() -> None:
             "sweep": case_result.get("sweep"),
             "results": case_result.get("results"),
         }
+        plot_cfg = case.get("plot")
+        if plot_cfg:
+            case_entry["plot"] = plot_cfg
         summary_payload = _case_summary(case_result, scale_key)
         if summary_payload:
             case_entry["summary"] = summary_payload

@@ -36,12 +36,69 @@ A = gpuArray(single(state ./ 4294967296.0));
 mu = mean(A, 1);
 A = A - mu;
 G = (A.' * A) / single(n - 1);
+if numel(getenv('RUNMAT_DEBUG_PCA'))
+  sum_abs_A = double(gather(sum(abs(A), 'all', 'native')));
+  sum_abs_G = double(gather(sum(abs(G), 'all', 'native')));
+  fprintf('DEBUG sum_abs_A=%.6e sum_abs_G=%.6e\n', sum_abs_A, sum_abs_G);
+end
 
-G_cpu = double(gather(G));
-Lambda_full = eig(G_cpu);
-Lambda_sorted = sort(real(Lambda_full), 'descend');
-k_use = min(k, length(Lambda_sorted));
-Lambda_top = Lambda_sorted(1:k_use);
-trace_G = sum(Lambda_full);
-explained = double(Lambda_top) / double(trace_G);
-fprintf('RESULT_ok EXPLAINED1=%.4f TOPK_SUM=%.6e\n', explained(1), sum(double(Lambda_top)));
+k_use = min(k, d);
+if k_use < 1
+  error('PCA requires k >= 1');
+end
+q_bid = reshape(0:d-1, [d 1]);
+q_cid = reshape(0:k_use-1, [1 k_use]);
+seed_shift_q = double(seed) + double(n) * double(d);
+q_idx = double(q_bid) .* double(k_use) + double(q_cid) + seed_shift_q;
+q_state = mod(1664525.0 .* q_idx + 1013904223.0, 4294967296.0);
+Q_cpu = single(q_state ./ 4294967296.0);
+[Q_cpu, ~] = qr(Q_cpu, 0);
+if numel(getenv('RUNMAT_DEBUG_PCA'))
+  fprintf('DEBUG max_Q_cpu=%.6e\n', max(abs(Q_cpu), [], 'all'));
+end
+Q = gpuArray(single(Q_cpu));
+if numel(getenv('RUNMAT_DEBUG_PCA'))
+  q_gpu_host = gather(abs(Q));
+  fprintf('DEBUG max_Q_gpu=%.6e\n', max(q_gpu_host, [], 'all'));
+end
+
+for t = 1:iters
+  Z = G * Q;
+  if numel(getenv('RUNMAT_DEBUG_PCA'))
+    nan_Z = gather(sum(isnan(Z), 'all'));
+    if nan_Z > 0
+      fprintf('DEBUG nan_Z=%d at iter=%d\n', nan_Z, t);
+    end
+  end
+  [Q, ~] = qr(Z, 0);
+  Q = single(Q);
+  if numel(getenv('RUNMAT_DEBUG_PCA'))
+    nan_iter = gather(sum(isnan(Q), 'all'));
+    if nan_iter > 0
+      fprintf('DEBUG nan_Q_iter=%d at iter=%d\n', nan_iter, t);
+    end
+  end
+end
+
+QtG = Q.' * G;
+B = QtG * Q;
+Lambda_vec = diag(B);
+trace_G_gpu = sum(diag(G), 'all', 'native');
+
+Lambda_host = double(gather(Lambda_vec));
+trace_G = double(gather(trace_G_gpu));
+explained = Lambda_host / trace_G;
+
+if numel(getenv('RUNMAT_DEBUG_PCA'))
+  nan_Q = gather(sum(isnan(Q), 'all'));
+  nan_B = gather(sum(isnan(B), 'all'));
+  fprintf('DEBUG nan_Q=%d nan_B=%d\n', nan_Q, nan_B);
+  preview_len = min(length(Lambda_host), 4);
+  fprintf('DEBUG trace_G=%.6e Lambda_top_sum=%.6e lambda_top:', trace_G, sum(Lambda_host));
+  for i = 1:preview_len
+    fprintf(' %.6e', Lambda_host(i));
+  end
+  fprintf('\n');
+end
+
+fprintf('RESULT_ok EXPLAINED1=%.4f TOPK_SUM=%.6e\n', explained(1), sum(Lambda_host));

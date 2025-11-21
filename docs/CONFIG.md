@@ -363,6 +363,12 @@ Provider-specific env vars are read by the WGPU backend and fusion code:
     directory (e.g., `$XDG_CACHE_HOME/runmat/pipelines` or platform equivalent),
     falling back to `target/tmp/wgpu-pipeline-cache-<device>`.
 
+> **Note:** `RUNMAT_WG`, `RUNMAT_MATMUL_TILE`, and `RUNMAT_REDUCTION_WG` are
+> automatically clamped to the adapter's compute limits
+> (`max_compute_workgroup_size_*`, `max_compute_invocations_per_workgroup`) to
+> prevent invalid pipelines on DX12/Metal/Vulkan backends. The adjusted values
+> are logged during provider initialization.
+
 ## Precedence & merging
 
 1. Start from built-in defaults.

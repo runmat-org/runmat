@@ -14,7 +14,7 @@ price  = mean(payoff) · exp(−μ T Δt)
 
 ## Results
 
-![Relative speed (higher is better), normalized to NumPy = 1×](../../results/monte_carlo_analysis_bar.png)
+![Relative speed (higher is better), normalized to NumPy = 1×](./monte-carlo-analysis_speedup.svg)
 
 ---
 

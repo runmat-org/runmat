@@ -297,6 +297,11 @@ These control GPU workgroup sizing, reductions, and provider debugging:
     directory (e.g., `$XDG_CACHE_HOME/runmat/pipelines` or platform equivalent),
     falling back to `target/tmp/wgpu-pipeline-cache-<device>` when not set.
 
+The provider clamps `RUNMAT_WG`, `RUNMAT_MATMUL_TILE`, and
+`RUNMAT_REDUCTION_WG` to the adapter's compute limits
+(`max_compute_workgroup_size_*`, `max_compute_invocations_per_workgroup`)
+so DX12/Metal/Vulkan backends never see invalid workgroup sizes.
+
 ## Precedence model
 
 CLI flags > environment variables > configuration files > built-in defaults.

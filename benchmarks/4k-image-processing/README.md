@@ -10,7 +10,7 @@ The math is deliberately simple and realistic: compute a per‑image mean and st
 
 ## Results
 
-![Relative speed (higher is better), normalized to NumPy = 1×](../../results/4k_image_processing_bar.png)
+![Relative speed (higher is better), normalized to NumPy = 1×](./4k-image-processing_speedup.svg)
 
 ---
 

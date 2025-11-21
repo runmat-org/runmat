@@ -10,13 +10,17 @@ K_default = single(100.0);
 if ~exist('seed','var'), seed = seed_default; end
 rng(seed);
 
-env_M = getenv('MC_M');
-if numel(env_M)
-  M_default = str2double(env_M);
+if ~exist('M','var')
+  env_M = getenv('MC_M');
+  if numel(env_M)
+    M_default = str2double(env_M);
+  end
 end
-env_T = getenv('MC_T');
-if numel(env_T)
-  T_default = str2double(env_T);
+if ~exist('T','var')
+  env_T = getenv('MC_T');
+  if numel(env_T)
+    T_default = str2double(env_T);
+  end
 end
 
 if ~exist('M','var'), M = M_default; end
@@ -39,4 +43,5 @@ end
 
 payoff = max(S - K, 0);
 price  = mean(payoff, 'all') * exp(-mu * T * dt);
-fprintf('RESULT_ok PRICE=%.6f\n', double(price));
+price_str = char(num2str(double(price)));
+disp(['RESULT_ok PRICE=' price_str]);
