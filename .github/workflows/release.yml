@@ -302,7 +302,7 @@ jobs:
     name: Publish crates to crates.io
     needs: [build-release]
     environment: Production
-    runs-on: ubuntu-latest
+    runs-on: ["self-hosted", "linux", "gpu"]
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
