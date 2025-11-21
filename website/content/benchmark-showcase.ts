@@ -68,7 +68,7 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
         runmat: "RunMat (GPU)",
       },
     },
-    headlineOverride: "RunMat is 10-100x faster than NumPy and PyTorch at scale",
+    headlineOverride: "RunMat is 10-100x faster at large elementwise math",
     stat: {
       compareImpl: "python-numpy",
       referenceImpl: "runmat",
