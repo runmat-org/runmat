@@ -25,13 +25,13 @@ jobs:
       max-parallel: 8
       matrix:
         include:
-          - os: ubuntu-latest-gpu
+          - runner: ["self-hosted", "linux", "gpu"]
             name: linux-x86_64
-          - os: windows-latest-l
+          - runner: windows-latest-l
             name: windows-x86_64
-          - os: macos-latest
+          - runner: macos-latest
             name: macos-universal
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     env:
       # Ensure single-threaded tests for GC stability
       RUST_TEST_THREADS: 1
