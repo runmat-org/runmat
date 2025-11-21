@@ -2,29 +2,18 @@
 
 A clear, minimal core. A fast, pragmatic runtime. An open extension model.
 
-RunMat is not a reimplementation of MATLAB-in-full. It is a modern runtime that runs MATLAB code very fast, is pleasant to reason about, and is easy to extend in both the Rust and MATLAB languages. We keep the core small and uncompromisingly high-quality; everything else is a package.
+RunMat is not a reimplementation of MATLAB-in-full. It is a modern runtime that runs MATLAB code very fast, is pleasant to reason about, and is easy to extend in both the Rust and MATLAB languages.
 
 This document explains the “why” and the “how” of that design.
 
 ## TL;DR
 
-- Full language: the core implements the MATLAB grammar and semantics, not a small subset.
-- Full built-ins: the core aims to ship the complete base MATLAB built-in set, with clear docs and tests.
+- Full MATLAB language support: the core implements the MATLAB grammar and semantics, not a small subset.
+- Core set of built-ins: RunMat includes a core set of MATLAB built-ins, with clear docs and tests.
 - Tiered CPU execution: Ignition interpreter for fast startup, Turbine JIT for hot code.
-- GPU-first math: a Fusion engine that turns MATLAB-style code into fast GPU workloads when shapes and patterns fit.
+- GPU-first math: a GPU layer and a Fusion engine that turns MATLAB-style code into fast GPU workloads when shapes and patterns fit.
 - Small, portable runtime: single static binary, fast startup, modern CLI, and Jupyter kernel support.
 - Toolboxes on top: signal, stats, image, optimization, and other domains sit above the core as libraries and packages.
-
-
-## Historical precedents that work
-
-- The UNIX philosophy: keep the core small, compose through well-defined interfaces.
-- Linux kernel + modules: a tight core with a massive extension surface.
-- LLVM: a small, carefully specified IR and powerful back-ends hosting a universe of front-ends.
-- Node.js + npm, Rust + crates.io, Python + PyPI, Julia + Pkg: a tiny “waist” with a thriving package ecosystem.
-- HotSpot (JVM) / V8 (JS): tiered execution (interpreter feeding an optimizing JIT) as the pragmatic choice for fast dynamic languages.
-
-RunMat stands on the shoulders of these patterns.
 
 ## The minimal core
 

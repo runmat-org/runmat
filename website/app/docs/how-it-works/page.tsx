@@ -30,12 +30,11 @@ export default function HowItWorksPage() {
             How RunMat Works
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed">
-          RunMat is a GPU-accelerated runtime for MATLAB code that automatically optimizes your math across CPU and GPU—often outperforming hand-tuned PyTorch without any kernel programming. It implements the full language grammar and core semantics — arrays and indexing, control flow, functions and multiple returns, cells/structs, and
-            classdef OOP — with a fast, V8-inspired engine.
+            RunMat is a GPU-accelerated runtime for MATLAB code that automatically optimizes your math across CPU and GPU—often outperforming hand-tuned PyTorch without any kernel programming. 
           </p>
           <p className="text-lg text-muted-foreground leading-relaxed mt-8">
-            We keep the core slim and blazing fast, then grow the ecosystem with packages. RunMat is a clean, fast runtime for the MATLAB language with an
-            open extension model.
+            It implements the full language grammar and core semantics of the MATLAB programming language — arrays and indexing, control flow, functions and multiple returns, cells/structs, and
+            classdef OOP — with a fast engine that can execute your code quickly on CPU or GPU. RunMat is a clean, fast runtime for the MATLAB language.
           </p>
         </div>
 
@@ -44,7 +43,10 @@ export default function HowItWorksPage() {
           <h2 className="text-3xl font-bold mb-6 text-foreground">Why existing approaches are slow</h2>
           <div className="bg-gradient-to-r from-amber-100 to-yellow-100 dark:from-amber-900/40 dark:to-yellow-900/40 rounded-lg p-6 mb-8 border border-amber-200 dark:border-amber-800">
               <p className="text-lg leading-relaxed">
-              <strong>Traditional MATLAB/Octave:</strong> Slow startup, interpreted loops, no GPU support without expensive toolboxes.
+              <strong>Traditional MATLAB:</strong> Slow startup, interpreted loops, no GPU support without expensive toolboxes.
+            </p>
+            <p className="text-lg leading-relaxed mt-4">
+              <strong>Octave:</strong> Significantly slower than MATLAB, especially for loop-heavy code. It is also not a full implementation of the MATLAB language, and does not have a GPU layer.
               </p>
               <p className="text-lg leading-relaxed mt-4">
               <strong>PyTorch/TensorFlow:</strong> Requires rewriting code, explicit device management, kernel programming knowledge.

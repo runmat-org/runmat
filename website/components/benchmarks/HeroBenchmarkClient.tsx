@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 import type { BenchmarkShowcaseSlide } from "@/lib/marketing-benchmarks";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 import BenchmarkShowcaseCarousel from "./BenchmarkShowcaseCarousel";
@@ -84,10 +83,10 @@ export default function HeroBenchmarkClient({ slides }: HeroBenchmarkClientProps
       <div className="container mx-auto px-4 md:px-6">
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
           <div className="flex flex-col space-y-6 text-left items-start">
-            <Badge variant="secondary" className="rounded-lg px-1 py-1 text-base">
+            <div className="mb-2 p-0">
               🚀 Open Source • MIT Licensed • Pre-Release
-            </Badge>
-            <h1 className="font-heading text-left leading-tight whitespace-nowrap tracking-tight text-[clamp(2.75rem,5vw,4.75rem)] sm:text-[clamp(3.25rem,4.5vw,5.5rem)] lg:text-[clamp(3.5rem,4vw,6rem)]">
+            </div>
+            <h1 className="font-heading text-left leading-tight whitespace-nowrap tracking-tight text-[clamp(2.6rem,4.8vw,4.25rem)] sm:text-[clamp(3rem,4vw,5rem)] lg:text-[clamp(3.25rem,3.6vw,5.25rem)]">
               Fastest runtime for
             </h1>
             <BenchmarkTicker slides={slides} activeIndex={activeIndex} onSelect={goToIndex} />

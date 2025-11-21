@@ -25,9 +25,11 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
   const gradientId = useId();
   const [ref, bounds] = useMeasure();
   const width = bounds.width;
-  const margin = { top: 48, right: 0, bottom: 68, left: 64 };
+  const isCompact = width > 0 && width < 520;
+  const effectiveHeight = isCompact ? 300 : height;
+  const margin = isCompact ? { top: 48, right: 8, bottom: 62, left: 56 } : { top: 48, right: 0, bottom: 68, left: 64 };
   const innerWidth = Math.max(0, width - margin.left - margin.right);
-  const innerHeight = Math.max(0, height - margin.top - margin.bottom);
+  const innerHeight = Math.max(0, effectiveHeight - margin.top - margin.bottom);
 
   const isLogX = data.logX ?? false;
   const logXMin = data.logXMin;
@@ -95,24 +97,18 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
     [yDomain, innerHeight]
   );
 
-  const highlightSeries = data.series.find((series) => series.impl === data.highlightImpl);
-  const highlightPoint = highlightSeries?.points[highlightSeries.points.length - 1];
-  const highlightSpeed = highlightPoint?.speedup ?? 0;
-
-  const annotationText =
-    highlightPoint && typeof highlightSpeed === "number"
-      ? `${highlightSpeed >= 9 ? highlightSpeed.toFixed(0) : highlightSpeed.toFixed(1)}× vs baseline`
-      : undefined;
 
   return (
     <div ref={ref} className="w-full">
       {width === 0 ? (
-        <div style={{ height }} />
+        <div style={{ height: effectiveHeight }} />
       ) : (
-        <svg width={width} height={height} role="img" aria-label="Benchmark line chart">
+          <svg width={width} height={effectiveHeight} role="img" aria-label="Benchmark line chart">
           <Group left={margin.left} top={margin.top}>
-              <foreignObject x={0} y={-40} width={innerWidth} height={40}>
-                <div className="flex h-10 w-full items-center justify-center gap-8">
+              <foreignObject x={0} y={isCompact ? -32 : -40} width={innerWidth} height={isCompact ? 40 : 40}>
+                <div
+                  className={`flex w-full items-center justify-center ${isCompact ? "gap-3 text-[11px]" : "h-10 gap-8 text-sm"}`}
+                >
                   {data.series.map((series, idx) => {
                     const color =
                       series.impl === data.highlightImpl ? "#a855f7" : SERIES_COLORS[idx % SERIES_COLORS.length];
@@ -122,8 +118,11 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                         ? { borderBottom: `1px dashed ${color}` }
                         : { borderBottom: `2px solid ${color}` };
                     return (
-                      <div key={series.impl} className="flex items-center justify-center gap-2 text-sm text-white/80">
-                        <span className="inline-block w-8" style={lineStyle} />
+                      <div
+                        key={series.impl}
+                        className={`flex items-center gap-2 text-white/80 ${series.impl === data.highlightImpl ? "font-semibold text-white" : ""}`}
+                      >
+                        <span className="inline-block w-8 shrink-0" style={lineStyle} />
                         <span className={series.impl === data.highlightImpl ? "text-white font-semibold" : undefined}>
                           {series.label}
                         </span>
@@ -201,46 +200,47 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                 tickFormat={(value) => `${Number(value).toFixed(0)}×`}
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.95)",
-                fontSize: 14,
-                dx: -35,
+                fontSize: isCompact ? 12 : 14,
+                dx: isCompact ? -24 : -35,
                 dy: 5,
               })}
-                left={10}
+                left={isCompact ? 4 : 10}
             />
             <AxisBottom
               top={innerHeight}
               scale={xScale}
               tickStroke="rgba(255,255,255,0.2)"
               stroke="rgba(255,255,255,0.2)"
-                numTicks={xTickValues ? undefined : 5}
+                numTicks={xTickValues ? undefined : isCompact ? 4 : 5}
                 tickValues={xTickValues}
               tickFormat={(value) => formatNumber(Number(value))}
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.9)",
-                fontSize: 14,
-                dy: 5,
-                dx: -20,
+                fontSize: isCompact ? 12 : 14,
+                dy: isCompact ? 4 : 5,
+                dx: isCompact ? -6 : -20,
+                textAnchor: "middle",
               })}
-                tickTransform="translate(-10, 0)"
+                tickTransform={isCompact ? "translate(-6, 0)" : "translate(-10, 0)"}
                 hideTicks
-                left={10}
+                left={isCompact ? 4 : 10}
             />
             <Text
               x={-innerHeight / 2}
-                y={-50}
+                y={isCompact ? -44 : -50}
               transform="rotate(-90)"
               textAnchor="middle"
                 fill="rgba(255,255,255,0.9)"
-                fontSize={14}
+                fontSize={isCompact ? 12 : 14}
             >
                 x faster than NumPy
             </Text>
             <Text
               x={innerWidth / 2}
-                y={innerHeight + 60}
+                y={innerHeight + (isCompact ? 54 : 60)}
               textAnchor="middle"
                 fill="rgba(255,255,255,0.9)"
-                fontSize={14}
+                fontSize={isCompact ? 12 : 14}
             >
               {data.paramLabel ?? data.paramKey}
               </Text>

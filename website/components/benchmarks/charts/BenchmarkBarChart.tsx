@@ -20,10 +20,14 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
   const gradientId = useId();
   const [ref, bounds] = useMeasure();
   const width = bounds.width;
-  const margin = { top: 12, right: 12, bottom: 58, left: 56 };
+  const isCompact = width > 0 && width < 460;
+  const effectiveHeight = isCompact ? 300 : height;
+  const margin = isCompact
+    ? { top: 12, right: 8, bottom: 70, left: 48 }
+    : { top: 12, right: 12, bottom: 58, left: 56 };
 
   const innerWidth = Math.max(0, width - margin.left - margin.right);
-  const innerHeight = Math.max(0, height - margin.top - margin.bottom);
+  const innerHeight = Math.max(0, effectiveHeight - margin.top - margin.bottom);
 
   const entries = data.entries;
   const maxSpeedup = Math.max(...entries.map((entry) => entry.speedup));
@@ -43,12 +47,19 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
 
   const axisLabel = "x faster than NumPy";
 
+  const formatLabel = (label: string) => {
+    if (!isCompact) {
+      return label;
+    }
+    return label.replace(/^Python\s+/i, "");
+  };
+
   return (
     <div ref={ref} className="w-full">
       {width === 0 ? (
-        <div style={{ height }} />
+        <div style={{ height: effectiveHeight }} />
       ) : (
-        <svg width={width} height={height} role="img" aria-label="Benchmark bar chart">
+          <svg width={width} height={effectiveHeight} role="img" aria-label="Benchmark bar chart">
           <defs>
             <LinearGradient id={gradientId} from="#5b8dff" to="#bb51ff" />
           </defs>
@@ -107,18 +118,18 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
               stroke="rgba(255,255,255,0.35)"
               tickLabelProps={() => ({
                 fill: "rgba(255,255,255,0.85)",
-                fontSize: 14,
-                dx: -12,
+                fontSize: isCompact ? 12 : 14,
+                dx: -10,
                 dy: 4,
               })}
             />
             <Text
               x={-innerHeight / 2}
-                y={-42}
+                y={isCompact ? -36 : -42}
               transform="rotate(-90)"
               textAnchor="middle"
                 fill="rgba(255,255,255,0.9)"
-                fontSize={14}
+                fontSize={isCompact ? 12 : 14}
             >
               {axisLabel}
             </Text>
@@ -127,10 +138,11 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
               top={innerHeight}
               scale={xScale}
               hideTicks
+                tickFormat={(value) => formatLabel(String(value))}
               tickLabelProps={(value) => ({
                 fill: "rgba(255,255,255,0.9)",
-                fontSize: 14,
-                dy: 16,
+                fontSize: isCompact ? 12 : 14,
+                dy: isCompact ? 12 : 16,
                 textAnchor: "middle",
                 x: (xScale(value as string) ?? 0) + xScale.bandwidth() / 2,
               })}

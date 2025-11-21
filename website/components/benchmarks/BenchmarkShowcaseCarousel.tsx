@@ -53,21 +53,21 @@ export function BenchmarkShowcaseCarousel({
                 <p className="text-base text-white/85">{activeSlide.description}</p>
               )}
               {activeSlide.headlineText && (
-                <p className="text-lg font-semibold text-white/90">
+                <p className="font-semibold text-white/90 text-[clamp(1rem,2.6vw,1.35rem)]">
                   <span className="gradient-brand font-semibold">
                     {activeSlide.headlineText}
                   </span>
                 </p>
               )}
             </div>
-            <div className="w-full">{renderChart(activeSlide.chart)}</div>
+            <div className="w-full min-h-[320px] sm:min-h-[360px]">{renderChart(activeSlide.chart)}</div>
             {(activeSlide.deviceLabel || activeSlide.link) && (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-base">
+              <div className="mt-4 flex flex-col gap-2 text-base sm:flex-row sm:items-center sm:justify-between">
                 {activeSlide.deviceLabel && (
                   <p className="text-left text-white/60">Measured on {activeSlide.deviceLabel}</p>
                 )}
                 {activeSlide.link && (
-                  <div className="flex-1 text-right text-white/40 transition-colors duration-300 group-hover:text-white/80">
+                  <div className="text-left text-white/40 transition-colors duration-300 group-hover:text-white/80 sm:text-right">
                     View detailed benchmark →
                   </div>
                 )}
