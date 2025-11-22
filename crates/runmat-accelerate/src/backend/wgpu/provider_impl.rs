@@ -166,7 +166,7 @@ struct WorkgroupConfig {
     max_x: u32,
     max_y: u32,
     max_z: u32,
-    max_invocations: u32,
+    adapter_max_invocations: u32,
 }
 
 impl WorkgroupConfig {
@@ -179,13 +179,15 @@ impl WorkgroupConfig {
         let max_x = Self::normalize_dim(limits.max_compute_workgroup_size_x, 1024);
         let max_y = Self::normalize_dim(limits.max_compute_workgroup_size_y, 1024);
         let max_z = Self::normalize_dim(limits.max_compute_workgroup_size_z, 64);
-        let max_invocations =
+        let adapter_max_invocations =
             Self::normalize_invocations(limits.max_compute_invocations_per_workgroup, 1536);
 
-        let scalar = Self::clamp_linear_workgroup(requested_scalar, max_x, max_invocations, 32);
+        let scalar =
+            Self::clamp_linear_workgroup(requested_scalar, max_x, adapter_max_invocations, 32);
         let reduction =
-            Self::clamp_linear_workgroup(requested_reduction, max_x, max_invocations, 32);
-        let matmul_tile = Self::clamp_matmul_tile(requested_tile, max_x, max_y, max_invocations, 8);
+            Self::clamp_linear_workgroup(requested_reduction, max_x, adapter_max_invocations, 32);
+        let matmul_tile =
+            Self::clamp_matmul_tile(requested_tile, max_x, max_y, adapter_max_invocations, 8);
 
         Self {
             scalar,
@@ -194,7 +196,7 @@ impl WorkgroupConfig {
             max_x,
             max_y,
             max_z,
-            max_invocations,
+            adapter_max_invocations,
         }
     }
 
@@ -277,6 +279,7 @@ impl WorkgroupConfig {
         mut tuning: ImageNormalizeTuning,
         batches: u32,
     ) -> ImageNormalizeTuning {
+        let original = tuning;
         let max_lane_dim = self.max_x.max(32);
         tuning.lane_count = tuning.lane_count.clamp(32, max_lane_dim).max(32);
         tuning.lane_count =
@@ -284,10 +287,7 @@ impl WorkgroupConfig {
         tuning.values_per_thread = tuning.values_per_thread.clamp(1, 8);
         let max_spatial = self.max_y.max(1);
         tuning.spatial_tile = tuning.spatial_tile.clamp(1, max_spatial);
-        let max_invocations = self
-            .max_invocations
-            .max(64)
-            .min(self.reduction_default.max(self.scalar));
+        let max_invocations = self.adapter_max_invocations.max(64);
         while tuning.lane_count.saturating_mul(tuning.spatial_tile) > max_invocations {
             if tuning.lane_count > 32 {
                 tuning.lane_count -= 32;
@@ -298,6 +298,24 @@ impl WorkgroupConfig {
             }
         }
         tuning.batch_tile = tuning.batch_tile.clamp(1, batches.max(1));
+        if tuning != original {
+            debug!(
+                "sanitize_image_normalize_tuning batches={} lane {} -> {} spatial {} -> {} values/thread {} -> {} batch_tile {} -> {} (max_invocations={}, limits=({}, {}, {}))",
+                batches,
+                original.lane_count,
+                tuning.lane_count,
+                original.spatial_tile,
+                tuning.spatial_tile,
+                original.values_per_thread,
+                tuning.values_per_thread,
+                original.batch_tile,
+                tuning.batch_tile,
+                self.adapter_max_invocations,
+                self.max_x,
+                self.max_y,
+                self.max_z
+            );
+        }
         tuning
     }
 }
@@ -2011,8 +2029,14 @@ impl WgpuProvider {
             lane_count: lane,
             spatial_tile,
         };
-        self.workgroup_config
-            .sanitize_image_normalize_tuning(tuning, batches)
+        let sanitized = self
+            .workgroup_config
+            .sanitize_image_normalize_tuning(tuning, batches);
+        debug!(
+            "select_image_normalize_tuning batches={} plane={} raw={:?} sanitized={:?}",
+            batches, plane, tuning, sanitized
+        );
+        sanitized
     }
 
     fn resolve_image_normalize_tuning(
@@ -2027,15 +2051,37 @@ impl WgpuProvider {
                     .workgroup_config
                     .sanitize_image_normalize_tuning(tuning, batches);
                 if sanitized != tuning {
+                    debug!(
+                        "image_normalize autotune sanitized cached key {:?}: {:?} -> {:?}",
+                        key, tuning, sanitized
+                    );
+                    debug!(
+                        "resolve_image_normalize_tuning returning cached {:?} for key {:?}",
+                        sanitized, key
+                    );
                     self.image_norm_autotune.insert(key, sanitized);
+                } else {
+                    debug!(
+                        "image_normalize autotune reusing cached key {:?}: {:?}",
+                        key, tuning
+                    );
                 }
                 return (sanitized, true);
             }
             let tuning = self.select_image_normalize_tuning(batches, plane);
+            debug!(
+                "image_normalize autotune inserted key {:?}: {:?}",
+                key, tuning
+            );
             self.image_norm_autotune.insert(key, tuning);
             (tuning, false)
         } else {
-            (self.select_image_normalize_tuning(batches, plane), false)
+            let tuning = self.select_image_normalize_tuning(batches, plane);
+            debug!(
+                "resolve_image_normalize_tuning returning fresh {:?} for key {:?}",
+                tuning, key
+            );
+            (tuning, false)
         }
     }
 
@@ -2482,7 +2528,7 @@ impl WgpuProvider {
         info!(
             "Adapter '{}' compute limits: invocations={} max_wg=({}, {}, {}) -> wg={} reduction_wg={} matmul_tile={}",
             adapter_info.name,
-            workgroup_config.max_invocations,
+            workgroup_config.adapter_max_invocations,
             workgroup_config.max_x,
             workgroup_config.max_y,
             workgroup_config.max_z,

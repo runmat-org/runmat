@@ -41,7 +41,33 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Install Rust toolchain (Windows self-hosted)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RUST_TOOLCHAIN: 1.90.0
+          RUST_COMPONENTS: rustfmt clippy
+        run: |
+          $toolchain = $env:RUST_TOOLCHAIN
+          $components = $env:RUST_COMPONENTS.Split(' ')
+          $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+          $rustup = Join-Path $cargoBin 'rustup.exe'
+          if (-not (Test-Path $cargoBin)) {
+            New-Item -ItemType Directory -Path $cargoBin | Out-Null
+          }
+          if (-not (Test-Path $rustup)) {
+            $tmp = Join-Path $env:USERPROFILE 'actions-runner\_work\_temp\rustup-init.exe'
+            Invoke-WebRequest -Uri https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe -OutFile $tmp
+            & $tmp -y --default-host x86_64-pc-windows-msvc --default-toolchain $toolchain
+          } else {
+            & $rustup default $toolchain
+          }
+          foreach ($component in $components) {
+            & $rustup component add --toolchain $toolchain $component
+          }
+
       - uses: actions-rs/toolchain@v1
+        if: runner.os != 'Windows'
         with:
           toolchain: 1.90.0
           components: rustfmt, clippy
