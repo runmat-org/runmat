@@ -68,7 +68,7 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
         runmat: "RunMat (GPU)",
       },
     },
-    headlineOverride: "100x faster than NumPy at 10B points",
+    headlineOverride: "80x faster than NumPy at 1B points",
     stat: {
       compareImpl: "python-numpy",
       referenceImpl: "runmat",

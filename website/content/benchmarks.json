@@ -1,17 +1,17 @@
 {
   "suite": {
     "version": 1,
-    "started_at": "2025-11-19T21:34:54.365125Z",
-    "finished_at": "2025-11-19T21:49:37.452934Z",
+    "started_at": "2025-11-21T23:29:52.117462Z",
+    "finished_at": "2025-11-21T23:43:13.352247Z",
     "auto_offload_calibration": {
-      "runs": 13,
+      "runs": 18,
       "cpu_time_ms": {
-        "elementwise": 2998.5855399964894,
+        "elementwise": 1875.4200370230187,
         "reduction": 0.0,
         "matmul": 0.0
       },
       "units": {
-        "elementwise": 21.0,
+        "elementwise": 56.0,
         "reduction": 0.0,
         "matmul_flops": 0.0
       },
@@ -44,14 +44,16 @@
         {
           "impl": "runmat",
           "lang": "matlab-syntax",
-          "iterations": 1,
-          "median_ms": 223.50808400005917,
+          "iterations": 3,
+          "median_ms": 142.97474999330007,
           "all_ms": [
-            223.50808400005917
+            220.93270800542086,
+            141.35650001117028,
+            142.97474999330007
           ],
           "mse": 0.2850092,
           "stdout_tail": "RESULT_ok MSE=2.850092e-1\n",
-          "stderr_tail": "d: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:00:14.271624000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:00:14.384670000Z  INFO runmat] Script executed successfully in 120.647084ms\n",
+          "stderr_tail": "ps=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:29:52.624278000Z  INFO runmat_accelerate::backend::wgpu::provider_impl] Compiling image_normalize pipeline tuning: batch_tile=4 values/thread=8 lane=256 spatial=4\n[runmat] Compiling image_normalize pipeline: batch_tile=4 values_per_thread=8 lane_count=256 spatial_tile=4\n[2025-11-21T23:29:52.697885000Z  INFO runmat] Script executed successfully in 92.867584ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -69,7 +71,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586014271
+                  "timestamp_ms": 1763767792612
                 },
                 {
                   "batch": 3840,
@@ -82,7 +84,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586014346
+                  "timestamp_ms": 1763767792657
                 },
                 {
                   "batch": 3840,
@@ -95,7 +97,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586014355
+                  "timestamp_ms": 1763767792668
                 },
                 {
                   "batch": 3840,
@@ -108,7 +110,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586014363
+                  "timestamp_ms": 1763767792677
                 }
               ],
               "env_overrides_applied": false,
@@ -142,22 +144,22 @@
                 {
                   "hits": 0,
                   "misses": 1,
-                  "tag": "layout_ptr_0x982d800f0"
-                },
-                {
-                  "hits": 0,
-                  "misses": 1,
-                  "tag": "runmat-fusion-layout-1"
-                },
-                {
-                  "hits": 0,
-                  "misses": 1,
                   "tag": "runmat-reduction-p1-bgl"
                 },
                 {
                   "hits": 0,
                   "misses": 1,
                   "tag": "runmat-reduction-p2-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "layout_ptr_0xb9d0f40f0"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-fusion-layout-1"
                 }
               ],
               "bind_group_cache_hits": 0,
@@ -165,14 +167,14 @@
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "total_wall_time_ns": 30970167
+                "total_wall_time_ns": 34632541
               },
               "fused_reduction": {
                 "count": 1,
-                "total_wall_time_ns": 6850250
+                "total_wall_time_ns": 5583708
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 4,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -239,10 +241,12 @@
         {
           "impl": "python-numpy",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 529.9917089996597,
+          "iterations": 3,
+          "median_ms": 500.34125000820495,
           "all_ms": [
-            529.9917089996597
+            591.2894590001088,
+            500.34125000820495,
+            495.8727920020465
           ],
           "mse": 0.2850724,
           "stdout_tail": "RESULT_ok MSE=2.850724e-01\n",
@@ -252,10 +256,12 @@
         {
           "impl": "python-torch",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 924.6655419997296,
+          "iterations": 3,
+          "median_ms": 801.2906670046505,
           "all_ms": [
-            924.6655419997296
+            1154.1868339991197,
+            801.2906670046505,
+            790.4074999969453
           ],
           "mse": 0.285215,
           "stdout_tail": "RESULT_ok MSE=2.852150e-01 device=mps\n",
@@ -266,14 +272,16 @@
         {
           "impl": "runmat",
           "lang": "matlab-syntax",
-          "iterations": 1,
-          "median_ms": 298.60562500016385,
+          "iterations": 3,
+          "median_ms": 212.76741600013338,
           "all_ms": [
-            298.60562500016385
+            290.7887499895878,
+            210.00600000843406,
+            212.76741600013338
           ],
           "mse": 14076030000.0,
           "stdout_tail": "RESULT_ok MSE=1.407603e10\n",
-          "stderr_tail": "d: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:00:16.112116000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:00:16.281792000Z  INFO runmat] Script executed successfully in 176.121667ms\n",
+          "stderr_tail": "s=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:29:57.699703000Z  INFO runmat_accelerate::backend::wgpu::provider_impl] Compiling image_normalize pipeline tuning: batch_tile=8 values/thread=8 lane=256 spatial=4\n[runmat] Compiling image_normalize pipeline: batch_tile=8 values_per_thread=8 lane_count=256 spatial_tile=4\n[2025-11-21T23:29:57.830383000Z  INFO runmat] Script executed successfully in 158.916333ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -291,7 +299,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586016112
+                  "timestamp_ms": 1763767797679
                 },
                 {
                   "batch": 3840,
@@ -304,7 +312,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586016218
+                  "timestamp_ms": 1763767797763
                 },
                 {
                   "batch": 3840,
@@ -317,7 +325,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586016232
+                  "timestamp_ms": 1763767797778
                 },
                 {
                   "batch": 3840,
@@ -330,7 +338,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586016249
+                  "timestamp_ms": 1763767797794
                 }
               ],
               "env_overrides_applied": false,
@@ -369,17 +377,17 @@
                 {
                   "hits": 0,
                   "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
                   "tag": "runmat-reduction-p2-bgl"
                 },
                 {
                   "hits": 0,
                   "misses": 1,
-                  "tag": "layout_ptr_0x740ed50f0"
-                },
-                {
-                  "hits": 0,
-                  "misses": 1,
-                  "tag": "runmat-reduction-p1-bgl"
+                  "tag": "layout_ptr_0xa4ee740f0"
                 }
               ],
               "bind_group_cache_hits": 0,
@@ -387,14 +395,14 @@
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "total_wall_time_ns": 50348334
+                "total_wall_time_ns": 52522126
               },
               "fused_reduction": {
                 "count": 1,
-                "total_wall_time_ns": 6766291
+                "total_wall_time_ns": 6783917
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 4,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -461,10 +469,12 @@
         {
           "impl": "python-numpy",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 1025.0025420000384,
+          "iterations": 3,
+          "median_ms": 939.2672920075711,
           "all_ms": [
-            1025.0025420000384
+            954.0332500182558,
+            939.2672920075711,
+            930.9787919919472
           ],
           "mse": 0.2850916,
           "stdout_tail": "RESULT_ok MSE=2.850916e-01\n",
@@ -474,10 +484,12 @@
         {
           "impl": "python-torch",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 980.4692499997145,
+          "iterations": 3,
+          "median_ms": 808.9177089859731,
           "all_ms": [
-            980.4692499997145
+            808.9177089859731,
+            802.5542499963194,
+            809.0171250223648
           ],
           "mse": 0.2851851,
           "stdout_tail": "RESULT_ok MSE=2.851851e-01 device=mps\n",
@@ -488,14 +500,16 @@
         {
           "impl": "runmat",
           "lang": "matlab-syntax",
-          "iterations": 1,
-          "median_ms": 304.54966700017394,
+          "iterations": 3,
+          "median_ms": 241.55712500214577,
           "all_ms": [
-            304.54966700017394
+            331.51437499327585,
+            241.55712500214577,
+            235.01137498533353
           ],
           "mse": 0.3333283,
           "stdout_tail": "RESULT_ok MSE=3.333283e-1\n",
-          "stderr_tail": "model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:00:18.541089000Z  WARN runmat_accelerate::backend::wgpu::provider_impl] runmat-rng-uniform-out: large GPU allocation (530841600 bytes) len=132710400 elems\n[2025-11-19T21:00:18.598728000Z  WARN runmat_accelerate::backend::wgpu::provider_impl] runmat-image-normalize-out: large GPU allocation (530841600 bytes) len=132710400 elems\n[2025-11-19T21:00:18.735673000Z  INFO runmat] Script executed successfully in 202.578791ms\n",
+          "stderr_tail": "te::backend::wgpu::provider_impl] Compiling image_normalize pipeline tuning: batch_tile=16 values/thread=8 lane=256 spatial=4\n[runmat] Compiling image_normalize pipeline: batch_tile=16 values_per_thread=8 lane_count=256 spatial_tile=4\n[2025-11-21T23:30:03.832638000Z  WARN runmat_accelerate::backend::wgpu::provider_impl] runmat-image-normalize-out: large GPU allocation (530841600 bytes) len=132710400 elems\n[2025-11-21T23:30:03.967380000Z  INFO runmat] Script executed successfully in 186.289166ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -513,7 +527,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586018540
+                  "timestamp_ms": 1763767803787
                 },
                 {
                   "batch": 3840,
@@ -526,7 +540,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586018615
+                  "timestamp_ms": 1763767803849
                 },
                 {
                   "batch": 3840,
@@ -539,7 +553,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586018643
+                  "timestamp_ms": 1763767803875
                 },
                 {
                   "batch": 3840,
@@ -552,7 +566,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586018671
+                  "timestamp_ms": 1763767803903
                 }
               ],
               "env_overrides_applied": false,
@@ -586,12 +600,12 @@
                 {
                   "hits": 0,
                   "misses": 1,
-                  "tag": "runmat-fusion-layout-1"
+                  "tag": "layout_ptr_0x73f1710f0"
                 },
                 {
                   "hits": 0,
                   "misses": 1,
-                  "tag": "layout_ptr_0x7d566d0f0"
+                  "tag": "runmat-fusion-layout-1"
                 },
                 {
                   "hits": 0,
@@ -609,14 +623,14 @@
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "total_wall_time_ns": 93316458
+                "total_wall_time_ns": 91447876
               },
               "fused_reduction": {
                 "count": 1,
-                "total_wall_time_ns": 7995709
+                "total_wall_time_ns": 9011333
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 4,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -683,10 +697,12 @@
         {
           "impl": "python-numpy",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 1855.5507080000098,
+          "iterations": 3,
+          "median_ms": 1783.4747500019148,
           "all_ms": [
-            1855.5507080000098
+            1783.4747500019148,
+            1838.931375008542,
+            1782.517125015147
           ],
           "mse": 0.2850792,
           "stdout_tail": "RESULT_ok MSE=2.850792e-01\n",
@@ -696,10 +712,12 @@
         {
           "impl": "python-torch",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 961.5065000002687,
+          "iterations": 3,
+          "median_ms": 907.7327919949312,
           "all_ms": [
-            961.5065000002687
+            931.1099580081645,
+            907.7327919949312,
+            884.1869590105489
           ],
           "mse": 0.2851658,
           "stdout_tail": "RESULT_ok MSE=2.851658e-01 device=mps\n",
@@ -710,14 +728,16 @@
         {
           "impl": "runmat",
           "lang": "matlab-syntax",
-          "iterations": 1,
-          "median_ms": 466.63329200009684,
+          "iterations": 3,
+          "median_ms": 389.24920800491236,
           "all_ms": [
-            466.63329200009684
+            389.24920800491236,
+            372.3362500022631,
+            398.9099579921458
           ],
           "mse": 0.3333225,
           "stdout_tail": "RESULT_ok MSE=3.333225e-1\n",
-          "stderr_tail": "del: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:00:21.807028000Z  WARN runmat_accelerate::backend::wgpu::provider_impl] runmat-rng-uniform-out: large GPU allocation (1061683200 bytes) len=265420800 elems\n[2025-11-19T21:00:21.892216000Z  WARN runmat_accelerate::backend::wgpu::provider_impl] runmat-image-normalize-out: large GPU allocation (1061683200 bytes) len=265420800 elems\n[2025-11-19T21:00:22.161352000Z  INFO runmat] Script executed successfully in 362.571959ms\n",
+          "stderr_tail": "e::backend::wgpu::provider_impl] Compiling image_normalize pipeline tuning: batch_tile=16 values/thread=8 lane=256 spatial=4\n[runmat] Compiling image_normalize pipeline: batch_tile=16 values_per_thread=8 lane_count=256 spatial_tile=4\n[2025-11-21T23:30:13.088212000Z  WARN runmat_accelerate::backend::wgpu::provider_impl] runmat-image-normalize-out: large GPU allocation (1061683200 bytes) len=265420800 elems\n[2025-11-21T23:30:13.341437000Z  INFO runmat] Script executed successfully in 344.283959ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -735,7 +755,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586021806
+                  "timestamp_ms": 1763767813003
                 },
                 {
                   "batch": 3840,
@@ -748,7 +768,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586021928
+                  "timestamp_ms": 1763767813125
                 },
                 {
                   "batch": 3840,
@@ -761,7 +781,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586021980
+                  "timestamp_ms": 1763767813177
                 },
                 {
                   "batch": 3840,
@@ -774,7 +794,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586022037
+                  "timestamp_ms": 1763767813230
                 }
               ],
               "env_overrides_applied": false,
@@ -808,22 +828,22 @@
                 {
                   "hits": 0,
                   "misses": 1,
-                  "tag": "runmat-fusion-layout-1"
-                },
-                {
-                  "hits": 0,
-                  "misses": 1,
-                  "tag": "runmat-reduction-p1-bgl"
-                },
-                {
-                  "hits": 0,
-                  "misses": 1,
                   "tag": "runmat-reduction-p2-bgl"
                 },
                 {
                   "hits": 0,
                   "misses": 1,
-                  "tag": "layout_ptr_0x9f75800f0"
+                  "tag": "runmat-fusion-layout-1"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "layout_ptr_0xca45310f0"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
                 }
               ],
               "bind_group_cache_hits": 0,
@@ -831,14 +851,14 @@
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "total_wall_time_ns": 179753793
+                "total_wall_time_ns": 165363583
               },
               "fused_reduction": {
                 "count": 1,
-                "total_wall_time_ns": 10555875
+                "total_wall_time_ns": 7992458
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 4,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -905,10 +925,12 @@
         {
           "impl": "python-numpy",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 3700.884374999987,
+          "iterations": 3,
+          "median_ms": 3605.9483339777216,
           "all_ms": [
-            3700.884374999987
+            3630.163583002286,
+            3575.59566598502,
+            3605.9483339777216
           ],
           "mse": 0.2851013,
           "stdout_tail": "RESULT_ok MSE=2.851013e-01\n",
@@ -918,10 +940,12 @@
         {
           "impl": "python-torch",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 1119.6692500002428,
+          "iterations": 3,
+          "median_ms": 1141.9192909961566,
           "all_ms": [
-            1119.6692500002428
+            1111.7000829835888,
+            1141.9192909961566,
+            1164.693874976365
           ],
           "mse": 0.2850548,
           "stdout_tail": "RESULT_ok MSE=2.850548e-01 device=mps\n",
@@ -932,14 +956,16 @@
         {
           "impl": "runmat",
           "lang": "matlab-syntax",
-          "iterations": 1,
-          "median_ms": 884.2817090003336,
+          "iterations": 3,
+          "median_ms": 683.5366250015795,
           "all_ms": [
-            884.2817090003336
+            683.5366250015795,
+            705.9259169909637,
+            669.4199169869535
           ],
           "mse": 0.3333415,
           "stdout_tail": "RESULT_ok MSE=3.333415e-1\n",
-          "stderr_tail": "del: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:00:27.246402000Z  WARN runmat_accelerate::backend::wgpu::provider_impl] runmat-rng-uniform-out: large GPU allocation (2123366400 bytes) len=530841600 elems\n[2025-11-19T21:00:27.422375000Z  WARN runmat_accelerate::backend::wgpu::provider_impl] runmat-image-normalize-out: large GPU allocation (2123366400 bytes) len=530841600 elems\n[2025-11-19T21:00:28.020672000Z  INFO runmat] Script executed successfully in 780.891667ms\n",
+          "stderr_tail": "e::backend::wgpu::provider_impl] Compiling image_normalize pipeline tuning: batch_tile=16 values/thread=8 lane=256 spatial=4\n[runmat] Compiling image_normalize pipeline: batch_tile=16 values_per_thread=8 lane_count=256 spatial_tile=4\n[2025-11-21T23:30:29.252739000Z  WARN runmat_accelerate::backend::wgpu::provider_impl] runmat-image-normalize-out: large GPU allocation (2123366400 bytes) len=530841600 elems\n[2025-11-21T23:30:29.723418000Z  INFO runmat] Script executed successfully in 615.909375ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -957,7 +983,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586027246
+                  "timestamp_ms": 1763767829118
                 },
                 {
                   "batch": 3840,
@@ -970,7 +996,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586027493
+                  "timestamp_ms": 1763767829320
                 },
                 {
                   "batch": 3840,
@@ -983,7 +1009,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586027621
+                  "timestamp_ms": 1763767829419
                 },
                 {
                   "batch": 3840,
@@ -996,7 +1022,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763586027753
+                  "timestamp_ms": 1763767829517
                 }
               ],
               "env_overrides_applied": false,
@@ -1030,22 +1056,22 @@
                 {
                   "hits": 0,
                   "misses": 1,
-                  "tag": "runmat-reduction-p2-bgl"
-                },
-                {
-                  "hits": 0,
-                  "misses": 1,
-                  "tag": "layout_ptr_0x99c8610f0"
-                },
-                {
-                  "hits": 0,
-                  "misses": 1,
                   "tag": "runmat-reduction-p1-bgl"
                 },
                 {
                   "hits": 0,
                   "misses": 1,
+                  "tag": "layout_ptr_0xa82cd00f0"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
                   "tag": "runmat-fusion-layout-1"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
                 }
               ],
               "bind_group_cache_hits": 0,
@@ -1053,14 +1079,14 @@
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "total_wall_time_ns": 420575958
+                "total_wall_time_ns": 308509668
               },
               "fused_reduction": {
                 "count": 1,
-                "total_wall_time_ns": 13056209
+                "total_wall_time_ns": 10479458
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 4,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -1127,10 +1153,12 @@
         {
           "impl": "python-numpy",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 7199.190833000102,
+          "iterations": 3,
+          "median_ms": 6958.275667013368,
           "all_ms": [
-            7199.190833000102
+            6957.425708009396,
+            7090.07979198941,
+            6958.275667013368
           ],
           "mse": 0.2850831,
           "stdout_tail": "RESULT_ok MSE=2.850831e-01\n",
@@ -1140,10 +1168,12 @@
         {
           "impl": "python-torch",
           "lang": "python",
-          "iterations": 1,
-          "median_ms": 1328.0434999996942,
+          "iterations": 3,
+          "median_ms": 1203.1985420035198,
           "all_ms": [
-            1328.0434999996942
+            1203.1985420035198,
+            1192.5242909928784,
+            1233.2741249992978
           ],
           "mse": 0.2850757,
           "stdout_tail": "RESULT_ok MSE=2.850757e-01 device=mps\n",
@@ -1162,54 +1192,54 @@
               "points": [
                 {
                   "param": 4,
-                  "speedup": 0.5731712548230923
+                  "speedup": 0.6244191659919847
                 },
                 {
                   "param": 8,
-                  "speedup": 1.045420386208274
+                  "speedup": 1.161140721205126
                 },
                 {
                   "param": 16,
-                  "speedup": 1.9298368840974982
+                  "speedup": 1.9647574327268258
                 },
                 {
                   "param": 32,
-                  "speedup": 3.3053371564854395
+                  "speedup": 3.1577961440970683
                 },
                 {
                   "param": 64,
-                  "speedup": 5.420899867362598
+                  "speedup": 5.783148353410332
                 }
               ],
-              "mean_speedup": 2.4549331097953804,
-              "auc_trapz": 196.63939706951794
+              "mean_speedup": 2.5382523634862673,
+              "auc_trapz": 200.1102529648316
             },
             {
               "impl": "runmat",
               "points": [
                 {
                   "param": 4,
-                  "speedup": 2.3712417891762674
+                  "speedup": 3.4995077804413115
                 },
                 {
                   "param": 8,
-                  "speedup": 3.4326297168697875
+                  "speedup": 4.4145260099741135
                 },
                 {
                   "param": 16,
-                  "speedup": 6.0927687962270864
+                  "speedup": 7.383242162639881
                 },
                 {
                   "param": 32,
-                  "speedup": 7.931033722727222
+                  "speedup": 9.263855288132568
                 },
                 {
                   "param": 64,
-                  "speedup": 8.141286605530576
+                  "speedup": 10.179813944859632
                 }
               ],
-              "mean_speedup": 5.593792126106188,
-              "auc_trapz": 419.0568824682389
+              "mean_speedup": 6.9481890372095005,
+              "auc_trapz": 507.2946276053416
             }
           ]
         },
@@ -1217,16 +1247,16 @@
           "runs": 5,
           "per_point": [
             {
-              "median_ms": 223.50808400005917,
+              "median_ms": 142.97474999330007,
               "upload_bytes": 20,
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "wall_ms": 30.970167
+                "wall_ms": 34.632541
               },
               "fused_reduction": {
                 "count": 1,
-                "wall_ms": 6.85025
+                "wall_ms": 5.583708
               },
               "matmul": {
                 "count": 0,
@@ -1234,7 +1264,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 4
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -1311,16 +1341,16 @@
               }
             },
             {
-              "median_ms": 298.60562500016385,
+              "median_ms": 212.76741600013338,
               "upload_bytes": 20,
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "wall_ms": 50.348334
+                "wall_ms": 52.522126
               },
               "fused_reduction": {
                 "count": 1,
-                "wall_ms": 6.766291
+                "wall_ms": 6.783917
               },
               "matmul": {
                 "count": 0,
@@ -1328,7 +1358,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 4
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -1405,16 +1435,16 @@
               }
             },
             {
-              "median_ms": 304.54966700017394,
+              "median_ms": 241.55712500214577,
               "upload_bytes": 20,
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "wall_ms": 93.316458
+                "wall_ms": 91.447876
               },
               "fused_reduction": {
                 "count": 1,
-                "wall_ms": 7.995709
+                "wall_ms": 9.011333
               },
               "matmul": {
                 "count": 0,
@@ -1422,7 +1452,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 4
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -1499,16 +1529,16 @@
               }
             },
             {
-              "median_ms": 466.63329200009684,
+              "median_ms": 389.24920800491236,
               "upload_bytes": 20,
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "wall_ms": 179.753793
+                "wall_ms": 165.363583
               },
               "fused_reduction": {
                 "count": 1,
-                "wall_ms": 10.555875
+                "wall_ms": 7.992458
               },
               "matmul": {
                 "count": 0,
@@ -1516,7 +1546,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 4
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -1593,16 +1623,16 @@
               }
             },
             {
-              "median_ms": 884.2817090003336,
+              "median_ms": 683.5366250015795,
               "upload_bytes": 20,
               "download_bytes": 4,
               "fused_elementwise": {
                 "count": 4,
-                "wall_ms": 420.575958
+                "wall_ms": 308.509668
               },
               "fused_reduction": {
                 "count": 1,
-                "wall_ms": 13.056209
+                "wall_ms": 10.479458
               },
               "matmul": {
                 "count": 0,
@@ -1610,7 +1640,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 4
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -1692,11 +1722,11 @@
             "download_bytes": 20,
             "fused_elementwise": {
               "count": 20,
-              "wall_ms": 774.96471
+              "wall_ms": 652.475794
             },
             "fused_reduction": {
               "count": 5,
-              "wall_ms": 45.224334000000006
+              "wall_ms": 39.850874
             },
             "matmul": {
               "count": 0,
@@ -1704,7 +1734,7 @@
             },
             "fusion_cache": {
               "hits": 15,
-              "misses": 185
+              "misses": 20
             },
             "bind_group_cache": {
               "hits": 0,
@@ -1745,7 +1775,7 @@
           "auto_offload_calibration": {
             "runs": 5,
             "cpu_time_ms": {
-              "elementwise": 1357.3893330008275,
+              "elementwise": 977.7584560020712,
               "reduction": 0.0,
               "matmul": 0.0
             },
@@ -1789,16 +1819,184 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 198.33766700048727,
+          "median_ms": 108.58429101062939,
           "all_ms": [
-            198.33766700048727,
-            213.22016699923552,
-            193.4136669997315
+            108.58429101062939,
+            105.44116600067355,
+            110.38074997486547
           ],
           "mse": null,
-          "stdout_tail": "",
-          "stderr_tail": "aches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:36:14.890340000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:36:14.955773000Z ERROR runmat] Script execution failed: Execution failed: No matching overload for `fprintf` with 2 args: fprintf: missing format string\n",
+          "stdout_tail": "RESULT_ok PRICE=25.5578746795654\n",
+          "stderr_tail": "oad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:30:54.716637000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:30:54.770213000Z  INFO runmat] Script executed successfully in 54.26025ms\n",
           "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854716
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854716
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854716
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854716
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854716
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854716
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854717
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854717
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854717
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 22310271.158333335,
+                  "decision": "gpu",
+                  "elements": 250000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854748
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767854765
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
             "device": {
               "backend": "metal",
               "device_id": 1,
@@ -1807,26 +2005,114 @@
               "vendor": "Apple"
             },
             "telemetry": {
-              "bind_group_cache_by_layout": [],
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-layout-1"
+                },
+                {
+                  "hits": 0,
+                  "misses": 2,
+                  "tag": "runmat-fusion-layout-2"
+                }
+              ],
               "bind_group_cache_hits": 0,
-              "bind_group_cache_misses": 0,
-              "download_bytes": 0,
+              "bind_group_cache_misses": 3,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 7,
+                "total_wall_time_ns": 43736751
               },
               "fused_reduction": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 1,
+                "total_wall_time_ns": 4044000
               },
-              "fusion_cache_hits": 0,
-              "fusion_cache_misses": 37,
-              "kernel_launches": [],
+              "fusion_cache_hits": 3,
+              "fusion_cache_misses": 7,
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 250000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 250000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "matmul": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
-              "upload_bytes": 0
+              "upload_bytes": 1000004
             }
           },
           "M": 250000
@@ -1835,11 +2121,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 4750.367165999705,
+          "median_ms": 4065.8662079949863,
           "all_ms": [
-            4750.367165999705,
-            4844.104750000042,
-            4729.674291000265
+            4041.7222500254866,
+            4065.8662079949863,
+            4213.61470798729
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.560496\n",
@@ -1850,11 +2136,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 1086.3932919992294,
+          "median_ms": 824.4165000214707,
           "all_ms": [
-            1100.696541000616,
-            1031.9443329999558,
-            1086.3932919992294
+            802.6304999948479,
+            870.7690830051433,
+            824.4165000214707
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.419365 device=mps\n",
@@ -1866,16 +2152,184 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 219.47916699991765,
+          "median_ms": 136.10391700058244,
           "all_ms": [
-            219.47916699991765,
-            235.71850000007544,
-            204.36349999999948
+            128.8127499865368,
+            139.23000000067987,
+            136.10391700058244
           ],
           "mse": null,
-          "stdout_tail": "",
-          "stderr_tail": "aches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:36:33.365263000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:36:33.460767000Z ERROR runmat] Script execution failed: Execution failed: No matching overload for `fprintf` with 2 args: fprintf: missing format string\n",
+          "stdout_tail": "RESULT_ok PRICE=25.5261688232422\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:31:10.000018000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:31:10.081176000Z  INFO runmat] Script executed successfully in 81.840375ms\n",
           "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870000
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870000
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870000
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870000
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870000
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870000
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870002
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870002
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870002
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 44620542.31666667,
+                  "decision": "gpu",
+                  "elements": 500000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870058
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767870076
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
             "device": {
               "backend": "metal",
               "device_id": 1,
@@ -1884,26 +2338,119 @@
               "vendor": "Apple"
             },
             "telemetry": {
-              "bind_group_cache_by_layout": [],
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 2,
+                  "tag": "runmat-fusion-layout-2"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                }
+              ],
               "bind_group_cache_hits": 0,
-              "bind_group_cache_misses": 0,
-              "download_bytes": 0,
+              "bind_group_cache_misses": 4,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 7,
+                "total_wall_time_ns": 68727916
               },
               "fused_reduction": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 1,
+                "total_wall_time_ns": 5375291
               },
-              "fusion_cache_hits": 0,
-              "fusion_cache_misses": 37,
-              "kernel_launches": [],
+              "fusion_cache_hits": 4,
+              "fusion_cache_misses": 7,
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 500000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 500000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "matmul": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
-              "upload_bytes": 0
+              "upload_bytes": 2000004
             }
           },
           "M": 500000
@@ -1912,11 +2459,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 9335.225457999513,
+          "median_ms": 8206.556124991039,
           "all_ms": [
-            9220.866249999744,
-            9335.225457999513,
-            9363.59241700029
+            8206.556124991039,
+            8310.282499995083,
+            8033.775124989916
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.580228\n",
@@ -1927,11 +2474,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 1102.0318339997175,
+          "median_ms": 900.1089170051273,
           "all_ms": [
-            1152.3067909993188,
-            1102.0318339997175,
-            1075.5983340004605
+            900.1089170051273,
+            884.6229159971699,
+            920.2103330171667
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.371815 device=mps\n",
@@ -1943,16 +2490,184 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 250.5979590005154,
+          "median_ms": 188.0037909722887,
           "all_ms": [
-            258.6879999998928,
-            245.63750000015716,
-            250.5979590005154
+            202.03633297933266,
+            187.38295801449567,
+            188.0037909722887
           ],
           "mse": null,
-          "stdout_tail": "",
-          "stderr_tail": "aches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:37:05.611237000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:37:05.746566000Z ERROR runmat] Script execution failed: Execution failed: No matching overload for `fprintf` with 2 args: fprintf: missing format string\n",
+          "stdout_tail": "RESULT_ok PRICE=25.4868507385254\n",
+          "stderr_tail": "d: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:31:37.879140000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:31:38.012111000Z  INFO runmat] Script executed successfully in 133.653333ms\n",
           "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897879
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897879
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897879
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897879
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897879
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897879
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897883
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897883
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897883
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89241084.63333334,
+                  "decision": "gpu",
+                  "elements": 1000000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767897987
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767898007
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
             "device": {
               "backend": "metal",
               "device_id": 1,
@@ -1961,26 +2676,119 @@
               "vendor": "Apple"
             },
             "telemetry": {
-              "bind_group_cache_by_layout": [],
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 2,
+                  "tag": "runmat-fusion-layout-2"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                }
+              ],
               "bind_group_cache_hits": 0,
-              "bind_group_cache_misses": 0,
-              "download_bytes": 0,
+              "bind_group_cache_misses": 4,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 7,
+                "total_wall_time_ns": 116841625
               },
               "fused_reduction": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 1,
+                "total_wall_time_ns": 5652834
               },
-              "fusion_cache_hits": 0,
-              "fusion_cache_misses": 37,
-              "kernel_launches": [],
+              "fusion_cache_hits": 4,
+              "fusion_cache_misses": 7,
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1000000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 1000000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "matmul": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
-              "upload_bytes": 0
+              "upload_bytes": 4000004
             }
           },
           "M": 1000000
@@ -1989,11 +2797,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 18643.763666999803,
+          "median_ms": 16092.49258399359,
           "all_ms": [
-            18459.18208400053,
-            18732.357874999252,
-            18643.763666999803
+            16556.025458994554,
+            16092.49258399359,
+            15950.319833005778
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.468233\n",
@@ -2004,11 +2812,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 1154.567708000286,
+          "median_ms": 894.3198749911971,
           "all_ms": [
-            1204.316166999888,
-            1154.567708000286,
-            1149.2851250004605
+            930.9906660055276,
+            894.3198749911971,
+            886.166417010827
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.455097 device=mps\n",
@@ -2020,16 +2828,184 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 359.81379199984076,
+          "median_ms": 297.64545799116604,
           "all_ms": [
-            388.1505419994937,
-            354.35012499965524,
-            359.81379199984076
+            288.9007500198204,
+            297.64545799116604,
+            333.7670409819111
           ],
           "mse": null,
-          "stdout_tail": "",
-          "stderr_tail": "aches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:38:06.241995000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:38:06.490703000Z ERROR runmat] Script execution failed: Execution failed: No matching overload for `fprintf` with 2 args: fprintf: missing format string\n",
+          "stdout_tail": "RESULT_ok PRICE=25.4807071685791\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:32:30.051166000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:32:30.330056000Z  INFO runmat] Script executed successfully in 279.56425ms\n",
           "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950051
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950051
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950051
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950051
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950051
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950051
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950057
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950057
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950057
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 178482169.26666668,
+                  "decision": "gpu",
+                  "elements": 2000000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950304
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763767950325
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
             "device": {
               "backend": "metal",
               "device_id": 1,
@@ -2038,26 +3014,119 @@
               "vendor": "Apple"
             },
             "telemetry": {
-              "bind_group_cache_by_layout": [],
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 2,
+                  "tag": "runmat-fusion-layout-2"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                }
+              ],
               "bind_group_cache_hits": 0,
-              "bind_group_cache_misses": 0,
-              "download_bytes": 0,
+              "bind_group_cache_misses": 4,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 7,
+                "total_wall_time_ns": 257736459
               },
               "fused_reduction": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 1,
+                "total_wall_time_ns": 5505375
               },
-              "fusion_cache_hits": 0,
-              "fusion_cache_misses": 37,
-              "kernel_launches": [],
+              "fusion_cache_hits": 4,
+              "fusion_cache_misses": 7,
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 2000000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 2000000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "matmul": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
-              "upload_bytes": 0
+              "upload_bytes": 8000004
             }
           },
           "M": 2000000
@@ -2066,11 +3135,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 34934.87037500017,
+          "median_ms": 32304.63729199255,
           "all_ms": [
-            36088.563249999424,
-            33025.92991700021,
-            34934.87037500017
+            32116.08254100429,
+            32304.63729199255,
+            32758.437500015134
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.461781\n",
@@ -2081,11 +3150,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 1304.8052499998448,
+          "median_ms": 1108.8024999771733,
           "all_ms": [
-            1351.1344590006047,
-            1297.474291999606,
-            1304.8052499998448
+            1108.8024999771733,
+            1155.0167090026662,
+            1087.8454160119873
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.462563 device=mps\n",
@@ -2097,16 +3166,184 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 664.5763749993421,
+          "median_ms": 607.3575000045821,
           "all_ms": [
-            698.3353340001486,
-            664.5763749993421,
-            663.0044590001489
+            595.896790997358,
+            607.3575000045821,
+            608.0693750118371
           ],
           "mse": null,
-          "stdout_tail": "",
-          "stderr_tail": "aches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:39:56.311513000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:39:56.860038000Z ERROR runmat] Script execution failed: Execution failed: No matching overload for `fprintf` with 2 args: fprintf: missing format string\n",
+          "stdout_tail": "RESULT_ok PRICE=25.4518814086914\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:34:12.211259000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:34:12.763217000Z  INFO runmat] Script executed successfully in 552.60425ms\n",
           "provider_telemetry": {
+            "auto_offload": {
+              "base_source": "loaded-from-cache",
+              "cache_path": "/Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json",
+              "calibrate_duration_ms": null,
+              "decisions": [
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052211
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052211
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052211
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052211
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052211
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052211
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052229
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052229
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "gpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "fusion-override",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052229
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 446205423.1666667,
+                  "decision": "gpu",
+                  "elements": 5000000,
+                  "flops": null,
+                  "fusion_kind": "ElementwiseChain",
+                  "gpu_estimate_ms": null,
+                  "operation": "elementwise",
+                  "reason": "residency",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052737
+                },
+                {
+                  "batch": null,
+                  "cpu_estimate_ms": 89.24108463333334,
+                  "decision": "cpu",
+                  "elements": 1,
+                  "flops": null,
+                  "fusion_kind": null,
+                  "gpu_estimate_ms": null,
+                  "operation": "unary",
+                  "reason": "threshold",
+                  "threshold": 4096,
+                  "timestamp_ms": 1763768052758
+                }
+              ],
+              "env_overrides_applied": false,
+              "provider": {
+                "backend": "metal",
+                "device_id": 1,
+                "name": "Apple M2 Max",
+                "vendor": "Apple"
+              },
+              "thresholds": {
+                "binary_min_elems": 4096,
+                "cpu_elem_per_elem": 0.08924108463333334,
+                "cpu_matmul_per_flop": 2.5e-11,
+                "cpu_reduction_per_elem": 1.2e-07,
+                "matmul_min_flops": 262144,
+                "reduction_min_elems": 4096,
+                "small_batch_max_dim": 8,
+                "small_batch_min_elems": 1048576,
+                "unary_min_elems": 4096
+              }
+            },
             "device": {
               "backend": "metal",
               "device_id": 1,
@@ -2115,26 +3352,119 @@
               "vendor": "Apple"
             },
             "telemetry": {
-              "bind_group_cache_by_layout": [],
+              "bind_group_cache_by_layout": [
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p1-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 1,
+                  "tag": "runmat-reduction-p2-bgl"
+                },
+                {
+                  "hits": 0,
+                  "misses": 2,
+                  "tag": "runmat-fusion-layout-2"
+                }
+              ],
               "bind_group_cache_hits": 0,
-              "bind_group_cache_misses": 0,
-              "download_bytes": 0,
+              "bind_group_cache_misses": 4,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 7,
+                "total_wall_time_ns": 516643293
               },
               "fused_reduction": {
-                "count": 0,
-                "total_wall_time_ns": 0
+                "count": 1,
+                "total_wall_time_ns": 5463625
               },
-              "fusion_cache_hits": 0,
-              "fusion_cache_misses": 37,
-              "kernel_launches": [],
+              "fusion_cache_hits": 4,
+              "fusion_cache_misses": 7,
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 5000000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 5000000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "matmul": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
-              "upload_bytes": 0
+              "upload_bytes": 20000004
             }
           },
           "M": 5000000
@@ -2143,11 +3473,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 91703.57933299965,
+          "median_ms": 79894.97812499758,
           "all_ms": [
-            92507.68512499963,
-            91703.57933299965,
-            87237.17162499997
+            80395.33712502453,
+            79894.97812499758,
+            79399.75820799009
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.469337\n",
@@ -2158,11 +3488,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 1686.775208000654,
+          "median_ms": 1697.5881250109524,
           "all_ms": [
-            1686.775208000654,
-            1703.461791999871,
-            1686.423707999893
+            1671.7221250000875,
+            1697.5881250109524,
+            1710.7511249778327
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok PRICE=25.488119 device=mps\n",
@@ -2181,54 +3511,54 @@
               "points": [
                 {
                   "param": 250000,
-                  "speedup": 4.3726035506514105
+                  "speedup": 4.93181081151226
                 },
                 {
                   "param": 500000,
-                  "speedup": 8.470921773755137
+                  "speedup": 9.11729232979512
                 },
                 {
                   "param": 1000000,
-                  "speedup": 16.14783051510322
+                  "speedup": 17.994112659245094
                 },
                 {
                   "param": 2000000,
-                  "speedup": 26.774011198226194
+                  "speedup": 29.134708203361374
                 },
                 {
                   "param": 5000000,
-                  "speedup": 54.36621246152682
+                  "speedup": 47.06381774700628
                 }
               ],
-              "mean_speedup": 22.026315899852555,
-              "auc_trapz": 150931385.08405963
+              "mean_speedup": 21.648348350184026,
+              "auc_trapz": 146396188.4967782
             },
             {
               "impl": "runmat",
               "points": [
                 {
                   "param": 250000,
-                  "speedup": 23.95090775161752
+                  "speedup": 37.44433168143057
                 },
                 {
                   "param": 500000,
-                  "speedup": 42.53353785511231
+                  "speedup": 60.29625234779922
                 },
                 {
                   "param": 1000000,
-                  "speedup": 74.3971089842813
+                  "speedup": 85.59663877397868
                 },
                 {
                   "param": 2000000,
-                  "speedup": 97.091526650028
+                  "speedup": 108.53395012314057
                 },
                 {
                   "param": 5000000,
-                  "speedup": 137.988021817794
+                  "speedup": 131.5452235699647
                 }
               ],
-              "mean_speedup": 75.19222061176663,
-              "auc_trapz": 475906857.92957723
+              "mean_speedup": 84.68327929926275,
+              "auc_trapz": 505874850.77231574
             }
           ]
         },
@@ -2236,173 +3566,623 @@
           "runs": 5,
           "per_point": [
             {
-              "median_ms": 198.33766700048727,
-              "upload_bytes": 0,
-              "download_bytes": 0,
+              "median_ms": 108.58429101062939,
+              "upload_bytes": 1000004,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 7,
+                "wall_ms": 43.736751
               },
               "fused_reduction": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 1,
+                "wall_ms": 4.044
               },
               "matmul": {
                 "count": 0,
                 "wall_ms": 0.0
               },
               "fusion_cache": {
-                "hits": 0,
-                "misses": 37
+                "hits": 3,
+                "misses": 7
               },
               "bind_group_cache": {
                 "hits": 0,
-                "misses": 0
+                "misses": 3
               },
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 250000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 250000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "status": "ok",
               "param": {
                 "M": 250000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 7,
+                  "fusion-override": 3,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 7,
+                  "gpu": 4
+                }
               }
             },
             {
-              "median_ms": 219.47916699991765,
-              "upload_bytes": 0,
-              "download_bytes": 0,
+              "median_ms": 136.10391700058244,
+              "upload_bytes": 2000004,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 7,
+                "wall_ms": 68.727916
               },
               "fused_reduction": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 1,
+                "wall_ms": 5.375291
               },
               "matmul": {
                 "count": 0,
                 "wall_ms": 0.0
               },
               "fusion_cache": {
-                "hits": 0,
-                "misses": 37
+                "hits": 4,
+                "misses": 7
               },
               "bind_group_cache": {
                 "hits": 0,
-                "misses": 0
+                "misses": 4
               },
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 500000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 500000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "status": "ok",
               "param": {
                 "M": 500000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 7,
+                  "fusion-override": 3,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 7,
+                  "gpu": 4
+                }
               }
             },
             {
-              "median_ms": 250.5979590005154,
-              "upload_bytes": 0,
-              "download_bytes": 0,
+              "median_ms": 188.0037909722887,
+              "upload_bytes": 4000004,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 7,
+                "wall_ms": 116.841625
               },
               "fused_reduction": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 1,
+                "wall_ms": 5.652834
               },
               "matmul": {
                 "count": 0,
                 "wall_ms": 0.0
               },
               "fusion_cache": {
-                "hits": 0,
-                "misses": 37
+                "hits": 4,
+                "misses": 7
               },
               "bind_group_cache": {
                 "hits": 0,
-                "misses": 0
+                "misses": 4
               },
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1000000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 1000000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "status": "ok",
               "param": {
                 "M": 1000000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 7,
+                  "fusion-override": 3,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 7,
+                  "gpu": 4
+                }
               }
             },
             {
-              "median_ms": 359.81379199984076,
-              "upload_bytes": 0,
-              "download_bytes": 0,
+              "median_ms": 297.64545799116604,
+              "upload_bytes": 8000004,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 7,
+                "wall_ms": 257.736459
               },
               "fused_reduction": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 1,
+                "wall_ms": 5.505375
               },
               "matmul": {
                 "count": 0,
                 "wall_ms": 0.0
               },
               "fusion_cache": {
-                "hits": 0,
-                "misses": 37
+                "hits": 4,
+                "misses": 7
               },
               "bind_group_cache": {
                 "hits": 0,
-                "misses": 0
+                "misses": 4
               },
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 2000000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 2000000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "status": "ok",
               "param": {
                 "M": 2000000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 7,
+                  "fusion-override": 3,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 7,
+                  "gpu": 4
+                }
               }
             },
             {
-              "median_ms": 664.5763749993421,
-              "upload_bytes": 0,
-              "download_bytes": 0,
+              "median_ms": 607.3575000045821,
+              "upload_bytes": 20000004,
+              "download_bytes": 4,
               "fused_elementwise": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 7,
+                "wall_ms": 516.643293
               },
               "fused_reduction": {
-                "count": 0,
-                "wall_ms": 0.0
+                "count": 1,
+                "wall_ms": 5.463625
               },
               "matmul": {
                 "count": 0,
                 "wall_ms": 0.0
               },
               "fusion_cache": {
-                "hits": 0,
-                "misses": 37
+                "hits": 4,
+                "misses": 7
               },
               "bind_group_cache": {
                 "hits": 0,
-                "misses": 0
+                "misses": 4
               },
+              "kernel_launches": [
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 5000000
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 2
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_reduction",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "reduce_len",
+                      "value": 5000000
+                    },
+                    {
+                      "key": "slices",
+                      "value": 1
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 256
+                    },
+                    {
+                      "key": "flavor",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kernel": "fused_elementwise",
+                  "precision": "f32",
+                  "shape": [
+                    {
+                      "key": "len",
+                      "value": 1
+                    },
+                    {
+                      "key": "inputs",
+                      "value": 2
+                    },
+                    {
+                      "key": "rank",
+                      "value": 1
+                    }
+                  ],
+                  "tuning": [
+                    {
+                      "key": "wg",
+                      "value": 512
+                    }
+                  ]
+                }
+              ],
               "status": "ok",
               "param": {
                 "M": 5000000
+              },
+              "auto_offload": {
+                "decisions_total": 11,
+                "by_reason": {
+                  "threshold": 7,
+                  "fusion-override": 3,
+                  "residency": 1
+                },
+                "by_decision": {
+                  "cpu": 7,
+                  "gpu": 4
+                }
               }
             }
           ],
           "totals": {
-            "upload_bytes": 0,
-            "download_bytes": 0,
+            "upload_bytes": 35000020,
+            "download_bytes": 20,
             "fused_elementwise": {
-              "count": 0,
-              "wall_ms": 0.0
+              "count": 35,
+              "wall_ms": 1003.686044
             },
             "fused_reduction": {
-              "count": 0,
-              "wall_ms": 0.0
+              "count": 5,
+              "wall_ms": 26.041125
             },
             "matmul": {
               "count": 0,
               "wall_ms": 0.0
             },
             "fusion_cache": {
-              "hits": 0,
-              "misses": 185
+              "hits": 19,
+              "misses": 35
             },
             "bind_group_cache": {
               "hits": 0,
-              "misses": 0
+              "misses": 19
             }
           },
           "device": {
@@ -2411,6 +4191,55 @@
             "memory_bytes": 20100448256,
             "name": "Apple M2 Max",
             "vendor": "Apple"
+          },
+          "auto_offload": {
+            "base_source": "loaded-from-cache",
+            "thresholds": {
+              "binary_min_elems": 4096,
+              "cpu_elem_per_elem": 0.08924108463333334,
+              "cpu_matmul_per_flop": 2.5e-11,
+              "cpu_reduction_per_elem": 1.2e-07,
+              "matmul_min_flops": 262144,
+              "reduction_min_elems": 4096,
+              "small_batch_max_dim": 8,
+              "small_batch_min_elems": 1048576,
+              "unary_min_elems": 4096
+            },
+            "env_overrides_applied": false,
+            "calibrate_duration_ms": null,
+            "decision_counts_by_reason": {
+              "threshold": 35,
+              "fusion-override": 15,
+              "residency": 5
+            },
+            "decision_counts_by_disposition": {
+              "cpu": 35,
+              "gpu": 20
+            }
+          },
+          "auto_offload_calibration": {
+            "runs": 5,
+            "cpu_time_ms": {
+              "elementwise": 307.96778797924867,
+              "reduction": 0.0,
+              "matmul": 0.0
+            },
+            "units": {
+              "elementwise": 35.0,
+              "reduction": 0.0,
+              "matmul_flops": 0.0
+            },
+            "provider": {
+              "backend": "metal",
+              "device_id": 1,
+              "memory_bytes": 20100448256,
+              "name": "Apple M2 Max",
+              "vendor": "Apple"
+            }
+          },
+          "kernel_launch_totals": {
+            "fused_elementwise": 10,
+            "fused_reduction": 5
           }
         }
       }
@@ -2438,15 +4267,15 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 206.5752500002418,
+          "median_ms": 145.14904201496392,
           "all_ms": [
-            180.8635419993152,
-            206.5752500002418,
-            206.62933299990982
+            123.08233400108293,
+            145.14904201496392,
+            148.8457919913344
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
-          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:44:34.159532000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:44:34.248176000Z  INFO runmat] Script executed successfully in 89.228333ms\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:38:17.978189000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:38:18.058339000Z  INFO runmat] Script executed successfully in 80.640583ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -2464,7 +4293,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588674159
+                  "timestamp_ms": 1763768297978
                 },
                 {
                   "batch": null,
@@ -2477,7 +4306,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588674167
+                  "timestamp_ms": 1763768297984
                 },
                 {
                   "batch": null,
@@ -2490,7 +4319,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588674176
+                  "timestamp_ms": 1763768297995
                 },
                 {
                   "batch": null,
@@ -2503,7 +4332,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588674205
+                  "timestamp_ms": 1763768298017
                 },
                 {
                   "batch": null,
@@ -2516,7 +4345,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588674220
+                  "timestamp_ms": 1763768298033
                 },
                 {
                   "batch": null,
@@ -2529,7 +4358,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588674223
+                  "timestamp_ms": 1763768298034
                 },
                 {
                   "batch": null,
@@ -2542,7 +4371,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588674223
+                  "timestamp_ms": 1763768298034
                 },
                 {
                   "batch": null,
@@ -2555,7 +4384,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588674231
+                  "timestamp_ms": 1763768298039
                 },
                 {
                   "batch": null,
@@ -2568,7 +4397,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588674232
+                  "timestamp_ms": 1763768298042
                 }
               ],
               "env_overrides_applied": false,
@@ -2610,14 +4439,14 @@
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "total_wall_time_ns": 77403958
+                "total_wall_time_ns": 71420374
               },
               "fused_reduction": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 10,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -2705,11 +4534,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 65.10754199916846,
+          "median_ms": 72.38699999288656,
           "all_ms": [
-            81.30454199999804,
-            65.10754199916846,
-            62.869832999240316
+            79.24462499795482,
+            72.38699999288656,
+            69.21733400668018
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
@@ -2720,11 +4549,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 818.9267500001733,
+          "median_ms": 856.4117920177523,
           "all_ms": [
-            818.9267500001733,
-            813.805124999817,
-            821.031459000551
+            896.0461670067161,
+            856.4117920177523,
+            855.5737079877872
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok device=mps\n",
@@ -2736,15 +4565,15 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 207.71199999944656,
+          "median_ms": 149.75458299159072,
           "all_ms": [
-            186.0659170006329,
-            207.71199999944656,
-            212.7442910004902
+            135.14762499835342,
+            149.75458299159072,
+            156.0581249941606
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
-          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:44:37.560964000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:44:37.656501000Z  INFO runmat] Script executed successfully in 96.200875ms\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:38:21.345717000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:38:21.430867000Z  INFO runmat] Script executed successfully in 85.605834ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -2762,7 +4591,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588677561
+                  "timestamp_ms": 1763768301345
                 },
                 {
                   "batch": null,
@@ -2775,7 +4604,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588677570
+                  "timestamp_ms": 1763768301352
                 },
                 {
                   "batch": null,
@@ -2788,7 +4617,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588677580
+                  "timestamp_ms": 1763768301362
                 },
                 {
                   "batch": null,
@@ -2801,7 +4630,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588677613
+                  "timestamp_ms": 1763768301382
                 },
                 {
                   "batch": null,
@@ -2814,7 +4643,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588677628
+                  "timestamp_ms": 1763768301405
                 },
                 {
                   "batch": null,
@@ -2827,7 +4656,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588677631
+                  "timestamp_ms": 1763768301408
                 },
                 {
                   "batch": null,
@@ -2840,7 +4669,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588677631
+                  "timestamp_ms": 1763768301408
                 },
                 {
                   "batch": null,
@@ -2853,7 +4682,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588677639
+                  "timestamp_ms": 1763768301413
                 },
                 {
                   "batch": null,
@@ -2866,7 +4695,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588677640
+                  "timestamp_ms": 1763768301415
                 }
               ],
               "env_overrides_applied": false,
@@ -2908,14 +4737,14 @@
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "total_wall_time_ns": 83016873
+                "total_wall_time_ns": 76273542
               },
               "fused_reduction": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 10,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -3003,11 +4832,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 76.98037499994825,
+          "median_ms": 79.48933300212957,
           "all_ms": [
-            93.83704100036994,
-            76.98037499994825,
-            76.83875000020635
+            87.25883299484849,
+            79.40862499526702,
+            79.48933300212957
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
@@ -3018,11 +4847,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 877.3257499997271,
+          "median_ms": 901.0459579876624,
           "all_ms": [
-            877.3257499997271,
-            861.9696669993573,
-            901.3641669998833
+            954.0227499965113,
+            897.9529580101371,
+            901.0459579876624
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok device=mps\n",
@@ -3034,15 +4863,15 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 206.91554099994391,
+          "median_ms": 145.13591601280496,
           "all_ms": [
-            196.4924579997387,
-            208.54733299984218,
-            206.91554099994391
+            134.54120798269287,
+            145.13591601280496,
+            149.16716699372046
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
-          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:44:41.205474000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:44:41.295575000Z  INFO runmat] Script executed successfully in 90.760958ms\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:38:24.882697000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:38:24.961888000Z  INFO runmat] Script executed successfully in 79.653291ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -3060,7 +4889,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588681205
+                  "timestamp_ms": 1763768304882
                 },
                 {
                   "batch": null,
@@ -3073,7 +4902,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588681213
+                  "timestamp_ms": 1763768304889
                 },
                 {
                   "batch": null,
@@ -3086,7 +4915,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588681222
+                  "timestamp_ms": 1763768304899
                 },
                 {
                   "batch": null,
@@ -3099,7 +4928,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588681252
+                  "timestamp_ms": 1763768304920
                 },
                 {
                   "batch": null,
@@ -3112,7 +4941,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588681268
+                  "timestamp_ms": 1763768304936
                 },
                 {
                   "batch": null,
@@ -3125,7 +4954,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588681270
+                  "timestamp_ms": 1763768304939
                 },
                 {
                   "batch": null,
@@ -3138,7 +4967,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588681270
+                  "timestamp_ms": 1763768304939
                 },
                 {
                   "batch": null,
@@ -3151,7 +4980,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588681278
+                  "timestamp_ms": 1763768304944
                 },
                 {
                   "batch": null,
@@ -3164,7 +4993,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588681280
+                  "timestamp_ms": 1763768304946
                 }
               ],
               "env_overrides_applied": false,
@@ -3206,14 +5035,14 @@
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "total_wall_time_ns": 78754335
+                "total_wall_time_ns": 70350958
               },
               "fused_reduction": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 10,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -3301,11 +5130,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 112.13591700015968,
+          "median_ms": 119.45108399959281,
           "all_ms": [
-            130.42937499994878,
-            112.13591700015968,
-            107.89145900071162
+            119.45108399959281,
+            130.84812500164844,
+            115.1292499853298
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
@@ -3316,11 +5145,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 1245.376292000401,
+          "median_ms": 1111.164625006495,
           "all_ms": [
-            1245.376292000401,
-            1249.2792079992796,
-            1176.8090409996148
+            1131.8377919960767,
+            1111.164625006495,
+            1075.7046249927953
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok device=mps\n",
@@ -3332,15 +5161,15 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 208.9523750000808,
+          "median_ms": 143.39379098964855,
           "all_ms": [
-            185.56716600051004,
-            212.2364999995625,
-            208.9523750000808
+            137.16370801557787,
+            143.39379098964855,
+            144.5267499948386
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
-          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:44:45.975136000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:44:46.068011000Z  INFO runmat] Script executed successfully in 93.437542ms\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:38:29.097026000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:38:29.173108000Z  INFO runmat] Script executed successfully in 76.542166ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -3358,7 +5187,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588685975
+                  "timestamp_ms": 1763768309097
                 },
                 {
                   "batch": null,
@@ -3371,7 +5200,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588685983
+                  "timestamp_ms": 1763768309103
                 },
                 {
                   "batch": null,
@@ -3384,7 +5213,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588685992
+                  "timestamp_ms": 1763768309114
                 },
                 {
                   "batch": null,
@@ -3397,7 +5226,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588686020
+                  "timestamp_ms": 1763768309135
                 },
                 {
                   "batch": null,
@@ -3410,7 +5239,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588686036
+                  "timestamp_ms": 1763768309149
                 },
                 {
                   "batch": null,
@@ -3423,7 +5252,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588686037
+                  "timestamp_ms": 1763768309150
                 },
                 {
                   "batch": null,
@@ -3436,7 +5265,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588686037
+                  "timestamp_ms": 1763768309150
                 },
                 {
                   "batch": null,
@@ -3449,7 +5278,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588686044
+                  "timestamp_ms": 1763768309155
                 },
                 {
                   "batch": null,
@@ -3462,7 +5291,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588686045
+                  "timestamp_ms": 1763768309157
                 }
               ],
               "env_overrides_applied": false,
@@ -3504,14 +5333,14 @@
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "total_wall_time_ns": 82899708
+                "total_wall_time_ns": 67255709
               },
               "fused_reduction": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 10,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -3599,11 +5428,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 167.43233399938617,
+          "median_ms": 154.379167011939,
           "all_ms": [
-            174.72858400014957,
-            167.43233399938617,
-            159.1946660000758
+            161.52329102624208,
+            153.59870801330544,
+            154.379167011939
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
@@ -3614,11 +5443,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 1386.4783330000137,
+          "median_ms": 1377.4251250142697,
           "all_ms": [
-            1386.4783330000137,
-            1399.6172920005847,
-            1381.959375000406
+            1377.4251250142697,
+            1395.6127499986906,
+            1366.4984999923036
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok device=mps\n",
@@ -3630,15 +5459,15 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 209.04262499971082,
+          "median_ms": 144.81316599994898,
           "all_ms": [
-            195.47366599999805,
-            209.48212499934016,
-            209.04262499971082
+            133.75937499222346,
+            144.81316599994898,
+            148.39449999271892
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
-          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:44:51.409194000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:44:51.499023000Z  INFO runmat] Script executed successfully in 90.573625ms\n",
+          "stderr_tail": "load: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:38:34.225643000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:38:34.304236000Z  INFO runmat] Script executed successfully in 79.0935ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -3656,7 +5485,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588691409
+                  "timestamp_ms": 1763768314225
                 },
                 {
                   "batch": null,
@@ -3669,7 +5498,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588691417
+                  "timestamp_ms": 1763768314232
                 },
                 {
                   "batch": null,
@@ -3682,7 +5511,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588691425
+                  "timestamp_ms": 1763768314243
                 },
                 {
                   "batch": null,
@@ -3695,7 +5524,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588691454
+                  "timestamp_ms": 1763768314263
                 },
                 {
                   "batch": null,
@@ -3708,7 +5537,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588691471
+                  "timestamp_ms": 1763768314278
                 },
                 {
                   "batch": null,
@@ -3721,7 +5550,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588691474
+                  "timestamp_ms": 1763768314279
                 },
                 {
                   "batch": null,
@@ -3734,7 +5563,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588691474
+                  "timestamp_ms": 1763768314279
                 },
                 {
                   "batch": null,
@@ -3747,7 +5576,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588691482
+                  "timestamp_ms": 1763768314287
                 },
                 {
                   "batch": null,
@@ -3760,7 +5589,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588691483
+                  "timestamp_ms": 1763768314288
                 }
               ],
               "env_overrides_applied": false,
@@ -3802,14 +5631,14 @@
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "total_wall_time_ns": 78560041
+                "total_wall_time_ns": 68676249
               },
               "fused_reduction": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 10,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -3897,11 +5726,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 1069.6407499999623,
+          "median_ms": 1073.0936249892693,
           "all_ms": [
-            1121.5869159996146,
-            1069.6407499999623,
-            1056.4429590003783
+            1073.0936249892693,
+            1062.0052909944206,
+            1081.1777909984812
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
@@ -3912,11 +5741,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 16694.22562499949,
+          "median_ms": 16404.21970799798,
           "all_ms": [
-            16694.22562499949,
-            16221.130208000432,
-            16733.68904200015
+            16404.21970799798,
+            16273.03412501351,
+            16413.61395898275
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok device=mps\n",
@@ -3928,15 +5757,15 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 203.28070799951092,
+          "median_ms": 156.93925000960007,
           "all_ms": [
-            196.10424999973475,
-            203.28070799951092,
-            212.38454099966475
+            128.83562501519918,
+            160.29166599037126,
+            156.93925000960007
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
-          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:45:45.055535000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:45:45.150004000Z  INFO runmat] Script executed successfully in 95.123833ms\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:39:27.071302000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:39:27.156888000Z  INFO runmat] Script executed successfully in 86.151792ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -3954,7 +5783,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588745055
+                  "timestamp_ms": 1763768367071
                 },
                 {
                   "batch": null,
@@ -3967,7 +5796,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588745065
+                  "timestamp_ms": 1763768367080
                 },
                 {
                   "batch": null,
@@ -3980,7 +5809,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588745075
+                  "timestamp_ms": 1763768367094
                 },
                 {
                   "batch": null,
@@ -3993,7 +5822,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588745106
+                  "timestamp_ms": 1763768367118
                 },
                 {
                   "batch": null,
@@ -4006,7 +5835,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588745122
+                  "timestamp_ms": 1763768367133
                 },
                 {
                   "batch": null,
@@ -4019,7 +5848,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588745124
+                  "timestamp_ms": 1763768367134
                 },
                 {
                   "batch": null,
@@ -4032,7 +5861,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588745124
+                  "timestamp_ms": 1763768367134
                 },
                 {
                   "batch": null,
@@ -4045,7 +5874,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588745132
+                  "timestamp_ms": 1763768367141
                 },
                 {
                   "batch": null,
@@ -4058,7 +5887,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588745134
+                  "timestamp_ms": 1763768367142
                 }
               ],
               "env_overrides_applied": false,
@@ -4100,14 +5929,14 @@
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "total_wall_time_ns": 81680625
+                "total_wall_time_ns": 74589874
               },
               "fused_reduction": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 10,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -4195,11 +6024,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 2069.533124999907,
+          "median_ms": 2114.6579589985777,
           "all_ms": [
-            2100.33520900015,
-            2069.533124999907,
-            2049.1924999996627
+            2095.600000000559,
+            2148.2137080165558,
+            2114.6579589985777
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
@@ -4210,11 +6039,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 16811.446415999853,
+          "median_ms": 16558.975416992325,
           "all_ms": [
-            16811.446415999853,
-            16813.071709000724,
-            16730.283833999238
+            16646.391624992248,
+            16558.975416992325,
+            16539.94179100846
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok device=mps\n",
@@ -4226,15 +6055,15 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 211.1624169992865,
+          "median_ms": 137.58370801224373,
           "all_ms": [
-            191.39274999997724,
-            211.91308399920672,
-            211.1624169992865
+            137.58370801224373,
+            134.87149999127723,
+            162.2448329871986
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
-          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:46:42.387607000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:46:42.481806000Z  INFO runmat] Script executed successfully in 94.845291ms\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:40:23.766571000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:40:23.858240000Z  INFO runmat] Script executed successfully in 92.218083ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -4252,7 +6081,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588802387
+                  "timestamp_ms": 1763768423766
                 },
                 {
                   "batch": null,
@@ -4265,7 +6094,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588802395
+                  "timestamp_ms": 1763768423774
                 },
                 {
                   "batch": null,
@@ -4278,7 +6107,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588802406
+                  "timestamp_ms": 1763768423789
                 },
                 {
                   "batch": null,
@@ -4291,7 +6120,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588802438
+                  "timestamp_ms": 1763768423815
                 },
                 {
                   "batch": null,
@@ -4304,7 +6133,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588802454
+                  "timestamp_ms": 1763768423831
                 },
                 {
                   "batch": null,
@@ -4317,7 +6146,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588802456
+                  "timestamp_ms": 1763768423833
                 },
                 {
                   "batch": null,
@@ -4330,7 +6159,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588802456
+                  "timestamp_ms": 1763768423833
                 },
                 {
                   "batch": null,
@@ -4343,7 +6172,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588802464
+                  "timestamp_ms": 1763768423841
                 },
                 {
                   "batch": null,
@@ -4356,7 +6185,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588802466
+                  "timestamp_ms": 1763768423842
                 }
               ],
               "env_overrides_applied": false,
@@ -4398,14 +6227,14 @@
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "total_wall_time_ns": 82907001
+                "total_wall_time_ns": 80644082
               },
               "fused_reduction": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 10,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -4493,11 +6322,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 5029.805166999722,
+          "median_ms": 5026.9426250015385,
           "all_ms": [
-            5574.846290999631,
-            5029.805166999722,
-            5004.226250000102
+            5662.025750003522,
+            4967.151167016709,
+            5026.9426250015385
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
@@ -4508,11 +6337,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 18019.03008299996,
+          "median_ms": 17882.112166000297,
           "all_ms": [
-            19206.747167000685,
-            18019.03008299996,
-            17804.299833000186
+            18481.959333992563,
+            17733.551374985836,
+            17882.112166000297
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok device=mps\n",
@@ -4524,15 +6353,15 @@
           "impl": "runmat",
           "lang": "matlab-syntax",
           "iterations": 3,
-          "median_ms": 203.85600000008708,
+          "median_ms": 144.39554201089777,
           "all_ms": [
-            198.45741700009967,
-            203.85600000008708,
-            210.79933300006815
+            145.49704099772498,
+            136.41337500303052,
+            144.39554201089777
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
-          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-19T21:47:53.861424000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-19T21:47:53.951784000Z  INFO runmat] Script executed successfully in 91.042334ms\n",
+          "stderr_tail": "ad: loaded cached calibration for 'Apple M2 Max' from /Users/nallana/Library/Caches/runmat/auto_offload/apple-apple_m2_max-metal-1.json\n[2025-11-21T23:41:34.133820000Z  INFO runmat_accelerate::native_auto] Native auto-offload thresholds: unary=4096 binary=4096 reduction=4096 matmul_flops=262144 small_batch_dim=8 small_batch_min_elems=1048576 (model: fallback, source: loaded-from-cache, env_overrides=false)\n[2025-11-21T23:41:34.210595000Z  INFO runmat] Script executed successfully in 77.249459ms\n",
           "provider_telemetry": {
             "auto_offload": {
               "base_source": "loaded-from-cache",
@@ -4550,7 +6379,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588873861
+                  "timestamp_ms": 1763768494133
                 },
                 {
                   "batch": null,
@@ -4563,7 +6392,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588873869
+                  "timestamp_ms": 1763768494140
                 },
                 {
                   "batch": null,
@@ -4576,7 +6405,7 @@
                   "operation": "unary",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588873878
+                  "timestamp_ms": 1763768494150
                 },
                 {
                   "batch": null,
@@ -4589,7 +6418,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588873908
+                  "timestamp_ms": 1763768494171
                 },
                 {
                   "batch": null,
@@ -4602,7 +6431,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588873924
+                  "timestamp_ms": 1763768494188
                 },
                 {
                   "batch": null,
@@ -4615,7 +6444,7 @@
                   "operation": "unary",
                   "reason": "threshold",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588873926
+                  "timestamp_ms": 1763768494190
                 },
                 {
                   "batch": null,
@@ -4628,7 +6457,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588873926
+                  "timestamp_ms": 1763768494190
                 },
                 {
                   "batch": null,
@@ -4641,7 +6470,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588873934
+                  "timestamp_ms": 1763768494196
                 },
                 {
                   "batch": null,
@@ -4654,7 +6483,7 @@
                   "operation": "elementwise",
                   "reason": "residency",
                   "threshold": 4096,
-                  "timestamp_ms": 1763588873936
+                  "timestamp_ms": 1763768494197
                 }
               ],
               "env_overrides_applied": false,
@@ -4696,14 +6525,14 @@
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "total_wall_time_ns": 78998458
+                "total_wall_time_ns": 68260417
               },
               "fused_reduction": {
                 "count": 0,
                 "total_wall_time_ns": 0
               },
               "fusion_cache_hits": 3,
-              "fusion_cache_misses": 37,
+              "fusion_cache_misses": 10,
               "kernel_launches": [
                 {
                   "kernel": "fused_elementwise",
@@ -4791,11 +6620,11 @@
           "impl": "python-numpy",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 12275.717665999764,
+          "median_ms": 11931.927708006697,
           "all_ms": [
-            12761.654165999971,
-            12194.336624999778,
-            12275.717665999764
+            12592.941125010839,
+            11874.381959001767,
+            11931.927708006697
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok\n",
@@ -4806,11 +6635,11 @@
           "impl": "python-torch",
           "lang": "python",
           "iterations": 3,
-          "median_ms": 22184.542292000515,
+          "median_ms": 20841.4241670107,
           "all_ms": [
-            21806.82387499928,
-            22256.14433300052,
-            22184.542292000515
+            21337.768500001403,
+            20841.4241670107,
+            20509.694917011075
           ],
           "mse": null,
           "stdout_tail": "RESULT_ok device=mps\n",
@@ -4833,78 +6662,78 @@
               "points": [
                 {
                   "param": 1000000,
-                  "speedup": 0.07950349893828072
+                  "speedup": 0.08452359094955814
                 },
                 {
                   "param": 2000000,
-                  "speedup": 0.08774434695433503
+                  "speedup": 0.08821895520141491
                 },
                 {
                   "param": 5000000,
-                  "speedup": 0.09004179517504704
+                  "speedup": 0.10750079809181703
                 },
                 {
                   "param": 10000000,
-                  "speedup": 0.12076087307985686
+                  "speedup": 0.1120780826546486
                 },
                 {
                   "param": 100000000,
-                  "speedup": 0.06407249872064641
+                  "speedup": 0.0654157066956422
                 },
                 {
                   "param": 200000000,
-                  "speedup": 0.12310262149902124
+                  "speedup": 0.127704637862351
                 },
                 {
                   "param": 500000000,
-                  "speedup": 0.27913850766835047
+                  "speedup": 0.28111570816334486
                 },
                 {
                   "param": 1000000000,
-                  "speedup": 0.5533455459401677
+                  "speedup": 0.5725101899175109
                 }
               ],
-              "mean_speedup": 0.17471371099696317,
-              "auc_trapz": 287010750.3260189
+              "mean_speedup": 0.17988345869203595,
+              "auc_trapz": 293301662.27761257
             },
             {
               "impl": "runmat",
               "points": [
                 {
                   "param": 1000000,
-                  "speedup": 0.31517590804848233
+                  "speedup": 0.4987080795574519
                 },
                 {
                   "param": 2000000,
-                  "speedup": 0.37061111057692075
+                  "speedup": 0.5307973313016616
                 },
                 {
                   "param": 5000000,
-                  "speedup": 0.5419405253865879
+                  "speedup": 0.8230291114781951
                 },
                 {
                   "param": 10000000,
-                  "speedup": 0.8012942374994371
+                  "speedup": 1.0766098444463572
                 },
                 {
                   "param": 100000000,
-                  "speedup": 5.11685475630361
+                  "speedup": 7.410193800953481
                 },
                 {
                   "param": 200000000,
-                  "speedup": 10.180666652365685
+                  "speedup": 13.474372783540273
                 },
                 {
                   "param": 500000000,
-                  "speedup": 23.819604068164825
+                  "speedup": 36.53733932330262
                 },
                 {
                   "param": 1000000000,
-                  "speedup": 60.21759313434248
+                  "speedup": 82.63362941707837
                 }
               ],
-              "mean_speedup": 12.670467549086004,
-              "auc_trapz": 27145602491.731476
+              "mean_speedup": 17.8730849614573,
+              "auc_trapz": 38727928084.14877
             }
           ]
         },
@@ -4912,12 +6741,12 @@
           "runs": 8,
           "per_point": [
             {
-              "median_ms": 206.5752500002418,
+              "median_ms": 145.14904201496392,
               "upload_bytes": 12,
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "wall_ms": 77.403958
+                "wall_ms": 71.420374
               },
               "fused_reduction": {
                 "count": 0,
@@ -4929,7 +6758,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 10
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -5026,12 +6855,12 @@
               }
             },
             {
-              "median_ms": 207.71199999944656,
+              "median_ms": 149.75458299159072,
               "upload_bytes": 12,
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "wall_ms": 83.016873
+                "wall_ms": 76.273542
               },
               "fused_reduction": {
                 "count": 0,
@@ -5043,7 +6872,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 10
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -5140,12 +6969,12 @@
               }
             },
             {
-              "median_ms": 206.91554099994391,
+              "median_ms": 145.13591601280496,
               "upload_bytes": 12,
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "wall_ms": 78.754335
+                "wall_ms": 70.350958
               },
               "fused_reduction": {
                 "count": 0,
@@ -5157,7 +6986,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 10
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -5254,12 +7083,12 @@
               }
             },
             {
-              "median_ms": 208.9523750000808,
+              "median_ms": 143.39379098964855,
               "upload_bytes": 12,
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "wall_ms": 82.899708
+                "wall_ms": 67.255709
               },
               "fused_reduction": {
                 "count": 0,
@@ -5271,7 +7100,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 10
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -5368,12 +7197,12 @@
               }
             },
             {
-              "median_ms": 209.04262499971082,
+              "median_ms": 144.81316599994898,
               "upload_bytes": 12,
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "wall_ms": 78.560041
+                "wall_ms": 68.676249
               },
               "fused_reduction": {
                 "count": 0,
@@ -5385,7 +7214,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 10
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -5482,12 +7311,12 @@
               }
             },
             {
-              "median_ms": 203.28070799951092,
+              "median_ms": 156.93925000960007,
               "upload_bytes": 12,
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "wall_ms": 81.680625
+                "wall_ms": 74.589874
               },
               "fused_reduction": {
                 "count": 0,
@@ -5499,7 +7328,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 10
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -5596,12 +7425,12 @@
               }
             },
             {
-              "median_ms": 211.1624169992865,
+              "median_ms": 137.58370801224373,
               "upload_bytes": 12,
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "wall_ms": 82.907001
+                "wall_ms": 80.644082
               },
               "fused_reduction": {
                 "count": 0,
@@ -5613,7 +7442,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 10
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -5710,12 +7539,12 @@
               }
             },
             {
-              "median_ms": 203.85600000008708,
+              "median_ms": 144.39554201089777,
               "upload_bytes": 12,
               "download_bytes": 0,
               "fused_elementwise": {
                 "count": 10,
-                "wall_ms": 78.998458
+                "wall_ms": 68.260417
               },
               "fused_reduction": {
                 "count": 0,
@@ -5727,7 +7556,7 @@
               },
               "fusion_cache": {
                 "hits": 3,
-                "misses": 37
+                "misses": 10
               },
               "bind_group_cache": {
                 "hits": 0,
@@ -5829,7 +7658,7 @@
             "download_bytes": 0,
             "fused_elementwise": {
               "count": 80,
-              "wall_ms": 644.2209990000001
+              "wall_ms": 577.4712049999999
             },
             "fused_reduction": {
               "count": 0,
@@ -5841,7 +7670,7 @@
             },
             "fusion_cache": {
               "hits": 24,
-              "misses": 296
+              "misses": 80
             },
             "bind_group_cache": {
               "hits": 0,
@@ -5882,7 +7711,7 @@
           "auto_offload_calibration": {
             "runs": 8,
             "cpu_time_ms": {
-              "elementwise": 1013.2759169983083,
+              "elementwise": 589.6937930416988,
               "reduction": 0.0,
               "matmul": 0.0
             },
