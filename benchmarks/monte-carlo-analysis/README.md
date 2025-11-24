@@ -14,7 +14,18 @@ price  = mean(payoff) · exp(−μ T Δt)
 
 ## Results
 
-![RunMat is up to 138x faster than NumPy](https://web.runmatstatic.com/monte-carlo-analysis_speedup.svg)
+![RunMat is up to 131x faster than NumPy](https://web.runmatstatic.com/monte-carlo-analysis_speedup-b.svg)
+
+### Monte Carlo Perf Sweep 
+| Paths (simulations) | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|--------------------:|-----------:|-------------:|-----------:|---------------:|-----------------:|
+| 250k   | 108.58 |   824.42 |  4,065.87 | 37.44× | 7.59× |
+| 500k   | 136.10 |   900.11 |  8,206.56 | 60.30× | 6.61× |
+| 1M     | 188.00 |   894.32 | 16,092.49 | 85.60× | 4.76× |
+| 2M     | 297.65 | 1,108.80 | 32,304.64 |108.53× | 3.73× |
+| 5M     | 607.36 | 1,697.59 | 79,894.98 |131.55× | 2.80× |
+
+*250k = 250,000 paths, 1M = 1,000,000 paths, etc.*
 
 ---
 

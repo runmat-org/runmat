@@ -7,9 +7,9 @@ import MonteCarloSweep from "./MonteCarloSweep";
 import ElementwiseMathSweep from "./ElementwiseMathSweep";
 
 const slides = [
-  { id: "4k", component: FourKImagePipelineSweep },
-  { id: "monte-carlo", component: MonteCarloSweep },
-  { id: "elementwise", component: ElementwiseMathSweep },
+  { id: "4k", component: FourKImagePipelineSweep, href: "/benchmarks/4k-image-processing" },
+  { id: "monte-carlo", component: MonteCarloSweep, href: "/benchmarks/monte-carlo-analysis" },
+  { id: "elementwise", component: ElementwiseMathSweep, href: "/benchmarks/elementwise-math" },
 ];
 
 export default function BenchmarkSweepCarousel() {
@@ -31,9 +31,9 @@ export default function BenchmarkSweepCarousel() {
         >
           ←
         </button>
-        <div className="w-full max-w-[42rem]">
+        <a className="w-full max-w-[42rem]" href={activeSlide.href}>
           <Component />
-        </div>
+        </a>
         <button
           type="button"
           onClick={goNext}

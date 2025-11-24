@@ -6,11 +6,11 @@ type SweepRow = {
 };
 
 const SWEEP_ROWS: SweepRow[] = [
-  { batchSize: 4, runMatMs: 204, vsPyTorch: "4.5× faster", vsNumPy: "2.6× faster" },
-  { batchSize: 8, runMatMs: 265, vsPyTorch: "3.3× faster", vsNumPy: "3.5× faster" },
-  { batchSize: 16, runMatMs: 299, vsPyTorch: "3.3× faster", vsNumPy: "6.1× faster" },
-  { batchSize: 32, runMatMs: 493, vsPyTorch: "2.2× faster", vsNumPy: "7.6× faster" },
-  { batchSize: 64, runMatMs: 871, vsPyTorch: "1.5× faster", vsNumPy: "8.3× faster" },
+  { batchSize: 4, runMatMs: 143, vsPyTorch: "5.6× faster", vsNumPy: "3.5× faster" },
+  { batchSize: 8, runMatMs: 213, vsPyTorch: "3.8× faster", vsNumPy: "4.4× faster" },
+  { batchSize: 16, runMatMs: 242, vsPyTorch: "3.8× faster", vsNumPy: "7.4× faster" },
+  { batchSize: 32, runMatMs: 389, vsPyTorch: "2.9× faster", vsNumPy: "9.3× faster" },
+  { batchSize: 64, runMatMs: 684, vsPyTorch: "1.8× faster", vsNumPy: "10.2× faster" },
 ];
 
 export default function FourKImagePipelineSweep() {
@@ -79,10 +79,10 @@ export default function FourKImagePipelineSweep() {
                   RunMat speedup range
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  1.5× – 4.5× vs PyTorch
+                  1.8× – 5.6× vs PyTorch
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  2.6× – 8.3× vs NumPy
+                  3.5× – 10.2× vs NumPy
                 </td>
               </tr>
             </tfoot>
