@@ -3,7 +3,7 @@ import type { BenchmarkShowcaseConfig } from "@/lib/marketing-benchmarks";
 export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
   {
     caseId: "4k-image-processing",
-    heroLabel: "4K Image Processing",
+    heroLabel: "Image Processing",
     description: "Denoise + Tone Mapping 4K Frames",
     deviceLabel: "Apple M2 Max",
     link: "/benchmarks/4k-image-processing",
@@ -15,8 +15,8 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
       highlightImpl: "runmat",
       baselineImpl: "python-numpy",
       labelOverrides: {
-        "python-numpy": "Python NumPy (CPU)",
-        "python-torch": "Python PyTorch (GPU)",
+        "python-numpy": "Python NumPy",
+        "python-torch": "Python PyTorch\n(GPU)",
         runmat: "RunMat (GPU)",
       },
     },
@@ -68,7 +68,7 @@ export const BENCHMARK_SHOWCASE_CONFIG: BenchmarkShowcaseConfig[] = [
         runmat: "RunMat (GPU)",
       },
     },
-    headlineOverride: "80x faster than NumPy at 1B points",
+    headlineOverride: "RunMat is 80x faster than Python at 1B points",
     stat: {
       compareImpl: "python-numpy",
       referenceImpl: "runmat",
