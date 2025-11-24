@@ -6,11 +6,11 @@ type MonteCarloRow = {
 };
 
 const MONTE_CARLO_ROWS: MonteCarloRow[] = [
-  { paths: "250k", runMatMs: 168, vsPyTorch: "5.1× faster", vsNumPy: "24.7× faster" },
-  { paths: "500k", runMatMs: 166, vsPyTorch: "5.3× faster", vsNumPy: "50.1× faster" },
-  { paths: "1M", runMatMs: 240, vsPyTorch: "4.0× faster", vsNumPy: "69.1× faster" },
-  { paths: "2M", runMatMs: 343, vsPyTorch: "3.3× faster", vsNumPy: "96.3× faster" },
-  { paths: "5M", runMatMs: 652, vsPyTorch: "2.8× faster", vsNumPy: "125.8× faster" },
+  { paths: "250k", runMatMs: 109, vsPyTorch: "7.6× faster", vsNumPy: "37.4× faster" },
+  { paths: "500k", runMatMs: 136, vsPyTorch: "6.6× faster", vsNumPy: "60.3× faster" },
+  { paths: "1M", runMatMs: 188, vsPyTorch: "4.8× faster", vsNumPy: "85.6× faster" },
+  { paths: "2M", runMatMs: 298, vsPyTorch: "3.7× faster", vsNumPy: "108.5× faster" },
+  { paths: "5M", runMatMs: 607, vsPyTorch: "2.8× faster", vsNumPy: "131.5× faster" },
 ];
 
 export default function MonteCarloSweep() {
@@ -71,10 +71,10 @@ export default function MonteCarloSweep() {
                   RunMat speedup range
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  2.8× – 5.3× vs PyTorch
+                  2.8× – 7.6× vs PyTorch
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  24.7× – 125.8× vs NumPy
+                  37.4× – 131.5× vs NumPy
                 </td>
               </tr>
             </tfoot>

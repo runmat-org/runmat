@@ -175,8 +175,11 @@ export default function HomePage() {
               <p>
                 <span className="font-semibold">Monte Carlo:</span> geometric Brownian motion with terminal PnL and risk stats.
               </p>
+              <p>
+                <span className="font-semibold">Elementwise math:</span> long chain of sin, exp, cos, and tanh operations on big 1D arrays.
+              </p>
               <p className="text-sm">
-                Each number is the mean of <span className="font-semibold">3 runs</span>. Full scripts live in the{" "}
+                Each number is the median of <span className="font-semibold">3 runs</span>. Full scripts live in the{" "}
                 <a
                   href="https://github.com/runmat-org/runmat/tree/main/benchmarks"
                   className="underline"

@@ -18,7 +18,20 @@ The scripts scale the number of samples via `ELM_POINTS` (default
 
 ## Results
 
-![RunMat is up to 100x faster](https://web.runmatstatic.com/elementwise-math_speedup.svg)
+![RunMat is up to 144x faster](https://web.runmatstatic.com/elementwise-math_speedup-b.svg)
+
+
+### Elementwise Math Perf Sweep (points)
+| points | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|---|---:|---:|---:|---:|---:|
+| 1,000,000   | 145.15 | 856.41  |   72.39 | 0.50× | 5.90× |
+| 2,000,000   | 149.75 | 901.05  |   79.49 | 0.53× | 6.02× |
+| 5,000,000   | 145.14 | 1111.16 |  119.45 | 0.82× | 7.66× |
+| 10,000,000  | 143.39 | 1377.43 |  154.38 | 1.08× | 9.61× |
+| 100,000,000 | 144.81 | 16,404.22 | 1,073.09 | 7.41× | 113.28× |
+| 200,000,000 | 156.94 | 16,558.98 | 2,114.66 | 13.47× | 105.51× |
+| 500,000,000 | 137.58 | 17,882.11 | 5,026.94 | 36.54× | 129.97× |
+| 1,000,000,000 | 144.40 | 20,841.42 | 11,931.93 | 82.63× | 144.34× |
 
 ---
 

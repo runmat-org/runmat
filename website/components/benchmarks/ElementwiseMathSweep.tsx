@@ -6,11 +6,11 @@ type ElementwiseRow = {
 };
 
 const ELEMENTWISE_ROWS: ElementwiseRow[] = [
-  { points: "10M", runMatMs: 174, vsPyTorch: "8× faster", vsNumPy: "≈ same speed" },
-  { points: "100M", runMatMs: 171, vsPyTorch: "99× faster", vsNumPy: "6× faster" },
-  { points: "200M", runMatMs: 203, vsPyTorch: "86× faster", vsNumPy: "11× faster" },
-  { points: "500M", runMatMs: 172, vsPyTorch: "110× faster", vsNumPy: "35× faster" },
-  { points: "1B", runMatMs: 199, vsPyTorch: "114× faster", vsNumPy: "63× faster" },
+  { points: "10M", runMatMs: 143, vsPyTorch: "9.6× faster", vsNumPy: "1.1× faster" },
+  { points: "100M", runMatMs: 145, vsPyTorch: "113.3× faster", vsNumPy: "7.4× faster" },
+  { points: "200M", runMatMs: 157, vsPyTorch: "105.5× faster", vsNumPy: "13.5× faster" },
+  { points: "500M", runMatMs: 138, vsPyTorch: "130× faster", vsNumPy: "36.5× faster" },
+  { points: "1B", runMatMs: 144, vsPyTorch: "144.3× faster", vsNumPy: "82.6× faster" },
 ];
 
 export default function ElementwiseMathSweep() {
@@ -71,10 +71,10 @@ export default function ElementwiseMathSweep() {
                   RunMat speedup range
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  8× – 114× vs PyTorch
+                  9.6× – 144.3× vs PyTorch
                 </td>
                 <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                  6× – 63× vs NumPy
+                  1.1× – 82.6× vs NumPy
                 </td>
               </tr>
             </tfoot>
