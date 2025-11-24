@@ -191,7 +191,7 @@ export default function BenchmarksPage() {
 
         <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {benchmarks.map((benchmark) => (
-            <Link key={benchmark.slug} href={`/benchmarks/${benchmark.slug}`} className="block">
+            <Link key={encodeURIComponent(benchmark.slug)} href={`/benchmarks/${encodeURIComponent(benchmark.slug)}`} className="block">
               <Card className="group overflow-hidden transition-all hover:shadow-lg cursor-pointer h-full flex flex-col">
                 <CardContent className="p-6 flex flex-col h-full">
                   {/* Thumbnail */}
