@@ -2,9 +2,7 @@ import { Metadata } from "next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
-import { join, extname } from 'path';
-import matter from 'gray-matter';
+import { getAllBenchmarks } from "@/lib/benchmarks";
 
 export const metadata: Metadata = {
   title: "RunMat Benchmarks - Performance Comparisons",
@@ -15,164 +13,6 @@ export const metadata: Metadata = {
     type: "website",
   },
 };
-
-interface Benchmark {
-  slug: string;
-  title: string;
-  description: string;
-  summary: string;
-  imageUrl?: string;
-  date: string;
-  readTime: string;
-  author: string;
-  tags: string[];
-}
-
-function extractTitleFromMarkdown(content: string): string {
-  const lines = content.split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('# ')) {
-      return trimmed.substring(2).trim();
-    }
-  }
-  return 'Untitled Benchmark';
-}
-
-function extractFirstParagraph(content: string): string {
-  const lines = content.split('\n');
-  let inParagraph = false;
-  const paragraphLines: string[] = [];
-  
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('#')) {
-      if (inParagraph) break;
-      continue;
-    }
-    if (!trimmed && !inParagraph) continue;
-    if (trimmed) {
-      inParagraph = true;
-      paragraphLines.push(trimmed);
-    } else if (inParagraph) {
-      break;
-    }
-  }
-  
-  const paragraph = paragraphLines.join(' ');
-  return paragraph || 'Performance benchmark comparing RunMat against alternatives.';
-}
-
-function truncateText(text: string, limit: number = 200): string {
-  if (text.length <= limit) {
-    return text;
-  }
-  return text.substring(0, limit).trimEnd() + '...';
-}
-
-function extractFirstImageUrl(content: string): string | undefined {
-  const imageRegex = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/;
-  const match = imageRegex.exec(content);
-  return match ? match[1] : undefined;
-}
-
-function getMimeTypeFromExtension(extension: string): string | undefined {
-  switch (extension.toLowerCase()) {
-    case '.png':
-      return 'image/png';
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg';
-    case '.svg':
-      return 'image/svg+xml';
-    case '.webp':
-      return 'image/webp';
-    default:
-      return undefined;
-  }
-}
-
-function getAllBenchmarks(): Benchmark[] {
-  try {
-    const benchmarksDir = join(process.cwd(), '..', 'benchmarks');
-    const entries = readdirSync(benchmarksDir, { withFileTypes: true });
-    
-    const benchmarks = entries
-      .filter(entry => entry.isDirectory() && entry.name !== '.harness' && entry.name !== 'wgpu_profile')
-      .map((entry): Benchmark | null => {
-        const slug = entry.name;
-        const readmePath = join(benchmarksDir, slug, 'README.md');
-        
-        try {
-          const fileContent = readFileSync(readmePath, 'utf-8');
-          const { data: frontmatter, content } = matter(fileContent);
-          
-          // Extract title from frontmatter or first heading
-          const title = frontmatter.title || extractTitleFromMarkdown(content);
-          
-          // Extract description from frontmatter or first paragraph
-          const rawDescription = frontmatter.description || frontmatter.excerpt || extractFirstParagraph(content);
-          const description = rawDescription || 'Performance benchmark comparing RunMat against alternatives.';
-          const summary = truncateText(description);
-
-          const frontmatterImage = typeof frontmatter.image === 'string' ? frontmatter.image : undefined;
-          const markdownImage = extractFirstImageUrl(content);
-          const resolvedImagePath = frontmatterImage || markdownImage;
-
-          let imageUrl: string | undefined;
-          if (resolvedImagePath) {
-            if (resolvedImagePath.startsWith('http://') || resolvedImagePath.startsWith('https://')) {
-              imageUrl = resolvedImagePath;
-            } else {
-              const sanitizedPath = resolvedImagePath.replace(/^\.?\//, '');
-              const absolutePath = join(benchmarksDir, slug, sanitizedPath);
-              if (existsSync(absolutePath)) {
-                const mimeType = getMimeTypeFromExtension(extname(absolutePath));
-                if (mimeType) {
-                  const fileBuffer = readFileSync(absolutePath);
-                  const base64 = fileBuffer.toString('base64');
-                  imageUrl = `data:${mimeType};base64,${base64}`;
-                }
-              }
-            }
-          }
-          
-          // Get file modification date as fallback
-          const stats = statSync(readmePath);
-          const defaultDate = stats.mtime.toISOString();
-          
-          return {
-            slug,
-            title,
-            description,
-            summary,
-            imageUrl,
-            date: frontmatter.date || defaultDate,
-            readTime: frontmatter.readTime || '5 min read',
-            author: frontmatter.author || 'RunMat Team',
-            tags: frontmatter.tags || []
-          };
-        } catch (error) {
-          console.error(`Error reading benchmark ${slug}:`, error);
-          return null;
-        }
-      })
-      .filter((benchmark): benchmark is Benchmark => benchmark !== null);
-    
-    // Sort by date (newest first) or alphabetically if no date
-    return benchmarks.sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      if (dateA !== dateB) {
-        return dateB - dateA;
-      }
-      return a.title.localeCompare(b.title);
-    });
-  } catch (error) {
-    console.error('Error reading benchmarks:', error);
-    return [];
-  }
-}
 
 export default function BenchmarksPage() {
   const benchmarks = getAllBenchmarks();
@@ -270,4 +110,3 @@ export default function BenchmarksPage() {
     </div>
   );
 }
-
