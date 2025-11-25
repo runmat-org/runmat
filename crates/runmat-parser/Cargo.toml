@@ -1,6 +1,6 @@
 [package]
 name = "runmat-parser"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"

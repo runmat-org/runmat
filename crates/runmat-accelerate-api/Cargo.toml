@@ -1,6 +1,6 @@
 [package]
 name = "runmat-accelerate-api"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 description = "Common API types for RunMat GPU acceleration backends"
 homepage = "https://runmat.org"
