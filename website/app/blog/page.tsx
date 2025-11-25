@@ -5,9 +5,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import Image from "next/image";
 import { Calendar, Clock, User } from "lucide-react";
-import { readFileSync, readdirSync } from 'fs';
-import { join } from 'path';
-import matter from 'gray-matter';
+import { getAllBlogPosts } from '@/lib/blog';
 
 export const metadata: Metadata = {
   title: "RunMat Blog - Stories and Insights",
@@ -18,50 +16,6 @@ export const metadata: Metadata = {
     type: "website",
   },
 };
-
-export interface BlogPost {
-  slug: string;
-  title: string;
-  description: string;
-  date: string;
-  readTime: string;
-  author: string;
-  tags: string[];
-  image?: string;
-  imageAlt?: string;
-}
-
-export function getAllBlogPosts(): BlogPost[] {
-  try {
-    const blogDir = join(process.cwd(), 'content/blog');
-    const files = readdirSync(blogDir).filter(file => file.endsWith('.md'));
-    
-    const posts = files.map(file => {
-      const slug = file.replace(/\.md$/, '');
-      const filePath = join(blogDir, file);
-      const fileContent = readFileSync(filePath, 'utf-8');
-      const { data: frontmatter } = matter(fileContent);
-      
-      return {
-        slug,
-        title: frontmatter.title || 'Untitled',
-        description: frontmatter.description || frontmatter.excerpt || '',
-        date: frontmatter.date || new Date().toISOString(),
-        readTime: frontmatter.readTime || '5 min read',
-        author: frontmatter.author || 'RunMat Team',
-        tags: frontmatter.tags || [],
-        image: frontmatter.image,
-        imageAlt: frontmatter.imageAlt
-      };
-    });
-    
-    // Sort posts by date (newest first)
-    return posts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  } catch (error) {
-    console.error('Error reading blog posts:', error);
-    return [];
-  }
-}
 
 export default function BlogPage() {
   const blogPosts = getAllBlogPosts();

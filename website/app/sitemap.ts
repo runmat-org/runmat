@@ -1,5 +1,5 @@
 import { MetadataRoute } from 'next'
-import { getAllBlogPosts } from '@/app/blog/page'
+import { getAllBlogPosts } from '@/lib/blog'
 import { loadBuiltins } from '@/lib/builtins'
 import { flatten } from '@/content/docs'
 
