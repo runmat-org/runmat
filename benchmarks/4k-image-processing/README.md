@@ -1,4 +1,4 @@
-# 4K Image Preprocessing, GPU‑accelerated
+# Image Preprocessing, GPU‑accelerated
 
 If you ship geospatial or vision workloads, you’ve likely written this stage countless times: standardize each 4K tile, apply a small radiometric correction, gamma‑correct, and run a quick QC metric. On CPUs this is fine—until the batch grows and your wall‑clock explodes. 
 
@@ -10,9 +10,16 @@ The math is deliberately simple and realistic: compute a per‑image mean and st
 
 ## Results
 
-![RunMat is 8.1x faster than NumPy](https://web.runmatstatic.com/4k-image-processing_speedup.svg)
+![RunMat is 10x faster than NumPy](https://web.runmatstatic.com/4k-image-processing_speedup-b.svg)
 
-
+### 4K Image Pipeline Perf Sweep (B = batch size)
+| B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|---|---:|---:|---:|---:|---:|
+| 4  | 142.97 | 801.29 | 500.34 | 3.50× | 5.60× |
+| 8  | 212.77 | 808.92 | 939.27 | 4.41× | 3.80× |
+| 16 | 241.56 | 907.73 | 1783.47 | 7.38× | 3.76× |
+| 32 | 389.25 | 1141.92 | 3605.95 | 9.26× | 2.93× |
+| 64 | 683.54 | 1203.20 | 6958.28 | 10.18× | 1.76× |
 ---
 
 ## Core implementation in RunMat (MATLAB-syntax)
@@ -45,7 +52,7 @@ Note: MATLAB’s license agreement restricts usage of their runtime for benchmar
 
 ## Why RunMat is fast (accelerate + fusion)
 
-<insert blurb about accelerate and fusion here, direct to the individual doc for more detail>
+RunMat fuses elementwise stages and keeps tensors resident on device between steps, while random number generation and updates execute in large, coalesced kernels—a strong fit for GPUs. For the big picture on fusion and residency, see the [Introduction to RunMat on the GPU](https://github.com/runmat-org/runmat/blob/main/docs/INTRODUCTION_TO_RUNMAT_GPU.md) document.
 
 ---
 
