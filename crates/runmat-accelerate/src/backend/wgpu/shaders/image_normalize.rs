@@ -130,6 +130,12 @@ fn main(
     let spatial_lane = lid.y;
     let lane_index = spatial_lane * LANE_COUNT + lane;
     let lane_stride = LANE_STRIDE * VALUES_PER_THREAD;
+    let lane_base = lane_index * BATCH_GROUPS;
+    for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+        partial_sum[lane_base + g] = vec4<f64>(0.0);
+        partial_sum_sq[lane_base + g] = vec4<f64>(0.0);
+    }
+    workgroupBarrier();
     var idx = spatial_lane * (LANE_COUNT * VALUES_PER_THREAD) + lane * VALUES_PER_THREAD;
     let total_groups = group_count(active_batches);
     var sum: array<vec4<f64>, BATCH_GROUPS>;
@@ -169,7 +175,6 @@ fn main(
         idx = idx + lane_stride;
     }
 
-    let lane_base = lane_index * BATCH_GROUPS;
     for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
         partial_sum[lane_base + g] = sum[g];
         partial_sum_sq[lane_base + g] = sum_sq[g];
@@ -401,13 +406,23 @@ fn main(
     let spatial_lane = lid.y;
     let lane_index = spatial_lane * LANE_COUNT + lane;
     let lane_stride = LANE_STRIDE * VALUES_PER_THREAD;
+    let lane_base = lane_index * BATCH_GROUPS;
+    for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+        partial_sum[lane_base + g] = vec4<f32>(0.0);
+        partial_sum_sq[lane_base + g] = vec4<f32>(0.0);
+    }
+    workgroupBarrier();
     var idx = spatial_lane * (LANE_COUNT * VALUES_PER_THREAD) + lane * VALUES_PER_THREAD;
     let total_groups = group_count(active_batches);
     var sum: array<vec4<f32>, BATCH_GROUPS>;
+    var sum_comp: array<vec4<f32>, BATCH_GROUPS>;
     var sum_sq: array<vec4<f32>, BATCH_GROUPS>;
+    var sum_sq_comp: array<vec4<f32>, BATCH_GROUPS>;
     for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
         sum[g] = vec4<f32>(0.0);
+        sum_comp[g] = vec4<f32>(0.0);
         sum_sq[g] = vec4<f32>(0.0);
+        sum_sq_comp[g] = vec4<f32>(0.0);
     }
     loop {
         if idx >= plane {
@@ -431,8 +446,15 @@ fn main(
                 let comp = group_component_count(active_batches, group);
                 let offset = sample_base + group * BATCH_VEC_WIDTH;
                 let value = load_batch_group(offset, comp);
-                sum[group] = sum[group] + value;
-                sum_sq[group] = sum_sq[group] + value * value;
+                let y = value - sum_comp[group];
+                let t = sum[group] + y;
+                sum_comp[group] = (t - sum[group]) - y;
+                sum[group] = t;
+                let sq_val = value * value;
+                let y_sq = sq_val - sum_sq_comp[group];
+                let t_sq = sum_sq[group] + y_sq;
+                sum_sq_comp[group] = (t_sq - sum_sq[group]) - y_sq;
+                sum_sq[group] = t_sq;
                 group = group + 1u;
             }
             inner = inner + 1u;
@@ -440,7 +462,6 @@ fn main(
         idx = idx + lane_stride;
     }
 
-    let lane_base = lane_index * BATCH_GROUPS;
     for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
         partial_sum[lane_base + g] = sum[g];
         partial_sum_sq[lane_base + g] = sum_sq[g];
