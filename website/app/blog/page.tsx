@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   },
 };
 
-interface BlogPost {
+export interface BlogPost {
   slug: string;
   title: string;
   description: string;
@@ -31,7 +31,7 @@ interface BlogPost {
   imageAlt?: string;
 }
 
-function getAllBlogPosts(): BlogPost[] {
+export function getAllBlogPosts(): BlogPost[] {
   try {
     const blogDir = join(process.cwd(), 'content/blog');
     const files = readdirSync(blogDir).filter(file => file.endsWith('.md'));
