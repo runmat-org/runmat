@@ -1,7 +1,7 @@
 import React from 'react';
 import { MDXRemote } from 'next-mdx-remote/rsc';
 import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
+import rehypePrism from 'rehype-prism-plus';
 import { MermaidDiagram } from '@/components/MermaidDiagram';
 import { slugifyHeading } from '@/lib/utils';
 import { HeadingAnchor } from '@/components/HeadingAnchor';
@@ -29,6 +29,9 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     }
     return "";
   }
+
+  const mergeClassNames = (...classes: Array<string | null | undefined | false>) =>
+    classes.filter(Boolean).join(' ');
 
   const defaultComponents: MarkdownRendererComponents = {
     h1: ({ children, ...props }: { children: React.ReactNode }) => (
@@ -173,8 +176,9 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       });
       
       if (hasCodeBlock) {
+        const { className, ...rest } = props as { className?: string };
         return (
-          <pre className="my-6 overflow-x-auto max-w-full -mx-4 sm:mx-0 px-4 sm:px-0" {...props}>
+          <pre className={mergeClassNames("markdown-pre my-6 -mx-4 max-w-full overflow-x-auto sm:mx-0", className)} {...rest}>
             {children}
           </pre>
         );
@@ -183,8 +187,10 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     },
     code: ({ children, className, ...props }: { children?: React.ReactNode; className?: string }) => {
       // Render Mermaid - check for language-mermaid or mermaid class
-      // Also handle cases where rehype-highlight might have added hljs classes
-      if (className && (/language-mermaid/.test(className) || className.includes('mermaid'))) {
+      // Also handle legacy highlight classes (hljs) from old content
+      const classList = className?.split(/\s+/) ?? [];
+      const isMermaid = classList.some(cls => cls.includes('language-mermaid') || cls === 'mermaid');
+      if (isMermaid) {
         // Extract the actual mermaid content - children might be wrapped in additional elements
         const toPlain = (node: React.ReactNode): string => {
           if (node == null) return '';
@@ -204,25 +210,16 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
           </div>
         );
       }
-      // Check if this is inside a pre block (has hljs class from rehype-highlight or language- class)
-      // Also check if parent is pre by looking at context
-      const isCodeBlock = className?.includes('hljs') || className?.includes('language-');
-      
-      // If we're inside a pre (which we can't directly check), ensure we have proper styling
-      // We'll add hljs class if we have a language class or if className is undefined (code block without language)
-      if (isCodeBlock || !className) {
-        // Ensure hljs class is present for styling
-        let finalClassName = className || 'hljs';
-        if (className?.includes('language-') && !className.includes('hljs')) {
-          finalClassName = `hljs ${className}`;
-        } else if (!className) {
-          // Code block without language identifier - add hljs for styling
-          finalClassName = 'hljs';
-        }
+
+      const isCodeBlock = classList.some(cls => cls.startsWith('language-'));
+
+      if (isCodeBlock) {
+        const finalClassName = mergeClassNames("markdown-code", className);
         return <code className={finalClassName} {...props}>{children}</code>;
       }
-      // Inline code styling
-      return <code className={className} {...props}>{children}</code>;
+
+      const inlineClassName = mergeClassNames("markdown-inline-code", className);
+      return <code className={inlineClassName} {...props}>{children}</code>;
     },
     img: ({ src, alt, ...props }: { src?: string; alt?: string } & Record<string, unknown>) => (
       <img 
@@ -249,18 +246,10 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
   function sanitizeMarkdown(input: string): string {
     const lines = input.split(/\r?\n/);
     let inFence = false;
-    let fenceLanguage = '';
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (/^\s*```/.test(line)) {
         inFence = !inFence;
-        // Extract language from fence (e.g., ```mermaid or ```matlab)
-        if (inFence) {
-          const match = line.match(/^```(\w+)/);
-          fenceLanguage = match ? match[1] : '';
-        } else {
-          fenceLanguage = '';
-        }
         continue;
       }
       // Skip processing inside code fences (including mermaid)
@@ -292,11 +281,9 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       options={{
         mdxOptions: {
           remarkPlugins: [remarkGfm],
-          rehypePlugins: [[rehypeHighlight, { 
+          rehypePlugins: [[rehypePrism, { 
             ignoreMissing: true,
-            // Don't highlight mermaid code blocks
-            detect: true,
-            subset: ['javascript', 'typescript', 'python', 'matlab', 'bash', 'shell', 'json', 'yaml', 'markdown'],
+            defaultLanguage: 'plaintext',
           }]],
           development: process.env.NODE_ENV !== 'production',
         },

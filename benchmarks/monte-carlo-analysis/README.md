@@ -4,10 +4,18 @@ Geometric Brownian Motion (GBM) is a staple in intraday risk and options pricing
 
 We simulate `M` paths over `T` steps:
 
-```
-S ← S .* exp((μ − ½σ²)Δt + σ√Δt · Z),    Z ~ N(0, 1)
-payoff = max(S − K, 0)
-price  = mean(payoff) · exp(−μ T Δt)
+```matlab
+M = 1000000; T = 256;
+drift = (mu - 0.5 * sigma^2) * dt;
+scale = sigma * sqrt(dt);
+
+for t = 1:T
+  Z = randn(M, 1, 'single');
+  S = S .* exp(drift + scale .* Z);
+end
+
+payoff = max(S - K, 0);
+price  = mean(payoff, 'all') * exp(-mu * T * dt);
 ```
 
 ---
@@ -17,7 +25,7 @@ price  = mean(payoff) · exp(−μ T Δt)
 ![RunMat is up to 131x faster than NumPy](https://web.runmatstatic.com/monte-carlo-analysis_speedup-b.svg)
 
 ### Monte Carlo Perf Sweep 
-| Paths (simulations) | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+| Simulation Paths (M) | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
 |--------------------:|-----------:|-------------:|-----------:|---------------:|-----------------:|
 | 250k   | 108.58 |   824.42 |  4,065.87 | 37.44× | 7.59× |
 | 500k   | 136.10 |   900.11 |  8,206.56 | 60.30× | 6.61× |
