@@ -386,20 +386,7 @@ Both package types appear identically to users—functions show up in the namesp
 
 ### Package Management
 
-```bash
-# Declare dependencies in .runmat
-[packages]
-linalg-plus = { source = "registry", version = "^1.2" }
-viz-tools = { source = "git", url = "https://github.com/acme/viz-tools" }
-
-# Install packages
-runmat pkg install
-
-# Publish your package
-runmat pkg publish
-```
-
-*Note: Package manager CLI is currently in beta. See [Package Manager Documentation](docs/PACKAGE_MANAGER.md) for design details.*
+The RunMat package manager is still in active design—no CLI commands ship in the current toolchain yet. The [Package Manager Documentation](docs/PACKAGE_MANAGER.md) captures the proposed workflow (dependency manifests, registry + git sources, publishing flow) and will be updated once the implementation begins.
 
 ## 💡 Design Philosophy
 
