@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import posthog from 'posthog-js'
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID;
+const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 const GA_API_SECRET = process.env.GA_API_SECRET;
+const POSTHOG_API_KEY = process.env.POSTHOG_API_KEY;
+const POSTHOG_HOST =
+  (process.env.POSTHOG_HOST && process.env.POSTHOG_HOST.trim()) ||
+  "https://us.i.posthog.com";
 
 // Expandable whitelist of event names
 const ALLOWED_EVENTS = new Set([
@@ -43,10 +46,6 @@ function uuid(): string {
 
 export async function POST(req: NextRequest) {
   try {
-    if (!GA_MEASUREMENT_ID || !GA_API_SECRET) {
-      return NextResponse.json({ ok: true, disabled: true }, { status: 200 });
-    }
-
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
     const event = sanitize(body.event || body.event_label);
@@ -66,38 +65,89 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const payload = {
-      client_id: cid,
-      events: [
-        {
-          name: event,
-          params,
-        },
-      ],
-    };
+    const forwarders: Array<Promise<Response | undefined>> = [];
+    let forwardedGA = false;
+    let forwardedPostHog = false;
 
-    const endpoint = `https://www.google-analytics.com/mp/collect?measurement_id=${encodeURIComponent(
-      GA_MEASUREMENT_ID
-    )}&api_secret=${encodeURIComponent(GA_API_SECRET)}`;
-
-    const resp = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    }).catch((err) => {
-      console.error(`Failed to post telemetry event: ${event}`, err);
-      return undefined;
-    });
-
-    if (!resp || !resp.ok) {
-      console.error(`Failed to process telemetry event: ${event}`);
-      return NextResponse.json({ ok: true, forwarded: false }, { status: 200 });
+    // Forward to Google Analytics (Measurement Protocol) if configured
+    if (GA_MEASUREMENT_ID && GA_API_SECRET) {
+      const gaPayload = {
+        client_id: cid,
+        events: [
+          {
+            name: event,
+            params,
+          },
+        ],
+      };
+      const gaEndpoint = `https://www.google-analytics.com/mp/collect?measurement_id=${encodeURIComponent(
+        GA_MEASUREMENT_ID
+      )}&api_secret=${encodeURIComponent(GA_API_SECRET)}`;
+      forwarders.push(
+        fetch(gaEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(gaPayload),
+          cache: "no-store",
+        })
+          .then((r) => {
+            if (!r.ok) {
+              console.error(`GA forwarding failed for event: ${event}`);
+            } else {
+              forwardedGA = true;
+            }
+            return r;
+          })
+          .catch((err) => {
+            console.error(`GA forwarding error for event: ${event}`, err);
+            return undefined;
+          })
+      );
     }
 
-    posthog.capture(event, params);
+    // Forward to PostHog ingestion API if configured
+    if (POSTHOG_API_KEY) {
+      const posthogEndpoint = `${POSTHOG_HOST.replace(/\/$/, "")}/capture/`;
+      const phPayload = {
+        api_key: POSTHOG_API_KEY,
+        event,
+        distinct_id: cid,
+        properties: params,
+      };
+      forwarders.push(
+        fetch(posthogEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(phPayload),
+          cache: "no-store",
+        })
+          .then((r) => {
+            if (!r.ok) {
+              console.error(`PostHog forwarding failed for event: ${event}`);
+            } else {
+              forwardedPostHog = true;
+            }
+            return r;
+          })
+          .catch((err) => {
+            console.error(`PostHog forwarding error for event: ${event}`, err);
+            return undefined;
+          })
+      );
+    }
 
-    return NextResponse.json({ ok: true, forwarded: true }, { status: 200 });
+    // Execute any configured forwarders; do not fail the request
+    if (forwarders.length > 0) {
+      await Promise.allSettled(forwarders);
+    } else {
+      // Nothing configured; keep endpoint no-op but successful to caller
+      return NextResponse.json({ ok: true, forwarded: { ga: false, posthog: false }, disabled: true }, { status: 200 });
+    }
+
+    return NextResponse.json(
+      { ok: true, forwarded: { ga: forwardedGA, posthog: forwardedPostHog } },
+      { status: 200 }
+    );
   } catch {
     return NextResponse.json({ ok: true }, { status: 200 });
   }
