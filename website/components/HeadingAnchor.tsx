@@ -23,7 +23,7 @@ export function HeadingAnchor({ id }: { id: string }) {
       aria-label={copied ? "Copied" : "Copy link"}
       title={copied ? "Copied" : "Copy link"}
       onClick={copyLink}
-      className="ml-2 inline-flex items-center rounded p-1 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+      className="ml-2 hidden sm:inline-flex items-center rounded p-1 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
     >
       {copied ? <Check className="h-4 w-4" /> : <LinkIcon className="h-4 w-4" />}
     </button>

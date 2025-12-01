@@ -123,7 +123,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       </a>
     ),
     table: ({ children, ...props }: { children: React.ReactNode }) => (
-      <div className="my-8 -mx-4 sm:mx-0 overflow-x-auto max-w-full">
+      <div className="my-8 mx-0 overflow-x-auto max-w-full">
         <table className="w-full min-w-full sm:min-w-[500px] border-collapse border border-border rounded-lg table-mobile-wrap" {...props}>{children}</table>
       </div>
     ),
@@ -178,7 +178,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       if (hasCodeBlock) {
         const { className, ...rest } = props as { className?: string };
         return (
-          <pre className={mergeClassNames("markdown-pre my-6 -mx-4 max-w-full overflow-x-auto sm:mx-0", className)} {...rest}>
+          <pre className={mergeClassNames("markdown-pre my-6 mx-0 max-w-full overflow-x-auto", className)} {...rest}>
             {children}
           </pre>
         );

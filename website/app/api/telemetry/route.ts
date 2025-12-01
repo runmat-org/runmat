@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import posthog from 'posthog-js'
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -93,6 +94,8 @@ export async function POST(req: NextRequest) {
       console.error(`Failed to process telemetry event: ${event}`);
       return NextResponse.json({ ok: true, forwarded: false }, { status: 200 });
     }
+
+    posthog.capture(event, params);
 
     return NextResponse.json({ ok: true, forwarded: true }, { status: 200 });
   } catch {
