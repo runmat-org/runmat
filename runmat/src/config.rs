@@ -107,7 +107,7 @@ impl Default for TelemetryConfig {
             enabled: true,
             show_payloads: false,
             http_endpoint: None,
-            udp_endpoint: Some("telemetry.runmat.org:7846".to_string()),
+            udp_endpoint: Some("udp.telemetry.runmat.org:7846".to_string()),
             queue_size: default_telemetry_queue(),
         }
     }

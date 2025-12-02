@@ -1,2 +1,6 @@
 node_modules/
-
+.terraform.lock.hcl
+.terraform
+.env
+worker/node_modules/
+udp-forwarder/node_modules/

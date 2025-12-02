@@ -1,10 +1,16 @@
-variable "cloudflare_account_id" {
-  description = "Cloudflare account id that owns runmat.org"
+variable "project_id" {
+  description = "GCP project that hosts telemetry infra"
   type        = string
 }
 
+variable "region" {
+  description = "Primary region for Cloud Run + Compute resources"
+  type        = string
+  default     = "us-central1"
+}
+
 variable "telemetry_domain" {
-  description = "Delegated subdomain that Cloudflare will host (e.g. telemetry.runmat.org)"
+  description = "Delegated subdomain served by Cloud DNS (e.g. telemetry.runmat.org)"
   type        = string
   default     = "telemetry.runmat.org"
 }
@@ -42,4 +48,34 @@ variable "ga_api_secret" {
   description = "Optional GA4 Measurement API secret"
   type        = string
   default     = ""
+}
+
+variable "worker_image" {
+  description = "Container image for the HTTP telemetry worker (Cloud Run)"
+  type        = string
+  default     = ""
+}
+
+variable "enable_udp_forwarder" {
+  description = "Provision the UDP forwarder (GCE + load balancer)"
+  type        = bool
+  default     = false
+}
+
+variable "udp_forwarder_image" {
+  description = "Container image for the UDP forwarder (only used when enable_udp_forwarder=true)"
+  type        = string
+  default     = ""
+}
+
+variable "udp_min_instances" {
+  description = "Number of UDP forwarder instances to keep running"
+  type        = number
+  default     = 1
+}
+
+variable "udp_machine_type" {
+  description = "Machine type for UDP forwarder instances"
+  type        = string
+  default     = "e2-micro"
 }

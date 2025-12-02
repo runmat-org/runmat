@@ -1,108 +1,239 @@
 terraform {
-  backend "s3" {}
+  backend "gcs" {}
 
   required_providers {
-    cloudflare = {
-      source  = "cloudflare/cloudflare"
-      version = "~> 4.0"
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.32"
     }
   }
 }
 
-provider "cloudflare" {
-  account_id = var.cloudflare_account_id
+locals {
+  zone_dns_name = "${var.telemetry_domain}."
+  worker_image  = var.worker_image != "" ? var.worker_image : "us-docker.pkg.dev/${var.project_id}/telemetry/worker:latest"
+  udp_image     = var.udp_forwarder_image != "" ? var.udp_forwarder_image : "us-docker.pkg.dev/${var.project_id}/telemetry/udp-forwarder:latest"
+  udp_enabled   = var.enable_udp_forwarder && var.udp_forwarder_image != ""
 }
 
-resource "cloudflare_zone" "telemetry" {
-  account_id = var.cloudflare_account_id
-  name       = var.telemetry_domain
-  plan       = "free"
+provider "google" {
+  project = var.project_id
+  region  = var.region
 }
 
-resource "cloudflare_record" "telemetry_root" {
-  zone_id = cloudflare_zone.telemetry.id
-  name    = "@"
-  type    = "AAAA"
-  value   = "100::"
-  proxied = true
-  ttl     = 1
-  comment = "Placeholder record proxied through Cloudflare so the Worker route can attach."
+resource "google_project_service" "services" {
+  for_each = toset([
+    "run.googleapis.com",
+    "dns.googleapis.com",
+    "compute.googleapis.com",
+    "iam.googleapis.com",
+    "artifactregistry.googleapis.com",
+  ])
+  service = each.value
 }
 
-resource "cloudflare_workers_script" "telemetry" {
-  name    = "runmat-telemetry"
-  content = file("${path.module}/worker.js")
+resource "google_dns_managed_zone" "telemetry" {
+  name        = "telemetry-${replace(var.telemetry_domain, ".", "-")}"
+  dns_name    = local.zone_dns_name
+  description = "Delegated zone for RunMat telemetry"
+}
 
-  plain_text_binding {
-    name = "POSTHOG_API_KEY"
-    text = var.posthog_api_key
+resource "google_dns_record_set" "ns_records" {
+  managed_zone = google_dns_managed_zone.telemetry.name
+  name         = local.zone_dns_name
+  type         = "NS"
+  ttl          = 300
+  rrdatas      = google_dns_managed_zone.telemetry.name_servers
+}
+
+resource "google_cloud_run_service" "telemetry" {
+  name     = "runmat-telemetry"
+  location = var.region
+  template {
+    spec {
+      containers {
+        image = local.worker_image
+        env {
+          name  = "POSTHOG_API_KEY"
+          value = var.posthog_api_key
+        }
+        env {
+          name  = "POSTHOG_HOST"
+          value = var.posthog_host
+        }
+        env {
+          name  = "INGESTION_KEY"
+          value = var.telemetry_ingestion_key
+        }
+        env {
+          name  = "GA_MEASUREMENT_ID"
+          value = var.ga_measurement_id
+        }
+        env {
+          name  = "GA_API_SECRET"
+          value = var.ga_api_secret
+        }
+      }
+    }
+  }
+  traffic {
+    percent         = 100
+    latest_revision = true
   }
 
-  plain_text_binding {
-    name = "POSTHOG_HOST"
-    text = var.posthog_host
+  depends_on = [google_project_service.services]
+}
+
+resource "google_cloud_run_service_iam_member" "public" {
+  service  = google_cloud_run_service.telemetry.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+resource "google_cloud_run_domain_mapping" "telemetry" {
+  location = var.region
+  name     = var.telemetry_domain
+
+  metadata {
+    namespace = var.project_id
   }
 
-  plain_text_binding {
-    name = "INGESTION_KEY"
-    text = var.telemetry_ingestion_key
-  }
-
-  plain_text_binding {
-    name = "GA_MEASUREMENT_ID"
-    text = var.ga_measurement_id
-  }
-
-  plain_text_binding {
-    name = "GA_API_SECRET"
-    text = var.ga_api_secret
+  spec {
+    route_name = google_cloud_run_service.telemetry.name
   }
 }
 
-resource "cloudflare_workers_route" "telemetry" {
-  zone_id     = cloudflare_zone.telemetry.id
-  script_name = cloudflare_workers_script.telemetry.name
-  pattern     = "${cloudflare_zone.telemetry.name}/*"
+locals {
+  domain_records = try(google_cloud_run_domain_mapping.telemetry.status[0].resource_records, [])
 }
 
-resource "cloudflare_record" "udp_endpoint" {
-  zone_id = cloudflare_zone.telemetry.id
-  name    = trimsuffix(var.telemetry_udp_subdomain, ".${cloudflare_zone.telemetry.name}")
-  type    = "AAAA"
-  value   = "100::"
-  proxied = true
-  ttl     = 1
-  comment = "UDP intake host (Cloudflare Spectrum origin)"
+resource "google_dns_record_set" "domain_mapping" {
+  for_each     = { for record in local.domain_records : record.name => record }
+  managed_zone = google_dns_managed_zone.telemetry.name
+  name         = each.value.name
+  type         = each.value.type
+  ttl          = 300
+  rrdatas      = [each.value.rrdata]
+  depends_on   = [google_cloud_run_domain_mapping.telemetry]
 }
 
-resource "cloudflare_spectrum_application" "telemetry_udp" {
-  zone_id      = cloudflare_zone.telemetry.id
-  protocol     = "udp"
-  traffic_type = "direct"
-  name         = "runmat-telemetry-udp"
-  edge_port    = 7846
-  origin_port  = 443
-  dns {
-    type = "CNAME"
-    name = cloudflare_record.udp_endpoint.name
+resource "google_compute_firewall" "udp_forwarder" {
+  count   = local.udp_enabled ? 1 : 0
+  name    = "telemetry-udp-allow"
+  network = "default"
+  allows {
+    protocol = "udp"
+    ports    = ["7846"]
   }
-  origin_dns {
-    name = cloudflare_zone.telemetry.name
+  direction     = "INGRESS"
+  target_tags   = ["telemetry-udp"]
+  source_ranges = ["0.0.0.0/0"]
+}
+
+resource "google_compute_address" "udp" {
+  count  = local.udp_enabled ? 1 : 0
+  name   = "telemetry-udp-ip"
+  region = var.region
+}
+
+resource "google_compute_instance_template" "udp" {
+  count        = local.udp_enabled ? 1 : 0
+  name_prefix  = "telemetry-udp-"
+  machine_type = var.udp_machine_type
+  tags         = ["telemetry-udp"]
+
+  disk {
+    auto_delete  = true
+    boot         = true
+    source_image = "projects/cos-cloud/global/images/family/cos-stable"
   }
-  tls = "flexible"
+
+  network_interface {
+    network = "default"
+    access_config {}
+  }
+
+  metadata = {
+    "gce-container-declaration" = <<-EOT
+spec:
+  containers:
+  - name: udp-forwarder
+    image: ${local.udp_image}
+    env:
+    - name: TELEMETRY_HTTP_ENDPOINT
+      value: "${google_cloud_run_service.telemetry.status[0].url}/ingest"
+    - name: TELEMETRY_INGESTION_KEY
+      value: "${var.telemetry_ingestion_key}"
+    - name: FORWARDER_CONCURRENCY
+      value: "8"
+  restartPolicy: Always
+EOT
+  }
+}
+
+resource "google_compute_region_health_check" "udp" {
+  count  = local.udp_enabled ? 1 : 0
+  name   = "telemetry-udp-health"
+  region = var.region
+  udp_health_check {
+    port = 7846
+  }
+}
+
+resource "google_compute_region_instance_group_manager" "udp" {
+  count              = local.udp_enabled ? 1 : 0
+  name               = "telemetry-udp-mig"
+  region             = var.region
+  base_instance_name = "telemetry-udp"
+  target_size        = var.udp_min_instances
+  version {
+    instance_template = google_compute_instance_template.udp[0].self_link
+  }
+  auto_healing_policies {
+    health_check      = google_compute_region_health_check.udp[0].self_link
+    initial_delay_sec = 30
+  }
+}
+
+resource "google_compute_target_pool" "udp" {
+  count     = local.udp_enabled ? 1 : 0
+  name      = "telemetry-udp-pool"
+  region    = var.region
+  instances = local.udp_enabled ? [google_compute_region_instance_group_manager.udp[0].instance_group] : []
+}
+
+resource "google_compute_forwarding_rule" "udp" {
+  count                 = local.udp_enabled ? 1 : 0
+  name                  = "telemetry-udp-forwarding"
+  region                = var.region
+  load_balancing_scheme = "EXTERNAL"
+  ip_protocol           = "UDP"
+  port_range            = "7846"
+  target                = google_compute_target_pool.udp[0].self_link
+  ip_address            = google_compute_address.udp[0].self_link
+}
+
+resource "google_dns_record_set" "udp_dns" {
+  count        = local.udp_enabled ? 1 : 0
+  managed_zone = google_dns_managed_zone.telemetry.name
+  name         = "${var.telemetry_udp_subdomain}."
+  type         = "A"
+  ttl          = 120
+  rrdatas      = [google_compute_address.udp[0].address]
 }
 
 output "telemetry_https_endpoint" {
   description = "HTTPS endpoint the CLI can post telemetry to"
-  value       = "https://${cloudflare_zone.telemetry.name}/ingest"
+  value       = "https://${var.telemetry_domain}/ingest"
 }
 
 output "telemetry_name_servers" {
   description = "Name servers to add as NS records for the delegated subdomain"
-  value       = cloudflare_zone.telemetry.name_servers
+  value       = google_dns_managed_zone.telemetry.name_servers
 }
 
 output "telemetry_udp_endpoint" {
-  description = "Spectrum UDP hostname:port"
-  value       = "${var.telemetry_udp_subdomain}:7846"
+  description = "UDP hostname:port (null when disabled)"
+  value       = local.udp_enabled ? "${var.telemetry_udp_subdomain}:7846" : null
 }

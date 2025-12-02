@@ -36,7 +36,6 @@ At most two events per process:
 
 Example runtime payload:
 
-```
 ```json
 {
   "event_label": "runtime_value",
@@ -92,8 +91,9 @@ Only aggregated counts and metadata listed above are sent. For broader privacy q
 
 ## Where does telemetry go?
 
-- Clients send UDP (best effort) to `telemetry.runmat.org:7846` or HTTPS POSTs to `https://telemetry.runmat.org/ingest`.
-- Cloudflare Spectrum terminates UDP and forwards to a Cloudflare Worker (`infra/worker.js`), which validates a shared secret and relays to PostHog (primary) and GA4 (optional) using their ingestion APIs.
+- Clients send UDP (best effort) to `udp.telemetry.runmat.org:7846` or HTTPS POSTs to `https://telemetry.runmat.org/ingest`.
+- HTTPS traffic lands on a Cloud Run service (`infra/worker/`) that validates `x-telemetry-key`, sanitizes payloads, and forwards to PostHog (primary) and GA4 (optional).
+- The UDP path flows through a lightweight Google Cloud UDP load balancer into a managed instance group running the forwarder container (`infra/udp-forwarder/`). Each forwarder replays datagrams to the Cloud Run endpoint asynchronously so the CLI never blocks.
 - No payloads are stored server-side beyond transient buffers; failures are logged and the CLI continues immediately.
 
 ## How do I opt out of RunMat telemetry?
@@ -115,6 +115,12 @@ RUNMAT_TELEMETRY=0 runmat script.m
 4. **Delete identifier:** remove `~/.runmat/telemetry_id` after running with telemetry disabled; a new id will only be created if you re-enable the feature.
 
 You can re-enable at any time by clearing the env var or setting `telemetry.enabled = true`.
+
+### Source
+
+- HTTP worker service: `infra/worker/`
+- UDP forwarder service: `infra/udp-forwarder/`
+- Terraform (DNS, Cloud Run, load balancer): `infra/main.tf`
 
 ---
 

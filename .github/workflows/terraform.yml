@@ -20,19 +20,38 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
-      TF_STATE_BUCKET: ${{ secrets.CF_TF_STATE_BUCKET }}
-      CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_ENDPOINT }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
+      TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ secrets.GCP_REGION }}
       TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
       TF_VAR_posthog_host: ${{ secrets.POSTHOG_HOST }}
       TF_VAR_telemetry_ingestion_key: ${{ secrets.TELEMETRY_INGESTION_KEY }}
       TF_VAR_ga_measurement_id: ${{ secrets.GA_MEASUREMENT_ID }}
       TF_VAR_ga_api_secret: ${{ secrets.GA_API_SECRET }}
+      TF_VAR_worker_image: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+      TF_VAR_enable_udp_forwarder: ${{ secrets.ENABLE_UDP_FORWARDER == 'true' }}
+      TF_VAR_udp_forwarder_image: ${{ secrets.ENABLE_UDP_FORWARDER == 'true' && format('us-docker.pkg.dev/{0}/telemetry/udp-forwarder:{1}', secrets.GCP_PROJECT_ID, github.sha) || '' }}
     steps:
       - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Configure Artifact Registry auth
+        run: gcloud auth configure-docker us-docker.pkg.dev -q
+
+      - name: Build worker image
+        run: |
+          docker build -t us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }} infra/worker
+          docker push us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+
+      - name: Build UDP forwarder image
+        if: secrets.ENABLE_UDP_FORWARDER == 'true'
+        run: |
+          docker build -t us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }} infra/udp-forwarder
+          docker push us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -46,12 +65,8 @@ jobs:
         working-directory: infra
         run: |
           terraform init \
-            -backend-config="bucket=${{ secrets.CF_TF_STATE_BUCKET }}" \
-            -backend-config="key=infra/terraform.tfstate" \
-            -backend-config="region=auto" \
-            -backend-config="endpoints={\"s3\":\"${CLOUDFLARE_R2_ENDPOINT}\"}" \
-            -backend-config="skip_credentials_validation=true" \
-            -backend-config="skip_region_validation=true"
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=infra/terraform.tfstate"
 
       - name: Terraform validate
         working-directory: infra
@@ -72,19 +87,38 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
-      TF_STATE_BUCKET: ${{ secrets.CF_TF_STATE_BUCKET }}
-      CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_ENDPOINT }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
+      TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ secrets.GCP_REGION }}
       TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
       TF_VAR_posthog_host: ${{ secrets.POSTHOG_HOST }}
       TF_VAR_telemetry_ingestion_key: ${{ secrets.TELEMETRY_INGESTION_KEY }}
       TF_VAR_ga_measurement_id: ${{ secrets.GA_MEASUREMENT_ID }}
       TF_VAR_ga_api_secret: ${{ secrets.GA_API_SECRET }}
+      TF_VAR_worker_image: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+      TF_VAR_enable_udp_forwarder: ${{ secrets.ENABLE_UDP_FORWARDER == 'true' }}
+      TF_VAR_udp_forwarder_image: ${{ secrets.ENABLE_UDP_FORWARDER == 'true' && format('us-docker.pkg.dev/{0}/telemetry/udp-forwarder:{1}', secrets.GCP_PROJECT_ID, github.sha) || '' }}
     steps:
       - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Configure Artifact Registry auth
+        run: gcloud auth configure-docker us-docker.pkg.dev -q
+
+      - name: Build worker image
+        run: |
+          docker build -t us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }} infra/worker
+          docker push us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+
+      - name: Build UDP forwarder image
+        if: secrets.ENABLE_UDP_FORWARDER == 'true'
+        run: |
+          docker build -t us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }} infra/udp-forwarder
+          docker push us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -94,12 +128,8 @@ jobs:
         working-directory: infra
         run: |
           terraform init \
-            -backend-config="bucket=${{ secrets.CF_TF_STATE_BUCKET }}" \
-            -backend-config="key=infra/terraform.tfstate" \
-            -backend-config="region=auto" \
-            -backend-config="endpoints={\"s3\":\"${CLOUDFLARE_R2_ENDPOINT}\"}" \
-            -backend-config="skip_credentials_validation=true" \
-            -backend-config="skip_region_validation=true"
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=infra/terraform.tfstate"
 
       - name: Terraform plan (safety)
         working-directory: infra
