@@ -80,24 +80,25 @@ fprintf('Done. MSE=%.6e\n', mse);    % Only here does data return to CPU for pri
 
 We ran this exact pipeline on an **Apple M2 Max** using the Metal backend, averaged over **3 runs** per point. Each batch size `B` is `B × 2160 × 3840` single-precision pixels.
 
-### 4K Image Pipeline Perf Sweep (B = image batch size)
+### 4K Image Pipeline Perf Sweep (B = batch size)
 | B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
-|---|-------------|--------------|------------|----------------|------------------|
-| 4 | 217.9 | 922.9 | 548.4 | 2.52x | 4.23x |
-| 8 | 270.3 | 960.1 | 989.6 | 3.66x | 3.55x |
-| 16 | 317.4 | 1,040.7 | 1,859.1 | 5.86x | 3.28x |
-| 32 | 520.5 | 1,178.3 | 3,698.6 | 7.11x | 2.26x |
-| 64 | 893.8 | 1,379.6 | 7,434.6 | 8.32x | 1.54x |
+|---|---:|---:|---:|---:|---:|
+| 4  | 142.97 | 801.29 | 500.34 | 3.50× | 5.60× |
+| 8  | 212.77 | 808.92 | 939.27 | 4.41× | 3.80× |
+| 16 | 241.56 | 907.73 | 1783.47 | 7.38× | 3.76× |
+| 32 | 389.25 | 1141.92 | 3605.95 | 9.26× | 2.93× |
+| 64 | 683.54 | 1203.20 | 6958.28 | 10.18× | 1.76× |
+
 
 At the high end (**B = 64**, 64 4K images ≈ 133M pixels):
 
-- RunMat: **0.89 s**  
-- NumPy: **7.43 s** → about **8.3× slower**  
-- PyTorch: **1.38 s** → about **1.5× slower**
+- RunMat: **0.68 s**  
+- NumPy: **about 7.0 s** → **(≈10× slower)**  
+- PyTorch: **about 1.2 s** → **(≈1.8× slower)**
 
 
 
-![RunMat 4K image pipeline benchmark](https://web.runmatstatic.com/runmat-4k-image-performance.png)
+![RunMat 4K image pipeline benchmark](https://web.runmatstatic.com/4k-benchmark-revised-dec.png)
 
 This is the same MATLAB-style code you saw above. RunMat’s fusion engine turns that code into a small number of GPU kernels, keeps tensors resident on the device, and only brings data back to CPU when you actually need it (for example, when printing the final MSE).
 
@@ -257,7 +258,7 @@ MATLAB is commonly taught in engineering programs, so many engineers already thi
 
 #### Try for yourself
 
-* **Download RunMat:** [Download](/download)
+***Download RunMat:** [Download](/download)
 
 * **See benchmarks and examples:** [Benchmarks](/benchmarks)
 

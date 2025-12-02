@@ -77,25 +77,26 @@ Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
 
 
 
-### 4K Image Pipeline Perf Sweep (B = image batch size)
+### 4K Image Pipeline Perf Sweep (B = batch size)
 | B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
-|---|-------------|--------------|------------|----------------|------------------|
-| 4 | 217.9 | 922.9 | 548.4 | 2.52x | 4.23x |
-| 8 | 270.3 | 960.1 | 989.6 | 3.66x | 3.55x |
-| 16 | 317.4 | 1,040.7 | 1,859.1 | 5.86x | 3.28x |
-| 32 | 520.5 | 1,178.3 | 3,698.6 | 7.11x | 2.26x |
-| 64 | 893.8 | 1,379.6 | 7,434.6 | 8.32x | 1.54x |
+|---|---:|---:|---:|---:|---:|
+| 4  | 142.97 | 801.29 | 500.34 | 3.50× | 5.60× |
+| 8  | 212.77 | 808.92 | 939.27 | 4.41× | 3.80× |
+| 16 | 241.56 | 907.73 | 1783.47 | 7.38× | 3.76× |
+| 32 | 389.25 | 1141.92 | 3605.95 | 9.26× | 2.93× |
+| 64 | 683.54 | 1203.20 | 6958.28 | 10.18× | 1.76× |
+
 
 ![4K image pipeline speedup](https://web.runmatstatic.com/4k-image-processing_speedup-b.svg)
 
-### Monte Carlo Perf Sweep (M = paths)
-| M | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
-|---|-------------|--------------|------------|----------------|------------------|
-| 250 000 | 179.8 | 955.4 | 4,252.3 | 23.65x | 5.31x |
-| 500 000 | 203.1 | 1,021.8 | 9,319.9 | 45.90x | 5.03x |
-| 1 000 000 | 243.3 | 1,283.9 | 17,946.4 | 73.78x | 5.28x |
-| 2 000 000 | 372.0 | 1,469.4 | 38,826.8 | 104.36x | 3.95x |
-| 5 000 000 | 678.1 | 1,719.5 | 95,539.2 | 140.89x | 2.54x |
+### Monte Carlo Perf Sweep 
+| Paths (simulations) | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|--------------------:|-----------:|-------------:|-----------:|---------------:|-----------------:|
+| 250k   | 108.58 |   824.42 |  4,065.87 | 37.44× | 7.59× |
+| 500k   | 136.10 |   900.11 |  8,206.56 | 60.30× | 6.61× |
+| 1M     | 188.00 |   894.32 | 16,092.49 | 85.60× | 4.76× |
+| 2M     | 297.65 | 1,108.80 | 32,304.64 |108.53× | 3.73× |
+| 5M     | 607.36 | 1,697.59 | 79,894.98 |131.55× | 2.80× |
 
 
 
@@ -103,19 +104,19 @@ Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
 
 ### Elementwise Math Perf Sweep (points)
 | points | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
-|--------|-------------|--------------|------------|----------------|------------------|
-| 1 000 000 | 197.1 | 820.8 | 68.3 | 0.35x | 4.16x |
-| 2 000 000 | 211.4 | 896.2 | 76.7 | 0.36x | 4.24x |
-| 5 000 000 | 207.7 | 1,104.7 | 111.9 | 0.54x | 5.32x |
-| 10 000 000 | 173.8 | 1,426.1 | 166.6 | 0.96x | 8.20x |
-| 100 000 000 | 170.9 | 16,878.8 | 1,098.8 | 6.43x | 98.77x |
-| 200 000 000 | 202.8 | 17,393.0 | 2,188.9 | 10.79x | 85.76x |
-| 500 000 000 | 171.8 | 18,880.2 | 5,946.9 | 34.61x | 109.87x |
-| 1 000 000 000 | 199.4 | 22,652.0 | 12,570.0 | 63.04x | 113.61x |
+|---|---:|---:|---:|---:|---:|
+| 1M   | 145.15 | 856.41  |   72.39 | 0.50× | 5.90× |
+| 2M   | 149.75 | 901.05  |   79.49 | 0.53× | 6.02× |
+| 5M   | 145.14 | 1111.16 |  119.45 | 0.82× | 7.66× |
+| 10M  | 143.39 | 1377.43 |  154.38 | 1.08× | 9.61× |
+| 100M | 144.81 | 16,404.22 | 1,073.09 | 7.41× | 113.28× |
+| 200M | 156.94 | 16,558.98 | 2,114.66 | 13.47× | 105.51× |
+| 500M | 137.58 | 17,882.11 | 5,026.94 | 36.54× | 129.97× |
+| 1B | 144.40 | 20,841.42 | 11,931.93 | 82.63× | 144.34× |
 
 ![Elementwise math speedup](https://web.runmatstatic.com/elementwise-math_speedup-b.svg)
 
-On smaller arrays, Fusion keeps work on CPU so you still get low overhead and a fast JIT.
+On smaller arrays Fusion keeps work on CPU so you still get low overhead and a fast JIT. 
 
 *Benchmarks run on Apple M2 Max with BLAS/LAPACK optimization and GPU acceleration. See [benchmarks/](benchmarks/) for reproducible test scripts, detailed results, and comparisons against NumPy, PyTorch, and Julia.*
 
@@ -224,7 +225,7 @@ grid on;
 title("Sine wave");
 ```
 
-
+---
 
 ## 🧱 Architecture: CPU+GPU performance
 
