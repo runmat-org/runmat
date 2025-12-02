@@ -6,7 +6,7 @@ export const revalidate = 0;
 
 const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 const GA_API_SECRET = process.env.GA_API_SECRET;
-const POSTHOG_API_KEY = process.env.POSTHOG_API_KEY;
+const POSTHOG_API_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY;
 const POSTHOG_HOST =
   (process.env.POSTHOG_HOST && process.env.POSTHOG_HOST.trim()) ||
   "https://us.i.posthog.com";
