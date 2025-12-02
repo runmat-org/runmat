@@ -14,10 +14,6 @@ permissions:
   contents: read
   pull-requests: write
 
-env:
-  TF_STATE_KEY: infra/terraform.tfstate
-  TF_STATE_REGION: auto
-
 jobs:
   plan:
     name: Terraform plan
@@ -50,9 +46,9 @@ jobs:
         working-directory: infra
         run: |
           terraform init \
-            -backend-config="bucket=${TF_STATE_BUCKET}" \
-            -backend-config="key=${TF_STATE_KEY}" \
-            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="bucket=${{ secrets.CF_TF_STATE_BUCKET }}" \
+            -backend-config="key=infra/terraform.tfstate" \
+            -backend-config="region=auto" \
             -backend-config="endpoints={\"s3\":\"${CLOUDFLARE_R2_ENDPOINT}\"}" \
             -backend-config="skip_credentials_validation=true" \
             -backend-config="skip_region_validation=true"
@@ -98,9 +94,9 @@ jobs:
         working-directory: infra
         run: |
           terraform init \
-            -backend-config="bucket=${TF_STATE_BUCKET}" \
-            -backend-config="key=${TF_STATE_KEY}" \
-            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="bucket=${{ secrets.CF_TF_STATE_BUCKET }}" \
+            -backend-config="key=infra/terraform.tfstate" \
+            -backend-config="region=auto" \
             -backend-config="endpoints={\"s3\":\"${CLOUDFLARE_R2_ENDPOINT}\"}" \
             -backend-config="skip_credentials_validation=true" \
             -backend-config="skip_region_validation=true"
