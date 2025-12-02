@@ -11,7 +11,7 @@ terraform init \
   -backend-config="bucket=$CF_TF_STATE_BUCKET" \
   -backend-config="key=infra/terraform.tfstate" \
   -backend-config="region=auto" \
-  -backend-config="endpoints.s3=$CF_R2_ENDPOINT" \
+  -backend-config="endpoints={\"s3\":\"$CF_R2_ENDPOINT\"}" \
   -backend-config="skip_credentials_validation=true" \
   -backend-config="skip_region_validation=true"
 ```
