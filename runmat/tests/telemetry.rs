@@ -37,6 +37,7 @@ fn telemetry_http_events_fire_for_script_execution() {
         .env("RUNMAT_ACCEL_ENABLE", "0")
         .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
         .env("RUNMAT_TELEMETRY", "1")
+        .env("RUNMAT_TELEMETRY_KEY", "test-key")
         .env("RUNMAT_TELEMETRY_SYNC", "1")
         .env("RUNMAT_TELEMETRY_UDP_ENDPOINT", "off")
         .env("RUNMAT_TELEMETRY_ENDPOINT", &endpoint)

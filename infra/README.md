@@ -50,6 +50,8 @@ Supply the same image URIs to Terraform via `TF_VAR_worker_image` / `TF_VAR_udp_
 
 > The GitHub Actions workflow automatically builds/pushes both images for every commit and injects the resulting tags into Terraform (`worker:${{ github.sha }}` and `udp-forwarder:${{ github.sha }}`). The local bootstrap script mirrors that flow so `terraform plan` works outside CI.
 
+> **Release builds:** set `RUNMAT_TELEMETRY_KEY=$TELEMETRY_INGESTION_KEY` before invoking `cargo build` (the release workflow does this automatically) so the CLI bakes the header it must send to the ingestion service.
+
 ### GitHub Actions deployment
 
 `.github/workflows/terraform.yml` authenticates with GCP and runs plan/apply when `infra/` changes:
@@ -66,7 +68,7 @@ Repository secrets required by the workflow:
 | `GCP_REGION` | Default region for Cloud Run/Compute |
 | `GCS_TF_STATE_BUCKET` | Bucket that stores Terraform state |
 | `POSTHOG_API_KEY` / `POSTHOG_HOST` | Worker bindings |
-| `TELEMETRY_INGESTION_KEY` | Optional shared secret (`x-telemetry-key`) |
+| `TELEMETRY_INGESTION_KEY` | Required shared secret (`x-telemetry-key`); also baked into release builds |
 | `GA_MEASUREMENT_ID` / `GA_API_SECRET` | Optional GA4 forwarding |
 
 Delegate `telemetry.runmat.org` to the Cloud DNS name servers emitted by `terraform output telemetry_name_servers`. Once delegated, Cloud Run’s domain mapping automatically issues TLS for `https://telemetry.runmat.org/ingest`, and the UDP forwarding rule is reachable at `udp.telemetry.runmat.org:7846`.

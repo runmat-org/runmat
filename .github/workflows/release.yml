@@ -18,6 +18,8 @@ jobs:
   build-release:
     environment: Production
     name: Build ${{ matrix.platform.release_for }}
+    env:
+      RUNMAT_TELEMETRY_KEY: ${{ secrets.TELEMETRY_INGESTION_KEY }}
     strategy:
       max-parallel: 8
       matrix:

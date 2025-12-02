@@ -83,7 +83,8 @@ GA_API_SECRET=
 EOF
 
 echo "Bootstrap complete. Next steps:"
-echo "1. Populate telemetry secrets inside infra/.env."
+echo "1. Populate telemetry secrets inside infra/.env (leave TELEMETRY_INGESTION_KEY blank and Terraform will fail)."
 echo "2. Source the file before running terraform (e.g. 'set -a && source infra/.env && set +a')."
-echo "3. Upload ${KEY_PATH} contents to the GitHub secret 'GCP_CREDENTIALS' and copy the other values into repo secrets."
+echo "3. Export RUNMAT_TELEMETRY_KEY with the same value whenever you build the CLI locally so the header is embedded."
+echo "4. Upload ${KEY_PATH} contents to the GitHub secret 'GCP_CREDENTIALS' and copy the other values into repo secrets."
 

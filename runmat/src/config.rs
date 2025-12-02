@@ -99,6 +99,9 @@ pub struct TelemetryConfig {
     /// Bounded queue size for async delivery
     #[serde(default = "default_telemetry_queue")]
     pub queue_size: usize,
+    /// Require ingestion key (self-built binaries default to false)
+    #[serde(default = "default_true")]
+    pub require_ingestion_key: bool,
 }
 
 impl Default for TelemetryConfig {
@@ -109,6 +112,7 @@ impl Default for TelemetryConfig {
             http_endpoint: None,
             udp_endpoint: Some("udp.telemetry.runmat.org:7846".to_string()),
             queue_size: default_telemetry_queue(),
+            require_ingestion_key: true,
         }
     }
 }

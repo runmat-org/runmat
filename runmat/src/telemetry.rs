@@ -143,6 +143,8 @@ struct TelemetryOptions {
     http_endpoint: Option<String>,
     udp_endpoint: Option<String>,
     sync_mode: bool,
+    ingestion_key: Option<String>,
+    require_ingestion_key: bool,
 }
 
 impl From<&RuntimeTelemetryConfig> for TelemetryOptions {
@@ -163,6 +165,8 @@ impl From<&RuntimeTelemetryConfig> for TelemetryOptions {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
             sync_mode: parse_env_bool("RUNMAT_TELEMETRY_SYNC").unwrap_or(false),
+            ingestion_key: resolve_ingestion_key(),
+            require_ingestion_key: cfg.require_ingestion_key,
         }
     }
 }
@@ -175,7 +179,7 @@ impl TelemetryClient {
             session_id: Uuid::new_v4().to_string(),
         };
 
-        if !options.enabled {
+        if !options.enabled || (options.require_ingestion_key && options.ingestion_key.is_none()) {
             return Self {
                 enabled: false,
                 show_payloads: options.show_payloads,
@@ -246,6 +250,7 @@ impl TelemetryClient {
 struct TelemetryTransport {
     udp_target: Option<SocketAddr>,
     http_endpoint: Option<String>,
+    ingestion_key: Option<String>,
 }
 
 impl TelemetryTransport {
@@ -257,6 +262,7 @@ impl TelemetryTransport {
         Self {
             udp_target,
             http_endpoint: options.http_endpoint.clone(),
+            ingestion_key: options.ingestion_key.clone(),
         }
     }
 
@@ -268,9 +274,12 @@ impl TelemetryTransport {
         }
 
         if let Some(endpoint) = &self.http_endpoint {
-            let request = ureq::post(endpoint)
+            let mut request = ureq::post(endpoint)
                 .set("Content-Type", "application/json")
                 .timeout(Duration::from_secs(2));
+            if let Some(key) = &self.ingestion_key {
+                request = request.set("x-telemetry-key", key);
+            }
             if let Err(err) = request.send_string(payload) {
                 log::debug!("telemetry http error: {err}");
             }
@@ -317,6 +326,24 @@ fn stable_client_id() -> Option<String> {
         log::debug!("failed to persist telemetry id: {err}");
     }
     Some(new_id)
+}
+
+fn resolve_ingestion_key() -> Option<String> {
+    if let Ok(value) = std::env::var("RUNMAT_TELEMETRY_KEY") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    option_env!("RUNMAT_TELEMETRY_KEY")
+        .map(str::trim)
+        .and_then(|value| {
+            if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        })
 }
 
 fn now_timestamp_ms() -> u64 {

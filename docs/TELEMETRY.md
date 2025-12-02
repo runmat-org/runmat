@@ -1,8 +1,5 @@
 # Telemetry
 
-Last updated December 2, 2025  
-Participation is optional and you may opt out at any time.
-
 ## Why is telemetry collected?
 
 RunMat telemetry exists to prove that we are delivering value to our users (e.g. that users are using RunMat). Anonymous usage signals tell us:
@@ -92,9 +89,10 @@ Only aggregated counts and metadata listed above are sent. For broader privacy q
 ## Where does telemetry go?
 
 - Clients send UDP (best effort) to `udp.telemetry.runmat.org:7846` or HTTPS POSTs to `https://telemetry.runmat.org/ingest`.
-- HTTPS traffic lands on a Cloud Run service (`infra/worker/`) that validates `x-telemetry-key`, sanitizes payloads, and forwards to PostHog (primary) and GA4 (optional).
+- HTTPS traffic lands on a Cloud Run service (`infra/worker/`) that validates a shared `x-telemetry-key`, normalizes payloads, emits human-readable summaries (so PostHog’s “URL / Screen” column reads like `run=script • jit=on • gpu=off`), and forwards to PostHog (primary) and GA4 (optional).
 - The UDP path flows through a lightweight Google Cloud UDP load balancer into a managed instance group running the forwarder container (`infra/udp-forwarder/`). Each forwarder replays datagrams to the Cloud Run endpoint asynchronously so the CLI never blocks.
 - No payloads are stored server-side beyond transient buffers; failures are logged and the CLI continues immediately.
+- Official RunMat binaries bake the ingestion key into the executable at build time (via the `RUNMAT_TELEMETRY_KEY` compile-time env var). If you build from source and want to talk to the hosted collector, set the same env var before invoking `cargo build`; otherwise the worker will return `401 unauthorized`.
 
 ## How do I opt out of RunMat telemetry?
 
@@ -109,10 +107,9 @@ RUNMAT_TELEMETRY=0 runmat script.m
 ```
 
 2. **Persisted setting:** create or edit `~/.runmat/config.toml` and set `telemetry.enabled = false`.
-
 3. **Installer-only:** export the same variables before running `install.sh` or `install.ps1`.
-
 4. **Delete identifier:** remove `~/.runmat/telemetry_id` after running with telemetry disabled; a new id will only be created if you re-enable the feature.
+5. **Build-from-source:** if you compile RunMat yourself (e.g. `cargo install --path runmat`), telemetry stays off unless you export `RUNMAT_TELEMETRY_KEY=<ingestion key>` during the build. Keeping that env var unset is equivalent to a permanent opt-out for self-built binaries.
 
 You can re-enable at any time by clearing the env var or setting `telemetry.enabled = true`.
 
