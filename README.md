@@ -86,6 +86,8 @@ Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
 | 32 | 520.5 | 1,178.3 | 3,698.6 | 7.11x | 2.26x |
 | 64 | 893.8 | 1,379.6 | 7,434.6 | 8.32x | 1.54x |
 
+![4K image pipeline speedup](https://web.runmatstatic.com/4k-image-processing_speedup-b.svg)
+
 ### Monte Carlo Perf Sweep (M = paths)
 | M | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
 |---|-------------|--------------|------------|----------------|------------------|
@@ -94,6 +96,10 @@ Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
 | 1 000 000 | 243.3 | 1,283.9 | 17,946.4 | 73.78x | 5.28x |
 | 2 000 000 | 372.0 | 1,469.4 | 38,826.8 | 104.36x | 3.95x |
 | 5 000 000 | 678.1 | 1,719.5 | 95,539.2 | 140.89x | 2.54x |
+
+
+
+![Monte Carlo speedup](https://web.runmatstatic.com/monte-carlo-analysis_speedup-b.svg)
 
 ### Elementwise Math Perf Sweep (points)
 | points | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
@@ -106,6 +112,8 @@ Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
 | 200 000 000 | 202.8 | 17,393.0 | 2,188.9 | 10.79x | 85.76x |
 | 500 000 000 | 171.8 | 18,880.2 | 5,946.9 | 34.61x | 109.87x |
 | 1 000 000 000 | 199.4 | 22,652.0 | 12,570.0 | 63.04x | 113.61x |
+
+![Elementwise math speedup](https://web.runmatstatic.com/elementwise-math_speedup-b.svg)
 
 On smaller arrays, Fusion keeps work on CPU so you still get low overhead and a fast JIT.
 
@@ -386,20 +394,7 @@ Both package types appear identically to users—functions show up in the namesp
 
 ### Package Management
 
-```bash
-# Declare dependencies in .runmat
-[packages]
-linalg-plus = { source = "registry", version = "^1.2" }
-viz-tools = { source = "git", url = "https://github.com/acme/viz-tools" }
-
-# Install packages
-runmat pkg install
-
-# Publish your package
-runmat pkg publish
-```
-
-*Note: Package manager CLI is currently in beta. See [Package Manager Documentation](docs/PACKAGE_MANAGER.md) for design details.*
+The RunMat package manager is still in active design—no CLI commands ship in the current toolchain yet. The [Package Manager Documentation](docs/PACKAGE_MANAGER.md) captures the proposed workflow (dependency manifests, registry + git sources, publishing flow) and will be updated once the implementation begins.
 
 ## 💡 Design Philosophy
 
