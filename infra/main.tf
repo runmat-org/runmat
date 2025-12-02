@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 5.32"
     }
+    dns = {
+      source  = "hashicorp/dns"
+      version = "~> 3.4"
+    }
   }
 }
 
@@ -103,24 +107,34 @@ resource "google_cloud_run_domain_mapping" "telemetry" {
   }
 }
 
-locals {
-  domain_records = try(google_cloud_run_domain_mapping.telemetry.status[0].resource_records, [])
+data "dns_a_record_set" "ghs" {
+  host = "ghs.googlehosted.com"
 }
 
-resource "google_dns_record_set" "domain_mapping" {
-  for_each     = { for record in local.domain_records : record.name => record }
+data "dns_aaaa_record_set" "ghs" {
+  host = "ghs.googlehosted.com"
+}
+
+resource "google_dns_record_set" "domain_mapping_a" {
   managed_zone = google_dns_managed_zone.telemetry.name
-  name         = each.value.name
-  type         = each.value.type
+  name         = local.zone_dns_name
+  type         = "A"
   ttl          = 300
-  rrdatas      = [each.value.rrdata]
-  depends_on   = [google_cloud_run_domain_mapping.telemetry]
+  rrdatas      = sort(data.dns_a_record_set.ghs.addrs)
+}
+
+resource "google_dns_record_set" "domain_mapping_aaaa" {
+  managed_zone = google_dns_managed_zone.telemetry.name
+  name         = local.zone_dns_name
+  type         = "AAAA"
+  ttl          = 300
+  rrdatas      = sort(data.dns_aaaa_record_set.ghs.addrs)
 }
 
 resource "google_compute_firewall" "udp_forwarder" {
   name    = "telemetry-udp-allow"
   network = "default"
-  allows {
+  allow {
     protocol = "udp"
     ports    = ["7846"]
   }
@@ -129,9 +143,28 @@ resource "google_compute_firewall" "udp_forwarder" {
   source_ranges = ["0.0.0.0/0"]
 }
 
+resource "google_compute_firewall" "udp_health" {
+  name    = "telemetry-udp-health-fw"
+  network = "default"
+  allow {
+    protocol = "tcp"
+    ports    = ["9000"]
+  }
+  direction     = "INGRESS"
+  target_tags   = ["telemetry-udp"]
+  source_ranges = ["35.191.0.0/16", "130.211.0.0/22"]
+}
+
 resource "google_compute_address" "udp" {
   name   = "telemetry-udp-ip"
   region = var.region
+}
+
+resource "google_compute_health_check" "udp" {
+  name = "telemetry-udp-health"
+  tcp_health_check {
+    port = 9000
+  }
 }
 
 resource "google_compute_instance_template" "udp" {
@@ -163,16 +196,10 @@ spec:
       value: "${var.telemetry_ingestion_key}"
     - name: FORWARDER_CONCURRENCY
       value: "8"
+    - name: HEALTH_PORT
+      value: "9000"
   restartPolicy: Always
 EOT
-  }
-}
-
-resource "google_compute_region_health_check" "udp" {
-  name   = "telemetry-udp-health"
-  region = var.region
-  udp_health_check {
-    port = 7846
   }
 }
 
@@ -185,7 +212,7 @@ resource "google_compute_region_instance_group_manager" "udp" {
     instance_template = google_compute_instance_template.udp.self_link
   }
   auto_healing_policies {
-    health_check      = google_compute_region_health_check.udp.self_link
+    health_check      = google_compute_health_check.udp.self_link
     initial_delay_sec = 30
   }
 }
@@ -194,6 +221,9 @@ resource "google_compute_target_pool" "udp" {
   name      = "telemetry-udp-pool"
   region    = var.region
   instances = [google_compute_region_instance_group_manager.udp.instance_group]
+  health_checks = [
+    google_compute_health_check.udp.self_link,
+  ]
 }
 
 resource "google_compute_forwarding_rule" "udp" {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 process.env.NODE_ENV = 'test';
 process.env.UDP_PORT = '0';
 process.env.TELEMETRY_HTTP_ENDPOINT = 'https://example.com/ingest';
+process.env.HEALTH_PORT = '0';
 
 vi.mock('undici', () => ({
   fetch: vi.fn(() => Promise.resolve({ ok: true })),
@@ -13,20 +14,21 @@ const { fetch } = await import('undici');
 const { startForwarder } = await import('../src/index.js');
 
 describe('udp forwarder', () => {
-  let socket;
+  let handles;
 
   beforeEach(() => {
     fetch.mockClear();
-    socket = startForwarder();
+    handles = startForwarder();
   });
 
   afterEach(() => {
-    socket?.close();
+    handles?.socket?.close();
+    handles?.healthServer?.close();
   });
 
   it('forwards UDP datagrams to HTTP endpoint', async () => {
-    await new Promise((resolve) => socket.once('listening', resolve));
-    const port = socket.address().port;
+    await new Promise((resolve) => handles.socket.once('listening', resolve));
+    const port = handles.socket.address().port;
     const client = dgram.createSocket('udp4');
 
     await new Promise((resolve, reject) => {
