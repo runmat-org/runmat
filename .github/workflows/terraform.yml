@@ -21,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
+      RUNMAT_WORKER_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+      RUNMAT_UDP_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
+      ENABLE_UDP: ${{ secrets.ENABLE_UDP_FORWARDER }}
       TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
       TF_VAR_region: ${{ secrets.GCP_REGION }}
       TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
@@ -28,9 +31,6 @@ jobs:
       TF_VAR_telemetry_ingestion_key: ${{ secrets.TELEMETRY_INGESTION_KEY }}
       TF_VAR_ga_measurement_id: ${{ secrets.GA_MEASUREMENT_ID }}
       TF_VAR_ga_api_secret: ${{ secrets.GA_API_SECRET }}
-      TF_VAR_worker_image: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
-      TF_VAR_enable_udp_forwarder: ${{ secrets.ENABLE_UDP_FORWARDER == 'true' }}
-      TF_VAR_udp_forwarder_image: ${{ secrets.ENABLE_UDP_FORWARDER == 'true' && format('us-docker.pkg.dev/{0}/telemetry/udp-forwarder:{1}', secrets.GCP_PROJECT_ID, github.sha) || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,19 +39,25 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
+      - name: Export terraform vars
+        run: |
+          echo "TF_VAR_worker_image=${RUNMAT_WORKER_IMAGE}" >> "$GITHUB_ENV"
+          echo "TF_VAR_udp_forwarder_image=${RUNMAT_UDP_IMAGE}" >> "$GITHUB_ENV"
+          echo "TF_VAR_enable_udp_forwarder=${ENABLE_UDP}" >> "$GITHUB_ENV"
+
       - name: Configure Artifact Registry auth
         run: gcloud auth configure-docker us-docker.pkg.dev -q
 
       - name: Build worker image
         run: |
-          docker build -t us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }} infra/worker
-          docker push us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+          docker build -t "${RUNMAT_WORKER_IMAGE}" infra/worker
+          docker push "${RUNMAT_WORKER_IMAGE}"
 
       - name: Build UDP forwarder image
-        if: secrets.ENABLE_UDP_FORWARDER == 'true'
+        if: env.ENABLE_UDP == 'true'
         run: |
-          docker build -t us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }} infra/udp-forwarder
-          docker push us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
+          docker build -t "${RUNMAT_UDP_IMAGE}" infra/udp-forwarder
+          docker push "${RUNMAT_UDP_IMAGE}"
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -88,6 +94,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
+      RUNMAT_WORKER_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+      RUNMAT_UDP_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
+      ENABLE_UDP: ${{ secrets.ENABLE_UDP_FORWARDER }}
       TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
       TF_VAR_region: ${{ secrets.GCP_REGION }}
       TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
@@ -95,9 +104,6 @@ jobs:
       TF_VAR_telemetry_ingestion_key: ${{ secrets.TELEMETRY_INGESTION_KEY }}
       TF_VAR_ga_measurement_id: ${{ secrets.GA_MEASUREMENT_ID }}
       TF_VAR_ga_api_secret: ${{ secrets.GA_API_SECRET }}
-      TF_VAR_worker_image: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
-      TF_VAR_enable_udp_forwarder: ${{ secrets.ENABLE_UDP_FORWARDER == 'true' }}
-      TF_VAR_udp_forwarder_image: ${{ secrets.ENABLE_UDP_FORWARDER == 'true' && format('us-docker.pkg.dev/{0}/telemetry/udp-forwarder:{1}', secrets.GCP_PROJECT_ID, github.sha) || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -106,19 +112,25 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
+      - name: Export terraform vars
+        run: |
+          echo "TF_VAR_worker_image=${RUNMAT_WORKER_IMAGE}" >> "$GITHUB_ENV"
+          echo "TF_VAR_udp_forwarder_image=${RUNMAT_UDP_IMAGE}" >> "$GITHUB_ENV"
+          echo "TF_VAR_enable_udp_forwarder=${ENABLE_UDP}" >> "$GITHUB_ENV"
+
       - name: Configure Artifact Registry auth
         run: gcloud auth configure-docker us-docker.pkg.dev -q
 
       - name: Build worker image
         run: |
-          docker build -t us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }} infra/worker
-          docker push us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
+          docker build -t "${RUNMAT_WORKER_IMAGE}" infra/worker
+          docker push "${RUNMAT_WORKER_IMAGE}"
 
       - name: Build UDP forwarder image
-        if: secrets.ENABLE_UDP_FORWARDER == 'true'
+        if: env.ENABLE_UDP == 'true'
         run: |
-          docker build -t us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }} infra/udp-forwarder
-          docker push us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
+          docker build -t "${RUNMAT_UDP_IMAGE}" infra/udp-forwarder
+          docker push "${RUNMAT_UDP_IMAGE}"
 
       - uses: hashicorp/setup-terraform@v3
         with:
