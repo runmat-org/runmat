@@ -229,13 +229,12 @@ function summarizeEvent(event, runKind, detail, successFlag) {
 
 function buildSyntheticUrl(event, runKind, detail, successFlag) {
   const params = new URLSearchParams({
-    run: runKind,
     jit: coerceBoolean(detail.jit_enabled) ? 'on' : 'off',
     accel: coerceBoolean(detail.accelerate_enabled) ? 'on' : 'off',
     gpu: detail.gpu_dispatches || detail.gpu_ratio ? 'on' : 'off',
     status: successFlag === false ? 'fail' : 'ok',
   });
-  return `telemetry://run.${runKind}?${params.toString()}`;
+  return `runmat://run.${runKind}?${params.toString()}`;
 }
 
 function friendlyEventName(event) {
