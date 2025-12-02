@@ -92,9 +92,9 @@ We ran this exact pipeline on an **Apple M2 Max** using the Metal backend, avera
 
 At the high end (**B = 64**, 64 4K images ≈ 133M pixels):
 
-- RunMat: **0.89 s**  
-- NumPy: **7.43 s** → about **8.3× slower**  
-- PyTorch: **1.38 s** → about **1.5× slower**
+- RunMat: **0.68 s**  
+- NumPy: **about 7.0 s** → **(≈10× slower)**  
+- PyTorch: **about 1.2 s** → **(≈1.8× slower)**
 
 
 
@@ -258,7 +258,7 @@ MATLAB is commonly taught in engineering programs, so many engineers already thi
 
 #### Try for yourself
 
-* **Download RunMat:** [Download](/download)
+***Download RunMat:** [Download](/download)
 
 * **See benchmarks and examples:** [Benchmarks](/benchmarks)
 

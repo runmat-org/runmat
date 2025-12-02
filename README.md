@@ -225,7 +225,7 @@ grid on;
 title("Sine wave");
 ```
 
-
+---
 
 ## 🧱 Architecture: CPU+GPU performance
 
