@@ -172,6 +172,10 @@ resource "google_compute_instance_template" "udp" {
   machine_type = var.udp_machine_type
   tags         = ["telemetry-udp"]
 
+  lifecycle {
+    create_before_destroy = true
+  }
+
   disk {
     auto_delete  = true
     boot         = true
