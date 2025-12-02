@@ -21,9 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TF_STATE_BUCKET: ${{ secrets.CF_TF_STATE_BUCKET }}
-      CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CF_R2_ENDPOINT }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_ENDPOINT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
@@ -73,9 +73,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TF_STATE_BUCKET: ${{ secrets.CF_TF_STATE_BUCKET }}
-      CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CF_R2_ENDPOINT }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_ENDPOINT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
