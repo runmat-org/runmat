@@ -1,10 +1,12 @@
-## RunMat Infra (GCP)
+## RunMat Cloud Infrastructure
 
-This directory now provisions the telemetry ingestion stack on Google Cloud Platform:
+This directory provisions the RunMat services on Google Cloud Platform.
+
+The following services are currently provisioned:
 
 - Cloud DNS zone for `telemetry.runmat.org`
 - Cloud Run service that hosts the HTTP telemetry worker
-- Optional UDP forwarder running on a regional Managed Instance Group + UDP load balancer
+- UDP forwarder running on a regional Managed Instance Group + UDP load balancer
 
 ### Remote state
 
@@ -26,7 +28,7 @@ Set the following environment variables (or prefix `terraform plan/apply` with t
 - `TF_VAR_telemetry_ingestion_key`
 - `TF_VAR_ga_measurement_id`, `TF_VAR_ga_api_secret`
 - `TF_VAR_worker_image`: container image URI for the Cloud Run worker (e.g. `us-docker.pkg.dev/<project>/telemetry/worker:latest`).
-- `TF_VAR_enable_udp_forwarder`, `TF_VAR_udp_forwarder_image` (set when the UDP path is required).
+- `TF_VAR_udp_forwarder_image`: container image URI for the UDP forwarder.
 
 ### Building/publishing containers
 
@@ -44,7 +46,7 @@ docker build -t us-docker.pkg.dev/$PROJECT/telemetry/udp-forwarder:$TAG infra/ud
 docker push us-docker.pkg.dev/$PROJECT/telemetry/udp-forwarder:$TAG
 ```
 
-Supply the same image URIs to Terraform via `TF_VAR_worker_image` / `TF_VAR_udp_forwarder_image`. When `TF_VAR_enable_udp_forwarder` is `false`, Terraform skips the UDP compute resources entirely.
+Supply the same image URIs to Terraform via `TF_VAR_worker_image` / `TF_VAR_udp_forwarder_image`.
 
 > The GitHub Actions workflow automatically builds/pushes both images for every commit and injects the resulting tags into Terraform (`worker:${{ github.sha }}` and `udp-forwarder:${{ github.sha }}`). The local bootstrap script mirrors that flow so `terraform plan` works outside CI.
 
@@ -66,9 +68,5 @@ Repository secrets required by the workflow:
 | `POSTHOG_API_KEY` / `POSTHOG_HOST` | Worker bindings |
 | `TELEMETRY_INGESTION_KEY` | Optional shared secret (`x-telemetry-key`) |
 | `GA_MEASUREMENT_ID` / `GA_API_SECRET` | Optional GA4 forwarding |
-| `WORKER_IMAGE` | Container image URI for the Cloud Run worker |
-| `UDP_FORWARDER_IMAGE` | Container image URI for the UDP forwarder (if enabled) |
-| `ENABLE_UDP_FORWARDER` | Optional repo variable/secret (`true`/`false`) |
 
-Delegate `telemetry.runmat.org` to the Cloud DNS name servers emitted by `terraform output telemetry_name_servers`. Once delegated, Cloud Run’s domain mapping automatically issues TLS for `https://telemetry.runmat.org/ingest`, and (if enabled) the UDP forwarding rule is reachable at `udp.telemetry.runmat.org:7846`.
-
+Delegate `telemetry.runmat.org` to the Cloud DNS name servers emitted by `terraform output telemetry_name_servers`. Once delegated, Cloud Run’s domain mapping automatically issues TLS for `https://telemetry.runmat.org/ingest`, and the UDP forwarding rule is reachable at `udp.telemetry.runmat.org:7846`.

@@ -56,14 +56,8 @@ variable "worker_image" {
   default     = ""
 }
 
-variable "enable_udp_forwarder" {
-  description = "Provision the UDP forwarder (GCE + load balancer)"
-  type        = bool
-  default     = false
-}
-
 variable "udp_forwarder_image" {
-  description = "Container image for the UDP forwarder (only used when enable_udp_forwarder=true)"
+  description = "Container image for the UDP forwarder"
   type        = string
   default     = ""
 }

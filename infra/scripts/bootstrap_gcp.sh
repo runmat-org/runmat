@@ -6,7 +6,6 @@ REGION=${REGION:-us-central1}
 STATE_BUCKET=${STATE_BUCKET:-${PROJECT}-terraform-state}
 SERVICE_ACCOUNT=${SERVICE_ACCOUNT:-runmat-terraform}
 ARTIFACT_REPO=${ARTIFACT_REPO:-telemetry}
-ENABLE_UDP=${ENABLE_UDP:-false}
 TAG=${TAG:-$(git rev-parse --short HEAD)}
 CONFIG_DIR=${CONFIG_DIR:-$HOME/.config/gcloud}
 KEY_PATH=${KEY_PATH:-$CONFIG_DIR/${SERVICE_ACCOUNT}.json}
@@ -23,7 +22,7 @@ if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT}@${PROJECT}.iam.gse
   gcloud iam service-accounts create "${SERVICE_ACCOUNT}" --display-name "RunMat Terraform"
 fi
 
-for role in roles/run.admin roles/compute.admin roles/dns.admin roles/iam.serviceAccountUser roles/artifactregistry.writer; do
+for role in roles/run.developer roles/compute.instanceAdmin.v1 roles/compute.networkAdmin roles/dns.admin roles/iam.serviceAccountUser; do
   gcloud projects add-iam-policy-binding "${PROJECT}" \
     --member="serviceAccount:${SERVICE_ACCOUNT}@${PROJECT}.iam.gserviceaccount.com" \
     --role="${role}" >/dev/null
@@ -36,6 +35,9 @@ gcloud iam service-accounts keys create "${KEY_PATH}" \
 
 echo "=> Ensuring state bucket ${STATE_BUCKET}"
 gsutil mb -l "${REGION%%-*}" "gs://${STATE_BUCKET}" >/dev/null 2>&1 || true
+gcloud storage buckets add-iam-policy-binding "gs://${STATE_BUCKET}" \
+  --member="serviceAccount:${SERVICE_ACCOUNT}@${PROJECT}.iam.gserviceaccount.com" \
+  --role="roles/storage.objectAdmin" >/dev/null
 
 echo "=> Ensuring Artifact Registry ${ARTIFACT_REPO}"
 gcloud artifacts repositories describe "${ARTIFACT_REPO}" --location="${REGION%%-*}" >/dev/null 2>&1 || \
@@ -43,6 +45,10 @@ gcloud artifacts repositories describe "${ARTIFACT_REPO}" --location="${REGION%%
     --repository-format=docker \
     --location="${REGION%%-*}" \
     --description="RunMat telemetry images"
+gcloud artifacts repositories add-iam-policy-binding "${ARTIFACT_REPO}" \
+  --location="${REGION%%-*}" \
+  --member="serviceAccount:${SERVICE_ACCOUNT}@${PROJECT}.iam.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer" >/dev/null
 
 echo "=> Authenticating docker"
 gcloud auth configure-docker us-docker.pkg.dev -q
@@ -51,11 +57,9 @@ echo "=> Building worker image ${WORKER_IMAGE}"
 docker build -t "${WORKER_IMAGE}" "$(git rev-parse --show-toplevel)/infra/worker"
 docker push "${WORKER_IMAGE}"
 
-if [[ "${ENABLE_UDP}" == "true" ]]; then
-  echo "=> Building UDP forwarder image ${UDP_IMAGE}"
-  docker build -t "${UDP_IMAGE}" "$(git rev-parse --show-toplevel)/infra/udp-forwarder"
-  docker push "${UDP_IMAGE}"
-fi
+echo "=> Building UDP forwarder image ${UDP_IMAGE}"
+docker build -t "${UDP_IMAGE}" "$(git rev-parse --show-toplevel)/infra/udp-forwarder"
+docker push "${UDP_IMAGE}"
 
 ENV_FILE="$(git rev-parse --show-toplevel)/infra/.env"
 echo "=> Writing ${ENV_FILE}"
@@ -68,8 +72,7 @@ GOOGLE_APPLICATION_CREDENTIALS=${KEY_PATH}
 TF_VAR_project_id=${PROJECT}
 TF_VAR_region=${REGION}
 TF_VAR_worker_image=${WORKER_IMAGE}
-TF_VAR_enable_udp_forwarder=${ENABLE_UDP}
-TF_VAR_udp_forwarder_image=$([[ "${ENABLE_UDP}" == "true" ]] && echo "${UDP_IMAGE}" || echo "")
+TF_VAR_udp_forwarder_image=${UDP_IMAGE}
 
 # Fill these in before running terraform plan/apply:
 POSTHOG_API_KEY=

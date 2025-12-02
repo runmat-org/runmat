@@ -13,7 +13,6 @@ locals {
   zone_dns_name = "${var.telemetry_domain}."
   worker_image  = var.worker_image != "" ? var.worker_image : "us-docker.pkg.dev/${var.project_id}/telemetry/worker:latest"
   udp_image     = var.udp_forwarder_image != "" ? var.udp_forwarder_image : "us-docker.pkg.dev/${var.project_id}/telemetry/udp-forwarder:latest"
-  udp_enabled   = var.enable_udp_forwarder && var.udp_forwarder_image != ""
 }
 
 provider "google" {
@@ -119,7 +118,6 @@ resource "google_dns_record_set" "domain_mapping" {
 }
 
 resource "google_compute_firewall" "udp_forwarder" {
-  count   = local.udp_enabled ? 1 : 0
   name    = "telemetry-udp-allow"
   network = "default"
   allows {
@@ -132,13 +130,11 @@ resource "google_compute_firewall" "udp_forwarder" {
 }
 
 resource "google_compute_address" "udp" {
-  count  = local.udp_enabled ? 1 : 0
   name   = "telemetry-udp-ip"
   region = var.region
 }
 
 resource "google_compute_instance_template" "udp" {
-  count        = local.udp_enabled ? 1 : 0
   name_prefix  = "telemetry-udp-"
   machine_type = var.udp_machine_type
   tags         = ["telemetry-udp"]
@@ -173,7 +169,6 @@ EOT
 }
 
 resource "google_compute_region_health_check" "udp" {
-  count  = local.udp_enabled ? 1 : 0
   name   = "telemetry-udp-health"
   region = var.region
   udp_health_check {
@@ -182,45 +177,41 @@ resource "google_compute_region_health_check" "udp" {
 }
 
 resource "google_compute_region_instance_group_manager" "udp" {
-  count              = local.udp_enabled ? 1 : 0
   name               = "telemetry-udp-mig"
   region             = var.region
   base_instance_name = "telemetry-udp"
   target_size        = var.udp_min_instances
   version {
-    instance_template = google_compute_instance_template.udp[0].self_link
+    instance_template = google_compute_instance_template.udp.self_link
   }
   auto_healing_policies {
-    health_check      = google_compute_region_health_check.udp[0].self_link
+    health_check      = google_compute_region_health_check.udp.self_link
     initial_delay_sec = 30
   }
 }
 
 resource "google_compute_target_pool" "udp" {
-  count     = local.udp_enabled ? 1 : 0
   name      = "telemetry-udp-pool"
   region    = var.region
-  instances = local.udp_enabled ? [google_compute_region_instance_group_manager.udp[0].instance_group] : []
+  instances = [google_compute_region_instance_group_manager.udp.instance_group]
 }
 
 resource "google_compute_forwarding_rule" "udp" {
-  count                 = local.udp_enabled ? 1 : 0
   name                  = "telemetry-udp-forwarding"
   region                = var.region
   load_balancing_scheme = "EXTERNAL"
   ip_protocol           = "UDP"
   port_range            = "7846"
-  target                = google_compute_target_pool.udp[0].self_link
-  ip_address            = google_compute_address.udp[0].self_link
+  target                = google_compute_target_pool.udp.self_link
+  ip_address            = google_compute_address.udp.self_link
 }
 
 resource "google_dns_record_set" "udp_dns" {
-  count        = local.udp_enabled ? 1 : 0
   managed_zone = google_dns_managed_zone.telemetry.name
   name         = "${var.telemetry_udp_subdomain}."
   type         = "A"
   ttl          = 120
-  rrdatas      = [google_compute_address.udp[0].address]
+  rrdatas      = [google_compute_address.udp.address]
 }
 
 output "telemetry_https_endpoint" {
@@ -234,6 +225,6 @@ output "telemetry_name_servers" {
 }
 
 output "telemetry_udp_endpoint" {
-  description = "UDP hostname:port (null when disabled)"
-  value       = local.udp_enabled ? "${var.telemetry_udp_subdomain}:7846" : null
+  description = "UDP hostname:port for CLI datagrams"
+  value       = "${var.telemetry_udp_subdomain}:7846"
 }

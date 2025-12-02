@@ -24,7 +24,6 @@ jobs:
       TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
       RUNMAT_WORKER_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
       RUNMAT_UDP_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
-      ENABLE_UDP: ${{ secrets.ENABLE_UDP_FORWARDER }}
       TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
       TF_VAR_region: ${{ secrets.GCP_REGION }}
       TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
@@ -39,7 +38,6 @@ jobs:
         run: |
           echo "TF_VAR_worker_image=${RUNMAT_WORKER_IMAGE}" >> "$GITHUB_ENV"
           echo "TF_VAR_udp_forwarder_image=${RUNMAT_UDP_IMAGE}" >> "$GITHUB_ENV"
-          echo "TF_VAR_enable_udp_forwarder=${ENABLE_UDP}" >> "$GITHUB_ENV"
 
       - id: auth
         uses: google-github-actions/auth@v2
@@ -55,7 +53,6 @@ jobs:
           docker push "${RUNMAT_WORKER_IMAGE}"
 
       - name: Build UDP forwarder image
-        if: env.ENABLE_UDP == 'true'
         run: |
           docker build -t "${RUNMAT_UDP_IMAGE}" infra/udp-forwarder
           docker push "${RUNMAT_UDP_IMAGE}"
@@ -98,7 +95,6 @@ jobs:
       TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
       RUNMAT_WORKER_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
       RUNMAT_UDP_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/udp-forwarder:${{ github.sha }}
-      ENABLE_UDP: ${{ secrets.ENABLE_UDP_FORWARDER }}
       TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
       TF_VAR_region: ${{ secrets.GCP_REGION }}
       TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
@@ -113,7 +109,6 @@ jobs:
         run: |
           echo "TF_VAR_worker_image=${RUNMAT_WORKER_IMAGE}" >> "$GITHUB_ENV"
           echo "TF_VAR_udp_forwarder_image=${RUNMAT_UDP_IMAGE}" >> "$GITHUB_ENV"
-          echo "TF_VAR_enable_udp_forwarder=${ENABLE_UDP}" >> "$GITHUB_ENV"
 
       - id: auth
         uses: google-github-actions/auth@v2
@@ -129,7 +124,6 @@ jobs:
           docker push "${RUNMAT_WORKER_IMAGE}"
 
       - name: Build UDP forwarder image
-        if: env.ENABLE_UDP == 'true'
         run: |
           docker build -t "${RUNMAT_UDP_IMAGE}" infra/udp-forwarder
           docker push "${RUNMAT_UDP_IMAGE}"
