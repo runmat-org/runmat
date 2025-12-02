@@ -203,9 +203,9 @@ EOT
   }
 }
 
-resource "google_compute_region_instance_group_manager" "udp" {
+resource "google_compute_instance_group_manager" "udp" {
   name               = "telemetry-udp-mig"
-  region             = var.region
+  zone               = "${var.region}-a"
   base_instance_name = "telemetry-udp"
   target_size        = var.udp_min_instances
   version {
@@ -215,15 +215,12 @@ resource "google_compute_region_instance_group_manager" "udp" {
     health_check      = google_compute_health_check.udp.self_link
     initial_delay_sec = 30
   }
+  target_pools = [google_compute_target_pool.udp.self_link]
 }
 
 resource "google_compute_target_pool" "udp" {
-  name      = "telemetry-udp-pool"
-  region    = var.region
-  instances = [google_compute_region_instance_group_manager.udp.instance_group]
-  health_checks = [
-    google_compute_health_check.udp.self_link,
-  ]
+  name   = "telemetry-udp-pool"
+  region = var.region
 }
 
 resource "google_compute_forwarding_rule" "udp" {
