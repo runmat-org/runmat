@@ -31,7 +31,7 @@ use telemetry::{
 #[derive(Parser)]
 #[command(
     name = "runmat",
-    version = "0.0.2",
+    version = env!("CARGO_PKG_VERSION"),
     about = "High-performance MATLAB/Octave code runtime",
     long_about = r#"
 RunMat is a modern, high-performance runtime for MATLAB/Octave code built 
