@@ -9,7 +9,7 @@ $BINARY_NAME = "runmat.exe"
 $INSTALL_DIR = "$env:USERPROFILE\.runmat\bin"
 $WEBSITE_URL = "https://runmat.org"
 
-$TELEMETRY_ENDPOINT = "https://runmat.org/api/telemetry"
+$TELEMETRY_ENDPOINT = "https://telemetry.runmat.org/ingest"
 $TELEMETRY_ID_FILE = "$env:USERPROFILE\.runmat\telemetry_id"
 
 function New-AnonymousClientId {

@@ -19,6 +19,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const MIN_QUEUE_SIZE: usize = 8;
+
 /// Main RunMat configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RunMatConfig {
@@ -27,6 +29,9 @@ pub struct RunMatConfig {
     /// Acceleration configuration
     #[serde(default)]
     pub accelerate: AccelerateConfig,
+    /// Telemetry configuration
+    #[serde(default)]
+    pub telemetry: TelemetryConfig,
     /// JIT compiler configuration
     pub jit: JitConfig,
     /// Garbage collector configuration
@@ -78,6 +83,36 @@ pub struct AccelerateConfig {
     pub auto_offload: AutoOffloadConfig,
 }
 
+/// Telemetry configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelemetryConfig {
+    /// Enable runtime telemetry
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Echo each payload to stdout for transparency
+    #[serde(default)]
+    pub show_payloads: bool,
+    /// Optional HTTP endpoint override
+    pub http_endpoint: Option<String>,
+    /// Optional UDP endpoint override (host:port)
+    pub udp_endpoint: Option<String>,
+    /// Bounded queue size for async delivery
+    #[serde(default = "default_telemetry_queue")]
+    pub queue_size: usize,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_payloads: false,
+            http_endpoint: None,
+            udp_endpoint: Some("telemetry.runmat.org:7846".to_string()),
+            queue_size: default_telemetry_queue(),
+        }
+    }
+}
+
 impl Default for AccelerateConfig {
     fn default() -> Self {
         Self {
@@ -89,6 +124,10 @@ impl Default for AccelerateConfig {
             auto_offload: AutoOffloadConfig::default(),
         }
     }
+}
+
+fn default_telemetry_queue() -> usize {
+    256
 }
 
 impl AccelerateConfig {
@@ -712,6 +751,13 @@ impl ConfigLoader {
         let config_paths = Self::find_config_files();
 
         for path in config_paths {
+            if path.is_dir() {
+                info!(
+                    "Ignoring config directory path (expected file): {}",
+                    path.display()
+                );
+                continue;
+            }
             if path.exists() {
                 info!("Loading configuration from: {}", path.display());
                 return Self::load_from_file(&path);
@@ -828,6 +874,48 @@ impl ConfigLoader {
 
         if let Ok(snapshot) = env::var("RUSTMAT_SNAPSHOT_PATH") {
             config.runtime.snapshot_path = Some(PathBuf::from(snapshot));
+        }
+
+        // Telemetry settings
+        if let Some(flag) = env::var("RUNMAT_TELEMETRY")
+            .ok()
+            .and_then(|v| parse_bool(&v))
+        {
+            config.telemetry.enabled = flag;
+        }
+        if let Some(flag) = env::var("RUNMAT_NO_TELEMETRY")
+            .ok()
+            .and_then(|v| parse_bool(&v))
+        {
+            if flag {
+                config.telemetry.enabled = false;
+            }
+        }
+        if let Ok(show) = env::var("RUNMAT_TELEMETRY_SHOW") {
+            config.telemetry.show_payloads = parse_bool(&show).unwrap_or(false);
+        }
+        if let Ok(endpoint) = env::var("RUNMAT_TELEMETRY_ENDPOINT")
+            .or_else(|_| env::var("RUNMAT_TELEMETRY_HTTP_ENDPOINT"))
+        {
+            let trimmed = endpoint.trim();
+            if trimmed.is_empty() {
+                config.telemetry.http_endpoint = None;
+            } else {
+                config.telemetry.http_endpoint = Some(trimmed.to_string());
+            }
+        }
+        if let Ok(udp) = env::var("RUNMAT_TELEMETRY_UDP_ENDPOINT") {
+            let trimmed = udp.trim();
+            if trimmed.is_empty() || trimmed == "0" || trimmed.eq_ignore_ascii_case("off") {
+                config.telemetry.udp_endpoint = None;
+            } else {
+                config.telemetry.udp_endpoint = Some(trimmed.to_string());
+            }
+        }
+        if let Ok(queue) = env::var("RUNMAT_TELEMETRY_QUEUE_SIZE") {
+            if let Ok(parsed) = queue.parse::<usize>() {
+                config.telemetry.queue_size = parsed.max(MIN_QUEUE_SIZE);
+            }
         }
 
         // Acceleration settings
@@ -1085,7 +1173,11 @@ fn parse_power_preference(value: &str) -> Option<AccelPowerPreference> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use once_cell::sync::Lazy;
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    static ENV_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
     fn test_config_defaults() {
@@ -1167,5 +1259,21 @@ mod tests {
         assert_eq!(parse_bool("false"), Some(false));
         assert_eq!(parse_bool("0"), Some(false));
         assert_eq!(parse_bool("invalid"), None);
+    }
+
+    #[test]
+    fn telemetry_env_overrides_respect_empty_values() {
+        let _lock = ENV_GUARD.lock().unwrap();
+        std::env::set_var("RUNMAT_TELEMETRY_ENDPOINT", "https://custom.example/ingest");
+        std::env::set_var("RUNMAT_TELEMETRY_UDP_ENDPOINT", "off");
+        let mut config = RunMatConfig::default();
+        ConfigLoader::apply_environment_variables(&mut config).unwrap();
+        assert_eq!(
+            config.telemetry.http_endpoint.as_deref(),
+            Some("https://custom.example/ingest")
+        );
+        assert!(config.telemetry.udp_endpoint.is_none());
+        std::env::remove_var("RUNMAT_TELEMETRY_ENDPOINT");
+        std::env::remove_var("RUNMAT_TELEMETRY_UDP_ENDPOINT");
     }
 }

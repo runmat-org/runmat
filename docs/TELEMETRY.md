@@ -1,78 +1,121 @@
-## Install Telemetry (transparent and optional)
+# Telemetry
 
-We collect a tiny amount of anonymous telemetry during installation to answer basic questions:
+Last updated December 2, 2025  
+Participation is optional and you may opt out at any time.
 
-- How many installs started/completed?
-- Do we have regressions causing installer failures by OS/arch?
+## Why is telemetry collected?
 
-This helps us prioritize fixes and track the health of releases. We designed it to be anonymous, minimal, and easy to opt out of.
+RunMat telemetry exists to prove that we are delivering value to our users (e.g. that users are using RunMat). Anonymous usage signals tell us:
 
-### What is sent
+- Whether installers are succeeding by OS/arch.
+- How often acceleration is enabled versus falling back to CPU.
+- Where JIT compilation or fusion fails so we can prioritize fixes.
 
-The install scripts emit at most one of each of these events per run:
+We only collect the minimum data needed to answer those questions, and we use it solely to improve the CLI/runtime.
 
-- `install_start`
-- `install_complete`
-- `install_failed`
+## What is being collected?
 
-Alongside the event name, we send the following keys:
+We separate installer events from runtime events and keep the schemas intentionally small.
 
-- `os`: operating system (e.g., `windows`, `linux`, `darwin`)
-- `arch`: architecture (e.g., `x86_64`, `arm64`)
-- `platform`: specific release target (e.g., `windows-x86_64`, `macos-aarch64`)
-- `release`: release tag being installed (e.g., `v0.1.2`), or `unknown` on fallback
-- `method`: installer type (`powershell` or `shell`)
-- `cid`: a random, anonymous client id (see below)
+### Installers
 
-Example payload (PowerShell):
+Each run emits at most one of each event: `install_start`, `install_complete`, `install_failed`. Fields:
 
+- `event_label` (one of the above)
+- `os`, `arch`, `platform` (e.g. `darwin`, `arm64`, `macos-aarch64`)
+- `release` (RunMat version being installed)
+- `method` (`powershell` or `shell`)
+- `cid` (anonymous client id, see below)
+
+### Runtime (CLI / REPL / scripts)
+
+At most two events per process:
+
+- `runtime_session_start`: `session_id`, `cid`, `run_kind` (`script`, `repl`, `benchmark`, `kernel`), `os`, `arch`, CLI version, whether acceleration/JIT are enabled.
+- `runtime_value`: everything above plus `duration_us`, `success`, stringified error class (never source code), JIT usage flag, execution counters, provider metadata (device name/vendor/backend only), and GPU telemetry (dispatch counts, wall time, bytes moved, cache hits/misses, fusion stats).
+
+Example runtime payload:
+
+```
 ```json
 {
-  "event_label": "install_start",
-  "os": "windows",
-  "arch": "AMD64",
-  "platform": "windows-x86_64",
-  "release": "v0.1.2",
-  "method": "powershell",
-  "cid": "9b7f0ee2-0a5a-4bda-8f1a-3a9d53f1b3e7"
+  "event_label": "runtime_value",
+  "cid": "eac98648-3b42-41c7-a887-7452dd08cbf0",
+  "session_id": "9e2a9d9f-4e37-4090-a1fb-96cb2c6f9f3a",
+  "run_kind": "script",
+  "os": "macos",
+  "arch": "aarch64",
+  "payload": {
+    "duration_us": 4412,
+    "success": true,
+    "jit_enabled": true,
+    "jit_used": true,
+    "accelerate_enabled": true,
+    "provider": {
+      "device": { "name": "NVIDIA RTX 4090", "vendor": "NVIDIA", "backend": "cuda" },
+      "telemetry": {
+        "gpu_dispatches": 12,
+        "gpu_wall_ns": 1850000,
+        "upload_bytes": 262144,
+        "download_bytes": 0,
+        "fusion_cache_hits": 8,
+        "fusion_cache_misses": 1
+      }
+    }
+  }
 }
 ```
 
 ### Anonymous client id
 
-Both installers generate a random GUID the first time they run and save it to a local file:
+Installers and the CLI store a random GUID in `~/.runmat/telemetry_id` (or `%USERPROFILE%\.runmat\telemetry_id`). It lets us count sessions without using personal identifiers. Delete the file to regenerate a new id.
 
-- Windows: `%USERPROFILE%/.runmat/telemetry_id`
-- Linux/macOS: `$HOME/.runmat/telemetry_id`
+### See exactly what’s sent
 
-This id lets us count starts/completions without using personal or device identifiers. You can delete the file at any time; a new random id will be generated if telemetry is enabled later.
+Set `RUNMAT_TELEMETRY_SHOW=1` to print every JSON payload to stderr before it is sent:
 
-### Where telemetry goes
+```bash
+RUNMAT_TELEMETRY_SHOW=1 runmat script.m
+```
 
-The installers post to `https://runmat.org/api/telemetry` (source code for that handler is [here](https://github.com/runmat-org/runmat/blob/main/website/app/api/telemetry/route.ts)). That endpoint:
+This flag is meant for transparency; telemetry is still transmitted unless disabled via the opts below.
 
-- Forwards the event to Google Analytics (Measurement API) with the anonymous `cid`
-- Stores nothing server‑side beyond standard, short‑lived service logs
+## What about sensitive data?
 
-If forwarding fails, the installer continues and your installation isn’t affected.
+We never collect:
 
-### How to opt out
+- Source code, tensors, file contents, or paths.
+- Environment variables or shell history.
+- Serialized stack traces or values that may contain user data.
 
-Set one of these environment variables before running the installer to disable telemetry:
+Only aggregated counts and metadata listed above are sent. For broader privacy questions, contact team@dystr.com.
 
-- `RUNMAT_NO_TELEMETRY=1`
-- `RUNMAT_TELEMETRY=0`
+## Where does telemetry go?
 
-Alternatively, you can remove the local `telemetry_id` file afterwards (see paths above). Future runs will remain opted out while those environment variables are set.
+- Clients send UDP (best effort) to `telemetry.runmat.org:7846` or HTTPS POSTs to `https://telemetry.runmat.org/ingest`.
+- Cloudflare Spectrum terminates UDP and forwards to a Cloudflare Worker (`infra/worker.js`), which validates a shared secret and relays to PostHog (primary) and GA4 (optional) using their ingestion APIs.
+- No payloads are stored server-side beyond transient buffers; failures are logged and the CLI continues immediately.
 
-### Scope
+## How do I opt out of RunMat telemetry?
 
-Telemetry is emitted only by the installers. The runtime (`runmat` CLI) does not send telemetry.
+Use whichever method fits your workflow:
 
-### Source
+1. **Environment variable (one-off or CI):**
 
-- Windows installer: `website/public/install.ps1`
-- Linux/macOS installer: `website/public/install.sh`
-- API proxy: `website/app/api/telemetry/route.ts`
+```bash
+RUNMAT_NO_TELEMETRY=1 runmat script.m
+# or
+RUNMAT_TELEMETRY=0 runmat script.m
+```
 
-We welcome feedback. If you have questions or concerns, please open an issue or contact the maintainers.
+2. **Persisted setting:** create or edit `~/.runmat/config.toml` and set `telemetry.enabled = false`.
+
+3. **Installer-only:** export the same variables before running `install.sh` or `install.ps1`.
+
+4. **Delete identifier:** remove `~/.runmat/telemetry_id` after running with telemetry disabled; a new id will only be created if you re-enable the feature.
+
+You can re-enable at any time by clearing the env var or setting `telemetry.enabled = true`.
+
+---
+
+Questions or feedback? Open an issue or reach us at team@dystr.com. We review this document regularly to keep it accurate and easy to read.

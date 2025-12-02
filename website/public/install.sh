@@ -19,7 +19,7 @@ WEBSITE_URL="https://runmat.org"
 
 # Optional: Telemetry relay (best-effort, anonymous)
 TELEMETRY_ID_FILE="$HOME/.runmat/telemetry_id"
-TELEMETRY_ENDPOINT="https://runmat.org/api/telemetry"
+TELEMETRY_ENDPOINT="https://telemetry.runmat.org/ingest"
 
 log() {
     printf "%b[INFO]%b %s\n" "$GREEN" "$NC" "$1"

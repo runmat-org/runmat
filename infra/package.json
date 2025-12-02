@@ -1,0 +1,12 @@
+{
+  "name": "runmat-telemetry-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0"
+  }
+}
+
