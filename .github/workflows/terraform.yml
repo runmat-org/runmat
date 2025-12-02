@@ -19,6 +19,7 @@ jobs:
     name: Terraform plan
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    environment: Production
     env:
       TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
       RUNMAT_WORKER_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
@@ -34,16 +35,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
-
       - name: Export terraform vars
         run: |
           echo "TF_VAR_worker_image=${RUNMAT_WORKER_IMAGE}" >> "$GITHUB_ENV"
           echo "TF_VAR_udp_forwarder_image=${RUNMAT_UDP_IMAGE}" >> "$GITHUB_ENV"
           echo "TF_VAR_enable_udp_forwarder=${ENABLE_UDP}" >> "$GITHUB_ENV"
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
       - name: Configure Artifact Registry auth
         run: gcloud auth configure-docker us-docker.pkg.dev -q
@@ -92,6 +93,7 @@ jobs:
     name: Terraform apply
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: Production
     env:
       TF_STATE_BUCKET: ${{ secrets.GCS_TF_STATE_BUCKET }}
       RUNMAT_WORKER_IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/telemetry/worker:${{ github.sha }}
@@ -107,16 +109,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
-
       - name: Export terraform vars
         run: |
           echo "TF_VAR_worker_image=${RUNMAT_WORKER_IMAGE}" >> "$GITHUB_ENV"
           echo "TF_VAR_udp_forwarder_image=${RUNMAT_UDP_IMAGE}" >> "$GITHUB_ENV"
           echo "TF_VAR_enable_udp_forwarder=${ENABLE_UDP}" >> "$GITHUB_ENV"
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
       - name: Configure Artifact Registry auth
         run: gcloud auth configure-docker us-docker.pkg.dev -q
