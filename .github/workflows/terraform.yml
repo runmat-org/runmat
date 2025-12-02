@@ -1,0 +1,115 @@
+name: Terraform Infra
+
+on:
+  push:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  TF_STATE_KEY: infra/terraform.tfstate
+  TF_STATE_REGION: auto
+
+jobs:
+  plan:
+    name: Terraform plan
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      TF_STATE_BUCKET: ${{ secrets.CF_TF_STATE_BUCKET }}
+      CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CF_R2_ENDPOINT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
+      TF_VAR_posthog_host: ${{ secrets.POSTHOG_HOST }}
+      TF_VAR_telemetry_ingestion_key: ${{ secrets.TELEMETRY_INGESTION_KEY }}
+      TF_VAR_ga_measurement_id: ${{ secrets.GA_MEASUREMENT_ID }}
+      TF_VAR_ga_api_secret: ${{ secrets.GA_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform fmt
+        working-directory: infra
+        run: terraform fmt -recursive -check
+
+      - name: Terraform init
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="endpoint=${CLOUDFLARE_R2_ENDPOINT}" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_region_validation=true"
+
+      - name: Terraform validate
+        working-directory: infra
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: infra
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: infra/tfplan
+
+  apply:
+    name: Terraform apply
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      TF_STATE_BUCKET: ${{ secrets.CF_TF_STATE_BUCKET }}
+      CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CF_R2_ENDPOINT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TF_VAR_posthog_api_key: ${{ secrets.POSTHOG_API_KEY }}
+      TF_VAR_posthog_host: ${{ secrets.POSTHOG_HOST }}
+      TF_VAR_telemetry_ingestion_key: ${{ secrets.TELEMETRY_INGESTION_KEY }}
+      TF_VAR_ga_measurement_id: ${{ secrets.GA_MEASUREMENT_ID }}
+      TF_VAR_ga_api_secret: ${{ secrets.GA_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform init
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="endpoint=${CLOUDFLARE_R2_ENDPOINT}" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_region_validation=true"
+
+      - name: Terraform plan (safety)
+        working-directory: infra
+        run: terraform plan -input=false
+
+      - name: Terraform apply
+        working-directory: infra
+        run: terraform apply -input=false -auto-approve
+
