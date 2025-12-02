@@ -388,7 +388,7 @@ struct SessionStartPayload {
 impl<'a> SessionStartEnvelope<'a> {
     fn new(context: &'a TelemetryContext, event: TelemetrySessionEvent) -> Self {
         Self {
-            event_label: "runtime_session_start",
+            event_label: "runtime_started",
             cid: context.cid.as_deref(),
             session_id: &context.session_id,
             os: std::env::consts::OS,
@@ -470,7 +470,7 @@ impl<'a> RuntimeValueEnvelope<'a> {
         });
 
         Self {
-            event_label: "runtime_value",
+            event_label: "runtime_finished",
             cid: context.cid.as_deref(),
             session_id: &context.session_id,
             os: std::env::consts::OS,

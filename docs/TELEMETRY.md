@@ -28,14 +28,14 @@ Each run emits at most one of each event: `install_start`, `install_complete`, `
 
 At most two events per process:
 
-- `runtime_session_start`: `session_id`, `cid`, `run_kind` (`script`, `repl`, `benchmark`, `kernel`), `os`, `arch`, CLI version, whether acceleration/JIT are enabled.
-- `runtime_value`: everything above plus `duration_us`, `success`, stringified error class (never source code), JIT usage flag, execution counters, provider metadata (device name/vendor/backend only), and GPU telemetry (dispatch counts, wall time, bytes moved, cache hits/misses, fusion stats).
+- `runtime_started`: `session_id`, `cid`, `run_kind` (`script`, `repl`, `benchmark`, `kernel`), `os`, `arch`, CLI version, whether acceleration/JIT are enabled.
+- `runtime_finished`: everything above plus `duration_us`, `success`, stringified error class (never source code), JIT usage flag, execution counters, provider metadata (device name/vendor/backend only), and GPU telemetry (dispatch counts, wall time, bytes moved, cache hits/misses, fusion stats).
 
 Example runtime payload:
 
 ```json
 {
-  "event_label": "runtime_value",
+  "event_label": "runtime_finished",
   "cid": "eac98648-3b42-41c7-a887-7452dd08cbf0",
   "session_id": "9e2a9d9f-4e37-4090-a1fb-96cb2c6f9f3a",
   "run_kind": "script",

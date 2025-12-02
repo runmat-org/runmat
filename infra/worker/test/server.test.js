@@ -46,7 +46,7 @@ describe('telemetry worker', () => {
       .post('/ingest')
       .set('x-telemetry-key', 'secret')
       .send({
-        event_label: 'runtime_value',
+        event_label: 'runtime_finished',
         cid: 'abc123',
         session_id: 'session-123',
         run_kind: 'script',
@@ -56,7 +56,8 @@ describe('telemetry worker', () => {
     expect(res.body.ok).toBe(true);
     expect(fetch).toHaveBeenCalled();
     const body = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(body.event).toBe('telemetry.runtime_value.script');
+    expect(body.event).toBe('runtime_finished');
+    expect(body.properties.event_label).toBe('Runtime execution finished');
     expect(body.properties.summary).toContain('jit=on');
     expect(body.properties.success).toBe(true);
   });

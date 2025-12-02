@@ -57,8 +57,8 @@ fn telemetry_http_events_fire_for_script_execution() {
         .recv_timeout(Duration::from_secs(5))
         .expect("value payload");
 
-    assert!(contains_event(&first, "runtime_session_start"));
-    assert!(contains_event(&second, "runtime_value"));
+    assert!(contains_event(&first, "runtime_started"));
+    assert!(contains_event(&second, "runtime_finished"));
 }
 
 #[test]

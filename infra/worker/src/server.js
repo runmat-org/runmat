@@ -3,7 +3,7 @@ import morgan from 'morgan';
 import crypto from 'node:crypto';
 import { fetch } from 'undici';
 
-const allowedEvents = new Set(['install_start', 'install_complete', 'install_failed', 'runtime_session_start', 'runtime_value']);
+const allowedEvents = new Set(['install_start', 'install_complete', 'install_failed', 'runtime_started', 'runtime_finished']);
 const allowedRunKinds = new Set(['script', 'repl', 'benchmark']);
 const gaAllowedKeys = ['os', 'arch', 'platform', 'release', 'method', 'run_kind'];
 const MAX_DETAIL_BYTES = 16 * 1024;
@@ -18,6 +18,7 @@ export function createApp() {
   };
 
   const app = express();
+  app.set('trust proxy', true);
   app.use(morgan('tiny'));
   app.use(express.json({ limit: '1mb' }));
 
@@ -37,7 +38,7 @@ export function createApp() {
 
     const payload = req.body ?? {};
     const eventRaw = payload.event_label || payload.event || '';
-    const event = sanitize(eventRaw, 'runtime_value');
+    const event = sanitize(eventRaw, 'runtime_finished');
     if (!allowedEvents.has(event)) {
       return res.status(400).json({ error: 'invalid_event' });
     }
@@ -69,12 +70,16 @@ export function createApp() {
     const summary = summarizeEvent(event, runKind, detail, successFlag);
     const currentUrl = buildSyntheticUrl(event, runKind, detail, successFlag);
 
+    const eventName = friendlyEventName(event);
+    const friendlyLabel = friendlyEventLabel(event);
     const posthogBody = {
       api_key: config.posthogKey,
-      event: `telemetry.${event}.${runKind}`,
+      event: eventName,
       distinct_id: cid,
       properties: {
         ...meta,
+        event_label: friendlyLabel,
+        client_ip: req.ip || req.headers['x-forwarded-for'],
         summary,
         status: successFlag === false ? 'failed' : 'ok',
         jit_enabled: coerceBoolean(detail.jit_enabled),
@@ -228,7 +233,35 @@ function buildSyntheticUrl(event, runKind, detail, successFlag) {
     gpu: detail.gpu_dispatches || detail.gpu_ratio ? 'on' : 'off',
     status: successFlag === false ? 'fail' : 'ok',
   });
-  return `telemetry://${event}?${params.toString()}`;
+  return `telemetry://run.${runKind}?${params.toString()}`;
+}
+
+function friendlyEventName(event) {
+  switch (event) {
+    case 'runtime_started':
+      return 'runtime_started';
+    case 'runtime_finished':
+      return 'runtime_finished';
+    default:
+      return event;
+  }
+}
+
+function friendlyEventLabel(event) {
+  switch (event) {
+    case 'runtime_started':
+      return 'Runtime execution start';
+    case 'runtime_finished':
+      return 'Runtime execution finished';
+    case 'install_start':
+      return 'Installer start';
+    case 'install_complete':
+      return 'Installer complete';
+    case 'install_failed':
+      return 'Installer failed';
+    default:
+      return event.replace(/_/g, ' ');
+  }
 }
 
 if (process.env.NODE_ENV !== 'test') {
