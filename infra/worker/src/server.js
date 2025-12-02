@@ -72,6 +72,7 @@ export function createApp() {
 
     const eventName = friendlyEventName(event);
     const friendlyLabel = friendlyEventLabel(event);
+    const clientIp = req.ip || req.headers['x-forwarded-for'];
     const posthogBody = {
       api_key: config.posthogKey,
       event: eventName,
@@ -79,7 +80,8 @@ export function createApp() {
       properties: {
         ...meta,
         event_label: friendlyLabel,
-        client_ip: req.ip || req.headers['x-forwarded-for'],
+        client_ip: clientIp,
+        $ip: clientIp,
         summary,
         status: successFlag === false ? 'failed' : 'ok',
         jit_enabled: coerceBoolean(detail.jit_enabled),
