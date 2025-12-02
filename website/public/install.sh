@@ -19,7 +19,7 @@ WEBSITE_URL="https://runmat.org"
 
 # Optional: Telemetry relay (best-effort, anonymous)
 TELEMETRY_ID_FILE="$HOME/.runmat/telemetry_id"
-TELEMETRY_ENDPOINT="https://telemetry.runmat.org/ingest"
+TELEMETRY_ENDPOINT="https://runmat.org/api/telemetry"
 
 log() {
     printf "%b[INFO]%b %s\n" "$GREEN" "$NC" "$1"
@@ -282,7 +282,6 @@ fi
 # Emit completion event
 _send_telemetry install_complete
 
-echo
 log "Installation complete! 🎉"
 echo
 echo "Next steps:"

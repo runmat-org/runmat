@@ -435,6 +435,7 @@ struct RuntimeValuePayload {
     gpu_download_bytes: Option<u64>,
     fusion_cache_hits: Option<u64>,
     fusion_cache_misses: Option<u64>,
+    fusion_hit_ratio: Option<f64>,
 }
 
 impl<'a> RuntimeValueEnvelope<'a> {
@@ -494,6 +495,10 @@ impl<'a> RuntimeValueEnvelope<'a> {
                 gpu_download_bytes: download_bytes,
                 fusion_cache_hits: fusion_hits,
                 fusion_cache_misses: fusion_misses,
+                fusion_hit_ratio: match (fusion_hits, fusion_misses) {
+                    (Some(h), Some(m)) if h + m > 0 => Some(h as f64 / (h + m) as f64),
+                    _ => None,
+                },
             },
         }
     }
