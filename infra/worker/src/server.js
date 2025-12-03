@@ -67,8 +67,8 @@ export function createApp() {
 
     const detail = normalizeDetail(payload.payload);
     const successFlag = coerceBoolean(detail.success ?? payload.success);
-    const summary = summarizeEvent(event, runKind, detail, successFlag);
-    const currentUrl = buildSyntheticUrl(event, runKind, detail, successFlag);
+    const summary = summarizeEvent(event, runKind, detail, successFlag, meta);
+    const currentUrl = buildSyntheticUrl(event, runKind, detail, successFlag, meta);
 
     const eventName = friendlyEventName(event);
     const friendlyLabel = friendlyEventLabel(event);
@@ -218,7 +218,17 @@ function coerceBoolean(value) {
   return undefined;
 }
 
-function summarizeEvent(event, runKind, detail, successFlag) {
+function summarizeEvent(event, runKind, detail, successFlag, meta = {}) {
+  if (runKind === 'install') {
+    const pieces = [
+      `event=${event}`,
+      meta.platform ? `platform=${meta.platform}` : null,
+      meta.method ? `method=${meta.method}` : null,
+      meta.arch ? `arch=${meta.arch}` : null,
+      `status=${successFlag === false ? 'fail' : 'ok'}`,
+    ].filter(Boolean);
+    return pieces.join(' • ');
+  }
   const jitEnabled = coerceBoolean(detail.jit_enabled);
   const jitUsed = coerceBoolean(detail.jit_used);
   const accel = coerceBoolean(detail.accelerate_enabled);
@@ -234,7 +244,21 @@ function summarizeEvent(event, runKind, detail, successFlag) {
   return pieces.join(' • ');
 }
 
-function buildSyntheticUrl(event, runKind, detail, successFlag) {
+function buildSyntheticUrl(event, runKind, detail, successFlag, meta = {}) {
+  if (runKind === 'install') {
+    const params = new URLSearchParams();
+    if (meta.platform) {
+      params.set('platform', meta.platform);
+    }
+    if (meta.method) {
+      params.set('method', meta.method);
+    }
+    if (meta.arch) {
+      params.set('arch', meta.arch);
+    }
+    params.set('status', successFlag === false ? 'fail' : 'ok');
+    return `runmat://install.${event.replace('install_', '')}?${params.toString()}`;
+  }
   const params = new URLSearchParams({
     jit: coerceBoolean(detail.jit_enabled) ? 'on' : 'off',
     accel: coerceBoolean(detail.accelerate_enabled) ? 'on' : 'off',

@@ -61,4 +61,26 @@ describe('telemetry worker', () => {
     expect(body.properties.summary).toContain('jit=on');
     expect(body.properties.success).toBe(true);
   });
+
+  it('formats installer payload without runtime flags', async () => {
+    fetch.mockResolvedValue({ ok: true });
+    const app = createApp();
+    const res = await request(app)
+      .post('/ingest')
+      .set('x-telemetry-key', 'secret')
+      .send({
+        event_label: 'install_complete',
+        session_id: 'install-session',
+        run_kind: 'install',
+        os: 'macos',
+        arch: 'arm64',
+        platform: 'macos-aarch64',
+        method: 'shell',
+      });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(body.properties.summary).toContain('platform=macos-aarch64');
+    expect(body.properties.summary).not.toContain('jit=');
+    expect(body.properties.$current_url).toBe('runmat://install.complete?platform=macos-aarch64&method=shell&arch=arm64&status=ok');
+  });
 });
