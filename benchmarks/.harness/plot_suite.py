@@ -14,6 +14,7 @@ GRID_COLOR = "#373737"
 NUMPY_COLOR = "#8f95a8"
 RUNMAT_COLOR = "#b38aff"
 PYTORCH_COLOR = "#5ad0ff"
+OCTAVE_COLOR = "#f4b942"
 EXPORT_EXT = ".svg"
 
 
@@ -50,6 +51,7 @@ def plot_case(
     out_dir: Path,
     log_x: bool = False,
     log_x_min: Optional[float] = None,
+    speedup_baseline: str = "python-numpy",
 ) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt  # noqa: E402
@@ -73,8 +75,18 @@ def plot_case(
     # Scaling plot (ms vs n)
     fig, ax = plt.subplots(figsize=(7.5, 4.5))
     fig.patch.set_facecolor(PRIMARY_BG)
-    colors = {"runmat": RUNMAT_COLOR, "python-numpy": NUMPY_COLOR, "python-torch": PYTORCH_COLOR}
-    markers = {"runmat": "o", "python-numpy": "^", "python-torch": "s"}
+    colors = {
+        "runmat": RUNMAT_COLOR,
+        "python-numpy": NUMPY_COLOR,
+        "python-torch": PYTORCH_COLOR,
+        "octave": OCTAVE_COLOR,
+    }
+    markers = {
+        "runmat": "o",
+        "python-numpy": "^",
+        "python-torch": "s",
+        "octave": "D",
+    }
     for impl, pts in series.items():
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
@@ -101,18 +113,29 @@ def plot_case(
     fig.savefig(out_dir / f"{case.get('id')}_scaling{EXPORT_EXT}", dpi=180, facecolor=fig.get_facecolor())
     plt.close(fig)
 
-    # Speedup plot vs numpy
-    numpy_pts = {n: ms for (n, ms, _) in series.get("python-numpy", [])}
-    if numpy_pts:
+    available_impls = set(series.keys())
+    effective_baseline = speedup_baseline
+    if effective_baseline not in available_impls:
+        if "python-numpy" in available_impls:
+            effective_baseline = "python-numpy"
+        else:
+            fallback = next((impl for impl in available_impls if impl != "runmat"), None)
+            effective_baseline = fallback
+
+    # Speedup plot vs chosen baseline
+    baseline_pts = (
+        {n: ms for (n, ms, _) in series.get(effective_baseline, [])} if effective_baseline else {}
+    )
+    if baseline_pts:
         fig2, ax2 = plt.subplots(figsize=(7.5, 4.5))
         fig2.patch.set_facecolor(PRIMARY_BG)
         for impl, pts in series.items():
-            if impl == "python-numpy":
+            if impl == effective_baseline:
                 continue
             xs = []
             ys = []
             for n, ms, _ in pts:
-                base = numpy_pts.get(n)
+                base = baseline_pts.get(n)
                 if base:
                     xs.append(n)
                     ys.append(base / ms)
@@ -126,10 +149,12 @@ def plot_case(
                     linewidth=2.2,
                     markersize=6,
                 )
-        ax2.axhline(1.0, color="#6c6c6c", linestyle="--", linewidth=1.2, label="numpy parity")
+        ax2.axhline(
+            1.0, color="#6c6c6c", linestyle="--", linewidth=1.2, label=f"{effective_baseline} parity"
+        )
         ax2.set_xlabel(f"{x_param}")
-        ax2.set_ylabel("Speedup vs numpy (x)")
-        ax2.set_title(f"{case.get('label', case.get('id'))} - speedup")
+        ax2.set_ylabel(f"Speedup vs {effective_baseline} (x)")
+        ax2.set_title(f"{case.get('label', case.get('id'))} - speedup vs {effective_baseline}")
         if log_x:
             apply_log_x(ax2, log_x_min)
         style_axes(ax2)
@@ -308,7 +333,14 @@ def main() -> None:
         effective_log_x_min = args.log_x_min
         if effective_log_x_min is None:
             effective_log_x_min = case_log_x_min
-        plot_case(case, out_dir, log_x=effective_log_x, log_x_min=effective_log_x_min)
+        speedup_baseline = case_plot.get("speedup_baseline") if isinstance(case_plot, dict) else None
+        plot_case(
+            case,
+            out_dir,
+            log_x=effective_log_x,
+            log_x_min=effective_log_x_min,
+            speedup_baseline=speedup_baseline or "python-numpy",
+        )
 
     print(f"Wrote plots to {out_dir}")
 
