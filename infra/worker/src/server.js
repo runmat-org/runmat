@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { fetch } from 'undici';
 
 const allowedEvents = new Set(['install_start', 'install_complete', 'install_failed', 'runtime_started', 'runtime_finished']);
-const allowedRunKinds = new Set(['script', 'repl', 'benchmark']);
+const allowedRunKinds = new Set(['script', 'repl', 'benchmark', 'install']);
 const gaAllowedKeys = ['os', 'arch', 'platform', 'release', 'method', 'run_kind'];
 const MAX_DETAIL_BYTES = 16 * 1024;
 
