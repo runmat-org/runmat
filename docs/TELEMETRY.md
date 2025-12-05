@@ -88,11 +88,18 @@ Only aggregated counts and metadata listed above are sent. For broader privacy q
 
 ## Where does telemetry go?
 
-- Clients send UDP (best effort) to `udp.telemetry.runmat.org:7846` or HTTPS POSTs to `https://telemetry.runmat.org/ingest`.
-- HTTPS traffic lands on a Cloud Run service (`infra/worker/`) that validates a shared `x-telemetry-key`, normalizes payloads, emits human-readable summaries (so PostHog’s “URL / Screen” column reads like `run=script • jit=on • gpu=off`), and forwards to PostHog (primary) and GA4 (optional).
-- The UDP path flows through a lightweight Google Cloud UDP load balancer into a managed instance group running the forwarder container (`infra/udp-forwarder/`). Each forwarder replays datagrams to the Cloud Run endpoint asynchronously so the CLI never blocks.
-- No payloads are stored server-side beyond transient buffers; failures are logged and the CLI continues immediately.
-- Official RunMat binaries bake the ingestion key into the executable at build time (via the `RUNMAT_TELEMETRY_KEY` compile-time env var). If you build from source and want to talk to the hosted collector, set the same env var before invoking `cargo build`; otherwise the worker will return `401 unauthorized`.
+Clients send UDP (best effort) to `udp.telemetry.runmat.org:7846` or HTTPS POSTs to `https://telemetry.runmat.org/ingest`.
+
+- HTTPS traffic lands on a Cloud Run service listening at `https://telemetry.runmat.org/ingest` (the source code is available at `infra/worker/` in the GitHub repo for transparency), normalizes payloads, and forwards to an analytics service (PostHog and Google Analytics [GA4] are used by the RunMat team for analytics).
+- The UDP path flows through a lightweight Google Cloud UDP load balancer into a managed instance group running the forwarder container (code under `infra/udp-forwarder/` in the repo). Each forwarder replays datagrams to the Cloud Run endpoint asynchronously so the CLI never blocks.
+
+No payloads are stored server-side beyond transient buffers; failures are logged and the CLI continues immediately.
+
+Note: Official RunMat binaries bake the ingestion key into the executable at build time (via the `RUNMAT_TELEMETRY_KEY` compile-time env var). If you build from source and want to talk to the hosted collector, set the same env var before invoking `cargo build`; otherwise the worker will return `401 unauthorized`.
+
+### Delivery guarantees
+
+The CLI keeps telemetry off the hot path via a background worker. By default it waits up to 50 ms for the `runtime_started` event to flush before exiting so extremely short scripts still count. This may add some wall time for sub-50 ms programs but is unnoticeable for longer runs. If you need faster exit times, set `RUNMAT_TELEMETRY_DRAIN=none` to prevent the worker from waiting for the `runtime_started` event to flush at all.
 
 ## How do I opt out of RunMat telemetry?
 

@@ -5,12 +5,15 @@ use runmat_accelerate_api::{provider, ApiDeviceInfo, ProviderTelemetry};
 use serde::Serialize;
 use std::fs;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 const DEFAULT_HTTP_ENDPOINT: &str = "https://telemetry.runmat.org/ingest";
 const MIN_QUEUE_SIZE: usize = 8;
+const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 50;
 
 static CLIENT: OnceCell<TelemetryClient> = OnceCell::new();
 
@@ -124,10 +127,14 @@ pub struct RuntimeTelemetryRecord {
 struct TelemetryClient {
     enabled: bool,
     show_payloads: bool,
-    sender: Option<Sender<String>>,
+    sender: Option<Sender<TelemetryJob>>,
     transport: TelemetryTransport,
     sync_mode: bool,
     context: TelemetryContext,
+    pending_started: Arc<AtomicUsize>,
+    pending_total: Arc<AtomicUsize>,
+    drain_mode: TelemetryDrainMode,
+    drain_timeout: Duration,
 }
 
 #[derive(Clone)]
@@ -145,6 +152,8 @@ struct TelemetryOptions {
     sync_mode: bool,
     ingestion_key: Option<String>,
     require_ingestion_key: bool,
+    drain_mode: TelemetryDrainMode,
+    drain_timeout: Duration,
 }
 
 impl From<&RuntimeTelemetryConfig> for TelemetryOptions {
@@ -167,6 +176,8 @@ impl From<&RuntimeTelemetryConfig> for TelemetryOptions {
             sync_mode: parse_env_bool("RUNMAT_TELEMETRY_SYNC").unwrap_or(false),
             ingestion_key: resolve_ingestion_key(),
             require_ingestion_key: cfg.require_ingestion_key,
+            drain_mode: resolve_drain_mode(),
+            drain_timeout: resolve_drain_timeout(),
         }
     }
 }
@@ -179,6 +190,9 @@ impl TelemetryClient {
             session_id: Uuid::new_v4().to_string(),
         };
 
+        let pending_started = Arc::new(AtomicUsize::new(0));
+        let pending_total = Arc::new(AtomicUsize::new(0));
+
         if !options.enabled || (options.require_ingestion_key && options.ingestion_key.is_none()) {
             return Self {
                 enabled: false,
@@ -187,6 +201,10 @@ impl TelemetryClient {
                 transport,
                 sync_mode: options.sync_mode,
                 context,
+                pending_started,
+                pending_total,
+                drain_mode: options.drain_mode,
+                drain_timeout: options.drain_timeout,
             };
         }
 
@@ -194,7 +212,12 @@ impl TelemetryClient {
             None
         } else {
             let (tx, rx) = bounded(options.queue_size);
-            spawn_worker(rx, transport.clone());
+            spawn_worker(
+                rx,
+                transport.clone(),
+                pending_started.clone(),
+                pending_total.clone(),
+            );
             Some(tx)
         };
 
@@ -205,6 +228,10 @@ impl TelemetryClient {
             transport,
             sync_mode: options.sync_mode,
             context,
+            pending_started,
+            pending_total,
+            drain_mode: options.drain_mode,
+            drain_timeout: options.drain_timeout,
         }
     }
 
@@ -213,7 +240,7 @@ impl TelemetryClient {
             return;
         }
         let payload = SessionStartEnvelope::new(&self.context, event);
-        self.enqueue(payload);
+        self.enqueue(payload, TelemetryJobKind::SessionStart);
     }
 
     fn emit_runtime_value(&self, record: RuntimeTelemetryRecord) {
@@ -221,10 +248,10 @@ impl TelemetryClient {
             return;
         }
         let payload = RuntimeValueEnvelope::new(&self.context, record);
-        self.enqueue(payload);
+        self.enqueue(payload, TelemetryJobKind::RuntimeValue);
     }
 
-    fn enqueue<T: Serialize>(&self, value: T) {
+    fn enqueue<T: Serialize>(&self, value: T, kind: TelemetryJobKind) {
         if !self.enabled {
             return;
         }
@@ -236,12 +263,58 @@ impl TelemetryClient {
                 if self.sync_mode {
                     self.transport.send(&serialized);
                 } else if let Some(sender) = &self.sender {
-                    let _ = sender.try_send(serialized);
+                    self.increment_counters(kind);
+                    if sender
+                        .try_send(TelemetryJob {
+                            payload: serialized,
+                            kind,
+                        })
+                        .is_err()
+                    {
+                        self.decrement_counters(kind);
+                    }
                 }
             }
             Err(err) => {
                 log::debug!("failed to serialize telemetry payload: {err}");
             }
+        }
+    }
+
+    fn increment_counters(&self, kind: TelemetryJobKind) {
+        self.pending_total.fetch_add(1, Ordering::SeqCst);
+        if matches!(kind, TelemetryJobKind::SessionStart) {
+            self.pending_started.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn decrement_counters(&self, kind: TelemetryJobKind) {
+        self.pending_total.fetch_sub(1, Ordering::SeqCst);
+        if matches!(kind, TelemetryJobKind::SessionStart) {
+            self.pending_started.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+impl Drop for TelemetryClient {
+    fn drop(&mut self) {
+        self.sender.take();
+        match self.drain_mode {
+            TelemetryDrainMode::None => {}
+            TelemetryDrainMode::Started => self.wait_for(&self.pending_started),
+            TelemetryDrainMode::All => self.wait_for(&self.pending_total),
+        }
+    }
+}
+
+impl TelemetryClient {
+    fn wait_for(&self, counter: &AtomicUsize) {
+        let start = Instant::now();
+        while counter.load(Ordering::SeqCst) > 0 {
+            if start.elapsed() >= self.drain_timeout {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 }
@@ -287,12 +360,21 @@ impl TelemetryTransport {
     }
 }
 
-fn spawn_worker(rx: Receiver<String>, transport: TelemetryTransport) {
+fn spawn_worker(
+    rx: Receiver<TelemetryJob>,
+    transport: TelemetryTransport,
+    pending_started: Arc<AtomicUsize>,
+    pending_total: Arc<AtomicUsize>,
+) {
     thread::Builder::new()
         .name("runmat-telemetry".to_string())
         .spawn(move || {
-            while let Ok(payload) = rx.recv() {
-                transport.send(&payload);
+            while let Ok(job) = rx.recv() {
+                transport.send(&job.payload);
+                pending_total.fetch_sub(1, Ordering::SeqCst);
+                if matches!(job.kind, TelemetryJobKind::SessionStart) {
+                    pending_started.fetch_sub(1, Ordering::SeqCst);
+                }
             }
         })
         .expect("failed to spawn telemetry worker");
@@ -346,6 +428,30 @@ fn resolve_ingestion_key() -> Option<String> {
         })
 }
 
+fn resolve_drain_mode() -> TelemetryDrainMode {
+    match std::env::var("RUNMAT_TELEMETRY_DRAIN") {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "started" | "start" | "session" => TelemetryDrainMode::Started,
+            "all" | "full" | "both" | "runtime" => TelemetryDrainMode::All,
+            "none" | "off" | "" => TelemetryDrainMode::None,
+            _ => TelemetryDrainMode::Started,
+        },
+        Err(_) => TelemetryDrainMode::Started,
+    }
+}
+
+fn resolve_drain_timeout() -> Duration {
+    const MAX_TIMEOUT_MS: u64 = 5_000;
+    match std::env::var("RUNMAT_TELEMETRY_DRAIN_TIMEOUT_MS") {
+        Ok(value) => value
+            .trim()
+            .parse::<u64>()
+            .map(|ms| Duration::from_millis(ms.min(MAX_TIMEOUT_MS)))
+            .unwrap_or_else(|_| Duration::from_millis(DEFAULT_DRAIN_TIMEOUT_MS)),
+        Err(_) => Duration::from_millis(DEFAULT_DRAIN_TIMEOUT_MS),
+    }
+}
+
 fn now_timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -363,6 +469,24 @@ fn clamp_ratio(value: f64) -> f64 {
     } else {
         0.0
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TelemetryJobKind {
+    SessionStart,
+    RuntimeValue,
+}
+
+struct TelemetryJob {
+    payload: String,
+    kind: TelemetryJobKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TelemetryDrainMode {
+    None,
+    Started,
+    All,
 }
 
 #[derive(Serialize)]
