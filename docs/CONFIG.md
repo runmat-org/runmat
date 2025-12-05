@@ -245,7 +245,7 @@ texture_compression = true
 
 ## Configuration schema (by module)
 
-Below reflects the Rust types in `runmat/src/config.rs`. Defaults shown in
+Below reflects the Rust types in `crates/runmat-cli/src/config.rs`. Defaults shown in
 parentheses.
 
 ### runtime

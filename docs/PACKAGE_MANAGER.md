@@ -46,7 +46,7 @@ my-local    = { source = "path", path = "../my-local" }
 # default registry is implicit, but additional registries can be provided in config
 ```
 
-The schema is defined in `runmat/src/config.rs` (`PackagesConfig`, `PackageSpec`).
+The schema is defined in `crates/runmat-cli/src/config.rs` (`PackagesConfig`, `PackageSpec`).
 
 ---
 
