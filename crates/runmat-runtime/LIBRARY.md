@@ -146,4 +146,5 @@
 
 | Completed | Path      | Name(s)                           | Purpose              | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                   |
 |-----------|-----------|-----------------------------------|----------------------|-----|--------|------------------|-----------------------------------------|
-|           | constants | pi, e, eps, inf, Inf, nan, NaN, true, false | Fundamental constants | N/A | —      | —                | |
+|    ✅     | constants | pi, e, eps, inf, Inf, nan, NaN, true, false | Fundamental constants | N/A | —      | —                | |
+|           | constants | i | Imaginary unit | N/A | —      | —                | |
