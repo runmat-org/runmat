@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use runmat_builtins::{builtin_functions, CharArray, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::path_to_string;
@@ -444,7 +445,10 @@ fn file_matches(name: &str) -> Result<Vec<String>, String> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
     for file in find_all_files_with_extensions(name, GENERAL_FILE_EXTENSIONS, "which")? {
-        if file.is_file() {
+        if vfs::metadata(&file)
+            .map(|meta| meta.is_file())
+            .unwrap_or(false)
+        {
             push_unique(&mut results, &mut seen, canonical_path(&file));
         }
     }
@@ -455,7 +459,10 @@ fn directory_matches(name: &str) -> Result<Vec<String>, String> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
     for dir in directory_candidates(name, "which")? {
-        if dir.is_dir() {
+        if vfs::metadata(&dir)
+            .map(|meta| meta.is_dir())
+            .unwrap_or(false)
+        {
             push_unique(&mut results, &mut seen, canonical_path(&dir));
         }
     }
@@ -463,7 +470,7 @@ fn directory_matches(name: &str) -> Result<Vec<String>, String> {
 }
 
 fn canonical_path(path: &Path) -> String {
-    std::fs::canonicalize(path)
+    vfs::canonicalize(path)
         .map(|p| path_to_string(&p))
         .unwrap_or_else(|_| path_to_string(path))
 }

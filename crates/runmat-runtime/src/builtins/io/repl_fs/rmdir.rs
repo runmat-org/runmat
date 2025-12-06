@@ -1,6 +1,6 @@
 //! MATLAB-compatible `rmdir` builtin for RunMat.
 
-use std::fs;
+use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -340,7 +340,7 @@ fn remove_folder(value: &Value, mode: RemoveMode) -> Result<RmdirResult, String>
 fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
     let display = path.display().to_string();
 
-    let metadata = match fs::metadata(path) {
+    let metadata = match vfs::metadata(path) {
         Ok(meta) => meta,
         Err(err) => {
             return if err.kind() == io::ErrorKind::NotFound {
@@ -356,7 +356,7 @@ fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
     }
 
     match mode {
-        RemoveMode::Recursive => match fs::remove_dir_all(path) {
+        RemoveMode::Recursive => match vfs::remove_dir_all(path) {
             Ok(_) => RmdirResult::success(),
             Err(err) => {
                 if err.kind() == io::ErrorKind::NotFound {
@@ -366,7 +366,7 @@ fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
                 }
             }
         },
-        RemoveMode::NonRecursive => match fs::remove_dir(path) {
+        RemoveMode::NonRecursive => match vfs::remove_dir(path) {
             Ok(_) => RmdirResult::success(),
             Err(err) => {
                 if err.kind() == io::ErrorKind::NotFound {
@@ -445,6 +445,7 @@ fn char_array_value(text: &str) -> Value {
 mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
+    use std::fs;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;

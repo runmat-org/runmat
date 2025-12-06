@@ -12,9 +12,9 @@ use crate::builtins::common::spec::{
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
 
+use runmat_filesystem as vfs;
 use std::collections::HashSet;
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 const ERROR_FOLDER_TYPE: &str = "genpath: folder must be a character vector or string scalar";
@@ -287,7 +287,7 @@ fn normalize_root(text: &str) -> Result<RootInfo, String> {
 
 fn canonicalize_existing(path: &Path, display: &str) -> Result<(PathBuf, String), String> {
     let canonical =
-        fs::canonicalize(path).map_err(|_| format!("genpath: folder '{display}' not found"))?;
+        vfs::canonicalize(path).map_err(|_| format!("genpath: folder '{display}' not found"))?;
     let canonical_str = canonical_string_from_path(&canonical);
     Ok((canonical, canonical_str))
 }
@@ -338,33 +338,25 @@ fn traverse(
 
     segments.push(canonical.clone());
 
-    let read_dir = match fs::read_dir(path) {
-        Ok(dir) => dir,
+    let mut children = Vec::new();
+    let entries = match vfs::read_dir(path) {
+        Ok(listing) => listing,
         Err(_) => return Ok(()),
     };
-
-    let mut children = Vec::new();
-    for entry_result in read_dir {
-        let entry = match entry_result {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-
-        let metadata = match entry.metadata() {
+    for entry in entries {
+        let source_path = entry.path().to_path_buf();
+        let metadata = match vfs::metadata(&source_path) {
             Ok(meta) => meta,
             Err(_) => continue,
         };
-
         if !metadata.is_dir() {
             continue;
         }
-
         let name = entry.file_name().to_string_lossy().into_owned();
         if is_matlab_reserved_folder(&name) {
             continue;
         }
-
-        let child_path = match fs::canonicalize(entry.path()) {
+        let child_path = match vfs::canonicalize(&source_path) {
             Ok(path) => path,
             Err(_) => continue,
         };
@@ -572,6 +564,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{CharArray, StringArray, Tensor};
     use std::convert::TryFrom;
+    use std::fs;
     use tempfile::tempdir;
 
     struct DirGuard {

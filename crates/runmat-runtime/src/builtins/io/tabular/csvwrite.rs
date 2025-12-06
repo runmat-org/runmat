@@ -6,11 +6,11 @@
 //! API and zero-based offset arguments. This implementation mirrors those
 //! semantics while integrating with RunMat's builtin framework.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{Tensor, Value};
+use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;

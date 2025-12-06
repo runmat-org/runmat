@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::filetext::registry;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_filesystem::File;
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -353,7 +354,7 @@ pub fn evaluate(fid_value: &Value, rest: &[Value]) -> Result<FgetsEval, String> 
         .map_err(|_| "fgets: failed to lock file handle (poisoned mutex)".to_string())?;
 
     let limit = parse_nchar(rest)?;
-    let read = read_line(&mut file, limit).map_err(|err| format!("fgets: {err}"))?;
+    let read = read_line(&mut *file, limit).map_err(|err| format!("fgets: {err}"))?;
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
     }
@@ -463,7 +464,7 @@ struct LineRead {
     eof_before_any: bool,
 }
 
-fn read_line(file: &mut std::fs::File, limit: Option<usize>) -> Result<LineRead, String> {
+fn read_line(file: &mut File, limit: Option<usize>) -> Result<LineRead, String> {
     let mut data = Vec::new();
     let mut terminators = Vec::new();
     let mut eof_before_any = false;
@@ -663,7 +664,7 @@ mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
-    use std::fs;
+    use runmat_filesystem as fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 

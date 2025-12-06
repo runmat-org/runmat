@@ -1,10 +1,10 @@
 //! MATLAB-compatible `writematrix` builtin for emitting delimited text files.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{Tensor, Value};
+use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{

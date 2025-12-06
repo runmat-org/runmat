@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use runmat_builtins::{CharArray, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
@@ -285,7 +286,7 @@ fn generate_unique_path(base: &Path) -> Result<PathBuf, String> {
         } else {
             base.join(&token)
         };
-        if !candidate.exists() {
+        if !path_exists(&candidate) {
             return Ok(candidate);
         }
     }
@@ -308,6 +309,10 @@ fn path_to_value(path: &Path) -> Value {
     Value::CharArray(CharArray::new_row(&text))
 }
 
+fn path_exists(path: &Path) -> bool {
+    vfs::metadata(path).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::REPL_FS_TEST_LOCK;
@@ -315,7 +320,7 @@ mod tests {
     use crate::builtins::common::fs::home_directory;
     use runmat_builtins::StringArray;
     use std::convert::TryFrom;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
     #[test]
@@ -329,14 +334,8 @@ mod tests {
             first_str, second_str,
             "tempname should return unique values"
         );
-        assert!(
-            !PathBuf::from(&first_str).exists(),
-            "first path should not exist"
-        );
-        assert!(
-            !PathBuf::from(&second_str).exists(),
-            "second path should not exist"
-        );
+        assert!(!path_exists(Path::new(&first_str)), "first path exists");
+        assert!(!path_exists(Path::new(&second_str)), "second path exists");
     }
 
     #[test]
@@ -378,7 +377,7 @@ mod tests {
             Some(base),
             "expected tempname to honour the provided folder"
         );
-        assert!(!path.exists(), "generated path should not exist yet");
+        assert!(!path_exists(&path), "generated path should not exist yet");
     }
 
     #[test]

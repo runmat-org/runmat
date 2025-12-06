@@ -1,6 +1,5 @@
 //! MATLAB-compatible `filewrite` builtin for RunMat.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -14,6 +13,7 @@ use crate::builtins::common::spec::{
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_filesystem::OpenOptions;
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
@@ -618,7 +618,7 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> Result<usize, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use runmat_filesystem as fs;
     use std::io::Read;
     use std::time::{SystemTime, UNIX_EPOCH};
 

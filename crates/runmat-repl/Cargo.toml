@@ -9,17 +9,13 @@ homepage = "https://runmat.org"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
-runmat-lexer = { workspace = true }
-runmat-parser = { workspace = true }
-runmat-hir = { workspace = true }
-runmat-ignition = { workspace = true }
-runmat-runtime = { workspace = true }
+runmat-core = { version = "=0.2.7", path = "../runmat-core", default-features = false }
 runmat-accelerate = { workspace = true }
-runmat-turbine = { workspace = true }
 runmat-gc = { workspace = true }
-runmat-builtins = { workspace = true }
-runmat-snapshot = { workspace = true }
-rustyline = "14.0"
 anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
+
+[features]
+default = ["jit"]
+jit = ["runmat-core/jit"]

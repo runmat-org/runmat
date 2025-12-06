@@ -1,6 +1,6 @@
 //! MATLAB-compatible `movefile` builtin for RunMat.
 
-use std::fs;
+use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -380,7 +380,7 @@ fn move_operation(
 
 fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileResult {
     let source_path = PathBuf::from(source);
-    if fs::metadata(&source_path).is_err() {
+    if vfs::metadata(&source_path).is_err() {
         return MovefileResult::source_not_found(source);
     }
 
@@ -389,7 +389,7 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
         return MovefileResult::success();
     }
 
-    let destination_meta = fs::metadata(&destination_path).ok();
+    let destination_meta = vfs::metadata(&destination_path).ok();
     let mut target_path = destination_path.clone();
     let mut remove_target = false;
     let mut remove_is_dir = false;
@@ -407,7 +407,7 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
             if target_path == source_path {
                 return MovefileResult::success();
             }
-            match fs::metadata(&target_path) {
+            match vfs::metadata(&target_path) {
                 Ok(existing) => {
                     if !force {
                         return MovefileResult::destination_exists(&path_to_display(&target_path));
@@ -475,7 +475,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
     }
 
     let destination_path = PathBuf::from(destination);
-    let destination_meta = match fs::metadata(&destination_path) {
+    let destination_meta = match vfs::metadata(&destination_path) {
         Ok(meta) => meta,
         Err(_) => return MovefileResult::destination_missing(destination),
     };
@@ -487,7 +487,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
     let mut plan = Vec::with_capacity(matches.len());
     for source_path in matches {
         let display_source = path_to_display(&source_path);
-        if fs::metadata(&source_path).is_err() {
+        if vfs::metadata(&source_path).is_err() {
             return MovefileResult::source_not_found(&display_source);
         }
         let Some(name) = source_path.file_name() else {
@@ -502,7 +502,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
             continue;
         }
         let target_display = path_to_display(&target_path);
-        match fs::metadata(&target_path) {
+        match vfs::metadata(&target_path) {
             Ok(existing) => {
                 if !force {
                     return MovefileResult::destination_exists(&target_display);
@@ -578,9 +578,9 @@ fn execute_plan(plan: &[MovePlanEntry]) -> Result<(), MoveError> {
     for entry in plan {
         if entry.remove_target {
             let result = if entry.remove_is_dir {
-                fs::remove_dir_all(&entry.target_path)
+                vfs::remove_dir_all(&entry.target_path)
             } else {
-                fs::remove_file(&entry.target_path)
+                vfs::remove_file(&entry.target_path)
             };
             if let Err(err) = result {
                 if err.kind() != io::ErrorKind::NotFound {
@@ -593,7 +593,7 @@ fn execute_plan(plan: &[MovePlanEntry]) -> Result<(), MoveError> {
             }
         }
 
-        if let Err(err) = fs::rename(&entry.source_path, &entry.target_path) {
+        if let Err(err) = vfs::rename(&entry.source_path, &entry.target_path) {
             return Err(MoveError {
                 source_display: entry.source_display.clone(),
                 target_display: entry.target_display.clone(),

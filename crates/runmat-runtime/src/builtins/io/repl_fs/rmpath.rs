@@ -15,9 +15,9 @@ use crate::builtins::common::spec::{
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
 
+use runmat_filesystem as vfs;
 use std::collections::HashSet;
 use std::env;
-use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const ERROR_ARG_TYPE: &str =
@@ -349,7 +349,7 @@ fn remove_directory(segments: &mut Vec<String>, raw: &str) -> Result<bool, Strin
         return Ok(true);
     }
 
-    match fs::metadata(&normalized) {
+    match vfs::metadata(&normalized) {
         Ok(meta) => {
             if !meta.is_dir() {
                 Err(format!("rmpath: '{raw}' is not a folder"))

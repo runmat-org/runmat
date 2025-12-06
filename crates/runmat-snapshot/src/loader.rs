@@ -11,7 +11,10 @@ use std::time::{Duration, Instant};
 
 use crate::compression::CompressionConfig;
 use anyhow::Context;
+#[cfg(not(target_arch = "wasm32"))]
 use memmap2::Mmap;
+#[cfg(target_arch = "wasm32")]
+type Mmap = ();
 use parking_lot::RwLock;
 
 use crate::compression::CompressionEngine;
@@ -89,6 +92,7 @@ impl SnapshotLoader {
     }
 
     /// Load snapshot from file
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load<P: AsRef<Path>>(&mut self, path: P) -> SnapshotResult<(Snapshot, LoadingStats)> {
         let start_time = Instant::now();
         log::info!("Loading snapshot from {}", path.as_ref().display());
@@ -117,7 +121,70 @@ impl SnapshotLoader {
         Ok((snapshot, self.stats.clone()))
     }
 
+    /// Load snapshot from an in-memory byte slice (supports wasm streaming scenarios)
+    pub fn load_from_bytes(&mut self, bytes: &[u8]) -> SnapshotResult<(Snapshot, LoadingStats)> {
+        let start_time = Instant::now();
+        self.stats.total_size = bytes.len();
+
+        if bytes.len() < std::mem::size_of::<SnapshotHeader>() {
+            return Err(SnapshotError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Byte buffer too small to contain snapshot header",
+            )));
+        }
+
+        let header_size =
+            bincode::serialized_size(&SnapshotHeader::new(SnapshotMetadata::current()))
+                .map_err(SnapshotError::Serialization)? as usize;
+        let header: SnapshotHeader = bincode::deserialize(&bytes[..header_size.min(bytes.len())])
+            .map_err(|e| SnapshotError::Configuration {
+            message: format!("Failed to deserialize snapshot header: {e}"),
+        })?;
+
+        header.validate()?;
+
+        let data_start = header.data_info.data_offset as usize;
+        let data_end = data_start
+            .checked_add(header.data_info.compressed_size)
+            .ok_or_else(|| SnapshotError::Configuration {
+                message: "Snapshot data section overflowed buffer length".to_string(),
+            })?;
+
+        if data_end > bytes.len() {
+            return Err(SnapshotError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Snapshot data section extends beyond provided buffer",
+            )));
+        }
+
+        let compressed_data = &bytes[data_start..data_end];
+        self.stats.compressed_size = compressed_data.len();
+
+        let decompressed = if header.data_info.compression.algorithm != CompressionAlgorithm::None {
+            let compression_engine = CompressionEngine::new(CompressionConfig::default());
+            compression_engine.decompress(compressed_data, &header.data_info.compression)?
+        } else {
+            compressed_data.to_vec()
+        };
+
+        let snapshot: Snapshot =
+            bincode::deserialize(&decompressed).map_err(|e| SnapshotError::Configuration {
+                message: format!("Failed to deserialize snapshot data: {e}"),
+            })?;
+
+        #[cfg(feature = "validation")]
+        if self.config.validation_enabled {
+            self.validate_snapshot(&snapshot)?;
+        }
+
+        self.initialize_runtime_integration(&snapshot)?;
+
+        self.stats.load_time = start_time.elapsed();
+        Ok((snapshot, self.stats.clone()))
+    }
+
     /// Load snapshot asynchronously with true async I/O for non-blocking startup
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn load_async<P: AsRef<Path>>(
         &mut self,
         path: P,
@@ -212,7 +279,19 @@ impl SnapshotLoader {
         Ok((snapshot, self.stats.clone()))
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub async fn load_async<P: AsRef<Path>>(
+        &mut self,
+        _path: P,
+    ) -> SnapshotResult<(Snapshot, LoadingStats)> {
+        Err(SnapshotError::Configuration {
+            message: "Asynchronous snapshot loading from files is unavailable on wasm targets"
+                .to_string(),
+        })
+    }
+
     /// Open and validate snapshot file
+    #[cfg(not(target_arch = "wasm32"))]
     fn open_snapshot_file(&mut self, path: &Path) -> SnapshotResult<FormatLoader> {
         let start = Instant::now();
 
@@ -267,6 +346,7 @@ impl SnapshotLoader {
     }
 
     /// Load and decompress snapshot data
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_snapshot_data(&mut self, format_loader: &FormatLoader) -> SnapshotResult<Vec<u8>> {
         let start = Instant::now();
 
@@ -475,6 +555,7 @@ impl SnapshotLoader {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FormatLoader {
     /// Read snapshot header from file
     fn read_header(&mut self) -> SnapshotResult<SnapshotHeader> {
@@ -581,6 +662,7 @@ impl FormatLoader {
 }
 
 /// Utility functions for snapshot loading
+#[cfg(not(target_arch = "wasm32"))]
 impl SnapshotLoader {
     /// Preload snapshot header for quick validation
     pub fn peek_header<P: AsRef<Path>>(path: P) -> SnapshotResult<SnapshotHeader> {

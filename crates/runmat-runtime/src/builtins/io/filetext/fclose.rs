@@ -428,7 +428,7 @@ mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use once_cell::sync::Lazy;
     use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
-    use std::fs;
+    use runmat_filesystem as fs;
     use std::io::Write;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard};

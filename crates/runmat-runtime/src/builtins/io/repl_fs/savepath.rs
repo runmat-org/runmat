@@ -13,9 +13,9 @@ use crate::builtins::common::spec::{
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
 
+use runmat_filesystem as vfs;
 use std::env;
-use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_FILENAME: &str = "pathdef.m";
@@ -350,24 +350,14 @@ impl SavepathFailure {
 
 fn persist_path(target: &Path, path_string: &str) -> Result<(), SavepathFailure> {
     if let Some(parent) = target.parent() {
-        if let Err(err) = fs::create_dir_all(parent) {
+        if let Err(err) = vfs::create_dir_all(parent) {
             return Err(SavepathFailure::cannot_write(target, err));
         }
     }
 
     let contents = build_pathdef_contents(path_string);
-    match File::create(target) {
-        Ok(mut file) => {
-            if let Err(err) = file.write_all(contents.as_bytes()) {
-                return Err(SavepathFailure::cannot_write(target, err));
-            }
-            if let Err(err) = file.flush() {
-                return Err(SavepathFailure::cannot_write(target, err));
-            }
-            Ok(())
-        }
-        Err(err) => Err(SavepathFailure::cannot_write(target, err)),
-    }
+    vfs::write(target, contents.as_bytes())
+        .map_err(|err| SavepathFailure::cannot_write(target, err))
 }
 
 fn default_target_path() -> Result<PathBuf, SavepathFailure> {
@@ -409,7 +399,7 @@ fn path_should_be_directory(path: &Path, original: &str) -> bool {
     if cfg!(windows) && original.ends_with('\\') {
         return true;
     }
-    match fs::metadata(path) {
+    match vfs::metadata(path) {
         Ok(metadata) => metadata.is_dir(),
         Err(_) => false,
     }

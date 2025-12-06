@@ -4,11 +4,11 @@
 //! its terse API for numeric CSV imports. This implementation mirrors MATLAB's
 //! zero-based range semantics while integrating with the modern builtin template.
 
-use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{Tensor, Value};
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;

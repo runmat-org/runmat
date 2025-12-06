@@ -11,9 +11,9 @@ use crate::builtins::common::path_search::{
     class_file_exists as path_class_file_exists,
     class_folder_candidates as path_class_folder_candidates,
     directory_candidates as path_directory_candidates,
-    find_file_with_extensions as path_find_file_with_extensions, CLASS_M_FILE_EXTENSIONS,
-    GENERAL_FILE_EXTENSIONS, LIB_EXTENSIONS, MEX_EXTENSIONS, PCODE_EXTENSIONS, SIMULINK_EXTENSIONS,
-    THUNK_EXTENSIONS,
+    find_file_with_extensions as path_find_file_with_extensions, path_is_directory,
+    CLASS_M_FILE_EXTENSIONS, GENERAL_FILE_EXTENSIONS, LIB_EXTENSIONS, MEX_EXTENSIONS,
+    PCODE_EXTENSIONS, SIMULINK_EXTENSIONS, THUNK_EXTENSIONS,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -444,7 +444,7 @@ fn class_exists(name: &str) -> Result<bool, String> {
 fn class_folder_exists(name: &str) -> Result<bool, String> {
     Ok(path_class_folder_candidates(name, "exist")?
         .into_iter()
-        .any(|path| path.is_dir()))
+        .any(|path| path_is_directory(&path)))
 }
 
 fn class_file_exists(name: &str) -> Result<bool, String> {
@@ -462,7 +462,7 @@ fn method_exists(name: &str) -> bool {
 fn directory_exists(name: &str) -> Result<bool, String> {
     Ok(path_directory_candidates(name, "exist")?
         .into_iter()
-        .any(|path| path.is_dir()))
+        .any(|path| path_is_directory(&path)))
 }
 
 fn detect_file_kind(name: &str) -> Result<Option<ExistResultKind>, String> {
@@ -512,10 +512,11 @@ mod tests {
     use super::*;
     use once_cell::sync::OnceCell;
     use runmat_builtins::Value;
+    use runmat_filesystem as vfs;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::env;
-    use std::fs::{self, File};
+    use std::fs::File;
     use std::io::Write;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -628,7 +629,7 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let _guard = DirGuard::new();
         env::set_current_dir(temp.path()).expect("set temp");
-        fs::create_dir("data").expect("mkdir data");
+        vfs::create_dir("data").expect("mkdir data");
 
         let dir = exist_builtin(Value::from("data"), vec![Value::from("dir")]).expect("exist");
         assert_eq!(dir, Value::Num(7.0));
@@ -654,7 +655,7 @@ mod tests {
         )
         .expect("write classdef");
 
-        fs::create_dir_all("+pkg/@Gizmo").expect("create package class folder");
+        vfs::create_dir_all("+pkg/@Gizmo").expect("create package class folder");
 
         let widget =
             exist_builtin(Value::from("Widget"), vec![Value::from("class")]).expect("exist");

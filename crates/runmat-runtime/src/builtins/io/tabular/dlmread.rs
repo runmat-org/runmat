@@ -7,11 +7,11 @@
 //! and numeric codes corresponding to ASCII delimiters.
 
 use std::char;
-use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{Tensor, Value};
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;

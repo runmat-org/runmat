@@ -17,9 +17,9 @@ use crate::builtins::common::spec::{
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
 
+use runmat_filesystem as vfs;
 use std::collections::HashSet;
 use std::env;
-use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const ERROR_ARG_TYPE: &str =
@@ -429,7 +429,7 @@ fn normalize_directory(raw: &str) -> Result<String, String> {
     let normalized = normalize_pathbuf(&joined);
 
     let metadata =
-        fs::metadata(&normalized).map_err(|_| format!("addpath: folder '{trimmed}' not found"))?;
+        vfs::metadata(&normalized).map_err(|_| format!("addpath: folder '{trimmed}' not found"))?;
     if !metadata.is_dir() {
         return Err(format!("addpath: '{trimmed}' is not a folder"));
     }
@@ -525,6 +525,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use std::convert::TryFrom;
     use std::env;
+    use std::fs;
     use tempfile::tempdir;
 
     struct PathGuard {

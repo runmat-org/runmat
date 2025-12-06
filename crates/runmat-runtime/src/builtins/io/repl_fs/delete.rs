@@ -1,6 +1,6 @@
 //! MATLAB-compatible `delete` builtin for RunMat.
 
-use std::fs;
+use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -312,7 +312,7 @@ fn delete_with_pattern(pattern: &str, display: &str) -> Result<(), String> {
 }
 
 fn delete_single_path(path: &Path, display: &str) -> Result<(), String> {
-    match fs::metadata(path) {
+    match vfs::metadata(path) {
         Ok(meta) => {
             if meta.is_dir() {
                 return Err(runtime_error(
@@ -323,7 +323,7 @@ fn delete_single_path(path: &Path, display: &str) -> Result<(), String> {
                     ),
                 ));
             }
-            fs::remove_file(path).map_err(|err| {
+            vfs::remove_file(path).map_err(|err| {
                 runtime_error(
                     MESSAGE_ID_OS_ERROR,
                     format!("delete: unable to delete '{}' ({})", display, err),

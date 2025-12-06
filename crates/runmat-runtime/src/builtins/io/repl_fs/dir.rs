@@ -2,7 +2,6 @@
 
 use std::env;
 use std::ffi::OsString;
-use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -10,6 +9,7 @@ use std::time::SystemTime;
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use glob::glob;
 use runmat_builtins::{StructValue, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{
@@ -322,7 +322,7 @@ fn list_from_text(text: &str) -> Result<Vec<DirRecord>, String> {
 
 fn list_path(expanded: &str, original: &str) -> Result<Vec<DirRecord>, String> {
     let path = PathBuf::from(expanded);
-    match fs::metadata(&path) {
+    match vfs::metadata(&path) {
         Ok(metadata) => {
             if metadata.is_dir() {
                 let mut records = list_directory(&path, true)?;
@@ -338,7 +338,7 @@ fn list_path(expanded: &str, original: &str) -> Result<Vec<DirRecord>, String> {
                     .file_name()
                     .map(|os| os.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path_to_string(&path));
-                let (date, datenum) = timestamp_fields(metadata.modified().ok());
+                let (date, datenum) = timestamp_fields(metadata.modified());
                 let record = DirRecord {
                     name,
                     folder,
@@ -363,7 +363,7 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<DirRecord>, S
     for item in matcher {
         match item {
             Ok(path) => {
-                let metadata = fs::symlink_metadata(&path).ok();
+                let metadata = vfs::symlink_metadata(&path).ok();
                 let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
                 let folder_path = path
                     .parent()
@@ -375,7 +375,7 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<DirRecord>, S
                     .map(|os| os.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path_to_string(&path));
                 let (date, datenum) =
-                    timestamp_fields(metadata.as_ref().and_then(|m| m.modified().ok()));
+                    timestamp_fields(metadata.as_ref().and_then(|m| m.modified()));
                 let bytes = if is_dir {
                     0.0
                 } else {
@@ -403,7 +403,7 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<DirRecord>, S
 
 fn list_directory(dir: &Path, include_special: bool) -> Result<Vec<DirRecord>, String> {
     let folder = absolute_folder_string(dir)?;
-    let dir_metadata = fs::metadata(dir).ok();
+    let dir_metadata = vfs::metadata(dir).ok();
     let mut records = Vec::new();
 
     if include_special {
@@ -412,20 +412,18 @@ fn list_directory(dir: &Path, include_special: bool) -> Result<Vec<DirRecord>, S
     }
 
     let dir_display = folder.clone();
-    let read_dir = fs::read_dir(dir)
+    let read_dir = vfs::read_dir(dir)
         .map_err(|err| format!("dir: unable to access '{dir_display}' ({err})"))?;
     for entry in read_dir {
-        let entry = entry.map_err(|err| format!("dir: unable to list '{dir_display}' ({err})"))?;
-        let name_os: OsString = entry.file_name();
+        let name_os: &OsString = entry.file_name();
         let name = name_os.to_string_lossy().into_owned();
         if name == "." || name == ".." {
             continue;
         }
 
-        let path = entry.path();
-        let metadata = entry
-            .metadata()
-            .or_else(|_| fs::symlink_metadata(&path))
+        let path = entry.path().to_path_buf();
+        let metadata = vfs::metadata(&path)
+            .or_else(|_| vfs::symlink_metadata(&path))
             .map_err(|err| format!("dir: unable to read metadata for '{}' ({err})", name))?;
         records.push(record_from_metadata(&folder, name, &metadata));
     }
@@ -481,13 +479,13 @@ fn absolute_folder_string(path: &Path) -> Result<String, String> {
             .map_err(|err| format!("dir: unable to determine current directory ({err})"))?
             .join(path)
     };
-    let normalized = joined.canonicalize().unwrap_or(joined);
+    let normalized = vfs::canonicalize(&joined).unwrap_or(joined);
     Ok(path_to_string(&normalized))
 }
 
-fn record_from_metadata(folder: &str, name: String, metadata: &fs::Metadata) -> DirRecord {
+fn record_from_metadata(folder: &str, name: String, metadata: &vfs::FsMetadata) -> DirRecord {
     let is_dir = metadata.is_dir();
-    let (date, datenum) = timestamp_fields(metadata.modified().ok());
+    let (date, datenum) = timestamp_fields(metadata.modified());
     DirRecord {
         name,
         folder: folder.to_string(),
@@ -498,8 +496,8 @@ fn record_from_metadata(folder: &str, name: String, metadata: &fs::Metadata) -> 
     }
 }
 
-fn make_special(name: &str, folder: &str, metadata: Option<&fs::Metadata>) -> DirRecord {
-    let (date, datenum) = timestamp_fields(metadata.and_then(|m| m.modified().ok()));
+fn make_special(name: &str, folder: &str, metadata: Option<&vfs::FsMetadata>) -> DirRecord {
+    let (date, datenum) = timestamp_fields(metadata.and_then(|m| m.modified()));
     DirRecord {
         name: name.to_string(),
         folder: folder.to_string(),
@@ -550,7 +548,7 @@ mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::{CharArray, StringArray, StructValue as TestStruct};
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
     use tempfile::tempdir;
 
     struct DirGuard {

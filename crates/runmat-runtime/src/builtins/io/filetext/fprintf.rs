@@ -17,6 +17,7 @@ use crate::builtins::io::filetext::registry::{self, FileInfo};
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "fprintf: Invalid file identifier. Use fopen to generate a valid file ID.";
@@ -425,7 +426,7 @@ enum OutputTarget {
     Stdout,
     Stderr,
     File {
-        handle: Arc<StdMutex<std::fs::File>>,
+        handle: Arc<StdMutex<File>>,
         encoding: String,
     },
 }
@@ -696,7 +697,7 @@ mod tests {
     use crate::builtins::io::filetext::{fclose, fopen, registry};
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
     use std::io::Read;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

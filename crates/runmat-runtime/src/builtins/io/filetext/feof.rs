@@ -289,7 +289,7 @@ mod tests {
     use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{Tensor, Value};
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
     use std::io::Write;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

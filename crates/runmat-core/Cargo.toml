@@ -1,0 +1,33 @@
+[package]
+name = "runmat-core"
+version = "0.2.7"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "Host-agnostic RunMat execution engine (parser, interpreter, snapshot loader)"
+homepage = "https://runmat.org"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+runmat-lexer = { workspace = true }
+runmat-parser = { workspace = true }
+runmat-hir = { workspace = true }
+runmat-ignition = { workspace = true }
+runmat-accelerate = { workspace = true }
+runmat-turbine = { workspace = true, optional = true }
+runmat-gc = { workspace = true }
+runmat-builtins = { workspace = true }
+anyhow = "1.0"
+log = "0.4"
+
+[features]
+default = ["jit"]
+jit = ["dep:runmat-turbine"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+runmat-runtime = { workspace = true }
+runmat-snapshot = { workspace = true, default-features = false, features = ["compression-native", "validation"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+runmat-runtime = { path = "../runmat-runtime", version = "=0.2.7", default-features = false }
+runmat-snapshot = { workspace = true, default-features = false, features = ["compression-wasm", "validation"] }

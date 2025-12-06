@@ -10,7 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-builtins = { workspace = true }
-runmat-runtime = { workspace = true }
+runmat-runtime = { path = "../runmat-runtime", version = "=0.2.7", default-features = false }
 runmat-accelerate = { workspace = true, optional = true }
 runmat-accelerate-api = { workspace = true, optional = true }
 runmat-lexer = { workspace = true }

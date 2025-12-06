@@ -1,6 +1,5 @@
 //! MATLAB-compatible `fopen` builtin exposing host file streams.
 
-use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -13,6 +12,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::filetext::registry::{self, FileInfo, RegisteredFile};
 use crate::{gather_if_needed, make_cell, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_filesystem::OpenOptions;
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -773,7 +773,7 @@ fn make_cell_column(values: Vec<Value>) -> Result<Value, String> {
 mod tests {
     use super::*;
     use crate::builtins::io::filetext::registry;
-    use std::fs;
+    use runmat_filesystem as fs;
     use std::io::Write;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

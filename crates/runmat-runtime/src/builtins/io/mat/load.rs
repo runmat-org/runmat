@@ -1,7 +1,6 @@
 //! MATLAB-compatible `load` builtin for RunMat.
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
 
@@ -9,6 +8,7 @@ use regex::Regex;
 use runmat_builtins::{
     CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use super::format::{

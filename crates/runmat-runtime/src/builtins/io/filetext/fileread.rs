@@ -1,6 +1,5 @@
 //! MATLAB-compatible `fileread` builtin for RunMat.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{CharArray, Value};
@@ -13,6 +12,7 @@ use crate::builtins::common::spec::{
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_filesystem as fs;
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
@@ -378,7 +378,7 @@ fn bytes_to_chars(bytes: Vec<u8>) -> Vec<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use runmat_filesystem as fs;
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
 

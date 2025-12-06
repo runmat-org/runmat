@@ -1,7 +1,6 @@
 //! MATLAB-compatible `fread` builtin for RunMat.
 
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
-use std::sync::MutexGuard;
 
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
@@ -13,6 +12,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::filetext::registry;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_filesystem::File;
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -887,7 +887,7 @@ fn value_to_scalar(value: &Value, err: &str) -> Result<f64, String> {
 }
 
 fn read_from_handle(
-    file: &mut MutexGuard<'_, std::fs::File>,
+    file: &mut File,
     size_spec: &SizeSpec,
     precision: &PrecisionSpec,
     skip: usize,
@@ -898,15 +898,14 @@ fn read_from_handle(
         OutputKind::Double => {
             let limit = size_spec.element_limit();
             let (values, count) =
-                read_numeric_values(&mut **file, precision.input, limit, skip, endianness)?;
+                read_numeric_values(file, precision.input, limit, skip, endianness)?;
             let (data, rows, cols) = finalize_numeric(size_spec, count, values);
             let tensor = Tensor::new(data, vec![rows, cols]).map_err(|e| format!("fread: {e}"))?;
             Ok(FreadEval::new(Value::Tensor(tensor), count))
         }
         OutputKind::Char => {
             let limit = size_spec.element_limit();
-            let (values, count) =
-                read_char_values(&mut **file, precision.input, limit, skip, endianness)?;
+            let (values, count) = read_char_values(file, precision.input, limit, skip, endianness)?;
             let (row_major, rows, cols) = finalize_char(size_spec, count, values);
             let char_array =
                 CharArray::new(row_major, rows, cols).map_err(|e| format!("fread: {e}"))?;
@@ -1279,7 +1278,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
     use std::io::Write;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

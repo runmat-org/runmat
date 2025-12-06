@@ -1,9 +1,9 @@
 //! MATLAB-compatible `mkdir` builtin for RunMat.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{CharArray, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;
@@ -328,7 +328,7 @@ fn create_from_parent_child(parent: &Value, child: &Value) -> Result<MkdirResult
 
     if let Some(parent_text) = parent_expanded {
         let parent_path = PathBuf::from(&parent_text);
-        if !parent_path.exists() {
+        if !path_exists(&parent_path) {
             let message = format!("Parent folder \"{}\" does not exist.", parent_text);
             return Ok(MkdirResult::failure(message, MESSAGE_ID_INVALID_PARENT));
         }
@@ -345,7 +345,7 @@ fn create_from_parent_child(parent: &Value, child: &Value) -> Result<MkdirResult
 
 fn create_directory(path: &Path) -> MkdirResult {
     let display = path.display().to_string();
-    if path.exists() {
+    if path_exists(path) {
         if path_is_existing_directory(path) {
             return MkdirResult::already_exists();
         }
@@ -358,7 +358,7 @@ fn create_directory(path: &Path) -> MkdirResult {
         );
     }
 
-    match fs::create_dir_all(path) {
+    match vfs::create_dir_all(path) {
         Ok(_) => MkdirResult::success(),
         Err(err) => MkdirResult::failure(
             format!("Unable to create folder \"{}\": {}", display, err),
@@ -368,10 +368,14 @@ fn create_directory(path: &Path) -> MkdirResult {
 }
 
 fn path_is_existing_directory(path: &Path) -> bool {
-    match fs::metadata(path) {
+    match vfs::metadata(path) {
         Ok(meta) => meta.is_dir(),
         Err(_) => false,
     }
+}
+
+fn path_exists(path: &Path) -> bool {
+    vfs::metadata(path).is_ok()
 }
 
 fn extract_folder_name(value: &Value, error_message: &str) -> Result<String, String> {
@@ -412,6 +416,8 @@ mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::Value;
+    use runmat_filesystem as vfs;
+    use std::fs;
     use std::fs::File;
     use tempfile::tempdir;
 
@@ -426,7 +432,7 @@ mod tests {
         let result =
             mkdir_builtin(vec![Value::from(target.to_string_lossy().to_string())]).expect("mkdir");
         assert_eq!(result, Value::Num(1.0));
-        assert!(target.is_dir());
+        assert!(path_is_existing_directory(&target));
     }
 
     #[test]
@@ -437,13 +443,13 @@ mod tests {
 
         let temp = tempdir().expect("temp dir");
         let target = temp.path().join("existing");
-        fs::create_dir(&target).expect("seed dir");
+        vfs::create_dir(&target).expect("seed dir");
 
         let eval = evaluate(&[Value::from(target.to_string_lossy().to_string())]).unwrap();
         assert_eq!(eval.status(), 1.0);
         assert_eq!(eval.message(), "Directory already exists.");
         assert_eq!(eval.message_id(), MESSAGE_ID_DIRECTORY_EXISTS);
-        assert!(target.is_dir());
+        assert!(path_is_existing_directory(&target));
     }
 
     #[test]
@@ -464,7 +470,7 @@ mod tests {
         .expect("mkdir");
         assert_eq!(eval.status(), 1.0);
         assert!(eval.message().is_empty());
-        assert!(parent.join(child).is_dir());
+        assert!(path_is_existing_directory(&parent.join(child)));
     }
 
     #[test]
@@ -497,7 +503,7 @@ mod tests {
         assert_eq!(eval.status(), 0.0);
         assert_eq!(eval.message_id(), MESSAGE_ID_INVALID_PARENT);
         assert!(eval.message().contains("does not exist"));
-        assert!(!expected_target.exists());
+        assert!(!path_exists(&expected_target));
     }
 
     #[test]
@@ -518,7 +524,8 @@ mod tests {
         assert_eq!(eval.status(), 0.0);
         assert_eq!(eval.message_id(), MESSAGE_ID_NOT_A_DIRECTORY);
         assert!(eval.message().contains("not a directory"));
-        assert!(!parent_file.with_file_name("child").exists());
+        let child = parent_file.with_file_name("child");
+        assert!(!path_exists(&child));
     }
 
     #[test]

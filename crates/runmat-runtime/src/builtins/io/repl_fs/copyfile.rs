@@ -1,6 +1,6 @@
 //! MATLAB-compatible `copyfile` builtin for RunMat.
 
-use std::fs;
+use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -389,7 +389,7 @@ fn copy_operation(
 
 fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileResult {
     let source_path = PathBuf::from(source);
-    let source_meta = match fs::metadata(&source_path) {
+    let source_meta = match vfs::metadata(&source_path) {
         Ok(meta) => meta,
         Err(_) => return CopyfileResult::source_not_found(source),
     };
@@ -400,7 +400,7 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
         return CopyfileResult::same_path(&source_display);
     }
 
-    let destination_meta = fs::metadata(&destination_path).ok();
+    let destination_meta = vfs::metadata(&destination_path).ok();
     let mut target_path = destination_path.clone();
     let mut remove_target = false;
     let mut remove_is_dir = false;
@@ -424,7 +424,7 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
                     MESSAGE_ID_OS_ERROR,
                 );
             }
-            match fs::metadata(&target_path) {
+            match vfs::metadata(&target_path) {
                 Ok(existing) => {
                     if !force {
                         return CopyfileResult::destination_exists(&path_to_display(&target_path));
@@ -501,7 +501,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     }
 
     let destination_path = PathBuf::from(destination);
-    let destination_meta = match fs::metadata(&destination_path) {
+    let destination_meta = match vfs::metadata(&destination_path) {
         Ok(meta) => meta,
         Err(_) => return CopyfileResult::destination_missing(destination),
     };
@@ -513,7 +513,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     let mut plan = Vec::with_capacity(matches.len());
     for source_path in matches {
         let display_source = path_to_display(&source_path);
-        let meta = match fs::metadata(&source_path) {
+        let meta = match vfs::metadata(&source_path) {
             Ok(meta) => meta,
             Err(_) => return CopyfileResult::source_not_found(&display_source),
         };
@@ -529,7 +529,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
             return CopyfileResult::same_path(&display_source);
         }
         let target_display = path_to_display(&target_path);
-        match fs::metadata(&target_path) {
+        match vfs::metadata(&target_path) {
             Ok(existing) => {
                 if !force {
                     return CopyfileResult::destination_exists(&target_display);
@@ -614,9 +614,9 @@ fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
     for entry in plan {
         if entry.remove_target {
             let result = if entry.remove_is_dir {
-                fs::remove_dir_all(&entry.target_path)
+                vfs::remove_dir_all(&entry.target_path)
             } else {
-                fs::remove_file(&entry.target_path)
+                vfs::remove_file(&entry.target_path)
             };
             if let Err(err) = result {
                 if err.kind() != io::ErrorKind::NotFound {
@@ -650,36 +650,33 @@ fn copy_path(source: &Path, destination: &Path, is_directory: bool) -> io::Resul
 }
 
 fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()> {
-    if let Some(parent) = destination.parent() {
-        if !parent.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Destination parent \"{}\" does not exist", parent.display()),
-            ));
+    ensure_parent_exists(destination)?;
+
+    match vfs::metadata(destination) {
+        Ok(meta) => {
+            if !meta.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Destination exists and is not a directory",
+                ));
+            }
+        }
+        Err(err) => {
+            if err.kind() != io::ErrorKind::NotFound {
+                return Err(err);
+            }
+            vfs::create_dir(destination)?;
         }
     }
 
-    if destination.exists() && !destination.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "Destination exists and is not a directory",
-        ));
+    if let Ok(metadata) = vfs::metadata(source) {
+        let _ = vfs::set_readonly(destination, metadata.is_readonly());
     }
 
-    if !destination.exists() {
-        fs::create_dir(destination)?;
-    }
-
-    if let Ok(metadata) = fs::metadata(source) {
-        let perms = metadata.permissions();
-        let _ = fs::set_permissions(destination, perms);
-    }
-
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let child_source = entry.path();
-        let child_dest = destination.join(entry.file_name());
-        let child_meta = fs::metadata(&child_source)?;
+    for entry in vfs::read_dir(source)? {
+        let child_source = entry.path().to_path_buf();
+        let child_dest = destination.join(PathBuf::from(entry.file_name()));
+        let child_meta = vfs::metadata(&child_source)?;
         if child_meta.is_dir() {
             copy_directory_recursive(&child_source, &child_dest)?;
         } else {
@@ -691,22 +688,26 @@ fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()>
 }
 
 fn copy_file_to_path(source: &Path, destination: &Path) -> io::Result<()> {
-    if let Some(parent) = destination.parent() {
-        if !parent.exists() {
+    ensure_parent_exists(destination)?;
+
+    vfs::copy_file(source, destination)?;
+
+    if let Ok(metadata) = vfs::metadata(source) {
+        let _ = vfs::set_readonly(destination, metadata.is_readonly());
+    }
+
+    Ok(())
+}
+
+fn ensure_parent_exists(path: &Path) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        if vfs::metadata(parent).is_err() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("Destination parent \"{}\" does not exist", parent.display()),
             ));
         }
     }
-
-    fs::copy(source, destination)?;
-
-    if let Ok(metadata) = fs::metadata(source) {
-        let perms = metadata.permissions();
-        let _ = fs::set_permissions(destination, perms);
-    }
-
     Ok(())
 }
 
@@ -714,7 +715,7 @@ fn same_physical_path(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
+    match (vfs::canonicalize(a), vfs::canonicalize(b)) {
         (Ok(ca), Ok(cb)) => ca == cb,
         _ => false,
     }
@@ -724,7 +725,7 @@ fn is_descendant(parent: &Path, candidate: &Path) -> bool {
     if candidate.starts_with(parent) && candidate != parent {
         return true;
     }
-    match (fs::canonicalize(parent), fs::canonicalize(candidate)) {
+    match (vfs::canonicalize(parent), vfs::canonicalize(candidate)) {
         (Ok(parent_canon), Ok(candidate_canon)) => {
             candidate_canon.starts_with(&parent_canon) && candidate_canon != parent_canon
         }

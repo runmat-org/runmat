@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::io::filetext::registry;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
+use runmat_filesystem::File;
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -301,7 +302,7 @@ pub fn evaluate(
 
     let elements = flatten_elements(&data_host)?;
     let count = write_elements(
-        &mut file,
+        &mut *file,
         &elements,
         precision_spec,
         skip_bytes,
@@ -613,7 +614,7 @@ fn flatten_string_array(sa: &runmat_builtins::StringArray) -> Vec<f64> {
 }
 
 fn write_elements(
-    file: &mut std::sync::MutexGuard<'_, std::fs::File>,
+    file: &mut File,
     values: &[f64],
     spec: WriteSpec,
     skip: usize,
@@ -673,7 +674,7 @@ fn write_elements(
     Ok(values.len())
 }
 
-fn write_bytes(file: &mut std::fs::File, bytes: &[u8]) -> Result<(), String> {
+fn write_bytes(file: &mut File, bytes: &[u8]) -> Result<(), String> {
     file.write_all(bytes)
         .map_err(|err| format!("fwrite: failed to write to file ({err})"))
 }
@@ -837,7 +838,7 @@ mod tests {
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Tensor;
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
     use std::io::Read;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

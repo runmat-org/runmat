@@ -2,12 +2,12 @@
 
 use std::collections::HashSet;
 use std::env;
-use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use glob::glob;
 use runmat_builtins::{CharArray, StringArray, Value};
+use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{
@@ -263,24 +263,16 @@ fn list_for_pattern(raw: &str) -> Result<Vec<String>, String> {
 fn list_directory(dir: &Path) -> Result<Vec<String>, String> {
     let mut entries = Vec::new();
     let dir_str = path_to_string(dir);
-    let read_dir = std::fs::read_dir(dir)
-        .map_err(|err| format!("ls: unable to access '{dir_str}' ({err})"))?;
+    let read_dir =
+        vfs::read_dir(dir).map_err(|err| format!("ls: unable to access '{dir_str}' ({err})"))?;
 
     for entry in read_dir {
-        let entry = entry.map_err(|err| format!("ls: unable to list '{dir_str}' ({err})"))?;
-        let name_os: OsString = entry.file_name();
-        let name = name_os.to_string_lossy();
+        let name = entry.file_name().to_string_lossy();
         if name == "." || name == ".." {
             continue;
         }
-
-        let file_type = entry.file_type().ok();
-        let is_dir = file_type
-            .map(|ft| ft.is_dir())
-            .unwrap_or_else(|| entry.metadata().map(|m| m.is_dir()).unwrap_or(false));
-
         let mut display = name.into_owned();
-        append_directory_suffix(&mut display, is_dir);
+        append_directory_suffix(&mut display, entry.is_dir());
         entries.push(display);
     }
 
@@ -290,7 +282,7 @@ fn list_directory(dir: &Path) -> Result<Vec<String>, String> {
 
 fn list_path(expanded: &str, original: &str) -> Result<Vec<String>, String> {
     let path = PathBuf::from(expanded);
-    match std::fs::metadata(&path) {
+    match vfs::metadata(&path) {
         Ok(metadata) => {
             if metadata.is_dir() {
                 list_directory(&path)
@@ -313,8 +305,9 @@ fn list_glob_pattern(expanded: &str, original: &str) -> Result<Vec<String>, Stri
     for item in matcher {
         match item {
             Ok(path) => {
-                let meta = path.symlink_metadata().ok();
-                let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                let is_dir = vfs::symlink_metadata(&path)
+                    .map(|meta| meta.is_dir())
+                    .unwrap_or(false);
                 let mut name = path_to_string(&path);
                 append_directory_suffix(&mut name, is_dir);
                 entries.push(name);
@@ -401,7 +394,7 @@ mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::CharArray;
-    use std::fs::{self, File};
+    use runmat_filesystem::{self as fs, File};
     use tempfile::tempdir;
 
     struct DirGuard {

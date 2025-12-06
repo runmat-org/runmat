@@ -1,0 +1,59 @@
+import { describe, expect, it, vi } from "vitest";
+import { __internals, type RunMatSnapshotSource } from "./index.js";
+
+async function readStream(stream: ReadableStream<Uint8Array> | undefined): Promise<number[]> {
+  if (!stream) {
+    return [];
+  }
+  const reader = stream.getReader();
+  const chunks: number[] = [];
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value) {
+      chunks.push(...value);
+    }
+  }
+  return chunks;
+}
+
+describe("resolveSnapshotSource", () => {
+  it("prefers inline bytes", async () => {
+    const source: RunMatSnapshotSource = { bytes: new Uint8Array([1, 2, 3]) };
+    const resolved = await __internals.resolveSnapshotSource(source);
+    expect(Array.from(resolved.bytes ?? [])).toEqual([1, 2, 3]);
+    expect(resolved.stream).toBeUndefined();
+  });
+
+  it("invokes custom fetcher", async () => {
+    const fetcher = vi.fn(async () => new Uint8Array([9, 9, 9]));
+    const source: RunMatSnapshotSource = { fetcher };
+    const resolved = await __internals.resolveSnapshotSource(source);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(Array.from(resolved.bytes ?? [])).toEqual([9, 9, 9]);
+  });
+
+  it("passes through readable streams from fetcher responses", async () => {
+    const payload = new Uint8Array([5, 6, 7]);
+    const response = new Response(payload);
+    const source: RunMatSnapshotSource = {
+      fetcher: vi.fn(async () => response)
+    };
+    const resolved = await __internals.resolveSnapshotSource(source);
+    expect(resolved.stream).toBeDefined();
+    const values = await readStream(resolved.stream as ReadableStream<Uint8Array>);
+    expect(values).toEqual([5, 6, 7]);
+  });
+
+  it("fetches from URL when provided", async () => {
+    const payload = new Uint8Array([4, 5, 6]);
+    const mockFetch = vi.fn(async () => new Response(payload));
+    // @ts-expect-error override global fetch for test
+    globalThis.fetch = mockFetch;
+    const result = await __internals.fetchSnapshotFromUrl("https://example.com/snapshot.bin");
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(Array.from(result)).toEqual([4, 5, 6]);
+  });
+});

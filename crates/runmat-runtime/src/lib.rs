@@ -49,6 +49,9 @@ pub use blas::*;
 #[cfg(feature = "blas-lapack")]
 pub use lapack::*;
 
+#[cfg(test)]
+mod filesystem_provider_tests;
+
 pub(crate) fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
     let handles: Vec<GcPtr<Value>> = values
         .into_iter()

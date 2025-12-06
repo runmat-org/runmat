@@ -20,6 +20,9 @@ members = [
     "crates/runmat-lsp",
     "crates/runmat-cli",
     "tools/runmatfunc",
+    "crates/runmat-core",
+    "crates/runmat-wasm",
+    "crates/runmat-filesystem",
 ]
 resolver = "2"
 
@@ -63,10 +66,12 @@ runmat-runtime = { version = "=0.2.7", path = "crates/runmat-runtime" }
 runmat-kernel = { version = "=0.2.7", path = "crates/runmat-kernel" }
 runmat-turbine = { version = "=0.2.7", path = "crates/runmat-turbine" }
 runmat-gc = { version = "=0.2.7", path = "crates/runmat-gc" }
-runmat-snapshot = { version = "=0.2.7", path = "crates/runmat-snapshot" }
+runmat-snapshot = { version = "=0.2.7", path = "crates/runmat-snapshot", default-features = false }
 runmat-accelerate = { version = "=0.2.7", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.2.7", path = "crates/runmat-accelerate-api" }
 runmat-gc-api = { version = "=0.2.7", path = "crates/runmat-gc-api" }
+runmat-core = { version = "=0.2.7", path = "crates/runmat-core" }
+runmat-filesystem = { version = "=0.2.7", path = "crates/runmat-filesystem" }
 
 [patch.crates-io]
 # Ensure no accidental cycle via crates.io variants

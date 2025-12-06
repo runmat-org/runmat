@@ -24,3 +24,6 @@ artifacts/
 __pycache__/
 
 benchmarks/results/
+bindings/ts/node_modules/
+bindings/ts/pkg/
+bindings/ts/dist/

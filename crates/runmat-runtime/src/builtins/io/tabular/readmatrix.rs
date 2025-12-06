@@ -2,12 +2,12 @@
 
 use std::collections::HashSet;
 use std::convert::TryFrom;
-use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{LogicalArray, Tensor, Value};
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{

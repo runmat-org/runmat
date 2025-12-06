@@ -1,12 +1,12 @@
 //! MATLAB-compatible `dlmwrite` builtin for delimiter-separated exports.
 
 use std::ffi::CString;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use libc::{c_char, size_t};
 use runmat_builtins::{Tensor, Value};
+use runmat_filesystem::{self as vfs, File, OpenOptions};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;
@@ -623,8 +623,8 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
     let cols = tensor.cols();
     let newline = options.newline.as_str();
 
-    let (existing_nonempty, ends_with_newline) = if options.append && path.exists() {
-        match fs::metadata(path) {
+    let (existing_nonempty, ends_with_newline) = if options.append {
+        match vfs::metadata(path) {
             Ok(meta) if meta.len() > 0 => {
                 let ends = file_ends_with_newline(path).map_err(|e| {
                     format!(
@@ -634,7 +634,17 @@ fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> Result<
                 })?;
                 (true, ends)
             }
-            _ => (false, false),
+            Ok(_) => (false, false),
+            Err(err) => {
+                if err.kind() == io::ErrorKind::NotFound {
+                    (false, false)
+                } else {
+                    return Err(format!(
+                        "dlmwrite: unable to inspect \"{}\" ({err})",
+                        path.display()
+                    ));
+                }
+            }
         }
     } else {
         (false, false)
@@ -737,8 +747,8 @@ fn write_blank_row(
     Ok(bytes)
 }
 
-fn file_ends_with_newline(path: &Path) -> std::io::Result<bool> {
-    let metadata = fs::metadata(path)?;
+fn file_ends_with_newline(path: &Path) -> io::Result<bool> {
+    let metadata = vfs::metadata(path)?;
     let len = metadata.len();
     if len == 0 {
         return Ok(false);

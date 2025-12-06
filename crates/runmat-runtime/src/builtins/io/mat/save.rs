@@ -1,12 +1,12 @@
 //! MATLAB-compatible `save` builtin for RunMat.
 
 use std::collections::HashSet;
-use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
 use runmat_builtins::{CharArray, StructValue, Tensor, Value};
+use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
 use super::format::{

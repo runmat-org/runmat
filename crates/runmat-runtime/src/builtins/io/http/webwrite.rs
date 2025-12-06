@@ -3,12 +3,15 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use reqwest::blocking::{Client, RequestBuilder};
-use reqwest::header::{HeaderName, HeaderValue, CONTENT_TYPE};
-use reqwest::Url;
+use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
+use base64::Engine;
 use runmat_builtins::{CellArray, CharArray, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use url::Url;
 
+use super::transport::{
+    self, decode_body_as_text, header_value, HttpMethod, HttpRequest, HEADER_CONTENT_TYPE,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -392,85 +395,63 @@ fn execute_request(
             }
         }
     }
-    let url_display = url.to_string();
-
     let user_agent = options
         .user_agent
         .as_deref()
         .filter(|ua| !ua.trim().is_empty())
-        .unwrap_or(DEFAULT_USER_AGENT);
+        .unwrap_or(DEFAULT_USER_AGENT)
+        .to_string();
 
-    let client = Client::builder()
-        .timeout(options.timeout)
-        .user_agent(user_agent)
-        .build()
-        .map_err(|err| format!("webwrite: failed to build HTTP client ({err})"))?;
+    let mut headers = options.headers.clone();
+    let has_auth_header = headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
+    if !has_auth_header {
+        if let Some(username) = options.username.as_ref().filter(|s| !s.is_empty()) {
+            let password = options.password.clone().unwrap_or_default();
+            let token = BASE64_ENGINE.encode(format!("{username}:{password}"));
+            headers.push(("Authorization".to_string(), format!("Basic {token}")));
+        }
+    }
 
-    let mut builder = match options.method {
-        HttpMethod::Post => client.post(url.clone()),
-        HttpMethod::Put => client.put(url.clone()),
-        HttpMethod::Patch => client.patch(url.clone()),
-        HttpMethod::Delete => client.delete(url.clone()),
-    };
-
-    let has_ct_header = options
-        .headers
+    let has_ct_header = headers
         .iter()
         .any(|(name, _)| name.eq_ignore_ascii_case("content-type"));
-
-    builder = apply_headers(builder, &options.headers)?;
-    if let Some(username) = &options.username {
-        if !username.is_empty() {
-            let password = options.password.as_ref().filter(|p| !p.is_empty()).cloned();
-            builder = builder.basic_auth(username.clone(), password);
-        }
-    }
     if !has_ct_header {
         if let Some(ct) = &body.content_type {
-            builder = builder.header(CONTENT_TYPE, ct.as_str());
+            headers.push(("Content-Type".to_string(), ct.clone()));
         }
     }
-    builder = builder.body(body.bytes);
 
-    let response = builder
-        .send()
-        .map_err(|err| request_error("request", &url_display, err))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!(
-            "webwrite: request to {} failed with HTTP status {}",
-            url_display, status
-        ));
-    }
+    let request = HttpRequest {
+        url,
+        method: options.method,
+        headers,
+        body: Some(body.bytes),
+        timeout: options.timeout,
+        user_agent,
+    };
 
-    let header_content_type = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|s| s.to_string());
+    let response = transport::send_request(&request).map_err(|err| err.into_context("webwrite"))?;
+
+    let header_content_type =
+        header_value(&response.headers, HEADER_CONTENT_TYPE).map(|value| value.to_string());
     let resolved = options.resolve_content_type(header_content_type.as_deref());
 
     match resolved {
         ResolvedContentType::Json => {
-            let body_text = response
-                .text()
-                .map_err(|err| request_error("read response body", &url_display, err))?;
+            let body_text = decode_body_as_text(&response.body, header_content_type.as_deref());
             match decode_json_text(&body_text) {
                 Ok(value) => Ok(value),
                 Err(err) => Err(map_json_error(err)),
             }
         }
         ResolvedContentType::Text => {
-            let body_text = response
-                .text()
-                .map_err(|err| request_error("read response body", &url_display, err))?;
+            let body_text = decode_body_as_text(&response.body, header_content_type.as_deref());
             Ok(Value::CharArray(CharArray::new_row(&body_text)))
         }
         ResolvedContentType::Binary => {
-            let bytes = response
-                .bytes()
-                .map_err(|err| request_error("read response body", &url_display, err))?;
-            let data: Vec<f64> = bytes.iter().map(|b| f64::from(*b)).collect();
+            let data: Vec<f64> = response.body.iter().map(|b| f64::from(*b)).collect();
             let cols = data.len();
             let tensor =
                 Tensor::new(data, vec![1, cols]).map_err(|err| format!("webwrite: {err}"))?;
@@ -770,41 +751,12 @@ fn parse_header_fields(value: &Value) -> Result<Vec<(String, String)>, String> {
     }
 }
 
-fn request_error(action: &str, url: &str, err: reqwest::Error) -> String {
-    if err.is_timeout() {
-        format!("webwrite: {action} to {url} timed out")
-    } else if err.is_connect() {
-        format!("webwrite: unable to connect to {url}: {err}")
-    } else if err.is_status() {
-        format!("webwrite: HTTP error for {url}: {err}")
-    } else {
-        format!("webwrite: failed to {action} {url}: {err}")
-    }
-}
-
 fn map_json_error(err: String) -> String {
     if let Some(rest) = err.strip_prefix("jsondecode: ") {
         format!("webwrite: failed to parse JSON response ({rest})")
     } else {
         format!("webwrite: failed to parse JSON response ({err})")
     }
-}
-
-fn apply_headers(
-    mut builder: RequestBuilder,
-    headers: &[(String, String)],
-) -> Result<RequestBuilder, String> {
-    for (name, value) in headers {
-        if name.trim().is_empty() {
-            return Err("webwrite: header names must not be empty".to_string());
-        }
-        let header_name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(|_| format!("webwrite: invalid header name '{name}'"))?;
-        let header_value = HeaderValue::from_str(value)
-            .map_err(|_| format!("webwrite: invalid header value for '{name}'"))?;
-        builder = builder.header(header_name, header_value);
-    }
-    Ok(builder)
 }
 
 fn numeric_scalar(value: &Value, context: &str) -> Result<f64, String> {
@@ -970,14 +922,6 @@ enum RequestFormat {
     Json,
     Text,
     Binary,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum HttpMethod {
-    Post,
-    Put,
-    Patch,
-    Delete,
 }
 
 #[derive(Clone, Debug)]
