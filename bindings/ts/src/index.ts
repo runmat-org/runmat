@@ -58,6 +58,7 @@ export interface RunMatInitOptions {
   wgpuForceFallbackAdapter?: boolean;
   wasmModule?: WasmInitInput;
   fsProvider?: RunMatFilesystemProvider;
+  plotCanvas?: HTMLCanvasElement;
 }
 
 export interface ExecuteResult {
@@ -127,6 +128,8 @@ interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
   registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
+  registerPlotCanvas?: (canvas: HTMLCanvasElement) => Promise<void>;
+  plotRendererReady?: () => boolean;
 }
 
 let loadPromise: Promise<RunMatNativeModule> | null = null;
@@ -154,6 +157,12 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     }
     native.registerFsProvider(fsProvider);
   }
+  if (options.plotCanvas) {
+    if (typeof native.registerPlotCanvas !== "function") {
+      throw new Error("The loaded runmat-wasm module does not support WebGPU plotting yet.");
+    }
+    await native.registerPlotCanvas(options.plotCanvas);
+  }
   const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
   const requestedGpu = options.enableGpu ?? true;
   const effectiveEnableGpu = requestedGpu && supportsWebGpu;
@@ -172,6 +181,22 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false
   });
   return new WebRunMatSession(session);
+}
+
+export async function attachPlotCanvas(canvas: HTMLCanvasElement): Promise<void> {
+  const native = await loadNativeModule();
+  if (typeof native.registerPlotCanvas !== "function") {
+    throw new Error("The loaded runmat-wasm module does not support WebGPU plotting yet.");
+  }
+  await native.registerPlotCanvas(canvas);
+}
+
+export async function plotRendererReady(): Promise<boolean> {
+  const native = await loadNativeModule();
+  if (typeof native.plotRendererReady !== "function") {
+    return false;
+  }
+  return native.plotRendererReady();
 }
 
 class WebRunMatSession implements RunMatSessionHandle {

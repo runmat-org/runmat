@@ -6,7 +6,12 @@ description = "Common API types for RunMat GPU acceleration backends"
 homepage = "https://runmat.org"
 repository = "https://github.com/runmat-org/runmat"
 
+[features]
+default = []
+wgpu = ["dep:wgpu"]
+
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true }
 once_cell = "1"
+wgpu = { version = "0.19", optional = true }

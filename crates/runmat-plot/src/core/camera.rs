@@ -167,8 +167,13 @@ impl Camera {
 
     /// Zoom the camera (positive = zoom in, negative = zoom out)
     pub fn zoom(&mut self, delta: f32) {
-        self.zoom *= 1.0 + delta * self.zoom_sensitivity;
-        self.zoom = self.zoom.clamp(0.01, 100.0);
+        // Convert wheel delta into multiplicative zoom with deadzone and clamping
+        let mut factor = 1.0 - delta * self.zoom_sensitivity;
+        if factor.abs() < 1e-3 {
+            return;
+        }
+        factor = factor.clamp(0.2, 5.0);
+        self.zoom = (self.zoom * factor).clamp(0.01, 100.0);
 
         match &mut self.projection {
             ProjectionType::Perspective { .. } => {
@@ -188,8 +193,8 @@ impl Camera {
                 // For orthographic, scale the view bounds
                 let center_x = (*left + *right) / 2.0;
                 let center_y = (*bottom + *top) / 2.0;
-                let width = (*right - *left) * self.zoom;
-                let height = (*top - *bottom) * self.zoom;
+                let width = (*right - *left) * factor;
+                let height = (*top - *bottom) * factor;
 
                 *left = center_x - width / 2.0;
                 *right = center_x + width / 2.0;
@@ -330,8 +335,12 @@ impl Camera {
                 near,
                 far,
             } => {
-                println!("ORTHO: Creating matrix with bounds: left={left}, right={right}, bottom={bottom}, top={top}, near={near}, far={far}");
-                println!("ORTHO: Camera aspect_ratio={}", self.aspect_ratio);
+                log::trace!(
+                    target: "runmat_plot",
+                    "ortho matrix bounds l={} r={} b={} t={} n={} f={}",
+                    left, right, bottom, top, near, far
+                );
+                log::trace!(target: "runmat_plot", "camera aspect_ratio={}", self.aspect_ratio);
                 Mat4::orthographic_rh(left, right, bottom, top, near, far)
             }
         };

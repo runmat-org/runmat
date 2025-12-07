@@ -34,7 +34,6 @@ nalgebra = "0.32"
 # Async runtime for WGPU
 pollster = "0.3"
 futures = "0.3"
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
 # Data processing
 rayon = "1.0"
@@ -42,6 +41,7 @@ rayon = "1.0"
 # Runtime environment detection
 atty = "0.2"
 log = "0.4"
+once_cell = "1.19"
 
 # Web browser integration
 webbrowser = "0.8"
@@ -56,6 +56,8 @@ serde_yaml = "0.9"
 
 # Image processing for export
 image = { version = "0.24", features = ["png", "jpeg"] }
+base64 = "0.22"
+rfd = { version = "0.14", optional = true }
 
 
 
@@ -63,11 +65,25 @@ image = { version = "0.24", features = ["png", "jpeg"] }
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "HtmlCanvasElement",
+    "Window",
+    "Document",
+    "DomRect"
+] }
+tokio = { version = "1.0", default-features = false, features = ["sync", "time"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
 [features]
 default = ["static", "gui"]
 static = []  # Static image export (always enabled)
-gui = ["winit", "egui", "egui-wgpu", "egui-winit", "eframe"]  # Interactive GUI
+gui = ["winit", "egui", "egui-wgpu", "egui-winit", "eframe", "rfd"]  # Interactive GUI
 jupyter = ["eframe"]  # Jupyter widget support
 web = []  # WebGL backend for web/jupyter
 

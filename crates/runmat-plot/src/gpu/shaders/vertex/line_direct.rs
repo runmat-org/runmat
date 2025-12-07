@@ -1,4 +1,4 @@
-// Direct coordinate transformation vertex shader for precise plot rendering
+pub const SHADER: &str = r#"// Direct coordinate transformation vertex shader for precise plot rendering
 // Performs efficient data-to-viewport coordinate mapping without camera transforms
 
 struct Uniforms {
@@ -29,23 +29,22 @@ struct VertexOutput {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    
+
     // Transform data coordinates to normalized device coordinates within viewport bounds
-    
     let data_range = uniforms.data_max - uniforms.data_min;
     let viewport_range = uniforms.viewport_max - uniforms.viewport_min;
-    
+
     // Normalize data position to [0, 1] within data bounds
     let normalized_pos = (input.position.xy - uniforms.data_min) / data_range;
-    
+
     // Map to viewport NDC range
     let ndc_pos = uniforms.viewport_min + normalized_pos * viewport_range;
-    
+
     // Create final clip position
     out.clip_position = vec4<f32>(ndc_pos.x, ndc_pos.y, 0.0, 1.0);
     out.world_position = input.position;
     out.color = input.color;
-    
+
     return out;
 }
 
@@ -54,3 +53,4 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Simple line rendering
     return input.color;
 }
+"#;

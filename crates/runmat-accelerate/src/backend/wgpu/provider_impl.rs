@@ -7,21 +7,21 @@ use once_cell::sync::OnceCell;
 use pollster::block_on;
 use rand::seq::SliceRandom;
 use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows,
-    CovNormalization, CovRows, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
-    HostTensorOwned, HostTensorView, ImfilterOptions, ImfilterPadding, IsMemberOptions,
-    IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth,
-    ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode,
-    ProviderConvOrientation, ProviderCummaxResult, ProviderCumminResult, ProviderEigResult,
-    ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult,
-    ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult,
-    ProviderMeshgridResult, ProviderNanMode, ProviderNormOrder, ProviderPinvOptions,
-    ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision,
-    ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult,
-    ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
-    ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
-    SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult, UniqueOptions,
-    UniqueResult,
+    AccelContextHandle, AccelContextKind, AccelProvider, ApiDeviceInfo, CorrcoefNormalization,
+    CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows, CovarianceOptions, FindDirection,
+    FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView, ImfilterOptions,
+    ImfilterPadding, IsMemberOptions, IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest,
+    ProviderBandwidth, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderConvMode, ProviderConvOrientation, ProviderCummaxResult, ProviderCumminResult,
+    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
+    ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
+    ProviderLuResult, ProviderMeshgridResult, ProviderNanMode, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult,
+    ProviderQrResult, ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind,
+    ReduceDimResult, ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult,
+    SortComparison, SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult,
+    UniqueOptions, UniqueResult, WgpuBufferRef, WgpuContextHandle,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -108,8 +108,10 @@ type MomentsCache = HashMap<MomentsKey, MomentsValue>;
 
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    instance: Arc<wgpu::Instance>,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    adapter: Arc<wgpu::Adapter>,
     adapter_info: wgpu::AdapterInfo,
     adapter_limits: wgpu::Limits,
     workgroup_config: WorkgroupConfig,
@@ -2173,10 +2175,10 @@ impl WgpuProvider {
     }
 
     pub(crate) fn device_ref(&self) -> &wgpu::Device {
-        &self.device
+        self.device.as_ref()
     }
     pub(crate) fn queue_ref(&self) -> &wgpu::Queue {
-        &self.queue
+        self.queue.as_ref()
     }
 
     fn warmup_from_disk(&self) {
@@ -2446,7 +2448,7 @@ impl WgpuProvider {
             instance_desc.backends = wgpu::Backends::BROWSER_WEBGPU;
         }
 
-        let instance = wgpu::Instance::new(instance_desc);
+        let instance = Arc::new(wgpu::Instance::new(instance_desc));
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: opts.power_preference,
@@ -2528,7 +2530,7 @@ impl WgpuProvider {
         };
         let limits = adapter.limits();
 
-        let (device, queue) = adapter
+        let (device_raw, queue_raw) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("RunMat WGPU Device"),
@@ -2538,6 +2540,9 @@ impl WgpuProvider {
                 None,
             )
             .await?;
+        let device = Arc::new(device_raw);
+        let queue = Arc::new(queue_raw);
+        let adapter = Arc::new(adapter);
         let satisfied_limits = device.limits();
 
         let workgroup_config = WorkgroupConfig::new(
@@ -2670,8 +2675,10 @@ impl WgpuProvider {
         let pipelines = WgpuPipelines::new(&device, precision, image_norm_bootstrap);
 
         Ok(Self {
+            instance,
             device,
             queue,
+            adapter,
             adapter_info,
             adapter_limits: satisfied_limits,
             workgroup_config,
@@ -13221,6 +13228,34 @@ impl WgpuProvider {
     }
 }
 impl AccelProvider for WgpuProvider {
+    fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
+        match kind {
+            AccelContextKind::Plotting => Some(AccelContextHandle::Wgpu(WgpuContextHandle {
+                instance: self.instance.clone(),
+                device: self.device.clone(),
+                queue: self.queue.clone(),
+                adapter: self.adapter.clone(),
+                adapter_info: self.adapter_info.clone(),
+                limits: self.adapter_limits.clone(),
+                features: self.device.features(),
+            })),
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn export_wgpu_buffer(&self, handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
+        self.get_entry(handle).ok().map(|entry| WgpuBufferRef {
+            buffer: entry.buffer,
+            len: entry.len,
+            shape: entry.shape,
+            element_size: self.element_size,
+            precision: match entry.precision {
+                NumericPrecision::F32 => ProviderPrecision::F32,
+                NumericPrecision::F64 => ProviderPrecision::F64,
+            },
+        })
+    }
+
     fn device_id(&self) -> u32 {
         self.runtime_device_id
     }

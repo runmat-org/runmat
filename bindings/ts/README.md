@@ -76,3 +76,25 @@ if (gpu.adapter) {
   console.log("GPU backend:", gpu.adapter.name, gpu.adapter.backend, gpu.adapter.precision);
 }
 ```
+
+## Plotting surfaces
+
+RunMat plotting now renders directly into a WebGPU-backed `<canvas>` using the same renderer as the native desktop build. Provide a canvas during initialization:
+
+```ts
+const canvas = document.getElementById("runmat-plot") as HTMLCanvasElement;
+await initRunMat({ plotCanvas: canvas });
+```
+
+or attach one later via the exported helpers:
+
+```ts
+import { attachPlotCanvas, plotRendererReady } from "@runmat/wasm";
+
+await attachPlotCanvas(canvas);
+if (!await plotRendererReady()) {
+  console.warn("Plotting not initialized yet.");
+}
+```
+
+Once the canvas is registered, calling `plot`, `scatter`, etc. from the RunMat REPL renders directly into that surface without any additional JS shims.

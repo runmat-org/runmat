@@ -1,0 +1,156 @@
+//! MATLAB-compatible `contourf` builtin (filled contour plot).
+
+use log::warn;
+use runmat_builtins::Value;
+use runmat_macros::runtime_builtin;
+use runmat_plot::plots::ColorMap;
+
+use super::common::tensor_to_surface_grid;
+use super::contour::{
+    build_contour_fill_gpu_plot, build_contour_fill_plot, build_contour_gpu_plot,
+    build_contour_plot, parse_contour_args, ContourArgs,
+};
+use super::state::{render_active_plot, PlotRenderOptions};
+
+#[cfg(feature = "doc_export")]
+use crate::register_builtin_doc_text;
+
+#[cfg(feature = "doc_export")]
+pub const DOC_MD: &str = r#"---
+title: "contourf"
+category: "plotting"
+keywords: ["contourf", "contour", "filled", "gpuArray"]
+summary: "Render MATLAB-compatible filled contour plots."
+references:
+  - https://www.mathworks.com/help/matlab/ref/contourf.html
+gpu_support:
+  elementwise: false
+  reduction: false
+  precisions: ["single", "double"]
+  broadcasting: "none"
+  notes: "Single/double-precision gpuArray grids stay on the device; CPU fallbacks mirror MATLAB semantics."
+fusion:
+  elementwise: false
+  reduction: false
+  max_inputs: 3
+  constants: "inline"
+requires_feature: null
+tested:
+  unit: "builtins::plotting::contourf::tests"
+---
+
+# What does `contourf` do?
+`contourf(X, Y, Z)` fills the regions between contour levels with solid colors. When the axes are
+omitted, RunMat assumes `1:m` and `1:n` just like MATLAB. The default level count matches MATLAB's
+behaviour (10).
+
+## GPU behaviour
+- Single/double-precision gpuArrays feed a compute shader that emits renderer-ready triangles on the
+  shared WebGPU device.
+- When GPU support is unavailable, tensors gather to host memory and rendering proceeds on the CPU
+  path with identical results.
+"#;
+
+#[cfg(feature = "doc_export")]
+register_builtin_doc_text!("contourf", DOC_MD);
+
+#[runtime_builtin(
+    name = "contourf",
+    category = "plotting",
+    summary = "Render MATLAB-compatible filled contour plots.",
+    keywords = "contourf,plotting,filled,contour",
+    sink = true
+)]
+pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> Result<String, String> {
+    let mut args = Some(parse_contour_args("contourf", first, rest)?);
+    let opts = PlotRenderOptions {
+        title: "Filled Contour Plot",
+        x_label: "X",
+        y_label: "Y",
+        axis_equal: true,
+        ..Default::default()
+    };
+    render_active_plot(opts, move |figure, axes| {
+        let ContourArgs {
+            name,
+            x_axis,
+            y_axis,
+            z_input,
+            level_spec,
+        } = args.take().expect("contourf args consumed once");
+        let color_map = ColorMap::Parula;
+        let base_z = 0.0;
+
+        if let Some(handle) = z_input.gpu_handle() {
+            match build_contour_fill_gpu_plot(
+                &x_axis,
+                &y_axis,
+                handle,
+                color_map,
+                base_z,
+                &level_spec,
+            ) {
+                Ok(fill_plot) => {
+                    figure.add_contour_fill_plot_on_axes(fill_plot, axes);
+                    if let Ok(contours) = build_contour_gpu_plot(
+                        &x_axis,
+                        &y_axis,
+                        handle,
+                        color_map,
+                        base_z,
+                        &level_spec,
+                    ) {
+                        figure.add_contour_plot_on_axes(contours, axes);
+                    } else {
+                        warn!(
+                            "contourf contour overlay unavailable: failed to build contour lines"
+                        );
+                    }
+                    return Ok(());
+                }
+                Err(err) => warn!("contourf GPU path unavailable: {err}"),
+            }
+        }
+
+        let grid = tensor_to_surface_grid(z_input.into_tensor(name)?, x_axis.len(), y_axis.len())?;
+        let fill_plot =
+            build_contour_fill_plot(&x_axis, &y_axis, &grid, color_map, base_z, &level_spec)?;
+        figure.add_contour_fill_plot_on_axes(fill_plot, axes);
+        if let Ok(contours) =
+            build_contour_plot(&x_axis, &y_axis, &grid, color_map, base_z, &level_spec)
+        {
+            figure.add_contour_plot_on_axes(contours, axes);
+        } else {
+            warn!("contourf overlay contour unavailable: failed to build contour lines");
+        }
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::Tensor;
+
+    fn tensor_from(data: &[f64]) -> Tensor {
+        Tensor {
+            data: data.to_vec(),
+            shape: vec![data.len()],
+            rows: data.len(),
+            cols: 1,
+            dtype: runmat_builtins::NumericDType::F64,
+        }
+    }
+
+    #[test]
+    fn contourf_requires_matching_grid() {
+        let res = contourf_builtin(
+            Value::Tensor(tensor_from(&[0.0])),
+            vec![
+                Value::Tensor(tensor_from(&[0.0, 1.0])),
+                Value::Tensor(tensor_from(&[0.0, 1.0])),
+            ],
+        );
+        assert!(res.is_err());
+    }
+}

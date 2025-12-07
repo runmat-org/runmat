@@ -34,6 +34,7 @@ This document tracks the technical decisions and workstreams required to bring t
 4. **Plotting**
    - Implement the `runmat-plot/web` feature: render into a provided canvas, schedule frames via `requestAnimationFrame`, and drop thread manager dependencies.
    - Fall back to static SVG/PNG rendering when WebGPU is unavailable so docs/examples still work.
+   - **Zero-copy renderer plan**: see `docs/wasm/plotting-zero-copy.md` for the shared-device design (Accelerate-exported WGPU context, GPU tensor handles, async frame scheduling) that keeps plotting and fusion on the same device/queue in both native and wasm builds.
 
 5. **CLI relocation & embedding API**
    - Move the CLI crate into `crates/runmat-cli` to isolate the desktop entrypoint from the reusable runtime.
@@ -80,11 +81,12 @@ This document tracks the technical decisions and workstreams required to bring t
 - [x] Add workspace features and wasm target check.
 - [x] Extract host-agnostic runtime crate and wasm snapshot loader.
 - [x] Update WebGPU provider for async wasm init and F32 enforcement.
-- [ ] Implement `runmat-plot/web` and canvas-based rendering.
+- [x] Implement `runmat-plot/web` and canvas-based rendering.
 - [x] Move CLI to `crates/runmat-cli` and stabilize embedding API.
 - [ ] Ship `runmat-wasm` bindings plus website integration.
   - [x] Expose wasm-bindgen bindings (`crates/runmat-wasm`) with snapshot streaming + async GPU init.
   - [x] Scaffold `bindings/ts` npm package with build scripts/documented workflow.
+  - [x] Surface WebGPU plotting registration from wasm + TypeScript (canvas attach helpers + docs).
   - [ ] Wire the website REPL + plotting demos to the new bindings.
 - [ ] Document IO/network limitations and snapshot streaming guidance.
 
@@ -96,10 +98,18 @@ This document tracks the technical decisions and workstreams required to bring t
 - **Remote FS + JS parity** – High-throughput HTTP/S3 proxy via `RemoteFsProvider` (`crates/runmat-filesystem/src/remote/native.rs`) and matching TypeScript helpers (`bindings/ts/src/fs/remote.ts`) backed by a synchronous Node XHR shim (`bindings/ts/src/test/node-sync-xhr.ts`) and worker-isolated test server (`bindings/ts/src/fs/providers.spec.ts`).
 - **HTTP builtins & transport refactor** – `webread`/`webwrite` flow through a shared transport layer so native uses `reqwest` while wasm leverages the browser bridge (`crates/runmat-runtime/src/builtins/io/http/transport.rs`).
 - **Bindings packaging** – `bindings/ts` now publishes the `@runmat/wasm` ESM wrapper (`bindings/ts/src/index.ts`, `bindings/ts/README.md`) with IndexedDB, in-memory, and remote filesystem providers plus Vitest coverage.
+- **Web plotting renderer** – `runmat-plot` ships a wasm-only `web` module (`crates/runmat-plot/src/web.rs`) that drives a `<canvas>` via WebGPU; `runmat-runtime/src/plotting.rs` uses it directly in wasm builds, and `runmat-wasm` exposes async `registerPlotCanvas`/`plotRendererReady` with matching TS helpers (`bindings/ts/src/index.ts`).
+- **Shared WGPU context plumbing** – Accelerate’s exported context now carries the originating `wgpu::Instance`, and both the wasm renderer plus the native GUI window reuse that shared instance/adapter/device/queue combo to avoid duplicate adapters and make zero-copy plotting deterministic.
+- **Stairs builtin + GPU packer** – MATLAB’s `stairs` is now a real builtin (`crates/runmat-runtime/src/builtins/plotting/stairs.rs`) with a zero-copy path via the new `runmat-plot::gpu::stairs` compute shader, so stairstep plots stay on the shared WGPU device just like `plot`/`scatter`.
+- **Contour overlays (`surfc` / `meshc`)** – Added GPU marching-squares packers (`crates/runmat-plot/src/gpu/contour.rs`) and runtime helpers (`crates/runmat-runtime/src/builtins/plotting/contour.rs`) so `surfc`/`meshc` render both the surface/mesh and their contour projections straight from gpuArray buffers. CPU fallbacks now share the same figure semantics, paving the way for filled-contour work.
+- **Filled contours (`contourf`)** – `contourf` now renders zero-copy on gpuArrays (triangles packed by `gpu::contour_fill`), falls back to CPU when needed, and overlays line contours to match MATLAB defaults. Legends/figures understand the new plot element.
+- **Plot style parsing** – `plot` now understands MATLAB-style style strings, name-value pairs (`'LineWidth'`, `'Color'`, `'LineStyle'`, `'Marker*'`), and multiple X/Y series. Inline style strings or name-value pairs can follow each `(x,y)` pair (e.g., `plot(x1,y1,'r',x2,y2,'--')`), and `'LineStyleOrder'` accepts string scalars, string arrays, or cell arrays to cycle default styles per axes across successive calls (reset on `hold off`). Marker specs are parsed and stored (kind, size, edge/face colors) but currently force the CPU rendering path while we build the GPU marker shaders.
+- **Standalone `contour` builtin** – MATLAB’s 2-D contour plot now lives in `crates/runmat-runtime/src/builtins/plotting/contour.rs` with full axis/level parsing, zero-copy gpuArray support (explicit level buffers feed the marching-squares shader), and CPU fallbacks that mirror MATLAB’s errors. Tests cover implicit axes, explicit axis validation, and level parsing corner cases.
 - **Documentation** – Filesystem strategy captured in `docs/filesystem-notes.md` (providers, REST contract, test approach), and this plan stays the canonical overview.
 
 ### Remaining / Next Up
-- **Plotting/web canvas backend** – `runmat-runtime/src/plotting.rs` still targets native; we need the `runmat-plot/web` adapter, GPU texture sharing, and fallbacks to unlock the UI mock described earlier.
+- **Plotting UX + UI wiring** – Attach the Monaco/LSP workspace, live overlay, and REPL-driven plot inspector to the new canvas bridge (current work only renders the WGPU figure; no editor plumbing yet).
+- **Plot argument parity** – Finish the parser/renderer work for per-series styles (style strings between series, `LineStyleOrder`), GPU-capable markers, and the remaining MATLAB options so scripts that mix `plot(x1,y1,'r',x2,y2,'--')` or `'Marker','o'` continue to run without manual adaptation.
 - **Website / REPL integration** – The future `runmat.org` shell and Tauri desktop client still need to consume `@runmat/wasm`, mount filesystem providers (remote + IndexedDB), stream snapshots, and surface GPU/plot signals. No code lives in this repo yet; track via `docs/wasm/plan.md` task list.
 - **IO/network docs & gaps** – Produce the promised matrix of MATLAB builtins vs. browser support, including any unavoidable no-ops (sockets, raw file handles) and recommended host bridges.
 - **Shape-rich MATLAB value metadata** – `matlab_class_name` serialization currently drops shape info in the wasm path (`crates/runmat-wasm/src/lib.rs`); the Monaco/LSP experience requires preserving it for hover/insight panes.

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 // use std::path::Path; // Not currently used
-use crate::plots::{Figure, LinePlot, PointCloudPlot, ScatterPlot, SurfacePlot};
+use crate::plots::{Figure, LinePlot, ScatterPlot, SurfacePlot};
 
 /// Jupyter notebook output handler
 #[derive(Debug)]
@@ -172,11 +172,7 @@ impl JupyterBackend {
         Ok("<div>3D Surface Plot (not yet integrated with Figure)</div>".to_string())
     }
 
-    /// Display a point cloud
-    pub fn display_point_cloud(&mut self, _plot: &PointCloudPlot) -> Result<String, String> {
-        // TODO: Implement once Figure supports 3D plots
-        Ok("<div>3D Point Cloud (not yet integrated with Figure)</div>".to_string())
-    }
+    // Scatter3 display not yet implemented for the new renderer
 
     // Session IDs removed as not currently used
 

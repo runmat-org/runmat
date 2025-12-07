@@ -198,7 +198,7 @@ impl RunMatSession {
             info!("JIT support was requested but the 'jit' feature is disabled; running interpreter-only.");
         }
 
-        Ok(Self {
+        let session = Self {
             #[cfg(feature = "jit")]
             jit_engine,
             verbose,
@@ -209,7 +209,17 @@ impl RunMatSession {
             workspace_values: HashMap::new(),
             function_definitions: HashMap::new(),
             snapshot,
-        })
+        };
+
+        // Cache the shared plotting context (if a GPU provider is active) so the
+        // runtime can wire zero-copy render paths without instantiating another
+        // WebGPU device.
+        #[cfg(any(target_arch = "wasm32", not(target_arch = "wasm32")))]
+        {
+            let _ = runmat_runtime::builtins::plotting::context::ensure_context_from_provider();
+        }
+
+        Ok(session)
     }
 
     /// Load a snapshot from disk

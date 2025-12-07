@@ -12,6 +12,8 @@ pub mod introspection;
 pub mod io;
 pub mod logical;
 pub mod math;
+#[cfg(feature = "plot-core")]
+pub mod plotting;
 pub mod stats;
 pub mod strings;
 pub mod structs;

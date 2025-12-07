@@ -6,8 +6,10 @@
 // ===== CORE ARCHITECTURE =====
 
 // Core rendering engine (always available)
+pub mod context;
 pub mod core;
 pub mod data;
+pub mod gpu;
 
 // High-level plot types and figures
 pub mod plots;
@@ -15,9 +17,15 @@ pub mod plots;
 // Export capabilities
 pub mod export;
 
+pub use context::{install_shared_wgpu_context, shared_wgpu_context, SharedWgpuContext};
+
 // GUI system (when enabled)
 #[cfg(feature = "gui")]
 pub mod gui;
+
+// WASM/WebGPU bridge
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
+pub mod web;
 
 // Jupyter integration
 #[cfg(feature = "jupyter")]
@@ -28,8 +36,14 @@ pub mod styling;
 
 // ===== PUBLIC API =====
 
+pub use core::scene::GpuVertexBuffer;
+
 // Core plot types
-pub use plots::*;
+// Avoid ambiguous re-exports: explicitly export plot types
+pub use plots::{
+    AreaPlot, ContourFillPlot, ContourPlot, Figure, ImagePlot, LinePlot, PieChart, QuiverPlot,
+    Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+};
 
 // High-level API
 #[cfg(feature = "gui")]
@@ -47,7 +61,8 @@ pub use gui::{
 };
 
 // Export functionality
-pub use export::*;
+// Explicitly export image exporter to avoid collision with plots::image
+pub use export::{image::*, vector::*};
 
 // ===== UNIFIED PLOTTING FUNCTIONS =====
 
@@ -102,19 +117,23 @@ pub fn show_plot_unified(
 }
 
 /// Render figure to file using the same GPU pipeline as interactive mode
+#[cfg(not(target_arch = "wasm32"))]
 fn render_figure_to_file(figure: plots::Figure, path: &str) -> Result<String, String> {
-    // For now, force interactive mode since static export needs more work
-    // This ensures we use the working GPU pipeline
-    #[cfg(feature = "gui")]
-    {
-        // Show interactively - user can screenshot or we'll implement proper export later
-        show_plot_sequential(figure)?;
-        Ok(format!("Plot displayed interactively. Static export to {path} not yet implemented - please screenshot the window."))
-    }
-    #[cfg(not(feature = "gui"))]
-    {
-        Err("GUI feature not enabled. Cannot render plots without GUI.".to_string())
-    }
+    use crate::export::ImageExporter;
+    // Use the headless GPU exporter that shares the same render pipeline
+    let rt =
+        tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {e}"))?;
+    rt.block_on(async move {
+        let mut fig = figure.clone();
+        let exporter = ImageExporter::new().await?;
+        exporter.export_png(&mut fig, path).await?;
+        Ok::<_, String>(format!("Saved plot to {path}"))
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_figure_to_file(_figure: plots::Figure, _path: &str) -> Result<String, String> {
+    Err("Static image export is not available in wasm builds".to_string())
 }
 
 // ===== BACKWARD COMPATIBILITY API =====
@@ -211,18 +230,57 @@ pub fn plot_histogram(
     path: &str,
     _options: PlotOptions,
 ) -> Result<(), String> {
-    let histogram = plots::Histogram::new(data.to_vec(), bins)
-        .map_err(|e| format!("Failed to create histogram: {e}"))?
+    if data.is_empty() {
+        return Err("Cannot create histogram with empty data".to_string());
+    }
+    if bins == 0 {
+        return Err("Number of bins must be greater than zero".to_string());
+    }
+
+    let min_val = data.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_val = data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let (min_val, max_val) = if (max_val - min_val).abs() < f64::EPSILON {
+        (min_val - 0.5, max_val + 0.5)
+    } else {
+        (min_val, max_val)
+    };
+    let bin_width = (max_val - min_val) / bins as f64;
+    let edges: Vec<f64> = (0..=bins).map(|i| min_val + i as f64 * bin_width).collect();
+    // Count values
+    let mut counts = vec![0u64; bins];
+    for &v in data {
+        let mut idx = bins;
+        for i in 0..bins {
+            if v >= edges[i] && v < edges[i + 1] {
+                idx = i;
+                break;
+            }
+        }
+        if idx == bins && (v - edges[bins]).abs() < f64::EPSILON {
+            idx = bins - 1;
+        }
+        if idx < bins {
+            counts[idx] += 1;
+        }
+    }
+
+    // Build bar labels and values
+    let labels: Vec<String> = edges
+        .windows(2)
+        .map(|w| format!("[{:.3},{:.3})", w[0], w[1]))
+        .collect();
+    let values: Vec<f64> = counts.into_iter().map(|c| c as f64).collect();
+
+    let bar_chart = plots::BarChart::new(labels, values)
+        .map_err(|e| format!("Failed to create histogram bars: {e}"))?
         .with_label("Frequency")
-        .with_style(glam::Vec4::new(0.6, 0.3, 0.7, 1.0), false); // Purple
+        .with_style(glam::Vec4::new(0.6, 0.3, 0.7, 1.0), 0.9);
 
     let mut figure = plots::Figure::new()
         .with_title("Histogram")
         .with_labels("Values", "Frequency")
         .with_grid(true);
-
-    figure.add_histogram(histogram);
-
+    figure.add_bar_chart(bar_chart);
     show_plot_unified(figure, Some(path))?;
     Ok(())
 }

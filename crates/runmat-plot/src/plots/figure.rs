@@ -4,7 +4,11 @@
 //! coordinate system, handling overlays, legends, and proper rendering order.
 
 use crate::core::{BoundingBox, RenderData};
-use crate::plots::{BarChart, Histogram, LinePlot, PointCloudPlot, ScatterPlot};
+use crate::plots::surface::ColorMap;
+use crate::plots::{
+    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, ImagePlot, LinePlot, PieChart,
+    QuiverPlot, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+};
 use glam::Vec4;
 use std::collections::HashMap;
 
@@ -26,9 +30,29 @@ pub struct Figure {
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
 
+    /// Axis scales
+    pub x_log: bool,
+    pub y_log: bool,
+
+    /// Axis aspect handling
+    pub axis_equal: bool,
+
+    /// Global colormap and colorbar
+    pub colormap: ColorMap,
+    pub colorbar_enabled: bool,
+
+    /// Color mapping limits for all color-mapped plots in this figure (caxis)
+    pub color_limits: Option<(f64, f64)>,
+
     /// Cached data
     bounds: Option<BoundingBox>,
     dirty: bool,
+
+    /// Subplot grid configuration (rows x cols). Defaults to 1x1.
+    pub axes_rows: usize,
+    pub axes_cols: usize,
+    /// For each plot element, the axes index (row-major, 0..rows*cols-1)
+    plot_axes_indices: Vec<usize>,
 }
 
 /// A plot element that can be any type of plot
@@ -37,8 +61,17 @@ pub enum PlotElement {
     Line(LinePlot),
     Scatter(ScatterPlot),
     Bar(BarChart),
-    Histogram(Histogram),
-    PointCloud(PointCloudPlot),
+    ErrorBar(ErrorBar),
+    Stairs(StairsPlot),
+    Stem(StemPlot),
+    Area(AreaPlot),
+    Quiver(QuiverPlot),
+    Pie(PieChart),
+    Image(ImagePlot),
+    Surface(SurfacePlot),
+    Scatter3(Scatter3Plot),
+    Contour(ContourPlot),
+    ContourFill(ContourFillPlot),
 }
 
 /// Legend entry for a plot
@@ -55,8 +88,16 @@ pub enum PlotType {
     Line,
     Scatter,
     Bar,
-    Histogram,
-    PointCloud,
+    ErrorBar,
+    Stairs,
+    Stem,
+    Area,
+    Quiver,
+    Pie,
+    Image,
+    Scatter3,
+    Contour,
+    ContourFill,
 }
 
 impl Figure {
@@ -72,22 +113,43 @@ impl Figure {
             background_color: Vec4::new(1.0, 1.0, 1.0, 1.0), // White background
             x_limits: None,
             y_limits: None,
+            x_log: false,
+            y_log: false,
+            axis_equal: false,
+            colormap: ColorMap::Parula,
+            colorbar_enabled: false,
+            color_limits: None,
             bounds: None,
             dirty: true,
+            axes_rows: 1,
+            axes_cols: 1,
+            plot_axes_indices: Vec::new(),
         }
     }
 
     /// Set the figure title
     pub fn with_title<S: Into<String>>(mut self, title: S) -> Self {
-        self.title = Some(title.into());
+        self.set_title(title);
         self
+    }
+
+    /// Set the figure title in-place
+    pub fn set_title<S: Into<String>>(&mut self, title: S) {
+        self.title = Some(title.into());
+        self.dirty = true;
     }
 
     /// Set axis labels
     pub fn with_labels<S: Into<String>>(mut self, x_label: S, y_label: S) -> Self {
+        self.set_axis_labels(x_label, y_label);
+        self
+    }
+
+    /// Set axis labels in-place
+    pub fn set_axis_labels<S: Into<String>>(&mut self, x_label: S, y_label: S) {
         self.x_label = Some(x_label.into());
         self.y_label = Some(y_label.into());
-        self
+        self.dirty = true;
     }
 
     /// Set axis limits manually
@@ -106,8 +168,13 @@ impl Figure {
 
     /// Enable or disable the grid
     pub fn with_grid(mut self, enabled: bool) -> Self {
-        self.grid_enabled = enabled;
+        self.set_grid(enabled);
         self
+    }
+
+    pub fn set_grid(&mut self, enabled: bool) {
+        self.grid_enabled = enabled;
+        self.dirty = true;
     }
 
     /// Set background color
@@ -116,39 +183,228 @@ impl Figure {
         self
     }
 
-    /// Add a line plot to the figure
-    pub fn add_line_plot(&mut self, plot: LinePlot) -> usize {
-        self.plots.push(PlotElement::Line(plot));
+    /// Set log scale flags
+    pub fn with_xlog(mut self, enabled: bool) -> Self {
+        self.x_log = enabled;
+        self
+    }
+    pub fn with_ylog(mut self, enabled: bool) -> Self {
+        self.y_log = enabled;
+        self
+    }
+    pub fn with_axis_equal(mut self, enabled: bool) -> Self {
+        self.set_axis_equal(enabled);
+        self
+    }
+
+    pub fn set_axis_equal(&mut self, enabled: bool) {
+        self.axis_equal = enabled;
+        self.dirty = true;
+    }
+    pub fn with_colormap(mut self, cmap: ColorMap) -> Self {
+        self.colormap = cmap;
+        self
+    }
+    pub fn with_colorbar(mut self, enabled: bool) -> Self {
+        self.colorbar_enabled = enabled;
+        self
+    }
+    pub fn with_color_limits(mut self, limits: Option<(f64, f64)>) -> Self {
+        self.color_limits = limits;
+        self
+    }
+
+    /// Configure subplot grid (rows x cols). Axes are indexed row-major starting at 0.
+    pub fn with_subplot_grid(mut self, rows: usize, cols: usize) -> Self {
+        self.set_subplot_grid(rows, cols);
+        self
+    }
+
+    /// Return subplot grid (rows, cols)
+    pub fn axes_grid(&self) -> (usize, usize) {
+        (self.axes_rows, self.axes_cols)
+    }
+
+    /// Axes index mapping for plots (length equals number of plots)
+    pub fn plot_axes_indices(&self) -> &[usize] {
+        &self.plot_axes_indices
+    }
+
+    /// Assign a specific plot (by index) to an axes index in the subplot grid
+    pub fn assign_plot_to_axes(
+        &mut self,
+        plot_index: usize,
+        axes_index: usize,
+    ) -> Result<(), String> {
+        if plot_index >= self.plot_axes_indices.len() {
+            return Err(format!(
+                "assign_plot_to_axes: index {plot_index} out of bounds"
+            ));
+        }
+        let max_axes = self.axes_rows.max(1) * self.axes_cols.max(1);
+        let ai = axes_index.min(max_axes.saturating_sub(1));
+        self.plot_axes_indices[plot_index] = ai;
+        self.dirty = true;
+        Ok(())
+    }
+    /// Mutably set subplot grid (rows x cols)
+    pub fn set_subplot_grid(&mut self, rows: usize, cols: usize) {
+        self.axes_rows = rows.max(1);
+        self.axes_cols = cols.max(1);
+        self.dirty = true;
+    }
+
+    /// Set color limits and propagate to existing surface plots
+    pub fn set_color_limits(&mut self, limits: Option<(f64, f64)>) {
+        self.color_limits = limits;
+        for plot in &mut self.plots {
+            if let PlotElement::Surface(s) = plot {
+                s.set_color_limits(limits);
+            }
+        }
+        self.dirty = true;
+    }
+
+    fn total_axes(&self) -> usize {
+        self.axes_rows.max(1) * self.axes_cols.max(1)
+    }
+
+    fn normalize_axes_index(&self, axes_index: usize) -> usize {
+        let total = self.total_axes().max(1);
+        axes_index.min(total - 1)
+    }
+
+    fn push_plot(&mut self, element: PlotElement, axes_index: usize) -> usize {
+        let idx = self.normalize_axes_index(axes_index);
+        self.plots.push(element);
+        self.plot_axes_indices.push(idx);
         self.dirty = true;
         self.plots.len() - 1
+    }
+
+    /// Add a line plot to the figure
+    pub fn add_line_plot(&mut self, plot: LinePlot) -> usize {
+        self.add_line_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_line_plot_on_axes(&mut self, plot: LinePlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Line(plot), axes_index)
     }
 
     /// Add a scatter plot to the figure
     pub fn add_scatter_plot(&mut self, plot: ScatterPlot) -> usize {
-        self.plots.push(PlotElement::Scatter(plot));
-        self.dirty = true;
-        self.plots.len() - 1
+        self.add_scatter_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_scatter_plot_on_axes(&mut self, plot: ScatterPlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Scatter(plot), axes_index)
     }
 
     /// Add a bar chart to the figure
     pub fn add_bar_chart(&mut self, plot: BarChart) -> usize {
-        self.plots.push(PlotElement::Bar(plot));
-        self.dirty = true;
-        self.plots.len() - 1
+        self.add_bar_chart_on_axes(plot, 0)
     }
 
-    /// Add a histogram to the figure
-    pub fn add_histogram(&mut self, plot: Histogram) -> usize {
-        self.plots.push(PlotElement::Histogram(plot));
-        self.dirty = true;
-        self.plots.len() - 1
+    pub fn add_bar_chart_on_axes(&mut self, plot: BarChart, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Bar(plot), axes_index)
     }
 
-    /// Add a point cloud to the figure
-    pub fn add_point_cloud_plot(&mut self, plot: PointCloudPlot) -> usize {
-        self.plots.push(PlotElement::PointCloud(plot));
-        self.dirty = true;
-        self.plots.len() - 1
+    /// Add an errorbar plot
+    pub fn add_errorbar(&mut self, plot: ErrorBar) -> usize {
+        self.add_errorbar_on_axes(plot, 0)
+    }
+
+    pub fn add_errorbar_on_axes(&mut self, plot: ErrorBar, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::ErrorBar(plot), axes_index)
+    }
+
+    /// Add a stairs plot
+    pub fn add_stairs_plot(&mut self, plot: StairsPlot) -> usize {
+        self.add_stairs_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_stairs_plot_on_axes(&mut self, plot: StairsPlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Stairs(plot), axes_index)
+    }
+
+    /// Add a stem plot
+    pub fn add_stem_plot(&mut self, plot: StemPlot) -> usize {
+        self.add_stem_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_stem_plot_on_axes(&mut self, plot: StemPlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Stem(plot), axes_index)
+    }
+
+    /// Add an area plot
+    pub fn add_area_plot(&mut self, plot: AreaPlot) -> usize {
+        self.add_area_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_area_plot_on_axes(&mut self, plot: AreaPlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Area(plot), axes_index)
+    }
+
+    pub fn add_image_plot(&mut self, plot: ImagePlot) -> usize {
+        self.add_image_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_image_plot_on_axes(&mut self, plot: ImagePlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Image(plot), axes_index)
+    }
+
+    pub fn add_quiver_plot(&mut self, plot: QuiverPlot) -> usize {
+        self.add_quiver_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_quiver_plot_on_axes(&mut self, plot: QuiverPlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Quiver(plot), axes_index)
+    }
+
+    pub fn add_pie_chart(&mut self, plot: PieChart) -> usize {
+        self.add_pie_chart_on_axes(plot, 0)
+    }
+
+    pub fn add_pie_chart_on_axes(&mut self, plot: PieChart, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Pie(plot), axes_index)
+    }
+
+    /// Add a surface plot to the figure
+    pub fn add_surface_plot(&mut self, plot: SurfacePlot) -> usize {
+        self.add_surface_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_surface_plot_on_axes(&mut self, plot: SurfacePlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Surface(plot), axes_index)
+    }
+
+    /// Add a 3D scatter plot to the figure
+    pub fn add_scatter3_plot(&mut self, plot: Scatter3Plot) -> usize {
+        self.add_scatter3_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_scatter3_plot_on_axes(&mut self, plot: Scatter3Plot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Scatter3(plot), axes_index)
+    }
+
+    pub fn add_contour_plot(&mut self, plot: ContourPlot) -> usize {
+        self.add_contour_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_contour_plot_on_axes(&mut self, plot: ContourPlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Contour(plot), axes_index)
+    }
+
+    pub fn add_contour_fill_plot(&mut self, plot: ContourFillPlot) -> usize {
+        self.add_contour_fill_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_contour_fill_plot_on_axes(
+        &mut self,
+        plot: ContourFillPlot,
+        axes_index: usize,
+    ) -> usize {
+        self.push_plot(PlotElement::ContourFill(plot), axes_index)
     }
 
     /// Remove a plot by index
@@ -157,6 +413,7 @@ impl Figure {
             return Err(format!("Plot index {index} out of bounds"));
         }
         self.plots.remove(index);
+        self.plot_axes_indices.remove(index);
         self.dirty = true;
         Ok(())
     }
@@ -164,6 +421,22 @@ impl Figure {
     /// Clear all plots
     pub fn clear(&mut self) {
         self.plots.clear();
+        self.plot_axes_indices.clear();
+        self.dirty = true;
+    }
+
+    /// Clear all plots assigned to a specific axes index
+    pub fn clear_axes(&mut self, axes_index: usize) {
+        let mut i = 0usize;
+        while i < self.plots.len() {
+            let ax = *self.plot_axes_indices.get(i).unwrap_or(&0);
+            if ax == axes_index {
+                self.plots.remove(i);
+                self.plot_axes_indices.remove(i);
+            } else {
+                i += 1;
+            }
+        }
         self.dirty = true;
     }
 
@@ -224,15 +497,20 @@ impl Figure {
 
     /// Generate all render data for all visible plots
     pub fn render_data(&mut self) -> Vec<RenderData> {
-        let mut render_data = Vec::new();
-
-        for plot in &mut self.plots {
-            if plot.is_visible() {
-                render_data.push(plot.render_data());
+        let mut out = Vec::new();
+        for p in self.plots.iter_mut() {
+            if !p.is_visible() {
+                continue;
             }
+            // Apply figure-level color limits to surfaces before generating
+            if let PlotElement::Surface(s) = p {
+                if self.color_limits.is_some() {
+                    s.set_color_limits(self.color_limits);
+                }
+            }
+            out.push(p.render_data());
         }
-
-        render_data
+        out
     }
 
     /// Get legend entries for all labeled plots
@@ -250,6 +528,22 @@ impl Figure {
         }
 
         entries
+    }
+
+    /// Assign labels to visible plots in order
+    pub fn set_labels(&mut self, labels: &[String]) {
+        let mut idx = 0usize;
+        for plot in &mut self.plots {
+            if !plot.is_visible() {
+                continue;
+            }
+            if idx >= labels.len() {
+                break;
+            }
+            plot.set_label(Some(labels[idx].clone()));
+            idx += 1;
+        }
+        self.dirty = true;
     }
 
     /// Get figure statistics
@@ -276,6 +570,19 @@ impl Figure {
             has_legend: self.legend_enabled && !self.legend_entries().is_empty(),
         }
     }
+
+    /// If the figure contains a bar/barh plot, return its categorical axis labels.
+    /// Returns (is_x_axis, labels) where is_x_axis=true means X is categorical (vertical bars),
+    /// false means Y is categorical (horizontal bars).
+    pub fn categorical_axis_labels(&self) -> Option<(bool, Vec<String>)> {
+        for plot in &self.plots {
+            if let PlotElement::Bar(b) = plot {
+                let is_x = matches!(b.orientation, crate::plots::bar::Orientation::Vertical);
+                return Some((is_x, b.labels.clone()));
+            }
+        }
+        None
+    }
 }
 
 impl Default for Figure {
@@ -291,8 +598,17 @@ impl PlotElement {
             PlotElement::Line(plot) => plot.visible,
             PlotElement::Scatter(plot) => plot.visible,
             PlotElement::Bar(plot) => plot.visible,
-            PlotElement::Histogram(plot) => plot.visible,
-            PlotElement::PointCloud(plot) => plot.visible,
+            PlotElement::ErrorBar(plot) => plot.visible,
+            PlotElement::Stairs(plot) => plot.visible,
+            PlotElement::Stem(plot) => plot.visible,
+            PlotElement::Area(plot) => plot.visible,
+            PlotElement::Quiver(plot) => plot.visible,
+            PlotElement::Pie(plot) => plot.visible,
+            PlotElement::Image(plot) => plot.visible,
+            PlotElement::Surface(plot) => plot.visible,
+            PlotElement::Scatter3(plot) => plot.visible,
+            PlotElement::Contour(plot) => plot.visible,
+            PlotElement::ContourFill(plot) => plot.visible,
         }
     }
 
@@ -302,8 +618,37 @@ impl PlotElement {
             PlotElement::Line(plot) => plot.label.clone(),
             PlotElement::Scatter(plot) => plot.label.clone(),
             PlotElement::Bar(plot) => plot.label.clone(),
-            PlotElement::Histogram(plot) => plot.label.clone(),
-            PlotElement::PointCloud(plot) => plot.label.clone(),
+            PlotElement::ErrorBar(plot) => plot.label.clone(),
+            PlotElement::Stairs(plot) => plot.label.clone(),
+            PlotElement::Stem(plot) => plot.label.clone(),
+            PlotElement::Area(plot) => plot.label.clone(),
+            PlotElement::Quiver(plot) => plot.label.clone(),
+            PlotElement::Pie(plot) => plot.label.clone(),
+            PlotElement::Image(plot) => plot.label.clone(),
+            PlotElement::Surface(plot) => plot.label.clone(),
+            PlotElement::Scatter3(plot) => plot.label.clone(),
+            PlotElement::Contour(plot) => plot.label.clone(),
+            PlotElement::ContourFill(plot) => plot.label.clone(),
+        }
+    }
+
+    /// Mutate label
+    pub fn set_label(&mut self, label: Option<String>) {
+        match self {
+            PlotElement::Line(plot) => plot.label = label,
+            PlotElement::Scatter(plot) => plot.label = label,
+            PlotElement::Bar(plot) => plot.label = label,
+            PlotElement::ErrorBar(plot) => plot.label = label,
+            PlotElement::Stairs(plot) => plot.label = label,
+            PlotElement::Stem(plot) => plot.label = label,
+            PlotElement::Area(plot) => plot.label = label,
+            PlotElement::Quiver(plot) => plot.label = label,
+            PlotElement::Pie(plot) => plot.label = label,
+            PlotElement::Image(plot) => plot.label = label,
+            PlotElement::Surface(plot) => plot.label = label,
+            PlotElement::Scatter3(plot) => plot.label = label,
+            PlotElement::Contour(plot) => plot.label = label,
+            PlotElement::ContourFill(plot) => plot.label = label,
         }
     }
 
@@ -313,8 +658,17 @@ impl PlotElement {
             PlotElement::Line(plot) => plot.color,
             PlotElement::Scatter(plot) => plot.color,
             PlotElement::Bar(plot) => plot.color,
-            PlotElement::Histogram(plot) => plot.color,
-            PlotElement::PointCloud(plot) => plot.default_color,
+            PlotElement::ErrorBar(plot) => plot.color,
+            PlotElement::Stairs(plot) => plot.color,
+            PlotElement::Stem(plot) => plot.color,
+            PlotElement::Area(plot) => plot.color,
+            PlotElement::Quiver(plot) => plot.color,
+            PlotElement::Pie(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::Image(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::Surface(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::Scatter3(plot) => plot.colors.first().copied().unwrap_or(Vec4::ONE),
+            PlotElement::Contour(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::ContourFill(_plot) => Vec4::new(0.9, 0.9, 0.9, 1.0),
         }
     }
 
@@ -324,8 +678,17 @@ impl PlotElement {
             PlotElement::Line(_) => PlotType::Line,
             PlotElement::Scatter(_) => PlotType::Scatter,
             PlotElement::Bar(_) => PlotType::Bar,
-            PlotElement::Histogram(_) => PlotType::Histogram,
-            PlotElement::PointCloud(_) => PlotType::PointCloud,
+            PlotElement::ErrorBar(_) => PlotType::ErrorBar,
+            PlotElement::Stairs(_) => PlotType::Stairs,
+            PlotElement::Stem(_) => PlotType::Stem,
+            PlotElement::Area(_) => PlotType::Area,
+            PlotElement::Quiver(_) => PlotType::Quiver,
+            PlotElement::Pie(_) => PlotType::Pie,
+            PlotElement::Image(_) => PlotType::Image,
+            PlotElement::Surface(_) => PlotType::Line,
+            PlotElement::Scatter3(_) => PlotType::Scatter3,
+            PlotElement::Contour(_) => PlotType::Contour,
+            PlotElement::ContourFill(_) => PlotType::ContourFill,
         }
     }
 
@@ -335,8 +698,17 @@ impl PlotElement {
             PlotElement::Line(plot) => plot.bounds(),
             PlotElement::Scatter(plot) => plot.bounds(),
             PlotElement::Bar(plot) => plot.bounds(),
-            PlotElement::Histogram(plot) => plot.bounds(),
-            PlotElement::PointCloud(plot) => plot.bounds(),
+            PlotElement::ErrorBar(plot) => plot.bounds(),
+            PlotElement::Stairs(plot) => plot.bounds(),
+            PlotElement::Stem(plot) => plot.bounds(),
+            PlotElement::Area(plot) => plot.bounds(),
+            PlotElement::Quiver(plot) => plot.bounds(),
+            PlotElement::Pie(plot) => plot.bounds(),
+            PlotElement::Image(plot) => plot.bounds(),
+            PlotElement::Surface(_plot) => BoundingBox::default(),
+            PlotElement::Scatter3(plot) => plot.bounds(),
+            PlotElement::Contour(plot) => plot.bounds(),
+            PlotElement::ContourFill(plot) => plot.bounds(),
         }
     }
 
@@ -346,8 +718,17 @@ impl PlotElement {
             PlotElement::Line(plot) => plot.render_data(),
             PlotElement::Scatter(plot) => plot.render_data(),
             PlotElement::Bar(plot) => plot.render_data(),
-            PlotElement::Histogram(plot) => plot.render_data(),
-            PlotElement::PointCloud(plot) => plot.render_data(),
+            PlotElement::ErrorBar(plot) => plot.render_data(),
+            PlotElement::Stairs(plot) => plot.render_data(),
+            PlotElement::Stem(plot) => plot.render_data(),
+            PlotElement::Area(plot) => plot.render_data(),
+            PlotElement::Quiver(plot) => plot.render_data(),
+            PlotElement::Pie(plot) => plot.render_data(),
+            PlotElement::Image(plot) => plot.render_data(),
+            PlotElement::Surface(plot) => plot.render_data(),
+            PlotElement::Scatter3(plot) => plot.render_data(),
+            PlotElement::Contour(plot) => plot.render_data(),
+            PlotElement::ContourFill(plot) => plot.render_data(),
         }
     }
 
@@ -357,8 +738,17 @@ impl PlotElement {
             PlotElement::Line(plot) => plot.estimated_memory_usage(),
             PlotElement::Scatter(plot) => plot.estimated_memory_usage(),
             PlotElement::Bar(plot) => plot.estimated_memory_usage(),
-            PlotElement::Histogram(plot) => plot.estimated_memory_usage(),
-            PlotElement::PointCloud(plot) => plot.estimated_memory_usage(),
+            PlotElement::ErrorBar(plot) => plot.estimated_memory_usage(),
+            PlotElement::Stairs(plot) => plot.estimated_memory_usage(),
+            PlotElement::Stem(plot) => plot.estimated_memory_usage(),
+            PlotElement::Area(plot) => plot.estimated_memory_usage(),
+            PlotElement::Quiver(plot) => plot.estimated_memory_usage(),
+            PlotElement::Pie(plot) => plot.estimated_memory_usage(),
+            PlotElement::Image(plot) => plot.estimated_memory_usage(),
+            PlotElement::Surface(_plot) => 0,
+            PlotElement::Scatter3(plot) => plot.estimated_memory_usage(),
+            PlotElement::Contour(plot) => plot.estimated_memory_usage(),
+            PlotElement::ContourFill(plot) => plot.estimated_memory_usage(),
         }
     }
 }

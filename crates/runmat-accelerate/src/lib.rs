@@ -109,6 +109,7 @@ static AUTO_OFFLOAD_OPTIONS: Lazy<RwLock<AutoOffloadOptions>> =
 static API_HOOKS: Lazy<()> = Lazy::new(|| {
     runmat_accelerate_api::register_residency_clear(fusion_residency::clear);
     runmat_accelerate_api::register_sequence_threshold_provider(sequence_threshold_hint_bridge);
+    runmat_accelerate_api::register_workgroup_size_hint_provider(workgroup_size_hint_bridge);
 });
 
 pub(crate) fn ensure_residency_hooks() {
@@ -117,6 +118,17 @@ pub(crate) fn ensure_residency_hooks() {
 
 fn sequence_threshold_hint_bridge() -> Option<usize> {
     native_auto::sequence_threshold_hint()
+}
+
+fn workgroup_size_hint_bridge() -> Option<u32> {
+    #[cfg(feature = "wgpu")]
+    {
+        Some(crate::backend::wgpu::config::effective_workgroup_size())
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        None
+    }
 }
 
 pub fn configure_auto_offload(options: AutoOffloadOptions) {

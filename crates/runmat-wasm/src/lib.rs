@@ -7,6 +7,8 @@ use runmat_accelerate::{
     AccelerateProviderPreference, AutoOffloadOptions,
 };
 use runmat_accelerate_api::ProviderPrecision;
+#[cfg(target_arch = "wasm32")]
+use runmat_accelerate_api::{AccelContextHandle, AccelContextKind};
 use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
 use runmat_core::{ExecutionResult, RunMatSession};
 use serde::{Deserialize, Serialize};
@@ -23,6 +25,16 @@ mod fs;
 use crate::fs::install_js_fs_provider;
 #[cfg(target_arch = "wasm32")]
 use js_sys::Reflect;
+#[cfg(target_arch = "wasm32")]
+use runmat_plot::{
+    web::{WebRenderer, WebRendererOptions},
+    SharedWgpuContext,
+};
+#[cfg(target_arch = "wasm32")]
+use runmat_runtime::builtins::plotting::{
+    context as plotting_context, install_web_renderer as runtime_install_web_renderer,
+    web_renderer_ready as runtime_plot_renderer_ready,
+};
 
 const MAX_DATA_PREVIEW: usize = 4096;
 const MAX_STRUCT_FIELDS: usize = 64;
@@ -159,6 +171,53 @@ pub fn register_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
     install_fs_provider_value(bindings)
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = registerPlotCanvas)]
+pub async fn register_plot_canvas(canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
+    init_logging_once();
+    let options = WebRendererOptions::default();
+    let renderer_future = match shared_webgpu_context() {
+        Some(shared) => WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared),
+        None => WebRenderer::new(canvas, options),
+    };
+    let renderer = renderer_future
+        .await
+        .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
+    runtime_install_web_renderer(renderer)
+        .map_err(|err| js_error(&format!("Failed to register plot renderer: {err}")))?;
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn shared_webgpu_context() -> Option<SharedWgpuContext> {
+    if let Some(ctx) = runmat_plot::shared_wgpu_context() {
+        return Some(ctx);
+    }
+
+    let handle = runmat_accelerate_api::export_context(AccelContextKind::Plotting)?;
+    match handle {
+        AccelContextHandle::Wgpu(ctx) => {
+            let shared = SharedWgpuContext {
+                instance: ctx.instance.clone(),
+                device: ctx.device,
+                queue: ctx.queue,
+                adapter: ctx.adapter,
+                adapter_info: ctx.adapter_info.clone(),
+                limits: ctx.limits,
+                features: ctx.features,
+            };
+            runmat_plot::install_shared_wgpu_context(shared.clone());
+            Some(shared)
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = plotRendererReady)]
+pub fn plot_renderer_ready() -> bool {
+    runtime_plot_renderer_ready()
+}
+
 #[wasm_bindgen(js_name = initRunMat)]
 pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     init_logging_once();
@@ -194,6 +253,10 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             Ok(_) => {
                 gpu_status.active = true;
                 gpu_status.adapter = capture_gpu_adapter_info();
+                #[cfg(target_arch = "wasm32")]
+                {
+                    plotting_context::ensure_context_from_provider();
+                }
             }
             Err(err) => {
                 let message = js_value_to_string(err);

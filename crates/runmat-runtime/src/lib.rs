@@ -11,7 +11,6 @@ pub mod concatenation;
 pub mod elementwise;
 pub mod indexing;
 pub mod matrix;
-pub mod plotting;
 pub mod workspace;
 
 #[cfg(feature = "blas-lapack")]

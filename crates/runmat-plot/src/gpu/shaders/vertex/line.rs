@@ -1,4 +1,4 @@
-// Line vertex shader for line plots and wireframes
+pub const SHADER: &str = r#"// Line vertex shader for line plots and wireframes
 
 struct Uniforms {
     view_proj: mat4x4<f32>,
@@ -25,12 +25,12 @@ struct VertexOutput {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    
+
     let world_position = uniforms.model * vec4<f32>(input.position, 1.0);
     out.clip_position = uniforms.view_proj * world_position;
     out.world_position = world_position.xyz;
     out.color = input.color;
-    
+
     return out;
 }
 
@@ -39,3 +39,4 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Simple line rendering
     return input.color;
 }
+"#;

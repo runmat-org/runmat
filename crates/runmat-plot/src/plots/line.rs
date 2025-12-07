@@ -3,7 +3,8 @@
 //! High-performance line plotting with GPU acceleration.
 
 use crate::core::{
-    vertex_utils, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex,
+    vertex_utils, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData,
+    Vertex,
 };
 use glam::{Vec3, Vec4};
 
@@ -18,6 +19,8 @@ pub struct LinePlot {
     pub color: Vec4,
     pub line_width: f32,
     pub line_style: LineStyle,
+    pub line_join: LineJoin,
+    pub line_cap: LineCap,
 
     /// Metadata
     pub label: Option<String>,
@@ -27,6 +30,8 @@ pub struct LinePlot {
     vertices: Option<Vec<Vertex>>,
     bounds: Option<BoundingBox>,
     dirty: bool,
+    gpu_vertices: Option<GpuVertexBuffer>,
+    gpu_vertex_count: Option<usize>,
 }
 
 /// Line rendering styles
@@ -36,6 +41,34 @@ pub enum LineStyle {
     Dashed,
     Dotted,
     DashDot,
+}
+
+/// Line join style for thick polylines
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineJoin {
+    Miter,
+    Bevel,
+    Round,
+}
+
+impl Default for LineJoin {
+    fn default() -> Self {
+        Self::Miter
+    }
+}
+
+/// Line cap style for thick polylines
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineCap {
+    Butt,
+    Square,
+    Round,
+}
+
+impl Default for LineCap {
+    fn default() -> Self {
+        Self::Butt
+    }
 }
 
 impl Default for LineStyle {
@@ -65,12 +98,48 @@ impl LinePlot {
             color: Vec4::new(0.0, 0.5, 1.0, 1.0), // Default blue
             line_width: 1.0,
             line_style: LineStyle::default(),
+            line_join: LineJoin::default(),
+            line_cap: LineCap::default(),
             label: None,
             visible: true,
             vertices: None,
             bounds: None,
             dirty: true,
+            gpu_vertices: None,
+            gpu_vertex_count: None,
         })
+    }
+
+    /// Build a line plot directly from a GPU vertex buffer.
+    pub fn from_gpu_buffer(
+        buffer: GpuVertexBuffer,
+        vertex_count: usize,
+        color: Vec4,
+        line_width: f32,
+        bounds: BoundingBox,
+    ) -> Self {
+        Self {
+            x_data: Vec::new(),
+            y_data: Vec::new(),
+            color,
+            line_width,
+            line_style: LineStyle::Solid,
+            line_join: LineJoin::Miter,
+            line_cap: LineCap::Butt,
+            label: None,
+            visible: true,
+            vertices: None,
+            bounds: Some(bounds),
+            dirty: false,
+            gpu_vertices: Some(buffer),
+            gpu_vertex_count: Some(vertex_count),
+        }
+    }
+
+    fn invalidate_gpu_data(&mut self) {
+        self.gpu_vertices = None;
+        self.gpu_vertex_count = None;
+        self.bounds = None;
     }
 
     /// Create a line plot with custom styling
@@ -79,6 +148,7 @@ impl LinePlot {
         self.line_width = line_width;
         self.line_style = line_style;
         self.dirty = true;
+        self.invalidate_gpu_data();
         self
     }
 
@@ -112,18 +182,35 @@ impl LinePlot {
     pub fn set_color(&mut self, color: Vec4) {
         self.color = color;
         self.dirty = true;
+        self.invalidate_gpu_data();
     }
 
     /// Set the line width
     pub fn set_line_width(&mut self, width: f32) {
         self.line_width = width.max(0.1); // Minimum line width
         self.dirty = true;
+        self.invalidate_gpu_data();
     }
 
     /// Set the line style
     pub fn set_line_style(&mut self, style: LineStyle) {
         self.line_style = style;
         self.dirty = true;
+        self.invalidate_gpu_data();
+    }
+
+    /// Set the line join style for thick lines
+    pub fn set_line_join(&mut self, join: LineJoin) {
+        self.line_join = join;
+        self.dirty = true;
+        self.invalidate_gpu_data();
+    }
+
+    /// Set the line cap style for thick lines
+    pub fn set_line_cap(&mut self, cap: LineCap) {
+        self.line_cap = cap;
+        self.dirty = true;
+        self.invalidate_gpu_data();
     }
 
     /// Show or hide the plot
@@ -133,22 +220,89 @@ impl LinePlot {
 
     /// Get the number of data points
     pub fn len(&self) -> usize {
-        self.x_data.len()
+        if !self.x_data.is_empty() {
+            self.x_data.len()
+        } else {
+            self.gpu_vertex_count.unwrap_or(0)
+        }
     }
 
     /// Check if the plot has no data
     pub fn is_empty(&self) -> bool {
-        self.x_data.is_empty()
+        self.len() == 0
     }
 
     /// Generate vertices for GPU rendering
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {
+        if self.gpu_vertices.is_some() {
+            if self.vertices.is_none() {
+                self.vertices = Some(Vec::new());
+            }
+            return self.vertices.as_ref().unwrap();
+        }
         if self.dirty || self.vertices.is_none() {
-            self.vertices = Some(vertex_utils::create_line_plot(
-                &self.x_data,
-                &self.y_data,
-                self.color,
-            ));
+            if self.line_width > 1.0 {
+                // Use triangle extrusion for thicker lines; switch pipeline in render_data
+                let base_tris = match self.line_cap {
+                    LineCap::Butt => vertex_utils::create_thick_polyline_with_join(
+                        &self.x_data,
+                        &self.y_data,
+                        self.color,
+                        self.line_width,
+                        self.line_join,
+                    ),
+                    LineCap::Square => vertex_utils::create_thick_polyline_square_caps(
+                        &self.x_data,
+                        &self.y_data,
+                        self.color,
+                        self.line_width,
+                    ),
+                    LineCap::Round => vertex_utils::create_thick_polyline_round_caps(
+                        &self.x_data,
+                        &self.y_data,
+                        self.color,
+                        self.line_width,
+                        12,
+                    ),
+                };
+                let tris = match self.line_style {
+                    LineStyle::Solid => base_tris,
+                    LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
+                        vertex_utils::create_thick_polyline_dashed(
+                            &self.x_data,
+                            &self.y_data,
+                            self.color,
+                            self.line_width,
+                            self.line_style,
+                        )
+                    }
+                };
+                self.vertices = Some(tris);
+            } else {
+                let verts = match self.line_style {
+                    LineStyle::Solid => {
+                        vertex_utils::create_line_plot(&self.x_data, &self.y_data, self.color)
+                    }
+                    LineStyle::Dashed | LineStyle::DashDot => {
+                        vertex_utils::create_line_plot_dashed(
+                            &self.x_data,
+                            &self.y_data,
+                            self.color,
+                            self.line_style,
+                        )
+                    }
+                    LineStyle::Dotted => {
+                        // Render as a sequence of tiny dashes to approximate dots
+                        vertex_utils::create_line_plot_dashed(
+                            &self.x_data,
+                            &self.y_data,
+                            self.color,
+                            LineStyle::Dashed,
+                        )
+                    }
+                };
+                self.vertices = Some(verts);
+            }
             self.dirty = false;
         }
         self.vertices.as_ref().unwrap()
@@ -156,6 +310,9 @@ impl LinePlot {
 
     /// Get the bounding box of the data
     pub fn bounds(&mut self) -> BoundingBox {
+        if self.gpu_vertices.is_some() {
+            return self.bounds.unwrap_or_default();
+        }
         if self.dirty || self.bounds.is_none() {
             let points: Vec<Vec3> = self
                 .x_data
@@ -170,13 +327,44 @@ impl LinePlot {
 
     /// Generate complete render data for the graphics pipeline
     pub fn render_data(&mut self) -> RenderData {
-        let vertices = self.generate_vertices().clone();
-        let vertex_count = vertices.len();
+        let using_gpu = self.gpu_vertices.is_some();
+        let gpu_vertices = self.gpu_vertices.clone();
+        let (vertices, vertex_count) = if using_gpu {
+            (Vec::new(), self.gpu_vertex_count.unwrap_or(0))
+        } else {
+            let verts = self.generate_vertices().clone();
+            let count = verts.len();
+            (verts, count)
+        };
 
-        let material = Material {
+        // Encode width/style/cap/join into material for exporters:
+        // - roughness: line width
+        // - metallic: line style code (0 solid,1 dashed,2 dotted,3 dashdot)
+        // - emissive.x: cap (0 butt,1 square,2 round)
+        // - emissive.y: join (0 miter,1 bevel,2 round)
+        let style_code = match self.line_style {
+            LineStyle::Solid => 0.0,
+            LineStyle::Dashed => 1.0,
+            LineStyle::Dotted => 2.0,
+            LineStyle::DashDot => 3.0,
+        };
+        let cap_code = match self.line_cap {
+            LineCap::Butt => 0.0,
+            LineCap::Square => 1.0,
+            LineCap::Round => 2.0,
+        };
+        let join_code = match self.line_join {
+            LineJoin::Miter => 0.0,
+            LineJoin::Bevel => 1.0,
+            LineJoin::Round => 2.0,
+        };
+        let mut material = Material {
             albedo: self.color,
             ..Default::default()
         };
+        material.roughness = self.line_width.max(0.0);
+        material.metallic = style_code;
+        material.emissive = Vec4::new(cap_code, join_code, 0.0, 0.0);
 
         let draw_call = DrawCall {
             vertex_offset: 0,
@@ -186,12 +374,22 @@ impl LinePlot {
             instance_count: 1,
         };
 
+        // If thick polyline was generated, we must render as triangles
+        let pipeline = if using_gpu {
+            PipelineType::Lines
+        } else if self.line_width > 1.0 {
+            PipelineType::Triangles
+        } else {
+            PipelineType::Lines
+        };
         RenderData {
-            pipeline_type: PipelineType::Lines,
+            pipeline_type: pipeline,
             vertices,
             indices: None,
+            gpu_vertices,
             material,
             draw_calls: vec![draw_call],
+            image: None,
         }
     }
 
@@ -225,6 +423,7 @@ impl LinePlot {
                 .vertices
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
+            + self.gpu_vertex_count.unwrap_or(0) * std::mem::size_of::<Vertex>()
     }
 }
 

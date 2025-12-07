@@ -14,8 +14,8 @@ links = "runmat_runtime_native"
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-macros = { workspace = true }
-runmat-plot = { workspace = true, optional = true }
-runmat-accelerate-api = { workspace = true }
+runmat-plot = { path = "../runmat-plot", version = "=0.2.7", optional = true, default-features = false }
+runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 runmat-gc = { workspace = true }
 runmat-gc-api = { workspace = true }
 runmat-filesystem = { workspace = true }
@@ -55,13 +55,27 @@ wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = ["XmlHttpRequest", "XmlHttpRequestResponseType", "Window", "TextDecoder", "DomException", "CustomEvent", "CustomEventInit", "EventTarget"] }
 
 [features]
-default = []
+default = ["plot-core"]
+
+# Core plotting types (figures, builders, shared renderer structs)
+plot-core = ["dep:runmat-plot"]
 
 # GUI plotting support
-gui = ["dep:runmat-plot", "runmat-plot/gui"]
+gui = ["plot-core", "runmat-plot/gui", "runmat-plot/static"]
 
 # Jupyter notebook integration
-jupyter = ["dep:runmat-plot", "runmat-plot/jupyter"]
+jupyter = [
+    "plot-core",
+    "runmat-plot/jupyter",
+    "runmat-plot/static",
+]
+
+# WebGPU plotting (used by wasm builds)
+plot-web = [
+    "plot-core",
+    "runmat-plot/web",
+    "runmat-plot/static",
+]
 
 # High-performance BLAS/LAPACK support using platform-native libraries
 # macOS: Uses Apple's Accelerate framework (WORKS on both Intel and Apple Silicon!)
@@ -90,6 +104,7 @@ matfile = "0.5.0"
 tempfile = "3.10"
 axum = "0.7"
 tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1.0", features = ["derive"] }
 
 [dependencies.serde]
 version = "1.0"

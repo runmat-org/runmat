@@ -12,7 +12,7 @@ rocm = []
 metal = []
 vulkan = []
 opencl = []
-wgpu = ["dep:wgpu", "dep:pollster"]
+wgpu = ["dep:wgpu", "dep:pollster", "runmat-accelerate-api/wgpu"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
