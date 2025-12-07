@@ -8,7 +8,9 @@ struct ScatterParams {
     color: vec4<f32>,
     point_size: f32,
     count: u32,
-    _pad: vec2<u32>,
+    has_sizes: u32,
+    has_colors: u32,
+    color_stride: u32,
 };
 
 @group(0) @binding(0)
@@ -22,6 +24,12 @@ var<storage, read_write> out_vertices: array<VertexRaw>;
 
 @group(0) @binding(3)
 var<uniform> params: ScatterParams;
+
+@group(0) @binding(4)
+var<storage, read> buf_sizes: array<f32>;
+
+@group(0) @binding(5)
+var<storage, read> buf_colors: array<f32>;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -37,13 +45,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[0u] = px;
     vertex.data[1u] = py;
     vertex.data[2u] = 0.0;
-    vertex.data[3u] = params.color.x;
-    vertex.data[4u] = params.color.y;
-    vertex.data[5u] = params.color.z;
-    vertex.data[6u] = params.color.w;
+
+    var v_color = params.color;
+    if (params.has_colors != 0u) {
+        let base = idx * params.color_stride;
+        let r = buf_colors[base];
+        let g = buf_colors[base + 1u];
+        let b = buf_colors[base + 2u];
+        let a = if params.color_stride > 3u {
+            buf_colors[base + 3u]
+        } else {
+            1.0
+        };
+        v_color = vec4<f32>(r, g, b, a);
+    }
+
+    let mut marker_size = params.point_size;
+    if (params.has_sizes != 0u) {
+        marker_size = buf_sizes[idx];
+    }
+
+    vertex.data[3u] = v_color.x;
+    vertex.data[4u] = v_color.y;
+    vertex.data[5u] = v_color.z;
+    vertex.data[6u] = v_color.w;
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
-    vertex.data[9u] = params.point_size;
+    vertex.data[9u] = marker_size;
     vertex.data[10u] = 0.0;
     vertex.data[11u] = 0.0;
 
@@ -61,7 +89,9 @@ struct ScatterParams {
     color: vec4<f32>,
     point_size: f32,
     count: u32,
-    _pad: vec2<u32>,
+    has_sizes: u32,
+    has_colors: u32,
+    color_stride: u32,
 };
 
 @group(0) @binding(0)
@@ -75,6 +105,12 @@ var<storage, read_write> out_vertices: array<VertexRaw>;
 
 @group(0) @binding(3)
 var<uniform> params: ScatterParams;
+
+@group(0) @binding(4)
+var<storage, read> buf_sizes: array<f32>;
+
+@group(0) @binding(5)
+var<storage, read> buf_colors: array<f32>;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -90,13 +126,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[0u] = px;
     vertex.data[1u] = py;
     vertex.data[2u] = 0.0;
-    vertex.data[3u] = params.color.x;
-    vertex.data[4u] = params.color.y;
-    vertex.data[5u] = params.color.z;
-    vertex.data[6u] = params.color.w;
+
+    var v_color = params.color;
+    if (params.has_colors != 0u) {
+        let base = idx * params.color_stride;
+        let r = buf_colors[base];
+        let g = buf_colors[base + 1u];
+        let b = buf_colors[base + 2u];
+        let a = if params.color_stride > 3u {
+            buf_colors[base + 3u]
+        } else {
+            1.0
+        };
+        v_color = vec4<f32>(r, g, b, a);
+    }
+
+    let mut marker_size = params.point_size;
+    if (params.has_sizes != 0u) {
+        marker_size = buf_sizes[idx];
+    }
+
+    vertex.data[3u] = v_color.x;
+    vertex.data[4u] = v_color.y;
+    vertex.data[5u] = v_color.z;
+    vertex.data[6u] = v_color.w;
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
-    vertex.data[9u] = params.point_size;
+    vertex.data[9u] = marker_size;
     vertex.data[10u] = 0.0;
     vertex.data[11u] = 0.0;
 

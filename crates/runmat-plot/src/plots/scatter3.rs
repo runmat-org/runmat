@@ -15,6 +15,8 @@ pub struct Scatter3Plot {
     pub colors: Vec<Vec4>,
     /// Marker size in pixels.
     pub point_size: f32,
+    /// Optional per-point marker sizes.
+    pub point_sizes: Option<Vec<f32>>,
     /// Legend label.
     pub label: Option<String>,
     /// Visibility flag.
@@ -34,6 +36,7 @@ impl Scatter3Plot {
             points,
             colors,
             point_size: 8.0,
+            point_sizes: None,
             label: None,
             visible: true,
             vertices: None,
@@ -55,6 +58,7 @@ impl Scatter3Plot {
             points: Vec::new(),
             colors: vec![color],
             point_size,
+            point_sizes: None,
             label: None,
             visible: true,
             vertices: None,
@@ -98,6 +102,7 @@ impl Scatter3Plot {
     /// Set marker size in pixels.
     pub fn with_point_size(mut self, size: f32) -> Self {
         self.point_size = size.max(1.0);
+        self.point_sizes = None;
         self.gpu_vertices = None;
         self.gpu_point_count = None;
         self
@@ -117,9 +122,28 @@ impl Scatter3Plot {
         self
     }
 
+    /// Supply per-point sizes in pixels.
+    pub fn set_point_sizes(&mut self, sizes: Vec<f32>) {
+        self.point_sizes = Some(sizes);
+        self.vertices = None;
+        self.gpu_vertices = None;
+        self.gpu_point_count = None;
+    }
+
     fn ensure_vertices(&mut self) {
         if self.vertices.is_none() {
-            self.vertices = Some(vertex_utils::create_point_cloud(&self.points, &self.colors));
+            let mut verts = vertex_utils::create_point_cloud(&self.points, &self.colors);
+            if let Some(sizes) = self.point_sizes.as_ref() {
+                for (idx, vertex) in verts.iter_mut().enumerate() {
+                    let size = sizes.get(idx).copied().unwrap_or(self.point_size);
+                    vertex.normal[2] = size;
+                }
+            } else {
+                for vertex in &mut verts {
+                    vertex.normal[2] = self.point_size;
+                }
+            }
+            self.vertices = Some(verts);
         }
     }
 
@@ -137,6 +161,11 @@ impl Scatter3Plot {
             .unwrap_or(0);
         self.points.len() * std::mem::size_of::<Vec3>()
             + self.colors.len() * std::mem::size_of::<Vec4>()
+            + self
+                .point_sizes
+                .as_ref()
+                .map(|sizes| sizes.len() * std::mem::size_of::<f32>())
+                .unwrap_or(0)
             + gpu_bytes
     }
 

@@ -1,5 +1,7 @@
 use glam::Vec4;
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
+use runmat_plot::plots::surface::ColorMap;
 use std::collections::VecDeque;
 
 use crate::gather_if_needed;
@@ -68,15 +70,6 @@ impl PointArgs {
             style,
         })
     }
-
-    pub fn requires_cpu(&self) -> bool {
-        self.style.requires_cpu_fallback
-            || matches!(self.size, PointSizeArg::Values(_))
-            || matches!(
-                self.color,
-                PointColorArg::ScalarValues(_) | PointColorArg::RgbMatrix(_)
-            )
-    }
 }
 
 impl PointSizeArg {
@@ -103,6 +96,10 @@ impl PointSizeArg {
             _ => None,
         }
     }
+
+    pub fn value(&self) -> Option<&Value> {
+        self.values()
+    }
 }
 
 impl PointColorArg {
@@ -124,7 +121,7 @@ impl PointColorArg {
             Value::Tensor(tensor) => {
                 if tensor.data.len() == 1 {
                     Ok(Self::ScalarValues(Value::Tensor(tensor.clone())))
-                } else if tensor.cols == 3 {
+                } else if tensor.cols == 3 || tensor.cols == 4 {
                     Ok(Self::RgbMatrix(Value::Tensor(tensor.clone())))
                 } else {
                     Ok(Self::ScalarValues(Value::Tensor(tensor.clone())))
@@ -133,7 +130,7 @@ impl PointColorArg {
             Value::GpuTensor(handle) => {
                 if total_len(handle.shape.as_slice()) == 1 {
                     Ok(Self::ScalarValues(value))
-                } else if handle.shape.last().copied().unwrap_or_default() == 3 {
+                } else if matches!(handle.shape.last().copied().unwrap_or_default(), 3 | 4) {
                     Ok(Self::RgbMatrix(value))
                 } else {
                     Ok(Self::ScalarValues(value))
@@ -270,9 +267,9 @@ pub(crate) fn convert_rgb_color_matrix(
     context: &str,
 ) -> Result<Vec<Vec4>, String> {
     let tensor = tensor_from_value(value, context)?;
-    if tensor.cols != 3 {
+    if tensor.cols != 3 && tensor.cols != 4 {
         return Err(format!(
-            "{context}: RGB color matrices must have three columns"
+            "{context}: color matrices must have three (RGB) or four (RGBA) columns"
         ));
     }
     if tensor.rows == 0 {
@@ -298,7 +295,12 @@ pub(crate) fn convert_rgb_color_matrix(
         let r = tensor_value(&tensor, src_row, 0) as f32;
         let g = tensor_value(&tensor, src_row, 1) as f32;
         let b = tensor_value(&tensor, src_row, 2) as f32;
-        colors.push(Vec4::new(r, g, b, 1.0));
+        let a = if tensor.cols > 3 {
+            tensor_value(&tensor, src_row, 3) as f32
+        } else {
+            1.0
+        };
+        colors.push(Vec4::new(r, g, b, a));
     }
     Ok(colors)
 }
@@ -307,4 +309,99 @@ fn tensor_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
     let rows = tensor.rows.max(1);
     let idx = col * rows + row.min(rows - 1);
     tensor.data.get(idx).copied().unwrap_or(0.0)
+}
+
+#[derive(Clone, Debug)]
+pub struct PointGpuColor {
+    pub handle: GpuTensorHandle,
+    pub components: PointColorComponents,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PointColorComponents {
+    Rgb,
+    Rgba,
+}
+
+impl PointColorComponents {
+    pub fn stride(&self) -> u32 {
+        match self {
+            Self::Rgb => 3,
+            Self::Rgba => 4,
+        }
+    }
+}
+
+pub fn map_scalar_values_to_colors(values: &[f64], colormap: ColorMap) -> (Vec<Vec4>, (f64, f64)) {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for &value in values {
+        if value.is_finite() {
+            if value < lo {
+                lo = value;
+            }
+            if value > hi {
+                hi = value;
+            }
+        }
+    }
+    if !lo.is_finite() || !hi.is_finite() || hi <= lo {
+        lo = 0.0;
+        hi = 1.0;
+    }
+    let denom = (hi - lo).max(std::f64::EPSILON);
+    let colors = values
+        .iter()
+        .map(|&value| {
+            let t = ((value - lo) / denom).clamp(0.0, 1.0) as f32;
+            let rgb = colormap.map_value(t);
+            Vec4::new(rgb.x, rgb.y, rgb.z, 1.0)
+        })
+        .collect::<Vec<_>>();
+    (colors, (lo, hi))
+}
+
+pub fn validate_gpu_vector_length(
+    handle: &GpuTensorHandle,
+    point_count: usize,
+    context: &str,
+) -> Result<(), String> {
+    let len = total_len(handle.shape.as_slice());
+    if len != point_count {
+        return Err(format!(
+            "{context}: gpuArray inputs must contain exactly {point_count} elements (got {len})"
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_gpu_color_matrix(
+    handle: &GpuTensorHandle,
+    point_count: usize,
+    context: &str,
+) -> Result<PointColorComponents, String> {
+    if handle.shape.len() < 2 {
+        return Err(format!(
+            "{context}: color gpuArray inputs must be at least 2-D"
+        ));
+    }
+    let cols = handle.shape.last().copied().unwrap_or_default();
+    let components = match cols {
+        3 => PointColorComponents::Rgb,
+        4 => PointColorComponents::Rgba,
+        _ => {
+            return Err(format!(
+                "{context}: color gpuArray inputs must have three (RGB) or four (RGBA) columns"
+            ))
+        }
+    };
+    let rows = handle.shape[..handle.shape.len() - 1]
+        .iter()
+        .product::<usize>();
+    if rows != point_count {
+        return Err(format!(
+            "{context}: color gpuArray inputs must have {point_count} rows (got {rows})"
+        ));
+    }
+    Ok(components)
 }

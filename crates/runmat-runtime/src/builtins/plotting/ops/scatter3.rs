@@ -6,8 +6,11 @@ use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
+use runmat_plot::gpu::scatter2::{ScatterAttributeBuffer, ScatterColorBuffer};
 use runmat_plot::gpu::scatter3::{Scatter3GpuInputs, Scatter3GpuParams};
 use runmat_plot::gpu::ScalarType;
+use runmat_plot::plots::surface::ColorMap;
+use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::Scatter3Plot;
 
 use crate::builtins::common::spec::{
@@ -19,7 +22,11 @@ use std::convert::TryFrom;
 
 use super::common::numeric_triplet;
 use super::gpu_helpers::axis_bounds;
-use super::point::{convert_rgb_color_matrix, PointArgs, PointColorArg, PointSizeArg};
+use super::point::{
+    convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
+    map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
+    PointColorArg, PointGpuColor, PointSizeArg,
+};
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::LineStyleParseOptions;
 
@@ -172,7 +179,13 @@ fn default_color() -> Vec4 {
 struct Scatter3ResolvedStyle {
     uniform_color: Vec4,
     point_size: f32,
+    per_point_sizes: Option<Vec<f32>>,
     per_point_colors: Option<Vec<Vec4>>,
+    color_values: Option<Vec<f64>>,
+    color_limits: Option<(f64, f64)>,
+    gpu_sizes: Option<GpuTensorHandle>,
+    gpu_colors: Option<PointGpuColor>,
+    colormap: ColorMap,
     requires_cpu: bool,
 }
 
@@ -184,37 +197,74 @@ fn resolve_scatter3_style(
     let mut style = Scatter3ResolvedStyle {
         uniform_color: default_color(),
         point_size: DEFAULT_POINT_SIZE,
+        per_point_sizes: None,
         per_point_colors: None,
-        requires_cpu: args.requires_cpu(),
+        color_values: None,
+        color_limits: None,
+        gpu_sizes: None,
+        gpu_colors: None,
+        colormap: ColorMap::Parula,
+        requires_cpu: false,
     };
+
+    let appearance = &args.style.appearance;
+    style.uniform_color = appearance.color;
 
     if let PointColorArg::Uniform(color) = &args.color {
         style.uniform_color = *color;
     }
 
+    if let Some(marker) = appearance.marker.as_ref() {
+        if let Some(size) = marker.size {
+            style.point_size = size.max(0.1);
+        }
+    }
+
+    if let PointSizeArg::Scalar(size) = &args.size {
+        style.point_size = (*size).max(0.1);
+    }
+
+    if let Some(value) = args.size.value() {
+        match value {
+            Value::GpuTensor(handle) => {
+                validate_gpu_vector_length(handle, point_count, context)?;
+                style.gpu_sizes = Some(handle.clone());
+            }
+            _ => {
+                style.per_point_sizes = Some(convert_size_vector(value, point_count, context)?);
+            }
+        }
+    }
+
     match &args.color {
-        PointColorArg::RgbMatrix(value) => {
-            style.per_point_colors = Some(convert_rgb_color_matrix(value, point_count, context)?);
-            style.requires_cpu = true;
+        PointColorArg::ScalarValues(value) => {
+            let scalars = convert_scalar_color_values(value, point_count, context)?;
+            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap);
+            style.color_values = Some(scalars);
+            style.per_point_colors = Some(colors);
+            style.color_limits = Some(limits);
         }
-        PointColorArg::ScalarValues(_) => {
-            return Err(format!(
-                "{context}: scalar color vectors are not supported for scatter3 yet"
-            ));
-        }
+        PointColorArg::RgbMatrix(value) => match value {
+            Value::GpuTensor(handle) => {
+                let components = validate_gpu_color_matrix(handle, point_count, context)?;
+                style.gpu_colors = Some(PointGpuColor {
+                    handle: handle.clone(),
+                    components,
+                });
+            }
+            _ => {
+                style.per_point_colors =
+                    Some(convert_rgb_color_matrix(value, point_count, context)?);
+            }
+        },
         _ => {}
     }
 
-    match &args.size {
-        PointSizeArg::Scalar(size) => {
-            style.point_size = (*size).max(0.1);
-        }
-        PointSizeArg::Values(_) => {
-            return Err(format!(
-                "{context}: per-point marker sizes are not implemented yet"
-            ));
-        }
-        PointSizeArg::Default => {}
+    if args.style.appearance.line_style != LineStyle::Solid && args.style.line_style_explicit {
+        style.requires_cpu = true;
+    }
+    if args.style.line_style_order.is_some() {
+        style.requires_cpu = true;
     }
 
     Ok(style)
@@ -230,6 +280,8 @@ fn build_scatter3_plot(
         return Err("scatter3: X, Y, and Z inputs must have identical lengths".to_string());
     }
 
+    ensure_scatter3_host_metadata(style, x.len())?;
+
     let points: Vec<Vec3> = x
         .iter()
         .zip(y.iter())
@@ -242,6 +294,9 @@ fn build_scatter3_plot(
         .with_point_size(style.point_size)
         .with_color(style.uniform_color)
         .with_label("Data");
+    if let Some(sizes) = style.per_point_sizes.take() {
+        scatter.set_point_sizes(sizes);
+    }
     if let Some(colors) = style.per_point_colors.take() {
         scatter = scatter
             .with_colors(colors)
@@ -324,6 +379,9 @@ fn build_scatter3_gpu_plot(
         .map_err(|_| "scatter3: point count exceeds supported range".to_string())?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
+    let size_buffer = build_scatter3_size_buffer(style, point_count)?;
+    let color_buffer = build_scatter3_color_buffer(style, point_count)?;
+
     let inputs = Scatter3GpuInputs {
         x_buffer: x_ref.buffer.clone(),
         y_buffer: y_ref.buffer.clone(),
@@ -334,6 +392,8 @@ fn build_scatter3_gpu_plot(
     let params = Scatter3GpuParams {
         color: style.uniform_color,
         point_size: style.point_size,
+        sizes: size_buffer,
+        colors: color_buffer,
     };
 
     let gpu_vertices = runmat_plot::gpu::scatter3::pack_vertices_from_xyz(
@@ -370,6 +430,98 @@ fn build_gpu_bounds(
     ))
 }
 
+fn build_scatter3_size_buffer(
+    style: &Scatter3ResolvedStyle,
+    point_count: usize,
+) -> Result<ScatterAttributeBuffer, String> {
+    if let Some(handle) = style.gpu_sizes.as_ref() {
+        let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
+            .ok_or_else(|| "scatter3: unable to export GPU marker sizes".to_string())?;
+        if exported.len != point_count {
+            return Err(format!(
+                "scatter3: marker size array must have {point_count} elements (got {})",
+                exported.len
+            ));
+        }
+        if exported.precision != ProviderPrecision::F32 {
+            return Err(
+                "scatter3: GPU marker sizes must be single-precision (cast before plotting)"
+                    .to_string(),
+            );
+        }
+        return Ok(ScatterAttributeBuffer::Gpu(exported.buffer));
+    }
+    if let Some(sizes) = style.per_point_sizes.as_ref() {
+        if sizes.is_empty() {
+            Ok(ScatterAttributeBuffer::None)
+        } else {
+            Ok(ScatterAttributeBuffer::Host(sizes.clone()))
+        }
+    } else {
+        Ok(ScatterAttributeBuffer::None)
+    }
+}
+
+fn build_scatter3_color_buffer(
+    style: &Scatter3ResolvedStyle,
+    point_count: usize,
+) -> Result<ScatterColorBuffer, String> {
+    if let Some(gpu_color) = style.gpu_colors.as_ref() {
+        let exported = runmat_accelerate_api::export_wgpu_buffer(&gpu_color.handle)
+            .ok_or_else(|| "scatter3: unable to export GPU color data".to_string())?;
+        let expected = point_count * gpu_color.components.stride() as usize;
+        if exported.len != expected {
+            return Err(format!(
+                "scatter3: color array must contain {} elements (got {})",
+                expected, exported.len
+            ));
+        }
+        if exported.precision != ProviderPrecision::F32 {
+            return Err(
+                "scatter3: GPU color arrays must be single-precision (cast before plotting)"
+                    .to_string(),
+            );
+        }
+        return Ok(ScatterColorBuffer::Gpu {
+            buffer: exported.buffer,
+            components: gpu_color.components.stride(),
+        });
+    }
+
+    if let Some(colors) = style.per_point_colors.as_ref() {
+        if colors.is_empty() {
+            Ok(ScatterColorBuffer::None)
+        } else {
+            let data = colors.iter().map(|c| c.to_array()).collect();
+            Ok(ScatterColorBuffer::Host(data))
+        }
+    } else {
+        Ok(ScatterColorBuffer::None)
+    }
+}
+
+fn ensure_scatter3_host_metadata(
+    style: &mut Scatter3ResolvedStyle,
+    point_count: usize,
+) -> Result<(), String> {
+    if style.per_point_sizes.is_none() {
+        if let Some(handle) = style.gpu_sizes.clone() {
+            let tensor = gather_tensor_from_gpu(handle, "scatter3")?;
+            let value = Value::Tensor(tensor);
+            style.per_point_sizes = Some(convert_size_vector(&value, point_count, "scatter3")?);
+        }
+    }
+    if style.per_point_colors.is_none() {
+        if let Some(gpu_color) = style.gpu_colors.as_ref() {
+            let tensor = gather_tensor_from_gpu(gpu_color.handle.clone(), "scatter3")?;
+            let value = Value::Tensor(tensor);
+            style.per_point_colors =
+                Some(convert_rgb_color_matrix(&value, point_count, "scatter3")?);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::style::LineStyleParseOptions;
@@ -380,7 +532,13 @@ mod tests {
         Scatter3ResolvedStyle {
             uniform_color: default_color(),
             point_size: DEFAULT_POINT_SIZE,
+            per_point_sizes: None,
             per_point_colors: None,
+            color_values: None,
+            color_limits: None,
+            gpu_sizes: None,
+            gpu_colors: None,
+            colormap: ColorMap::Parula,
             requires_cpu: false,
         }
     }
@@ -417,7 +575,7 @@ mod tests {
     }
 
     #[test]
-    fn scatter3_rejects_per_point_sizes() {
+    fn scatter3_accepts_per_point_sizes() {
         let rest = vec![Value::Tensor(Tensor {
             data: vec![1.0, 2.0],
             shape: vec![2],
@@ -426,7 +584,7 @@ mod tests {
             dtype: runmat_builtins::NumericDType::F64,
         })];
         let args = PointArgs::parse(rest, LineStyleParseOptions::scatter3()).unwrap();
-        let err = resolve_scatter3_style(2, &args, "scatter3").unwrap_err();
-        assert!(err.contains("per-point marker sizes"));
+        let style = resolve_scatter3_style(2, &args, "scatter3").expect("style");
+        assert!(style.per_point_sizes.is_some());
     }
 }

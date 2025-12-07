@@ -6,6 +6,51 @@ use glam::Vec4;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
+/// Optional per-point scalar attribute buffer (marker sizes).
+pub enum ScatterAttributeBuffer {
+    None,
+    Host(Vec<f32>),
+    Gpu(Arc<wgpu::Buffer>),
+}
+
+impl ScatterAttributeBuffer {
+    pub fn has_data(&self) -> bool {
+        !matches!(self, ScatterAttributeBuffer::None)
+    }
+}
+
+/// Optional per-point color buffer. Host data is supplied as RGBA tuples; GPU buffers
+/// may contain RGB (3 floats) or RGBA (4 floats) sequences.
+pub enum ScatterColorBuffer {
+    None,
+    Host(Vec<[f32; 4]>),
+    Gpu {
+        buffer: Arc<wgpu::Buffer>,
+        components: u32,
+    },
+}
+
+impl ScatterColorBuffer {
+    pub fn has_data(&self) -> bool {
+        !matches!(self, ScatterColorBuffer::None)
+    }
+
+    pub fn stride(&self) -> u32 {
+        match self {
+            ScatterColorBuffer::None => 4,
+            ScatterColorBuffer::Host(_) => 4,
+            ScatterColorBuffer::Gpu { components, .. } => *components,
+        }
+    }
+
+    pub fn buffer(&self) -> Option<Arc<wgpu::Buffer>> {
+        match self {
+            ScatterColorBuffer::Gpu { buffer, .. } => Some(buffer.clone()),
+            _ => None,
+        }
+    }
+}
+
 /// Inputs required to pack scatter vertices directly on the GPU.
 pub struct Scatter2GpuInputs {
     pub x_buffer: Arc<wgpu::Buffer>,
@@ -18,6 +63,8 @@ pub struct Scatter2GpuInputs {
 pub struct Scatter2GpuParams {
     pub color: Vec4,
     pub point_size: f32,
+    pub sizes: ScatterAttributeBuffer,
+    pub colors: ScatterColorBuffer,
 }
 
 #[repr(C)]
@@ -26,7 +73,10 @@ struct Scatter2Uniforms {
     color: [f32; 4],
     point_size: f32,
     count: u32,
-    _pad: [u32; 2],
+    has_sizes: u32,
+    has_colors: u32,
+    color_stride: u32,
+    _pad: u32,
 }
 
 /// Builds a GPU-resident vertex buffer for scatter plots directly from
@@ -88,6 +138,26 @@ pub fn pack_vertices_from_xy(
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 5,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -114,11 +184,17 @@ pub fn pack_vertices_from_xy(
         mapped_at_creation: false,
     }));
 
+    let (size_buffer, has_sizes) = prepare_size_buffer(device, params);
+    let (color_buffer, has_colors, color_stride) = prepare_color_buffer(device, params);
+
     let uniforms = Scatter2Uniforms {
         color: params.color.to_array(),
         point_size: params.point_size,
         count: inputs.len,
-        _pad: [0; 2],
+        has_sizes: if has_sizes { 1 } else { 0 },
+        has_colors: if has_colors { 1 } else { 0 },
+        color_stride,
+        _pad: 0,
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("scatter2-pack-uniforms"),
@@ -146,6 +222,14 @@ pub fn pack_vertices_from_xy(
                 binding: 3,
                 resource: uniform_buffer.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: size_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: color_buffer.as_entire_binding(),
+            },
         ],
     });
 
@@ -165,6 +249,107 @@ pub fn pack_vertices_from_xy(
     queue.submit(Some(encoder.finish()));
 
     Ok(GpuVertexBuffer::new(output_buffer, inputs.len as usize))
+}
+
+fn prepare_size_buffer(
+    device: &Arc<wgpu::Device>,
+    params: &Scatter2GpuParams,
+) -> (Arc<wgpu::Buffer>, bool) {
+    match &params.sizes {
+        ScatterAttributeBuffer::None => (
+            Arc::new(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("scatter2-size-fallback"),
+                    contents: bytemuck::cast_slice(&[0.0f32]),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                }),
+            ),
+            false,
+        ),
+        ScatterAttributeBuffer::Host(data) => {
+            if data.is_empty() {
+                (
+                    Arc::new(
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("scatter2-size-fallback"),
+                            contents: bytemuck::cast_slice(&[0.0f32]),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        }),
+                    ),
+                    false,
+                )
+            } else {
+                (
+                    Arc::new(
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("scatter2-size-host"),
+                            contents: bytemuck::cast_slice(data.as_slice()),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        }),
+                    ),
+                    true,
+                )
+            }
+        }
+        ScatterAttributeBuffer::Gpu(buffer) => (buffer.clone(), true),
+    }
+}
+
+fn prepare_color_buffer(
+    device: &Arc<wgpu::Device>,
+    params: &Scatter2GpuParams,
+) -> (Arc<wgpu::Buffer>, bool, u32) {
+    match &params.colors {
+        ScatterColorBuffer::None => (
+            Arc::new(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("scatter2-color-fallback"),
+                    contents: bytemuck::cast_slice(&[
+                        params.color.x,
+                        params.color.y,
+                        params.color.z,
+                        params.color.w,
+                    ]),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                }),
+            ),
+            false,
+            4,
+        ),
+        ScatterColorBuffer::Host(colors) => {
+            if colors.is_empty() {
+                (
+                    Arc::new(
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("scatter2-color-fallback"),
+                            contents: bytemuck::cast_slice(&[
+                                params.color.x,
+                                params.color.y,
+                                params.color.z,
+                                params.color.w,
+                            ]),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        }),
+                    ),
+                    false,
+                    4,
+                )
+            } else {
+                (
+                    Arc::new(
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("scatter2-color-host"),
+                            contents: bytemuck::cast_slice(colors.as_slice()),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        }),
+                    ),
+                    true,
+                    4,
+                )
+            }
+        }
+        ScatterColorBuffer::Gpu { buffer, components } => (buffer.clone(), true, *components),
+    }
 }
 
 fn compile_shader(

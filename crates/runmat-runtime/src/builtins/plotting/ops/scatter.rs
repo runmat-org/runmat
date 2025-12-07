@@ -6,9 +6,13 @@ use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
-use runmat_plot::gpu::scatter2::{Scatter2GpuInputs, Scatter2GpuParams};
+use runmat_plot::gpu::scatter2::{
+    Scatter2GpuInputs, Scatter2GpuParams, ScatterAttributeBuffer, ScatterColorBuffer,
+};
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::scatter::{MarkerStyle, ScatterGpuStyle};
+use runmat_plot::plots::surface::ColorMap;
+use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::ScatterPlot;
 
 use crate::builtins::common::spec::{
@@ -21,8 +25,9 @@ use std::convert::TryFrom;
 use super::common::numeric_pair;
 use super::gpu_helpers::axis_bounds;
 use super::point::{
-    convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector, PointArgs,
-    PointColorArg, PointSizeArg,
+    convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
+    map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
+    PointColorArg, PointGpuColor, PointSizeArg,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor, MarkerKind};
@@ -170,10 +175,13 @@ fn build_scatter_plot(
         return Err("scatter: inputs cannot be empty".to_string());
     }
 
+    ensure_host_marker_metadata(style, x.len())?;
+
     let mut scatter = ScatterPlot::new(x, y)
         .map_err(|err| format!("scatter: {err}"))?
         .with_style(style.uniform_color, style.marker_size, style.marker_style)
         .with_label("Data");
+    scatter.colormap = style.colormap;
     scatter.set_edge_color(style.edge_color);
     scatter.set_edge_thickness(style.edge_thickness);
     scatter.set_filled(style.filled);
@@ -185,7 +193,7 @@ fn build_scatter_plot(
         scatter.set_colors(colors);
     }
     if let Some(values) = style.color_values.take() {
-        scatter.set_color_values(values, None);
+        scatter.set_color_values(values, style.color_limits.take());
     }
     Ok(scatter)
 }
@@ -208,6 +216,10 @@ struct ScatterResolvedStyle {
     per_point_sizes: Option<Vec<f32>>,
     per_point_colors: Option<Vec<Vec4>>,
     color_values: Option<Vec<f64>>,
+    color_limits: Option<(f64, f64)>,
+    gpu_sizes: Option<GpuTensorHandle>,
+    gpu_colors: Option<PointGpuColor>,
+    colormap: ColorMap,
     requires_cpu: bool,
 }
 
@@ -226,7 +238,11 @@ fn resolve_scatter_style(
         per_point_sizes: None,
         per_point_colors: None,
         color_values: None,
-        requires_cpu: args.requires_cpu(),
+        color_limits: None,
+        gpu_sizes: None,
+        gpu_colors: None,
+        colormap: ColorMap::Parula,
+        requires_cpu: false,
     };
 
     let appearance = &args.style.appearance;
@@ -263,25 +279,51 @@ fn resolve_scatter_style(
         style.marker_size = (*size).max(0.1);
     }
 
-    if let Some(values) = args.size.values() {
-        style.per_point_sizes = Some(convert_size_vector(values, point_count, context)?);
-        style.requires_cpu = true;
+    if let Some(value) = args.size.value() {
+        match value {
+            Value::GpuTensor(handle) => {
+                validate_gpu_vector_length(handle, point_count, context)?;
+                style.gpu_sizes = Some(handle.clone());
+            }
+            _ => {
+                style.per_point_sizes = Some(convert_size_vector(value, point_count, context)?);
+            }
+        }
     }
 
     match &args.color {
         PointColorArg::ScalarValues(value) => {
-            style.color_values = Some(convert_scalar_color_values(value, point_count, context)?);
-            style.requires_cpu = true;
+            let scalars = convert_scalar_color_values(value, point_count, context)?;
+            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap);
+            style.color_values = Some(scalars);
+            style.per_point_colors = Some(colors);
+            style.color_limits = Some(limits);
         }
-        PointColorArg::RgbMatrix(value) => {
-            style.per_point_colors = Some(convert_rgb_color_matrix(value, point_count, context)?);
-            style.requires_cpu = true;
-        }
+        PointColorArg::RgbMatrix(value) => match value {
+            Value::GpuTensor(handle) => {
+                let components = validate_gpu_color_matrix(handle, point_count, context)?;
+                style.gpu_colors = Some(PointGpuColor {
+                    handle: handle.clone(),
+                    components,
+                });
+            }
+            _ => {
+                style.per_point_colors =
+                    Some(convert_rgb_color_matrix(value, point_count, context)?);
+            }
+        },
         _ => {}
     }
 
     if style.per_point_colors.is_some() || style.color_values.is_some() {
         style.filled = true;
+    }
+
+    if args.style.appearance.line_style != LineStyle::Solid && args.style.line_style_explicit {
+        style.requires_cpu = true;
+    }
+    if args.style.line_style_order.is_some() {
+        style.requires_cpu = true;
     }
 
     Ok(style)
@@ -384,6 +426,11 @@ fn build_scatter_gpu_plot(
         .map_err(|_| "scatter: point count exceeds supported range".to_string())?;
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
+    let size_buffer = build_size_buffer(style, point_count)?;
+    let has_sizes = size_buffer.has_data();
+    let color_buffer = build_color_buffer(style, point_count)?;
+    let has_colors = color_buffer.has_data();
+
     let inputs = Scatter2GpuInputs {
         x_buffer: x_ref.buffer.clone(),
         y_buffer: y_ref.buffer.clone(),
@@ -393,6 +440,8 @@ fn build_scatter_gpu_plot(
     let params = Scatter2GpuParams {
         color: style.uniform_color,
         point_size: style.marker_size,
+        sizes: size_buffer,
+        colors: color_buffer,
     };
 
     let gpu_vertices = runmat_plot::gpu::scatter2::pack_vertices_from_xy(
@@ -411,14 +460,18 @@ fn build_scatter_gpu_plot(
         marker_size: style.marker_size,
         marker_style: style.marker_style,
         filled: style.filled,
-        has_per_point_sizes: false,
-        has_per_point_colors: false,
+        has_per_point_sizes: has_sizes,
+        has_per_point_colors: has_colors,
     };
 
-    Ok(
-        ScatterPlot::from_gpu_buffer(gpu_vertices, point_count, bounds, gpu_style)
-            .with_label("Data"),
-    )
+    let mut scatter = ScatterPlot::from_gpu_buffer(gpu_vertices, point_count, bounds, gpu_style)
+        .with_label("Data");
+    scatter.colormap = style.colormap;
+    if let Some(values) = style.color_values.as_ref() {
+        scatter.color_values = Some(values.clone());
+    }
+    scatter.color_limits = style.color_limits;
+    Ok(scatter)
 }
 
 fn build_gpu_bounds(x: &GpuTensorHandle, y: &GpuTensorHandle) -> Result<BoundingBox, String> {
@@ -428,6 +481,99 @@ fn build_gpu_bounds(x: &GpuTensorHandle, y: &GpuTensorHandle) -> Result<Bounding
         Vec3::new(min_x, min_y, 0.0),
         Vec3::new(max_x, max_y, 0.0),
     ))
+}
+
+fn build_size_buffer(
+    style: &ScatterResolvedStyle,
+    point_count: usize,
+) -> Result<ScatterAttributeBuffer, String> {
+    if let Some(handle) = style.gpu_sizes.as_ref() {
+        let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
+            .ok_or_else(|| "scatter: unable to export GPU marker sizes".to_string())?;
+        if exported.len != point_count {
+            return Err(format!(
+                "scatter: marker size array must have {point_count} elements (got {})",
+                exported.len
+            ));
+        }
+        if exported.precision != ProviderPrecision::F32 {
+            return Err(
+                "scatter: GPU marker sizes must be single-precision (cast before plotting)"
+                    .to_string(),
+            );
+        }
+        return Ok(ScatterAttributeBuffer::Gpu(exported.buffer));
+    }
+
+    if let Some(sizes) = style.per_point_sizes.as_ref() {
+        if sizes.is_empty() {
+            Ok(ScatterAttributeBuffer::None)
+        } else {
+            Ok(ScatterAttributeBuffer::Host(sizes.clone()))
+        }
+    } else {
+        Ok(ScatterAttributeBuffer::None)
+    }
+}
+
+fn build_color_buffer(
+    style: &ScatterResolvedStyle,
+    point_count: usize,
+) -> Result<ScatterColorBuffer, String> {
+    if let Some(gpu_color) = style.gpu_colors.as_ref() {
+        let exported = runmat_accelerate_api::export_wgpu_buffer(&gpu_color.handle)
+            .ok_or_else(|| "scatter: unable to export GPU color data".to_string())?;
+        let expected = point_count * gpu_color.components.stride() as usize;
+        if exported.len != expected {
+            return Err(format!(
+                "scatter: color array must contain {} elements (got {})",
+                expected, exported.len
+            ));
+        }
+        if exported.precision != ProviderPrecision::F32 {
+            return Err(
+                "scatter: GPU color arrays must be single-precision (cast before plotting)"
+                    .to_string(),
+            );
+        }
+        return Ok(ScatterColorBuffer::Gpu {
+            buffer: exported.buffer,
+            components: gpu_color.components.stride(),
+        });
+    }
+
+    if let Some(colors) = style.per_point_colors.as_ref() {
+        if colors.is_empty() {
+            Ok(ScatterColorBuffer::None)
+        } else {
+            let data = colors.iter().map(|c| c.to_array()).collect();
+            Ok(ScatterColorBuffer::Host(data))
+        }
+    } else {
+        Ok(ScatterColorBuffer::None)
+    }
+}
+
+fn ensure_host_marker_metadata(
+    style: &mut ScatterResolvedStyle,
+    point_count: usize,
+) -> Result<(), String> {
+    if style.per_point_sizes.is_none() {
+        if let Some(handle) = style.gpu_sizes.clone() {
+            let tensor = gather_tensor_from_gpu(handle, "scatter")?;
+            let value = Value::Tensor(tensor);
+            style.per_point_sizes = Some(convert_size_vector(&value, point_count, "scatter")?);
+        }
+    }
+    if style.per_point_colors.is_none() {
+        if let Some(gpu_color) = style.gpu_colors.as_ref() {
+            let tensor = gather_tensor_from_gpu(gpu_color.handle.clone(), "scatter")?;
+            let value = Value::Tensor(tensor);
+            style.per_point_colors =
+                Some(convert_rgb_color_matrix(&value, point_count, "scatter")?);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -447,6 +593,10 @@ mod tests {
             per_point_sizes: None,
             per_point_colors: None,
             color_values: None,
+            color_limits: None,
+            gpu_sizes: None,
+            gpu_colors: None,
+            colormap: ColorMap::Parula,
             requires_cpu: false,
         }
     }
