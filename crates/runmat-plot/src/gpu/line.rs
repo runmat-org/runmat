@@ -17,6 +17,7 @@ pub struct LineGpuInputs {
 /// Parameters describing how the GPU vertices should be generated.
 pub struct LineGpuParams {
     pub color: Vec4,
+    pub marker_size: f32,
 }
 
 #[repr(C)]
@@ -24,7 +25,8 @@ pub struct LineGpuParams {
 struct LineUniforms {
     color: [f32; 4],
     count: u32,
-    _pad: [u32; 3],
+    marker_size: f32,
+    _pad: [u32; 2],
 }
 
 /// Builds a GPU-resident vertex buffer for line plots directly from provider-owned XY arrays.
@@ -113,7 +115,8 @@ pub fn pack_vertices_from_xy(
     let uniforms = LineUniforms {
         color: params.color.to_array(),
         count: inputs.len,
-        _pad: [0; 3],
+        marker_size: params.marker_size,
+        _pad: [0; 2],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line-pack-uniforms"),

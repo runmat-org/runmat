@@ -30,7 +30,7 @@ use super::point::{
     PointColorArg, PointGpuColor, PointSizeArg,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
-use super::style::{LineStyleParseOptions, MarkerColor, MarkerKind};
+use super::style::{LineStyleParseOptions, MarkerColor};
 
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
@@ -205,7 +205,7 @@ fn default_color() -> Vec4 {
     Vec4::new(0.85, 0.2, 0.2, 0.95)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ScatterResolvedStyle {
     uniform_color: Vec4,
     edge_color: Vec4,
@@ -220,6 +220,7 @@ struct ScatterResolvedStyle {
     gpu_sizes: Option<GpuTensorHandle>,
     gpu_colors: Option<PointGpuColor>,
     colormap: ColorMap,
+    marker_face_flat: bool,
     requires_cpu: bool,
 }
 
@@ -242,6 +243,7 @@ fn resolve_scatter_style(
         gpu_sizes: None,
         gpu_colors: None,
         colormap: ColorMap::Parula,
+        marker_face_flat: false,
         requires_cpu: false,
     };
 
@@ -259,19 +261,35 @@ fn resolve_scatter_style(
     }
 
     if let Some(marker) = appearance.marker.as_ref() {
-        style.marker_style = map_marker_kind(marker.kind);
+        style.marker_style = marker.kind.to_plot_marker();
         if let Some(size) = marker.size {
             style.marker_size = size.max(0.1);
         }
+        if matches!(marker.edge_color, MarkerColor::Flat) {
+            return Err(format!(
+                "{context}: MarkerEdgeColor 'flat' is not supported for scatter"
+            ));
+        }
         style.edge_color =
             resolve_marker_color(&marker.edge_color, style.edge_color, style.uniform_color);
-        let face_color =
-            resolve_marker_color(&marker.face_color, style.uniform_color, style.uniform_color);
-        if matches!(marker.face_color, MarkerColor::Color(_) | MarkerColor::Auto) {
-            style.uniform_color = face_color;
-        }
-        if matches!(marker.face_color, MarkerColor::None) {
-            style.filled = false;
+        match &marker.face_color {
+            MarkerColor::Flat => {
+                style.marker_face_flat = true;
+                style.filled = true;
+            }
+            MarkerColor::None => {
+                style.filled = false;
+            }
+            _ => {
+                let face_color = resolve_marker_color(
+                    &marker.face_color,
+                    style.uniform_color,
+                    style.uniform_color,
+                );
+                if matches!(marker.face_color, MarkerColor::Color(_) | MarkerColor::Auto) {
+                    style.uniform_color = face_color;
+                }
+            }
         }
     }
 
@@ -319,6 +337,15 @@ fn resolve_scatter_style(
         style.filled = true;
     }
 
+    if style.marker_face_flat {
+        if style.per_point_colors.is_none() && style.gpu_colors.is_none() {
+            return Err(format!(
+                "{context}: MarkerFaceColor 'flat' requires per-point color data (C argument)"
+            ));
+        }
+        style.filled = true;
+    }
+
     if args.style.appearance.line_style != LineStyle::Solid && args.style.line_style_explicit {
         style.requires_cpu = true;
     }
@@ -333,25 +360,8 @@ fn resolve_marker_color(marker_color: &MarkerColor, fallback: Vec4, default_base
     match marker_color {
         MarkerColor::Auto => fallback,
         MarkerColor::None => Vec4::new(default_base.x, default_base.y, default_base.z, 0.0),
+        MarkerColor::Flat => fallback,
         MarkerColor::Color(color) => *color,
-    }
-}
-
-fn map_marker_kind(kind: MarkerKind) -> MarkerStyle {
-    match kind {
-        MarkerKind::Circle => MarkerStyle::Circle,
-        MarkerKind::Plus => MarkerStyle::Plus,
-        MarkerKind::Star => MarkerStyle::Star,
-        MarkerKind::Point => MarkerStyle::Circle,
-        MarkerKind::Cross => MarkerStyle::Cross,
-        MarkerKind::TriangleUp => MarkerStyle::Triangle,
-        MarkerKind::TriangleDown => MarkerStyle::Triangle,
-        MarkerKind::TriangleLeft => MarkerStyle::Triangle,
-        MarkerKind::TriangleRight => MarkerStyle::Triangle,
-        MarkerKind::Square => MarkerStyle::Square,
-        MarkerKind::Diamond => MarkerStyle::Diamond,
-        MarkerKind::Pentagram => MarkerStyle::Star,
-        MarkerKind::Hexagram => MarkerStyle::Star,
     }
 }
 
@@ -597,6 +607,7 @@ mod tests {
             gpu_sizes: None,
             gpu_colors: None,
             colormap: ColorMap::Parula,
+            marker_face_flat: false,
             requires_cpu: false,
         }
     }
@@ -645,5 +656,36 @@ mod tests {
         assert!(style.filled);
         assert_eq!(style.marker_style, MarkerStyle::Square);
         assert_eq!(style.marker_size as i32, 12);
+    }
+
+    #[test]
+    fn scatter_supports_flat_marker_face_color() {
+        let rest = vec![
+            Value::Tensor(tensor_from(&[5.0, 5.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::String("Marker".into()),
+            Value::String("o".into()),
+            Value::String("MarkerFaceColor".into()),
+            Value::String("flat".into()),
+        ];
+        let args = PointArgs::parse(rest, LineStyleParseOptions::scatter()).unwrap();
+        let style = resolve_scatter_style(2, &args, "scatter").expect("style");
+        assert!(style.marker_face_flat);
+        assert!(style.per_point_colors.is_some() || style.gpu_colors.is_some());
+    }
+
+    #[test]
+    fn scatter_rejects_flat_marker_edge_color() {
+        let rest = vec![
+            Value::Tensor(tensor_from(&[5.0, 5.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::String("Marker".into()),
+            Value::String("o".into()),
+            Value::String("MarkerEdgeColor".into()),
+            Value::String("flat".into()),
+        ];
+        let args = PointArgs::parse(rest, LineStyleParseOptions::scatter()).unwrap();
+        let err = resolve_scatter_style(2, &args, "scatter").unwrap_err();
+        assert!(err.contains("MarkerEdgeColor 'flat'"));
     }
 }

@@ -497,7 +497,8 @@ impl PlotOverlay {
                         crate::plots::figure::PlotType::Bar
                         | crate::plots::figure::PlotType::Area
                         | crate::plots::figure::PlotType::Pie
-                        | crate::plots::figure::PlotType::Image => {
+                        | crate::plots::figure::PlotType::Image
+                        | crate::plots::figure::PlotType::ContourFill => {
                             // Filled rect
                             ui.painter().rect_filled(swatch_rect, 2.0, c);
                             ui.painter().rect_stroke(

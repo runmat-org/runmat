@@ -7,7 +7,8 @@ struct VertexRaw {
 struct LineParams {
     color: vec4<f32>,
     count: u32,
-    _pad: vec3<u32>,
+    marker_size: f32,
+    _pad: vec2<u32>,
 };
 
 @group(0) @binding(0)
@@ -42,7 +43,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[6u] = params.color.w;
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
-    vertex.data[9u] = 1.0;
+    vertex.data[9u] = params.marker_size;
     vertex.data[10u] = 0.0;
     vertex.data[11u] = 0.0;
 
@@ -59,7 +60,8 @@ struct VertexRaw {
 struct LineParams {
     color: vec4<f32>,
     count: u32,
-    _pad: vec3<u32>,
+    marker_size: f32,
+    _pad: vec2<u32>,
 };
 
 @group(0) @binding(0)
@@ -94,7 +96,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vertex.data[6u] = params.color.w;
     vertex.data[7u] = 0.0;
     vertex.data[8u] = 0.0;
-    vertex.data[9u] = 1.0;
+    vertex.data[9u] = params.marker_size;
     vertex.data[10u] = 0.0;
     vertex.data[11u] = 0.0;
 

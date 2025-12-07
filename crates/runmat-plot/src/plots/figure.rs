@@ -508,7 +508,16 @@ impl Figure {
                     s.set_color_limits(self.color_limits);
                 }
             }
-            out.push(p.render_data());
+
+            match p {
+                PlotElement::Line(plot) => {
+                    out.push(plot.render_data());
+                    if let Some(marker_data) = plot.marker_render_data() {
+                        out.push(marker_data);
+                    }
+                }
+                _ => out.push(p.render_data()),
+            }
         }
         out
     }

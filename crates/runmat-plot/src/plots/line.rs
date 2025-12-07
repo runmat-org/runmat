@@ -3,9 +3,10 @@
 //! High-performance line plotting with GPU acceleration.
 
 use crate::core::{
-    vertex_utils, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData,
-    Vertex,
+    vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType,
+    RenderData, Vertex,
 };
+use crate::plots::scatter::MarkerStyle as ScatterMarkerStyle;
 use glam::{Vec3, Vec4};
 
 /// High-performance GPU-accelerated line plot
@@ -21,6 +22,7 @@ pub struct LinePlot {
     pub line_style: LineStyle,
     pub line_join: LineJoin,
     pub line_cap: LineCap,
+    pub marker: Option<LineMarkerAppearance>,
 
     /// Metadata
     pub label: Option<String>,
@@ -32,6 +34,26 @@ pub struct LinePlot {
     dirty: bool,
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
+    marker_vertices: Option<Vec<Vertex>>,
+    marker_gpu_vertices: Option<GpuVertexBuffer>,
+    marker_dirty: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LineMarkerAppearance {
+    pub kind: ScatterMarkerStyle,
+    pub size: f32,
+    pub edge_color: Vec4,
+    pub face_color: Vec4,
+    pub filled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LineGpuStyle {
+    pub color: Vec4,
+    pub line_width: f32,
+    pub line_style: LineStyle,
+    pub marker: Option<LineMarkerAppearance>,
 }
 
 /// Line rendering styles
@@ -100,6 +122,7 @@ impl LinePlot {
             line_style: LineStyle::default(),
             line_join: LineJoin::default(),
             line_cap: LineCap::default(),
+            marker: None,
             label: None,
             visible: true,
             vertices: None,
@@ -107,6 +130,9 @@ impl LinePlot {
             dirty: true,
             gpu_vertices: None,
             gpu_vertex_count: None,
+            marker_vertices: None,
+            marker_gpu_vertices: None,
+            marker_dirty: true,
         })
     }
 
@@ -114,18 +140,19 @@ impl LinePlot {
     pub fn from_gpu_buffer(
         buffer: GpuVertexBuffer,
         vertex_count: usize,
-        color: Vec4,
-        line_width: f32,
+        style: LineGpuStyle,
         bounds: BoundingBox,
+        marker_buffer: Option<GpuVertexBuffer>,
     ) -> Self {
         Self {
             x_data: Vec::new(),
             y_data: Vec::new(),
-            color,
-            line_width,
-            line_style: LineStyle::Solid,
+            color: style.color,
+            line_width: style.line_width,
+            line_style: style.line_style,
             line_join: LineJoin::Miter,
             line_cap: LineCap::Butt,
+            marker: style.marker,
             label: None,
             visible: true,
             vertices: None,
@@ -133,6 +160,9 @@ impl LinePlot {
             dirty: false,
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
+            marker_vertices: None,
+            marker_gpu_vertices: marker_buffer,
+            marker_dirty: true,
         }
     }
 
@@ -140,6 +170,16 @@ impl LinePlot {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.bounds = None;
+        self.marker_gpu_vertices = None;
+        self.marker_dirty = true;
+    }
+
+    fn invalidate_marker_data(&mut self) {
+        self.marker_vertices = None;
+        self.marker_dirty = true;
+        if self.gpu_vertices.is_none() {
+            self.marker_gpu_vertices = None;
+        }
     }
 
     /// Create a line plot with custom styling
@@ -175,6 +215,7 @@ impl LinePlot {
         self.x_data = x_data;
         self.y_data = y_data;
         self.dirty = true;
+        self.invalidate_marker_data();
         Ok(())
     }
 
@@ -183,6 +224,7 @@ impl LinePlot {
         self.color = color;
         self.dirty = true;
         self.invalidate_gpu_data();
+        self.invalidate_marker_data();
     }
 
     /// Set the line width
@@ -197,6 +239,12 @@ impl LinePlot {
         self.line_style = style;
         self.dirty = true;
         self.invalidate_gpu_data();
+    }
+
+    /// Attach marker metadata so renderers can emit hybrid line+marker plots.
+    pub fn set_marker(&mut self, marker: Option<LineMarkerAppearance>) {
+        self.marker = marker;
+        self.invalidate_marker_data();
     }
 
     /// Set the line join style for thick lines
@@ -364,7 +412,7 @@ impl LinePlot {
         };
         material.roughness = self.line_width.max(0.0);
         material.metallic = style_code;
-        material.emissive = Vec4::new(cap_code, join_code, 0.0, 0.0);
+        material.emissive = Vec4::new(cap_code, join_code, -1.0, 0.0);
 
         let draw_call = DrawCall {
             vertex_offset: 0,
@@ -391,6 +439,90 @@ impl LinePlot {
             draw_calls: vec![draw_call],
             image: None,
         }
+    }
+
+    /// Generate render data representing the markers for this line plot.
+    pub fn marker_render_data(&mut self) -> Option<RenderData> {
+        let marker = self.marker.clone()?;
+        let material = Self::build_marker_material(&marker);
+
+        if let Some(gpu_vertices) = self.marker_gpu_vertices.clone() {
+            let vertex_count = gpu_vertices.vertex_count;
+            if vertex_count == 0 {
+                return None;
+            }
+            let draw_call = DrawCall {
+                vertex_offset: 0,
+                vertex_count,
+                index_offset: None,
+                index_count: None,
+                instance_count: 1,
+            };
+            return Some(RenderData {
+                pipeline_type: PipelineType::Points,
+                vertices: Vec::new(),
+                indices: None,
+                gpu_vertices: Some(gpu_vertices),
+                material,
+                draw_calls: vec![draw_call],
+                image: None,
+            });
+        }
+
+        let vertices = self.marker_vertices_slice(&marker)?;
+        if vertices.is_empty() {
+            return None;
+        }
+        let draw_call = DrawCall {
+            vertex_offset: 0,
+            vertex_count: vertices.len(),
+            index_offset: None,
+            index_count: None,
+            instance_count: 1,
+        };
+
+        Some(RenderData {
+            pipeline_type: PipelineType::Points,
+            vertices: vertices.to_vec(),
+            indices: None,
+            gpu_vertices: None,
+            material,
+            draw_calls: vec![draw_call],
+            image: None,
+        })
+    }
+
+    fn build_marker_material(marker: &LineMarkerAppearance) -> Material {
+        let mut material = Material {
+            albedo: marker.face_color,
+            ..Default::default()
+        };
+        if !marker.filled {
+            material.albedo.w = 0.0;
+        }
+        material.emissive = marker.edge_color;
+        material.roughness = 1.0;
+        material.metallic = marker_style_code(marker.kind);
+        material.alpha_mode = AlphaMode::Blend;
+        material
+    }
+
+    fn marker_vertices_slice(&mut self, marker: &LineMarkerAppearance) -> Option<&[Vertex]> {
+        if self.x_data.len() != self.y_data.len() || self.x_data.is_empty() {
+            return None;
+        }
+
+        if self.marker_vertices.is_none() || self.marker_dirty {
+            let mut verts = Vec::with_capacity(self.x_data.len());
+            for (&x, &y) in self.x_data.iter().zip(self.y_data.iter()) {
+                let mut vertex = Vertex::new(Vec3::new(x as f32, y as f32, 0.0), marker.face_color);
+                vertex.normal[2] = marker.size.max(1.0);
+                verts.push(vertex);
+            }
+            self.marker_vertices = Some(verts);
+            self.marker_dirty = false;
+        }
+        self.marker_vertices.as_deref()
     }
 
     /// Get plot statistics for debugging
@@ -424,6 +556,19 @@ impl LinePlot {
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
             + self.gpu_vertex_count.unwrap_or(0) * std::mem::size_of::<Vertex>()
+    }
+}
+
+fn marker_style_code(kind: ScatterMarkerStyle) -> f32 {
+    match kind {
+        ScatterMarkerStyle::Circle => 0.0,
+        ScatterMarkerStyle::Square => 1.0,
+        ScatterMarkerStyle::Triangle => 2.0,
+        ScatterMarkerStyle::Diamond => 3.0,
+        ScatterMarkerStyle::Plus => 4.0,
+        ScatterMarkerStyle::Cross => 5.0,
+        ScatterMarkerStyle::Star => 6.0,
+        ScatterMarkerStyle::Hexagon => 7.0,
     }
 }
 
@@ -602,5 +747,20 @@ mod tests {
 
         // Invalid color should fail
         assert!(plot_with_color(x, y, "invalid").is_err());
+    }
+
+    #[test]
+    fn marker_render_data_produces_point_draw_call() {
+        let mut plot = LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap();
+        plot.set_marker(Some(LineMarkerAppearance {
+            kind: ScatterMarkerStyle::Circle,
+            size: 8.0,
+            edge_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            face_color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            filled: true,
+        }));
+        let marker_data = plot.marker_render_data().expect("marker render data");
+        assert_eq!(marker_data.pipeline_type, PipelineType::Points);
+        assert_eq!(marker_data.draw_calls[0].vertex_count, 2);
     }
 }

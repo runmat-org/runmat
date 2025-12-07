@@ -27,7 +27,7 @@ pub use contour_fill::ContourFillPlot;
 pub use errorbar::ErrorBar;
 pub use figure::{Figure, LegendEntry, PlotElement, PlotType};
 pub use image::ImagePlot;
-pub use line::{LinePlot, LineStyle};
+pub use line::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 pub use pie::PieChart;
 pub use quiver::QuiverPlot;
 pub use scatter::{MarkerStyle, ScatterPlot};

@@ -1,11 +1,12 @@
 //! MATLAB-compatible `plot` builtin.
 
+use glam::Vec4;
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::ScalarType;
-use runmat_plot::plots::{LinePlot, LineStyle};
+use runmat_plot::plots::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -20,7 +21,7 @@ use super::state::{
 };
 use super::style::{
     looks_like_option_name, parse_line_style_args, value_as_string, LineAppearance,
-    LineStyleParseOptions,
+    LineStyleParseOptions, MarkerColor,
 };
 use std::collections::VecDeque;
 use std::convert::TryFrom;
@@ -109,6 +110,8 @@ register_builtin_fusion_spec!(FUSION_SPEC);
 #[cfg(feature = "doc_export")]
 register_builtin_doc_text!("plot", DOC_MD);
 
+const DEFAULT_LINE_MARKER_SIZE: f32 = 6.0;
+
 #[runtime_builtin(
     name = "plot",
     category = "plotting",
@@ -146,7 +149,7 @@ fn build_line_plot(
     label: &str,
     appearance: &LineAppearance,
 ) -> Result<LinePlot, String> {
-    let plot = LinePlot::new(x, y)
+    let mut plot = LinePlot::new(x, y)
         .map_err(|e| format!("plot: {e}"))?
         .with_label(label)
         .with_style(
@@ -154,6 +157,7 @@ fn build_line_plot(
             appearance.line_width,
             appearance.line_style,
         );
+    apply_marker_metadata(&mut plot, appearance);
     Ok(plot)
 }
 
@@ -200,7 +204,6 @@ fn parse_series_specs(
     let mut line_style_order: Option<Vec<LineStyle>> = None;
     let mut inline_opts = LineStyleParseOptions::plot();
     inline_opts.forbid_leading_numeric = false;
-    inline_opts.forbid_interleaved_numeric = false;
     while let Some(x_val) = queue.pop_front() {
         if !is_numeric_value(&x_val) {
             return Err(plot_err(
@@ -281,6 +284,40 @@ fn apply_line_style_order(plans: &mut [SeriesRenderPlan], order: &[LineStyle]) {
         }
     }
 }
+
+fn apply_marker_metadata(plot: &mut LinePlot, appearance: &LineAppearance) {
+    if let Some(marker) = build_marker_metadata(appearance) {
+        plot.set_marker(Some(marker));
+    }
+}
+
+fn build_marker_metadata(appearance: &LineAppearance) -> Option<LineMarkerAppearance> {
+    let marker = appearance.marker.as_ref()?;
+    let size = marker.size.unwrap_or(DEFAULT_LINE_MARKER_SIZE);
+    let edge_color = marker_color_to_vec4(&marker.edge_color, appearance.color);
+    let face_color = match marker.face_color {
+        MarkerColor::None => Vec4::new(edge_color.x, edge_color.y, edge_color.z, 0.0),
+        MarkerColor::Flat => appearance.color,
+        MarkerColor::Auto | MarkerColor::Color(_) => {
+            marker_color_to_vec4(&marker.face_color, appearance.color)
+        }
+    };
+    Some(LineMarkerAppearance {
+        kind: marker.kind.to_plot_marker(),
+        size,
+        edge_color,
+        face_color,
+        filled: !matches!(marker.face_color, MarkerColor::None),
+    })
+}
+
+fn marker_color_to_vec4(color: &MarkerColor, fallback: Vec4) -> Vec4 {
+    match color {
+        MarkerColor::Auto | MarkerColor::Flat => fallback,
+        MarkerColor::None => Vec4::new(fallback.x, fallback.y, fallback.z, 0.0),
+        MarkerColor::Color(value) => *value,
+    }
+}
 fn build_line_gpu_plot(
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
@@ -316,7 +353,9 @@ fn build_line_gpu_plot(
     };
     let params = runmat_plot::gpu::line::LineGpuParams {
         color: appearance.color,
+        marker_size: 1.0,
     };
+    let marker_meta = build_marker_metadata(appearance);
 
     let gpu_vertices = runmat_plot::gpu::line::pack_vertices_from_xy(
         &context.device,
@@ -326,13 +365,37 @@ fn build_line_gpu_plot(
     )
     .map_err(|e| format!("plot: failed to build GPU vertices: {e}"))?;
 
+    let marker_gpu_vertices = if let Some(marker) = marker_meta.as_ref() {
+        let marker_params = runmat_plot::gpu::line::LineGpuParams {
+            color: marker.face_color,
+            marker_size: marker.size.max(1.0),
+        };
+        Some(
+            runmat_plot::gpu::line::pack_vertices_from_xy(
+                &context.device,
+                &context.queue,
+                &inputs,
+                &marker_params,
+            )
+            .map_err(|e| format!("plot: failed to build marker vertices: {e}"))?,
+        )
+    } else {
+        None
+    };
+
     let bounds = gpu_xy_bounds(x, y, "plot")?;
+    let gpu_style = LineGpuStyle {
+        color: appearance.color,
+        line_width: appearance.line_width,
+        line_style: appearance.line_style,
+        marker: marker_meta.clone(),
+    };
     let mut plot = LinePlot::from_gpu_buffer(
         gpu_vertices,
         x_ref.len,
-        appearance.color,
-        appearance.line_width,
+        gpu_style,
         bounds,
+        marker_gpu_vertices,
     );
     plot = plot.with_label(label);
     Ok(plot)
@@ -354,13 +417,6 @@ fn render_series(
 
         if !line_style_explicit {
             appearance.line_style = next_line_style_for_axes(axes_index);
-        }
-
-        if let Some(marker) = appearance.marker.as_ref() {
-            warn!(
-                "plot: marker styles {:?} (size {:?}, edge {:?}, face {:?}) currently force CPU rendering",
-                marker.kind, marker.size, marker.edge_color, marker.face_color
-            );
         }
 
         let label = if total == 1 {

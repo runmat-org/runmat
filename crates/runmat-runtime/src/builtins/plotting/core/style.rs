@@ -1,6 +1,6 @@
 use glam::Vec4;
 use runmat_builtins::{CellArray, Tensor, Value};
-use runmat_plot::plots::LineStyle;
+use runmat_plot::plots::{LineStyle, MarkerStyle as PlotMarkerStyle};
 
 #[derive(Clone, Copy, Debug)]
 pub struct LineStyleParseOptions {
@@ -14,7 +14,7 @@ impl LineStyleParseOptions {
         Self {
             builtin_name: "plot",
             forbid_leading_numeric: true,
-            forbid_interleaved_numeric: true,
+            forbid_interleaved_numeric: false,
         }
     }
 
@@ -94,10 +94,31 @@ pub enum MarkerKind {
     Hexagram,
 }
 
+impl MarkerKind {
+    pub fn to_plot_marker(self) -> PlotMarkerStyle {
+        match self {
+            MarkerKind::Circle => PlotMarkerStyle::Circle,
+            MarkerKind::Plus => PlotMarkerStyle::Plus,
+            MarkerKind::Star => PlotMarkerStyle::Star,
+            MarkerKind::Point => PlotMarkerStyle::Circle,
+            MarkerKind::Cross => PlotMarkerStyle::Cross,
+            MarkerKind::TriangleUp => PlotMarkerStyle::Triangle,
+            MarkerKind::TriangleDown => PlotMarkerStyle::Triangle,
+            MarkerKind::TriangleLeft => PlotMarkerStyle::Triangle,
+            MarkerKind::TriangleRight => PlotMarkerStyle::Triangle,
+            MarkerKind::Square => PlotMarkerStyle::Square,
+            MarkerKind::Diamond => PlotMarkerStyle::Diamond,
+            MarkerKind::Pentagram => PlotMarkerStyle::Star,
+            MarkerKind::Hexagram => PlotMarkerStyle::Star,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum MarkerColor {
     Auto,
     None,
+    Flat,
     Color(Vec4),
 }
 
@@ -227,8 +248,7 @@ pub fn parse_line_style_args(
     let appearance = options.resolve();
     Ok(ParsedLineStyle {
         requires_cpu_fallback: options.requires_cpu_fallback
-            || appearance.line_style != LineStyle::Solid
-            || appearance.marker.is_some(),
+            || appearance.line_style != LineStyle::Solid,
         appearance,
         line_style_explicit: options.line_style.is_some(),
         line_style_order: options.line_style_order.clone(),
@@ -275,7 +295,6 @@ fn parse_style_string(
             'o' | '+' | '*' | '.' | 'x' | '^' | 'v' | '<' | '>' | 's' | 'd' | 'p' | 'h' => {
                 if let Some(kind) = marker_kind_from_token(ch) {
                     options.marker_kind = Some(kind);
-                    options.requires_cpu_fallback = true;
                 }
             }
             c if color_from_token(c).is_some() => {
@@ -324,7 +343,6 @@ fn parse_name_value_pairs(
                     Some(kind) => {
                         options.marker_kind = Some(kind);
                         options.marker_disabled = false;
-                        options.requires_cpu_fallback = true;
                     }
                     None => {
                         options.marker_kind = None;
@@ -339,15 +357,12 @@ fn parse_name_value_pairs(
                     return Err(ctx_err(opts, "MarkerSize must be positive"));
                 }
                 options.marker_size = Some(size as f32);
-                options.requires_cpu_fallback = true;
             }
             "markeredgecolor" => {
                 options.marker_edge_color = Some(parse_marker_color_value(opts, &pair[1])?);
-                options.requires_cpu_fallback = true;
             }
             "markerfacecolor" => {
                 options.marker_face_color = Some(parse_marker_color_value(opts, &pair[1])?);
-                options.requires_cpu_fallback = true;
             }
             "linestyleorder" => {
                 let order = parse_line_style_order_value(opts, &pair[1])?;
@@ -414,7 +429,8 @@ fn parse_marker_color_value(
     if let Some(name) = value_as_string(value) {
         let lower = name.trim().to_ascii_lowercase();
         return match lower.as_str() {
-            "auto" | "flat" => Ok(MarkerColor::Auto),
+            "auto" => Ok(MarkerColor::Auto),
+            "flat" => Ok(MarkerColor::Flat),
             "none" => Ok(MarkerColor::None),
             _ => Ok(MarkerColor::Color(parse_color_value(opts, value)?)),
         };
@@ -550,12 +566,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn style_string_with_marker_sets_cpu_fallback() {
+    fn style_string_with_marker_no_longer_forces_cpu_fallback() {
         let rest = vec![Value::String("o--".into())];
         let opts = LineStyleParseOptions::plot();
         let parsed = parse_line_style_args(&rest, &opts).expect("parsed");
         assert!(parsed.appearance.marker.is_some());
-        assert!(parsed.requires_cpu_fallback);
+        assert!(!parsed.requires_cpu_fallback);
     }
 
     #[test]
@@ -565,5 +581,12 @@ mod tests {
         let parsed = parse_line_style_args(&rest, &opts).expect("parsed");
         assert!(parsed.appearance.marker.is_none());
         assert!(!parsed.requires_cpu_fallback);
+    }
+
+    #[test]
+    fn marker_color_flat_literal_is_supported() {
+        let opts = LineStyleParseOptions::plot();
+        let color = parse_marker_color_value(&opts, &Value::String("flat".into())).unwrap();
+        assert_eq!(color, MarkerColor::Flat);
     }
 }
