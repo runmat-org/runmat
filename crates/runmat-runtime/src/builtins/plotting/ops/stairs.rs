@@ -4,9 +4,12 @@ use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_plot::gpu::line::{
+    self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
+};
 use runmat_plot::gpu::stairs::{StairsGpuInputs, StairsGpuParams};
 use runmat_plot::gpu::ScalarType;
-use runmat_plot::plots::StairsPlot;
+use runmat_plot::plots::{LineMarkerAppearance, LineStyle, StairsPlot};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -17,7 +20,10 @@ use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 use super::common::numeric_pair;
 use super::gpu_helpers::{gather_tensor_from_gpu, gpu_xy_bounds};
 use super::state::{render_active_plot, PlotRenderOptions};
-use super::style::{parse_line_style_args, LineAppearance, LineStyleParseOptions};
+use super::style::{
+    marker_metadata_from_appearance, parse_line_style_args, LineAppearance, LineStyleParseOptions,
+    DEFAULT_LINE_MARKER_SIZE,
+};
 use std::convert::TryFrom;
 
 #[cfg(feature = "doc_export")]
@@ -116,11 +122,16 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, St
     };
     render_active_plot(opts, move |figure, axes| {
         let appearance = parsed_style.appearance.clone();
+        let marker_meta = marker_metadata_from_appearance(&appearance);
+        let label = parsed_style
+            .label
+            .clone()
+            .unwrap_or_else(|| "Data".to_string());
         let x_arg = x_input.take().expect("stairs x consumed once");
         let y_arg = y_input.take().expect("stairs y consumed once");
 
         if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
-            match build_stairs_gpu_plot(x_gpu, y_gpu, &appearance) {
+            match build_stairs_gpu_plot(x_gpu, y_gpu, &appearance, marker_meta.clone(), &label) {
                 Ok(plot) => {
                     figure.add_stairs_plot_on_axes(plot, axes);
                     return Ok(());
@@ -131,7 +142,7 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> Result<String, St
 
         let (x_tensor, y_tensor) = (x_arg.into_tensor("stairs")?, y_arg.into_tensor("stairs")?);
         let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "stairs")?;
-        let plot = build_stairs_plot(x_vals, y_vals, &appearance)?;
+        let plot = build_stairs_plot(x_vals, y_vals, &appearance, marker_meta, &label)?;
         figure.add_stairs_plot_on_axes(plot, axes);
         Ok(())
     })
@@ -141,6 +152,8 @@ fn build_stairs_plot(
     x: Vec<f64>,
     y: Vec<f64>,
     appearance: &LineAppearance,
+    marker_meta: Option<LineMarkerAppearance>,
+    label: &str,
 ) -> Result<StairsPlot, String> {
     if x.len() != y.len() {
         return Err("stairs: X and Y inputs must share the same length".to_string());
@@ -148,10 +161,11 @@ fn build_stairs_plot(
     if x.len() < 2 {
         return Err("stairs: inputs must contain at least two elements".to_string());
     }
-    let plot = StairsPlot::new(x, y)
+    let mut plot = StairsPlot::new(x, y)
         .map_err(|e| format!("stairs: {e}"))?
         .with_style(appearance.color, appearance.line_width)
-        .with_label("Data");
+        .with_label(label);
+    apply_stairs_marker_metadata(&mut plot, marker_meta);
     Ok(plot)
 }
 
@@ -159,6 +173,8 @@ fn build_stairs_gpu_plot(
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
     appearance: &LineAppearance,
+    marker_meta: Option<LineMarkerAppearance>,
+    label: &str,
 ) -> Result<StairsPlot, String> {
     let context = runmat_plot::shared_wgpu_context()
         .ok_or_else(|| "stairs: plotting GPU context unavailable".to_string())?;
@@ -200,13 +216,49 @@ fn build_stairs_gpu_plot(
     )
     .map_err(|e| format!("stairs: failed to build GPU vertices: {e}"))?;
 
+    let marker_gpu = if let Some(marker) = marker_meta.clone() {
+        let marker_inputs = MarkerGpuInputs {
+            x_buffer: x_ref.buffer.clone(),
+            y_buffer: y_ref.buffer.clone(),
+            len: len_u32,
+            scalar,
+        };
+        let marker_params = MarkerGpuParams {
+            color: marker.face_color,
+            line_width: 1.0,
+            line_style: LineStyle::Solid,
+            marker_size: marker.size.max(DEFAULT_LINE_MARKER_SIZE),
+        };
+        Some(
+            line::pack_marker_vertices_from_xy(
+                &context.device,
+                &context.queue,
+                &marker_inputs,
+                &marker_params,
+            )
+            .map_err(|e| format!("stairs: failed to build marker vertices: {e}"))?,
+        )
+    } else {
+        None
+    };
+
     let bounds = gpu_xy_bounds(x, y, "stairs")?;
     let vertex_count = (x_ref.len - 1) * 4;
-    Ok(
+    let mut plot =
         StairsPlot::from_gpu_buffer(appearance.color, gpu_vertices, vertex_count, bounds)
             .with_style(appearance.color, appearance.line_width)
-            .with_label("Data"),
-    )
+            .with_label(label);
+    apply_stairs_marker_metadata(&mut plot, marker_meta);
+    plot.set_marker_gpu_vertices(marker_gpu);
+    Ok(plot)
+}
+
+fn apply_stairs_marker_metadata(plot: &mut StairsPlot, marker_meta: Option<LineMarkerAppearance>) {
+    if let Some(marker) = marker_meta {
+        plot.set_marker(Some(marker));
+    } else {
+        plot.set_marker(None);
+    }
 }
 
 enum StairsInput {

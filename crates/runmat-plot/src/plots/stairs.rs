@@ -1,8 +1,9 @@
 //! Stairs (step) plot implementation
 
 use crate::core::{
-    BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+    AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
 };
+use crate::plots::line::LineMarkerAppearance;
 use glam::{Vec3, Vec4};
 
 #[derive(Debug, Clone)]
@@ -19,6 +20,10 @@ pub struct StairsPlot {
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
+    marker: Option<LineMarkerAppearance>,
+    marker_vertices: Option<Vec<Vertex>>,
+    marker_gpu_vertices: Option<GpuVertexBuffer>,
+    marker_dirty: bool,
 }
 
 impl StairsPlot {
@@ -39,6 +44,10 @@ impl StairsPlot {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            marker: None,
+            marker_vertices: None,
+            marker_gpu_vertices: None,
+            marker_dirty: true,
         })
     }
 
@@ -62,6 +71,10 @@ impl StairsPlot {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            marker: None,
+            marker_vertices: None,
+            marker_gpu_vertices: None,
+            marker_dirty: true,
         }
     }
 
@@ -69,6 +82,7 @@ impl StairsPlot {
         self.color = color;
         self.line_width = line_width.max(0.5);
         self.dirty = true;
+        self.marker_dirty = true;
         self.drop_gpu();
         self
     }
@@ -80,10 +94,28 @@ impl StairsPlot {
         self.visible = v;
     }
 
+    pub fn set_marker(&mut self, marker: Option<LineMarkerAppearance>) {
+        self.marker = marker;
+        self.marker_dirty = true;
+        if self.marker.is_none() {
+            self.marker_vertices = None;
+            self.marker_gpu_vertices = None;
+        }
+    }
+
+    pub fn set_marker_gpu_vertices(&mut self, buffer: Option<GpuVertexBuffer>) {
+        let has_gpu = buffer.is_some();
+        self.marker_gpu_vertices = buffer;
+        if has_gpu {
+            self.marker_vertices = None;
+        }
+    }
+
     fn drop_gpu(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
+        self.marker_gpu_vertices = None;
     }
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {
         if self.gpu_vertices.is_some() {
@@ -172,6 +204,87 @@ impl StairsPlot {
             draw_calls: vec![draw_call],
             image: None,
         }
+    }
+
+    pub fn marker_render_data(&mut self) -> Option<RenderData> {
+        let marker = self.marker.clone()?;
+        if let Some(gpu_vertices) = self.marker_gpu_vertices.clone() {
+            let vertex_count = gpu_vertices.vertex_count;
+            if vertex_count == 0 {
+                return None;
+            }
+            let draw_call = DrawCall {
+                vertex_offset: 0,
+                vertex_count,
+                index_offset: None,
+                index_count: None,
+                instance_count: 1,
+            };
+            let material = Self::marker_material(&marker);
+            return Some(RenderData {
+                pipeline_type: PipelineType::Points,
+                vertices: Vec::new(),
+                indices: None,
+                gpu_vertices: Some(gpu_vertices),
+                material,
+                draw_calls: vec![draw_call],
+                image: None,
+            });
+        }
+
+        let vertices = self.marker_vertices_slice(&marker)?;
+        if vertices.is_empty() {
+            return None;
+        }
+        let draw_call = DrawCall {
+            vertex_offset: 0,
+            vertex_count: vertices.len(),
+            index_offset: None,
+            index_count: None,
+            instance_count: 1,
+        };
+        let material = Self::marker_material(&marker);
+        Some(RenderData {
+            pipeline_type: PipelineType::Points,
+            vertices: vertices.to_vec(),
+            indices: None,
+            gpu_vertices: None,
+            material,
+            draw_calls: vec![draw_call],
+            image: None,
+        })
+    }
+
+    fn marker_material(marker: &LineMarkerAppearance) -> Material {
+        let mut material = Material {
+            albedo: marker.face_color,
+            ..Default::default()
+        };
+        if !marker.filled {
+            material.albedo.w = 0.0;
+        }
+        material.emissive = marker.edge_color;
+        material.roughness = 1.0;
+        material.metallic = 0.0;
+        material.alpha_mode = AlphaMode::Blend;
+        material
+    }
+
+    fn marker_vertices_slice(&mut self, marker: &LineMarkerAppearance) -> Option<&[Vertex]> {
+        if self.x.len() != self.y.len() || self.x.is_empty() {
+            return None;
+        }
+        if self.marker_vertices.is_none() || self.marker_dirty {
+            let mut verts = Vec::with_capacity(self.x.len());
+            for (&x, &y) in self.x.iter().zip(self.y.iter()) {
+                let mut vertex = Vertex::new(Vec3::new(x as f32, y as f32, 0.0), marker.face_color);
+                vertex.normal[2] = marker.size.max(1.0);
+                verts.push(vertex);
+            }
+            self.marker_vertices = Some(verts);
+            self.marker_dirty = false;
+        }
+        self.marker_vertices.as_deref()
     }
     pub fn estimated_memory_usage(&self) -> usize {
         self.vertices

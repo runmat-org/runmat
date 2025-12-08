@@ -176,21 +176,23 @@ pub fn hist_builtin(data: Value, rest: Vec<Value>) -> Result<String, String> {
     };
     render_active_plot(opts, move |figure, axes| {
         let data_arg = input.take().expect("hist input consumed once");
-        if let Some(handle) = data_arg.gpu_handle() {
-            if bin_spec.is_uniform() {
-                match build_histogram_gpu_chart(
-                    handle,
-                    &bin_spec,
-                    sample_len,
-                    normalization,
-                    &bar_style,
-                ) {
-                    Ok(mut bar) => {
-                        apply_bar_style(&mut bar, &bar_style, HIST_DEFAULT_LABEL);
-                        figure.add_bar_chart_on_axes(bar, axes);
-                        return Ok(());
+        if !bar_style.requires_cpu_path() {
+            if let Some(handle) = data_arg.gpu_handle() {
+                if bin_spec.is_uniform() {
+                    match build_histogram_gpu_chart(
+                        handle,
+                        &bin_spec,
+                        sample_len,
+                        normalization,
+                        &bar_style,
+                    ) {
+                        Ok(mut bar) => {
+                            apply_bar_style(&mut bar, &bar_style, HIST_DEFAULT_LABEL);
+                            figure.add_bar_chart_on_axes(bar, axes);
+                            return Ok(());
+                        }
+                        Err(err) => warn!("hist GPU path unavailable: {err}"),
                     }
-                    Err(err) => warn!("hist GPU path unavailable: {err}"),
                 }
             }
         }

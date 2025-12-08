@@ -123,5 +123,9 @@ The wasm bindings now expose the same figure/axes controls that the MATLAB runti
 - `newFigureHandle()` / `currentFigureHandle()` – explicit helpers for creating or querying handles when wiring UI tabs.
 - `setHoldMode(mode)` / `hold(mode?)` / `holdOn()` / `holdOff()` – toggle MATLAB's `hold` state from JS using `"on" | "off" | "toggle"` (boolean flags also work).
 - `configureSubplot(rows, cols, index)` / `subplot(rows, cols, index)` – mirror MATLAB's subplot grid selection so canvas layouts stay in sync with the runtime registry.
+- `clearFigure(handle?)` / `closeFigure(handle?)` – mirror `clf`/`close` semantics. Omit the handle (or pass `undefined`) to target the current figure.
+- `currentAxesInfo()` – returns `{ handle, axesRows, axesCols, activeIndex }` so hosts can surface the active subplot without scraping text output.
 
 Each helper forwards directly to the new wasm exports, so the zero-copy renderer stays in lock-step with MATLAB semantics even when figure switches originate from the host UI.
+
+When a lifecycle call fails (bad handle, invalid subplot index, etc.) the Promise rejects with a structured error object `{ code, message, ... }`. The wrapper converts that into a real `Error` (with `.code`, `.handle`, `.rows`, `.cols`, `.index` where applicable) so host UIs can surface meaningful messages without parsing MATLAB text.

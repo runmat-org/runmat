@@ -1135,10 +1135,7 @@ mod tests {
         let args = parse_contour_args(
             "contour",
             z,
-            vec![
-                Value::String("LevelStep".into()),
-                Value::Num(0.5),
-            ],
+            vec![Value::String("LevelStep".into()), Value::Num(0.5)],
         )
         .unwrap();
         match args.level_spec {
@@ -1153,10 +1150,7 @@ mod tests {
         let args = parse_contour_args(
             "contour",
             z,
-            vec![
-                Value::String("LineColor".into()),
-                Value::String("r".into()),
-            ],
+            vec![Value::String("LineColor".into()), Value::String("r".into())],
         )
         .unwrap();
         match args.line_color {

@@ -30,6 +30,12 @@ mod wasm {
         Ok(())
     }
 
+    pub fn detach_web_renderer(handle: u32) {
+        WEB_RENDERERS.with(|slot| {
+            slot.borrow_mut().remove(&handle);
+        });
+    }
+
     pub fn web_renderer_ready() -> bool {
         WEB_RENDERERS.with(|slot| !slot.borrow().is_empty())
             || DEFAULT_RENDERER.with(|slot| slot.borrow().is_some())
@@ -84,6 +90,8 @@ mod wasm {
         Err(ERR_PLOTTING_UNAVAILABLE.to_string())
     }
 
+    pub fn detach_web_renderer(_handle: u32) {}
+
     pub fn web_renderer_ready() -> bool {
         false
     }
@@ -107,6 +115,10 @@ pub fn install_web_renderer_for_handle(
     renderer: wasm::RendererType,
 ) -> Result<(), String> {
     wasm::install_web_renderer_for_handle(handle, renderer)
+}
+
+pub fn detach_web_renderer(handle: u32) {
+    wasm::detach_web_renderer(handle)
 }
 
 #[cfg_attr(

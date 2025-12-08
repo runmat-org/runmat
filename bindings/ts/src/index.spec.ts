@@ -57,3 +57,24 @@ describe("resolveSnapshotSource", () => {
     expect(Array.from(result)).toEqual([4, 5, 6]);
   });
 });
+
+describe("coerceFigureError", () => {
+  it("wraps structured payloads", () => {
+    const payload = {
+      code: "InvalidHandle",
+      message: "figure missing",
+      handle: 7
+    };
+    const err = __internals.coerceFigureError(payload);
+    expect(err.code).toBe("InvalidHandle");
+    expect(err.handle).toBe(7);
+    expect(err.message).toBe("figure missing");
+  });
+
+  it("defaults unknown errors to code 'Unknown'", () => {
+    const original = new Error("boom");
+    const err = __internals.coerceFigureError(original);
+    expect(err.code).toBe("Unknown");
+    expect(err.message).toBe("boom");
+  });
+});

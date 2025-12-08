@@ -33,17 +33,17 @@ use runmat_plot::{
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::plotting::{
-    configure_subplot as runtime_configure_subplot,
-    context as plotting_context,
+    clear_figure as runtime_clear_figure, close_figure as runtime_close_figure,
+    configure_subplot as runtime_configure_subplot, context as plotting_context,
+    current_axes_state as runtime_current_axes_state,
     current_figure_handle as runtime_current_figure_handle,
+    detach_web_renderer as runtime_detach_web_renderer,
     install_figure_observer as runtime_install_figure_observer,
     install_web_renderer as runtime_install_web_renderer,
     install_web_renderer_for_handle as runtime_install_web_renderer_for_handle,
-    new_figure_handle as runtime_new_figure_handle,
-    select_figure as runtime_select_figure,
-    set_hold as runtime_set_hold,
-    web_renderer_ready as runtime_plot_renderer_ready,
-    FigureHandle, HoldMode,
+    new_figure_handle as runtime_new_figure_handle, select_figure as runtime_select_figure,
+    set_hold as runtime_set_hold, web_renderer_ready as runtime_plot_renderer_ready,
+    FigureAxesState, FigureError, FigureEventKind, FigureHandle, HoldMode,
 };
 
 const MAX_DATA_PREVIEW: usize = 4096;
@@ -228,13 +228,8 @@ pub fn wasm_current_figure_handle() -> u32 {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = configureSubplot)]
 pub fn wasm_configure_subplot(rows: u32, cols: u32, index: u32) -> Result<(), JsValue> {
-    if rows == 0 || cols == 0 {
-        return Err(js_error(
-            "configureSubplot requires rows and cols to be at least 1",
-        ));
-    }
-    runtime_configure_subplot(rows as usize, cols as usize, index as usize);
-    Ok(())
+    runtime_configure_subplot(rows as usize, cols as usize, index as usize)
+        .map_err(figure_error_to_js)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -242,6 +237,28 @@ pub fn wasm_configure_subplot(rows: u32, cols: u32, index: u32) -> Result<(), Js
 pub fn wasm_set_hold_mode(mode: JsValue) -> Result<bool, JsValue> {
     let parsed = parse_hold_mode(mode)?;
     Ok(runtime_set_hold(parsed))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = clearFigure)]
+pub fn wasm_clear_figure(handle: JsValue) -> Result<u32, JsValue> {
+    let target = parse_optional_handle(handle)?;
+    let cleared = runtime_clear_figure(target).map_err(figure_error_to_js)?;
+    Ok(cleared.as_u32())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = closeFigure)]
+pub fn wasm_close_figure(handle: JsValue) -> Result<u32, JsValue> {
+    let target = parse_optional_handle(handle)?;
+    let closed = runtime_close_figure(target).map_err(figure_error_to_js)?;
+    Ok(closed.as_u32())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = currentAxesInfo)]
+pub fn wasm_current_axes_info() -> JsValue {
+    axes_state_to_js(runtime_current_axes_state())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -411,8 +428,8 @@ fn install_cpu_provider(config: &SessionConfig) {
 fn ensure_figure_event_bridge() {
     use runmat_plot::plots::Figure;
     FIGURE_EVENT_OBSERVER.get_or_init(|| {
-        let observer: Arc<dyn Fn(u32, &Figure) + Send + Sync> =
-            Arc::new(|handle, figure| emit_js_figure_event(handle, figure));
+        let observer: Arc<dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync> =
+            Arc::new(|event| emit_js_figure_event(event));
         let _ = runtime_install_figure_observer(observer);
     });
 }
@@ -445,48 +462,186 @@ fn parse_hold_mode(value: JsValue) -> Result<HoldMode, JsValue> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn emit_js_figure_event(handle: u32, figure: &runmat_plot::plots::Figure) {
+fn parse_optional_handle(value: JsValue) -> Result<Option<FigureHandle>, JsValue> {
+    if value.is_null() || value.is_undefined() {
+        return Ok(None);
+    }
+    if let Some(num) = value.as_f64() {
+        if !num.is_finite() || num <= 0.0 {
+            return Err(js_error("Figure handles must be positive numbers"));
+        }
+        return Ok(Some(FigureHandle::from(num.round() as u32)));
+    }
+    Err(js_error(
+        "Figure handles must be numeric or left undefined for the active figure",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn figure_error_to_js(err: FigureError) -> JsValue {
+    let payload = js_sys::Object::new();
+    let message = err.to_string();
+    let code = match err {
+        FigureError::InvalidHandle(handle) => {
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("handle"),
+                &JsValue::from(handle),
+            );
+            "InvalidHandle"
+        }
+        FigureError::InvalidSubplotGrid { rows, cols } => {
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("rows"),
+                &JsValue::from(rows as u32),
+            );
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("cols"),
+                &JsValue::from(cols as u32),
+            );
+            "InvalidSubplotGrid"
+        }
+        FigureError::InvalidSubplotIndex { rows, cols, index } => {
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("rows"),
+                &JsValue::from(rows as u32),
+            );
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("cols"),
+                &JsValue::from(cols as u32),
+            );
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("index"),
+                &JsValue::from(index as u32),
+            );
+            "InvalidSubplotIndex"
+        }
+    };
+    let _ = Reflect::set(
+        &payload,
+        &JsValue::from_str("code"),
+        &JsValue::from_str(code),
+    );
+    let _ = Reflect::set(
+        &payload,
+        &JsValue::from_str("message"),
+        &JsValue::from_str(&message),
+    );
+    JsValue::from(payload)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn axes_state_to_js(state: FigureAxesState) -> JsValue {
+    let payload = js_sys::Object::new();
+    let _ = Reflect::set(
+        &payload,
+        &JsValue::from_str("handle"),
+        &JsValue::from(state.handle.as_u32()),
+    );
+    let _ = Reflect::set(
+        &payload,
+        &JsValue::from_str("axesRows"),
+        &JsValue::from(state.rows as u32),
+    );
+    let _ = Reflect::set(
+        &payload,
+        &JsValue::from_str("axesCols"),
+        &JsValue::from(state.cols as u32),
+    );
+    let _ = Reflect::set(
+        &payload,
+        &JsValue::from_str("activeIndex"),
+        &JsValue::from(state.active_index as u32),
+    );
+    payload.into()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn emit_js_figure_event(event: FigureEventView<'_>) {
+    if let FigureEventKind::Closed = event.kind {
+        runtime_detach_web_renderer(event.handle.as_u32());
+    }
     FIGURE_EVENT_CALLBACK.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {
             let payload = js_sys::Object::new();
             let _ = Reflect::set(
                 &payload,
                 &JsValue::from_str("handle"),
-                &JsValue::from(handle),
-            );
-            let (rows, cols) = figure.axes_grid();
-            let _ = Reflect::set(
-                &payload,
-                &JsValue::from_str("axesRows"),
-                &JsValue::from(rows as u32),
+                &JsValue::from(event.handle.as_u32()),
             );
             let _ = Reflect::set(
                 &payload,
-                &JsValue::from_str("axesCols"),
-                &JsValue::from(cols as u32),
+                &JsValue::from_str("kind"),
+                &JsValue::from_str(match event.kind {
+                    FigureEventKind::Created => "created",
+                    FigureEventKind::Updated => "updated",
+                    FigureEventKind::Cleared => "cleared",
+                    FigureEventKind::Closed => "closed",
+                }),
             );
-            let plot_count = figure.plot_axes_indices().len() as u32;
-            let _ = Reflect::set(
-                &payload,
-                &JsValue::from_str("plotCount"),
-                &JsValue::from(plot_count),
-            );
-            let indices = Array::new();
-            for idx in figure.plot_axes_indices() {
-                indices.push(&JsValue::from(*idx as u32));
-            }
-            let _ = Reflect::set(
-                &payload,
-                &JsValue::from_str("axesIndices"),
-                &JsValue::from(indices),
-            );
-            if let Some(title) = figure.title.as_ref() {
+
+            if let Some(figure) = event.figure {
+                let (rows, cols) = figure.axes_grid();
                 let _ = Reflect::set(
                     &payload,
-                    &JsValue::from_str("title"),
-                    &JsValue::from_str(title),
+                    &JsValue::from_str("axesRows"),
+                    &JsValue::from(rows as u32),
+                );
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("axesCols"),
+                    &JsValue::from(cols as u32),
+                );
+                let plot_count = figure.plot_axes_indices().len() as u32;
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("plotCount"),
+                    &JsValue::from(plot_count),
+                );
+                let indices = Array::new();
+                for idx in figure.plot_axes_indices() {
+                    indices.push(&JsValue::from(*idx as u32));
+                }
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("axesIndices"),
+                    &JsValue::from(indices),
+                );
+                if let Some(title) = figure.title.as_ref() {
+                    let _ = Reflect::set(
+                        &payload,
+                        &JsValue::from_str("title"),
+                        &JsValue::from_str(title),
+                    );
+                }
+            } else {
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("axesRows"),
+                    &JsValue::from(0u32),
+                );
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("axesCols"),
+                    &JsValue::from(0u32),
+                );
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("plotCount"),
+                    &JsValue::from(0u32),
+                );
+                let _ = Reflect::set(
+                    &payload,
+                    &JsValue::from_str("axesIndices"),
+                    &JsValue::from(Array::new()),
                 );
             }
+
             let _ = cb.call1(&JsValue::NULL, &payload);
         }
     });

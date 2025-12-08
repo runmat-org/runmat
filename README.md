@@ -1,5 +1,8 @@
-# 🚀 RunMat: The fastest runtime for your math
-### RunMat automatically **fuses operations and intelligently routes between CPU and GPU**. MATLAB syntax. No kernel code, no rewrites.
+# 🚀 RunMat: Blazing Fast Runtime for Math
+
+### RunMat automatically **fuses operations and intelligently routes between CPU and GPU**. 
+
+Capture math in MATLAB syntax. Run on CPU or GPU. Works across Windows, macOS, Linux, and WebAssembly, across NVIDIA, AMD, Apple Silicon, and Intel GPUs. No kernel code, no rewrites. No device flags. No vendor lock-in.
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/runmat-org/runmat/ci.yml?branch=main)](https://github.com/runmat-org/runmat/actions)
 [![License](https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg)](LICENSE.md)
@@ -10,26 +13,42 @@
 
 ---
 
-### **Status: Pre-release (v0.2)**
-RunMat is an early build. The core runtime and GPU engine already pass thousands of tests, but some plotting features are still missing or buggy. Expect a few rough edges. Feedback and bug reports help us decide what to fix next.
+### **Status: Pre-release (v0.3)**
+
+RunMat is an early build. The core runtime and GPU engine already pass thousands of tests, and the plotting backend is in its first public release. Expect a few rough edges. Feedback and bug reports are always appreciated.
 
 ---
 
 ## What is RunMat?
 
-With RunMat you write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best place — CPU or GPU. On GPU, it can often match or beat hand-tuned CUDA on many dense numerical workloads
+With RunMat you write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best place — CPU or GPU. On GPU, it can often match or beat hand-written CUDA on many dense numerical workloads
 
 It runs on whatever GPU you have — NVIDIA, AMD, Apple Silicon, Intel — through native APIs (Metal / DirectX 12 / Vulkan). No device management. No vendor lock-in. No rewrites.
 
+This means a you can write math like:
+
+```matlab
+x  = 0:0.01:4*pi;
+y0 = sin(x) .* exp(-x / 10);
+y1 = y0 .* cos(x / 4) + 0.25 .* (y0 .^ 2);
+y2 = tanh(y1) + 0.1 .* y1;
+
+plot(x, y2);
+```
+
+and it will run like this (points in the graph is the number of elements in the `x` vector above):
+
+![Elementwise math speedup](https://web.runmatstatic.com/elementwise-math_speedup-b.svg)
+
 Core ideas:
 
-- **MATLAB syntax, not a new language**  
+- **MATLAB input language compatibility, not a new language**  
 - **Fast on CPU and GPU**, with one runtime  
 - **No device flags** — Fusion automatically chooses CPU vs GPU based on data size and transfer cost heuristics
 
 ## ✨ Features at a glance
 
-- **MATLAB language**
+- **MATLAB input language compatibility, not a new language**
 
   - Familiar `.m` files, arrays, control flow  
   - Many MATLAB / Octave scripts run with few or no changes  
@@ -70,12 +89,8 @@ Core ideas:
 --- 
 
 ## 📊 Performance highlights
-
-These are large workloads where **Fusion chooses GPU**.  
-Hardware: **Apple M2 Max**, **Metal**, each point is the mean of 3 runs.
-
-
-
+ 
+Hardware: **Apple M2 Max**, **Metal**. Each point is the median of 3 runs for each benchmark.
 
 ### 4K Image Pipeline Perf Sweep (B = batch size)
 | B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |

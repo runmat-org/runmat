@@ -26,6 +26,7 @@ pub struct BarChart {
     pub bar_width: f32,
     pub outline_color: Option<Vec4>,
     pub outline_width: f32,
+    per_bar_colors: Option<Vec<Vec4>>,
 
     /// Orientation (vertical = default bar, horizontal = barh)
     pub orientation: Orientation,
@@ -90,6 +91,7 @@ impl BarChart {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            per_bar_colors: None,
         })
     }
 
@@ -124,6 +126,7 @@ impl BarChart {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            per_bar_colors: None,
         }
     }
 
@@ -154,6 +157,27 @@ impl BarChart {
         self.orientation = orientation;
         self.dirty = true;
         self
+    }
+
+    pub fn bar_count(&self) -> usize {
+        self.value_count
+    }
+
+    pub fn set_per_bar_colors(&mut self, colors: Vec<Vec4>) {
+        if colors.is_empty() {
+            self.per_bar_colors = None;
+        } else {
+            self.per_bar_colors = Some(colors);
+        }
+        self.dirty = true;
+        self.invalidate_gpu_data();
+    }
+
+    pub fn clear_per_bar_colors(&mut self) {
+        if self.per_bar_colors.is_some() {
+            self.per_bar_colors = None;
+            self.dirty = true;
+        }
     }
 
     /// Configure grouped bars (index within group and total group count)
@@ -213,6 +237,7 @@ impl BarChart {
     /// Set the bar color
     pub fn set_color(&mut self, color: Vec4) {
         self.color = color;
+        self.per_bar_colors = None;
         self.dirty = true;
     }
 
@@ -339,6 +364,7 @@ impl BarChart {
                     if !value.is_finite() {
                         continue;
                     }
+                    let color = self.color_for_bar(i);
                     let x_center = (i as f32) + 1.0;
                     let center = x_center + local_offset;
                     let half = per_group_width * 0.5;
@@ -353,10 +379,10 @@ impl BarChart {
                     let top = base + value as f32;
 
                     let vertex_offset = vertices.len() as u32;
-                    vertices.push(Vertex::new(Vec3::new(left, bottom, 0.0), self.color));
-                    vertices.push(Vertex::new(Vec3::new(right, bottom, 0.0), self.color));
-                    vertices.push(Vertex::new(Vec3::new(right, top, 0.0), self.color));
-                    vertices.push(Vertex::new(Vec3::new(left, top, 0.0), self.color));
+                    vertices.push(Vertex::new(Vec3::new(left, bottom, 0.0), color));
+                    vertices.push(Vertex::new(Vec3::new(right, bottom, 0.0), color));
+                    vertices.push(Vertex::new(Vec3::new(right, top, 0.0), color));
+                    vertices.push(Vertex::new(Vec3::new(left, top, 0.0), color));
                     indices.push(vertex_offset);
                     indices.push(vertex_offset + 1);
                     indices.push(vertex_offset + 2);
@@ -370,6 +396,7 @@ impl BarChart {
                     if !value.is_finite() {
                         continue;
                     }
+                    let color = self.color_for_bar(i);
                     let y_center = (i as f32) + 1.0;
                     let center = y_center + local_offset;
                     let half = per_group_width * 0.5;
@@ -384,10 +411,10 @@ impl BarChart {
                     let right = base + value as f32;
 
                     let vertex_offset = vertices.len() as u32;
-                    vertices.push(Vertex::new(Vec3::new(left, bottom, 0.0), self.color));
-                    vertices.push(Vertex::new(Vec3::new(right, bottom, 0.0), self.color));
-                    vertices.push(Vertex::new(Vec3::new(right, top, 0.0), self.color));
-                    vertices.push(Vertex::new(Vec3::new(left, top, 0.0), self.color));
+                    vertices.push(Vertex::new(Vec3::new(left, bottom, 0.0), color));
+                    vertices.push(Vertex::new(Vec3::new(right, bottom, 0.0), color));
+                    vertices.push(Vertex::new(Vec3::new(right, top, 0.0), color));
+                    vertices.push(Vertex::new(Vec3::new(left, top, 0.0), color));
                     indices.push(vertex_offset);
                     indices.push(vertex_offset + 1);
                     indices.push(vertex_offset + 2);
@@ -399,6 +426,15 @@ impl BarChart {
         }
 
         (vertices, indices)
+    }
+
+    fn color_for_bar(&self, index: usize) -> Vec4 {
+        if let Some(colors) = &self.per_bar_colors {
+            if let Some(color) = colors.get(index) {
+                return *color;
+            }
+        }
+        self.color
     }
 
     /// Get the bounding box of the chart

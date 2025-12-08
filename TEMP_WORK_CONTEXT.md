@@ -11,6 +11,9 @@ This scratch file preserves the current mental model for the RunMat plotting/WAS
 - `plot` now handles MATLAB-style strings/name-value pairs (`'LineWidth'`, `'Color'`, `'LineStyle'`, `'Marker*'`) and multiple X/Y series so long as every series appears before the shared style block. Inline style tokens between series (e.g., `plot(x1,y1,'r',x2,y2,'--')`) are parsed per-series, and `'LineStyleOrder'` accepts string scalars, string arrays, or cell arrays of strings to seed the default line-style cycle. The figure registry stores the current `LineStyleOrder` per axes and cycles it across successive plot calls (reset on `hold off`), mirroring MATLAB defaults. Marker specs now ride a zero-copy path: the runtime exports GPU marker metadata, runmat-plot packs point vertices alongside the line buffers, and the renderer draws both primitives so hybrid line+marker plots stay GPU-resident (no more CPU fallback warnings). The GPU packer also keeps dashed/dash-dot/dotted styles and multi-pixel widths on-device by expanding each segment into line pairs or extruded triangle strips while tracking vertex counts atomically, so only unsupported precisions fall back to the CPU path. Other plotting builtins still accept only their minimal argument forms.
 - Parser parity work has started to spread beyond `plot`: `bar`, `hist`, `contour`, and `contourf` now accept MATLAB-style color/width/name-value pairs (`'FaceColor'`, `'EdgeColor'`, `'FaceAlpha'`, `'BarWidth'`, `'DisplayName'`, `'LevelList'`, `'LevelListMode'`, `'LevelStep'`, `'LineColor'`, etc.) while keeping gpuArray inputs zero-copy. Shared helpers (`parse_bar_style_args`, `parse_contour_style_args`) live next to the line-style parser so new builtins can adopt the same syntax surface without rolling bespoke logic. Contour docs/tests now cover the `'LevelList'`/`'LevelStep'`/`'LineColor'` parsing paths so regressions are visible.
 - LOD/perf tuning now covers scatter2/scatter3 and surfaces. Scatter kernels honor an env/runtime-configurable target (`RUNMAT_PLOT_SCATTER_TARGET` or `set_scatter_target_points`) and surfaces coalesce via `RUNMAT_PLOT_SURFACE_VERTEX_BUDGET`, both scaled by the plot’s extent so zoomed-in views retain more detail. Stress harnesses live in `runmat-plot` (skipping by default unless `RUNMAT_PLOT_FORCE_GPU_TESTS=1`) to sanity-check million-point clouds without forcing GPU CI. Figure lifecycle events (`FigureEvent::Created/Updated/Closed`) now flow through the wasm bridge so TypeScript consumers can subscribe via `onFigureEvent`, mount canvases per handle, and (new) drive figure/hold/subplot state from JS via the exported `figure()`, `setHoldMode()`, and `configureSubplot()` helpers.
+- Figure lifecycle bindings are rounded out: the runtime exposes `clear_figure`, `close_figure`, and `current_axes_state`, wasm exports wrap them with structured error payloads (`InvalidHandle`, `InvalidSubplotGrid`, `InvalidSubplotIndex`), and the TypeScript wrapper now ships `clearFigure`, `closeFigure`, `currentAxesInfo`, and label-aware `FigureEvent` objects (`kind = created/updated/cleared/closed`). Hosts no longer have to parse MATLAB stdout to learn that a subplot index was invalid; they can inspect `error.code`/`error.rows`/`error.cols` straight from the promise rejection.
+- Figure close events now forcibly detach any registered wasm canvases (`runmat-runtime/src/builtins/plotting/core/web.rs`, `crates/runmat-wasm/src/lib.rs`), so `close(handle)` immediately releases GPU resources and signals host shells without waiting for manual deregistration.
+- Parser parity resumed: `stairs` reuses the shared line-style parser end-to-end (marker metadata now feeds both CPU and GPU packers, so dashed/marker-heavy stairs no longer drop to CPU), and `bar`/`hist` accept MATLAB’s `'FaceColor','flat'` syntax by generating per-bar color cycles on the CPU path while automatically skipping the GPU packers when flat colors are requested.
 
 This means our next work streams are:
 1. Zero-copy renderer integration (shared WGPU context, GPU buffer refs, renderer perf work).
@@ -96,15 +99,16 @@ _Audit 2024-05-05_: `LineStyleParseOptions` previously forbade both leading and 
 - [ ] **Docs/tests**
   - For each builtin, expand `DOC_MD` with new argument coverage, add unit tests for parser edge cases, and integration tests mirroring MATLAB scripts.
   - _Status 2024-05-05_: `stairs` accepts shared parser output (line width, colors) and reflects styles into both CPU + zero-copy GPU packers. Missing pieces: comprehensive doc/tests and marker semantics (MATLAB exposes markers on `stairs`, which we still ignore).
+  - _Status 2025-12-??_: `stairs` now honors `'DisplayName'` from name/value pairs so legends match MATLAB. Next up is marker support, line-style cycling, and doc/test coverage.
 
 ---
 
 ## 3. Multi-Figure UX & Bindings
 Goal: expose figure handles/axes info to wasm/TS so the Tauri/web UI can display multiple figures (tabs or simultaneous canvases) without guessing.
 
-- [ ] **3.1 Runtime surfacing**
+  - [ ] **3.1 Runtime surfacing**
   - Decide on the API surface for reporting current figure handle (return value from plotting builtins? event hook? dedicated `gcf` builtin?).
-  - Add helpers for `gcf`, `gca`, `close`, `clf` if needed.
+  - Add helpers for `gcf`, `gca`, `close`, `clf` if needed. ✅ (implemented; future work is expanding renderer lifecycle hooks beyond wasm).
   - Ensure regressions (e.g., `figure(2); plot(...)`) update the registry + return consistent status messages.
 
 - [ ] **3.2 runmat-wasm / TS bindings**
@@ -120,8 +124,8 @@ Goal: expose figure handles/axes info to wasm/TS so the Tauri/web UI can display
 ---
 
 ## Current Blocking TODOs (short list)
-- Surface `close`/`clf`/`gcf` equivalents plus figure error reporting through the wasm exports so UI shells can drive the registry without MATLAB text.
-- Update `docs/wasm/plan.md` to reflect the completed multi-figure observer + figure-control bindings and call out what’s left (close/axes metadata, wasm error flow).
+- ✅ Promote full MATLAB builtin coverage for `close`, `clf`, `gcf`, and `gca` so scripts (not just the wasm API) can drive the new registry helpers. Follow-up: extend the same detach signal to the native GUI window path so desktop canvases release without polling.
+- Parser parity follow-through: `stairs` now renders markers/line styles zero-copy and `bar`/`hist` accept `'FaceColor','flat'`, but we still need grouped/stacked variants plus a real GPU-friendly flat-color path so future host builds don’t have to drop to CPU.
 
 ## Working Notes
 - Keep this file updated whenever a checklist item is started/completed; it’s our single source of truth when context gets compressed.

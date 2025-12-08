@@ -1,13 +1,12 @@
 //! MATLAB-compatible `plot` builtin.
 
-use glam::Vec4;
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::PipelineType;
 use runmat_plot::gpu::ScalarType;
-use runmat_plot::plots::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
+use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -21,8 +20,8 @@ use super::state::{
     next_line_style_for_axes, render_active_plot, set_line_style_order_for_axes, PlotRenderOptions,
 };
 use super::style::{
-    looks_like_option_name, parse_line_style_args, value_as_string, LineAppearance,
-    LineStyleParseOptions, MarkerColor,
+    looks_like_option_name, marker_metadata_from_appearance, parse_line_style_args,
+    value_as_string, LineAppearance, LineStyleParseOptions, DEFAULT_LINE_MARKER_SIZE,
 };
 use std::collections::VecDeque;
 use std::convert::TryFrom;
@@ -110,8 +109,6 @@ register_builtin_fusion_spec!(FUSION_SPEC);
 
 #[cfg(feature = "doc_export")]
 register_builtin_doc_text!("plot", DOC_MD);
-
-const DEFAULT_LINE_MARKER_SIZE: f32 = 6.0;
 
 #[runtime_builtin(
     name = "plot",
@@ -228,6 +225,7 @@ fn parse_series_specs(
             appearance: parsed_style.appearance,
             requires_cpu: parsed_style.requires_cpu_fallback,
             line_style_explicit: parsed_style.line_style_explicit,
+            label: parsed_style.label.clone(),
         });
     }
 
@@ -287,38 +285,11 @@ fn apply_line_style_order(plans: &mut [SeriesRenderPlan], order: &[LineStyle]) {
 }
 
 fn apply_marker_metadata(plot: &mut LinePlot, appearance: &LineAppearance) {
-    if let Some(marker) = build_marker_metadata(appearance) {
+    if let Some(marker) = marker_metadata_from_appearance(appearance) {
         plot.set_marker(Some(marker));
     }
 }
 
-fn build_marker_metadata(appearance: &LineAppearance) -> Option<LineMarkerAppearance> {
-    let marker = appearance.marker.as_ref()?;
-    let size = marker.size.unwrap_or(DEFAULT_LINE_MARKER_SIZE);
-    let edge_color = marker_color_to_vec4(&marker.edge_color, appearance.color);
-    let face_color = match marker.face_color {
-        MarkerColor::None => Vec4::new(edge_color.x, edge_color.y, edge_color.z, 0.0),
-        MarkerColor::Flat => appearance.color,
-        MarkerColor::Auto | MarkerColor::Color(_) => {
-            marker_color_to_vec4(&marker.face_color, appearance.color)
-        }
-    };
-    Some(LineMarkerAppearance {
-        kind: marker.kind.to_plot_marker(),
-        size,
-        edge_color,
-        face_color,
-        filled: !matches!(marker.face_color, MarkerColor::None),
-    })
-}
-
-fn marker_color_to_vec4(color: &MarkerColor, fallback: Vec4) -> Vec4 {
-    match color {
-        MarkerColor::Auto | MarkerColor::Flat => fallback,
-        MarkerColor::None => Vec4::new(fallback.x, fallback.y, fallback.z, 0.0),
-        MarkerColor::Color(value) => *value,
-    }
-}
 fn build_line_gpu_plot(
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
@@ -358,7 +329,7 @@ fn build_line_gpu_plot(
         line_style: appearance.line_style,
         marker_size: DEFAULT_LINE_MARKER_SIZE,
     };
-    let marker_meta = build_marker_metadata(appearance);
+    let marker_meta = marker_metadata_from_appearance(appearance);
 
     let gpu_vertices = runmat_plot::gpu::line::pack_vertices_from_xy(
         &context.device,
@@ -424,17 +395,20 @@ fn render_series(
             mut appearance,
             requires_cpu,
             line_style_explicit,
+            label,
         } = plan;
 
         if !line_style_explicit {
             appearance.line_style = next_line_style_for_axes(axes_index);
         }
 
-        let label = if total == 1 {
-            "Data".to_string()
-        } else {
-            format!("Series {}", series_idx + 1)
-        };
+        let label = label.unwrap_or_else(|| {
+            if total == 1 {
+                "Data".to_string()
+            } else {
+                format!("Series {}", series_idx + 1)
+            }
+        });
 
         if !requires_cpu {
             if let Some((x_gpu, y_gpu)) = data.gpu_handles() {
@@ -470,6 +444,7 @@ struct SeriesRenderPlan {
     appearance: LineAppearance,
     requires_cpu: bool,
     line_style_explicit: bool,
+    label: Option<String>,
 }
 
 impl PlotSeriesInput {

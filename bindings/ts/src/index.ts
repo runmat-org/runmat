@@ -63,8 +63,11 @@ export interface RunMatInitOptions {
   surfaceVertexBudget?: number;
 }
 
+export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
+
 export interface FigureEvent {
   handle: number;
+  kind: FigureEventKind;
   axesRows: number;
   axesCols: number;
   plotCount: number;
@@ -74,6 +77,21 @@ export interface FigureEvent {
 
 export type FigureEventListener = (event: FigureEvent) => void;
 export type HoldMode = "on" | "off" | "toggle" | boolean;
+
+export interface AxesInfo {
+  handle: number;
+  axesRows: number;
+  axesCols: number;
+  activeIndex: number;
+}
+
+export interface FigureBindingError extends Error {
+  code: "InvalidHandle" | "InvalidSubplotGrid" | "InvalidSubplotIndex" | "Unknown";
+  handle?: number;
+  rows?: number;
+  cols?: number;
+  index?: number;
+}
 
 export interface ExecuteResult {
   valueText?: string;
@@ -153,6 +171,9 @@ interface RunMatNativeModule {
   currentFigureHandle?: () => number;
   setHoldMode?: (mode: HoldMode) => boolean;
   configureSubplot?: (rows: number, cols: number, index: number) => void;
+  clearFigure?: (handle: number | null) => number;
+  closeFigure?: (handle: number | null) => number;
+  currentAxesInfo?: () => AxesInfo;
 }
 
 let loadPromise: Promise<RunMatNativeModule> | null = null;
@@ -282,11 +303,41 @@ export async function holdOff(): Promise<boolean> {
 export async function configureSubplot(rows: number, cols: number, index = 0): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "configureSubplot");
-  native.configureSubplot(rows, cols, index);
+  try {
+    native.configureSubplot(rows, cols, index);
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
 }
 
 export async function subplot(rows: number, cols: number, index = 0): Promise<void> {
   return configureSubplot(rows, cols, index);
+}
+
+export async function clearFigure(handle?: number): Promise<number> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "clearFigure");
+  try {
+    return native.clearFigure(handle ?? null);
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
+export async function closeFigure(handle?: number): Promise<number> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "closeFigure");
+  try {
+    return native.closeFigure(handle ?? null);
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
+export async function currentAxesInfo(): Promise<AxesInfo> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "currentAxesInfo");
+  return native.currentAxesInfo();
 }
 
 class WebRunMatSession implements RunMatSessionHandle {
@@ -339,6 +390,54 @@ function requireNativeFunction<K extends keyof RunMatNativeModule>(
   if (typeof native[method] !== "function") {
     throw new Error(`The loaded runmat-wasm module does not expose ${String(method)} yet.`);
   }
+}
+
+type FigureErrorPayload = {
+  code?: string;
+  message?: string;
+  handle?: number;
+  rows?: number;
+  cols?: number;
+  index?: number;
+};
+
+function isFigureErrorPayload(value: unknown): value is FigureErrorPayload {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "code" in value &&
+    typeof (value as FigureErrorPayload).code === "string"
+  );
+}
+
+function coerceFigureError(value: unknown): FigureBindingError {
+  if (isFigureErrorPayload(value)) {
+    const err = new Error(value.message ?? value.code ?? "Figure error") as FigureBindingError;
+    err.code = (value.code as FigureBindingError["code"]) ?? "Unknown";
+    if (typeof value.handle === "number") {
+      err.handle = value.handle;
+    }
+    if (typeof value.rows === "number") {
+      err.rows = value.rows;
+    }
+    if (typeof value.cols === "number") {
+      err.cols = value.cols;
+    }
+    if (typeof value.index === "number") {
+      err.index = value.index;
+    }
+    return err;
+  }
+  if (value instanceof Error) {
+    const err = value as FigureBindingError;
+    if (!err.code) {
+      err.code = "Unknown";
+    }
+    return err;
+  }
+  const err = new Error(String(value)) as FigureBindingError;
+  err.code = "Unknown";
+  return err;
 }
 
 async function resolveFsProvider(
@@ -481,5 +580,6 @@ function toUint8Array(data: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Ar
 
 export const __internals = {
   resolveSnapshotSource,
-  fetchSnapshotFromUrl
+  fetchSnapshotFromUrl,
+  coerceFigureError
 };

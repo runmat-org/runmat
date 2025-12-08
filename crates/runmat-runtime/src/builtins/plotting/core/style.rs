@@ -1,7 +1,8 @@
 use glam::Vec4;
 use runmat_builtins::{CellArray, Tensor, Value};
 use runmat_plot::plots::{
-    ColorMap, LineStyle, MarkerStyle as PlotMarkerStyle, ShadingMode, SurfacePlot,
+    ColorMap, LineMarkerAppearance, LineStyle, MarkerStyle as PlotMarkerStyle, ShadingMode,
+    SurfacePlot,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -28,6 +29,7 @@ pub struct BarStyle {
     pub line_width: f32,
     pub bar_width: f32,
     pub label: Option<String>,
+    pub face_color_flat: bool,
 }
 
 impl BarStyle {
@@ -96,6 +98,7 @@ impl LineStyleParseOptions {
 
 pub const DEFAULT_LINE_WIDTH: f32 = 2.0;
 pub const DEFAULT_LINE_COLOR: Vec4 = Vec4::new(0.0, 0.4, 0.8, 1.0);
+pub const DEFAULT_LINE_MARKER_SIZE: f32 = 6.0;
 
 fn ctx_err(opts: &LineStyleParseOptions, msg: impl Into<String>) -> String {
     format!("{}: {}", opts.builtin_name, msg.into())
@@ -117,6 +120,36 @@ impl Default for LineAppearance {
             line_style: LineStyle::Solid,
             marker: None,
         }
+    }
+}
+
+pub fn marker_metadata_from_appearance(
+    appearance: &LineAppearance,
+) -> Option<LineMarkerAppearance> {
+    let marker = appearance.marker.as_ref()?;
+    let size = marker.size.unwrap_or(DEFAULT_LINE_MARKER_SIZE);
+    let edge_color = marker_color_to_vec4(&marker.edge_color, appearance.color);
+    let face_color = match marker.face_color {
+        MarkerColor::None => Vec4::new(edge_color.x, edge_color.y, edge_color.z, 0.0),
+        MarkerColor::Flat => appearance.color,
+        MarkerColor::Auto | MarkerColor::Color(_) => {
+            marker_color_to_vec4(&marker.face_color, appearance.color)
+        }
+    };
+    Some(LineMarkerAppearance {
+        kind: marker.kind.to_plot_marker(),
+        size,
+        edge_color,
+        face_color,
+        filled: !matches!(marker.face_color, MarkerColor::None),
+    })
+}
+
+pub fn marker_color_to_vec4(color: &MarkerColor, fallback: Vec4) -> Vec4 {
+    match color {
+        MarkerColor::Auto | MarkerColor::Flat => fallback,
+        MarkerColor::None => Vec4::new(fallback.x, fallback.y, fallback.z, 0.0),
+        MarkerColor::Color(value) => *value,
     }
 }
 
@@ -259,6 +292,7 @@ struct LineStyleOptions {
     marker_edge_color: Option<MarkerColor>,
     marker_face_color: Option<MarkerColor>,
     line_style_order: Option<Vec<LineStyle>>,
+    label: Option<String>,
 }
 
 impl LineStyleOptions {
@@ -291,6 +325,9 @@ impl LineStyleOptions {
         }
         if other.line_style_order.is_some() {
             self.line_style_order = other.line_style_order;
+        }
+        if other.label.is_some() {
+            self.label = other.label;
         }
     }
 
@@ -325,6 +362,7 @@ pub struct ParsedLineStyle {
     pub requires_cpu_fallback: bool,
     pub line_style_explicit: bool,
     pub line_style_order: Option<Vec<LineStyle>>,
+    pub label: Option<String>,
 }
 
 pub fn parse_line_style_args(
@@ -337,6 +375,7 @@ pub fn parse_line_style_args(
             requires_cpu_fallback: false,
             line_style_explicit: false,
             line_style_order: None,
+            label: None,
         });
     }
 
@@ -377,6 +416,7 @@ pub fn parse_line_style_args(
         appearance,
         line_style_explicit: options.line_style.is_some(),
         line_style_order: options.line_style_order.clone(),
+        label: options.label.clone(),
     })
 }
 
@@ -555,6 +595,12 @@ fn parse_name_value_pairs(
             "linestyleorder" => {
                 let order = parse_line_style_order_value(opts, &pair[1])?;
                 options.line_style_order = Some(order);
+            }
+            "displayname" | "label" => {
+                let Some(name) = value_as_string(&pair[1]) else {
+                    return Err(ctx_err(opts, "DisplayName must be a char array or string"));
+                };
+                options.label = Some(name);
             }
             other => {
                 return Err(ctx_err(opts, format!("unsupported option `{other}`")));
@@ -933,6 +979,7 @@ pub fn parse_bar_style_args(
         line_width: DEFAULT_LINE_WIDTH,
         bar_width: defaults.bar_width.clamp(0.1, 1.0),
         label: None,
+        face_color_flat: false,
     };
 
     if rest.is_empty() {
@@ -969,18 +1016,26 @@ pub fn parse_bar_style_args(
         let lower = key.trim().to_ascii_lowercase();
         match lower.as_str() {
             "facecolor" | "color" => match parse_bar_face_color(&opts, &pair[1])? {
-                FaceColorSpec::Auto => {}
+                FaceColorSpec::Auto => {
+                    style.face_color_flat = false;
+                }
+                FaceColorSpec::Flat => {
+                    style.face_color_flat = true;
+                    style.face_alpha = 1.0;
+                }
                 FaceColorSpec::None => {
                     style.face_alpha = 0.0;
+                    style.face_color_flat = false;
                 }
                 FaceColorSpec::Color(color) => {
                     style.face_color = color;
                     style.face_alpha = 1.0;
+                    style.face_color_flat = false;
                 }
             },
             "edgecolor" => {
                 style.edge_color = match parse_bar_edge_color(&opts, &pair[1])? {
-                    EdgeColorSpec::Auto => None,
+                    EdgeColorSpec::Auto | EdgeColorSpec::Flat => None,
                     EdgeColorSpec::None => None,
                     EdgeColorSpec::Color(color) => Some(color),
                 };
@@ -1033,14 +1088,22 @@ pub fn parse_bar_style_args(
     Ok(style)
 }
 
+impl BarStyle {
+    pub fn requires_cpu_path(&self) -> bool {
+        self.face_color_flat
+    }
+}
+
 enum FaceColorSpec {
     Auto,
+    Flat,
     None,
     Color(Vec4),
 }
 
 enum EdgeColorSpec {
     Auto,
+    Flat,
     None,
     Color(Vec4),
 }
@@ -1054,7 +1117,7 @@ fn parse_bar_face_color(
         return match lower.as_str() {
             "auto" => Ok(FaceColorSpec::Auto),
             "none" => Ok(FaceColorSpec::None),
-            "flat" => Err(ctx_err(opts, "FaceColor 'flat' is not supported yet")),
+            "flat" => Ok(FaceColorSpec::Flat),
             _ => {
                 let color = parse_bar_color_literal(opts, &text)?;
                 Ok(FaceColorSpec::Color(color))
@@ -1074,7 +1137,7 @@ fn parse_bar_edge_color(
         return match lower.as_str() {
             "auto" => Ok(EdgeColorSpec::Auto),
             "none" => Ok(EdgeColorSpec::None),
-            "flat" => Err(ctx_err(opts, "EdgeColor 'flat' is not supported yet")),
+            "flat" => Ok(EdgeColorSpec::Flat),
             _ => {
                 let color = parse_bar_color_literal(opts, &text)?;
                 Ok(EdgeColorSpec::Color(color))
@@ -1156,5 +1219,17 @@ mod tests {
         ];
         let style = parse_bar_style_args("bar", &rest, defaults).expect("parsed");
         assert_eq!(style.label.as_deref(), Some("My Bars"));
+    }
+
+    #[test]
+    fn bar_style_accepts_flat_facecolor() {
+        let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
+        let rest = vec![
+            Value::String("FaceColor".into()),
+            Value::String("flat".into()),
+        ];
+        let style = parse_bar_style_args("bar", &rest, defaults).expect("parsed");
+        assert!(style.face_color_flat);
+        assert!(style.requires_cpu_path());
     }
 }

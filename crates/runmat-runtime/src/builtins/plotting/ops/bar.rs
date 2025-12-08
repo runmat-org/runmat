@@ -125,15 +125,17 @@ pub fn bar_builtin(values: Value, rest: Vec<Value>) -> Result<String, String> {
     render_active_plot(opts, move |figure, axes| {
         let style = style.clone();
         let arg = input.take().expect("bar input consumed once");
-        if let Some(handle) = arg.gpu_handle() {
-            match build_bar_gpu_chart(handle, &style) {
-                Ok(mut bar) => {
-                    apply_bar_style(&mut bar, &style, BAR_DEFAULT_LABEL);
-                    figure.add_bar_chart_on_axes(bar, axes);
-                    return Ok(());
-                }
-                Err(err) => {
-                    warn!("bar GPU path unavailable: {err}");
+        if !style.requires_cpu_path() {
+            if let Some(handle) = arg.gpu_handle() {
+                match build_bar_gpu_chart(handle, &style) {
+                    Ok(mut bar) => {
+                        apply_bar_style(&mut bar, &style, BAR_DEFAULT_LABEL);
+                        figure.add_bar_chart_on_axes(bar, axes);
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        warn!("bar GPU path unavailable: {err}");
+                    }
                 }
             }
         }
@@ -148,6 +150,15 @@ pub fn bar_builtin(values: Value, rest: Vec<Value>) -> Result<String, String> {
 
 const DEFAULT_BAR_WIDTH: f32 = 0.75;
 const BAR_DEFAULT_LABEL: &str = "Series 1";
+const MATLAB_COLOR_ORDER: [Vec4; 7] = [
+    Vec4::new(0.0, 0.447, 0.741, 1.0),
+    Vec4::new(0.85, 0.325, 0.098, 1.0),
+    Vec4::new(0.929, 0.694, 0.125, 1.0),
+    Vec4::new(0.494, 0.184, 0.556, 1.0),
+    Vec4::new(0.466, 0.674, 0.188, 1.0),
+    Vec4::new(0.301, 0.745, 0.933, 1.0),
+    Vec4::new(0.635, 0.078, 0.184, 1.0),
+];
 
 fn default_bar_color() -> Vec4 {
     Vec4::new(0.2, 0.6, 0.9, 0.95)
@@ -266,8 +277,15 @@ fn gather_tensor_from_gpu(handle: GpuTensorHandle, context: &str) -> Result<Tens
 }
 
 pub(crate) fn apply_bar_style(bar: &mut BarChart, style: &BarStyle, default_label: &str) {
-    let face = style.face_rgba();
-    bar.apply_face_style(face, style.bar_width);
+    if style.face_color_flat {
+        let colors = generate_flat_colors(bar.bar_count(), style.face_alpha);
+        bar.set_per_bar_colors(colors);
+        bar.set_bar_width(style.bar_width);
+    } else {
+        bar.clear_per_bar_colors();
+        let face = style.face_rgba();
+        bar.apply_face_style(face, style.bar_width);
+    }
 
     let outline = style.edge_rgba();
     bar.apply_outline_style(outline, style.line_width);
@@ -277,6 +295,18 @@ pub(crate) fn apply_bar_style(bar: &mut BarChart, style: &BarStyle, default_labe
     } else if bar.label.is_none() {
         bar.label = Some(default_label.to_string());
     }
+}
+
+fn generate_flat_colors(count: usize, alpha: f32) -> Vec<Vec4> {
+    let mut colors = Vec::with_capacity(count);
+    if count == 0 {
+        return colors;
+    }
+    for i in 0..count {
+        let base = MATLAB_COLOR_ORDER[i % MATLAB_COLOR_ORDER.len()];
+        colors.push(Vec4::new(base.x, base.y, base.z, alpha));
+    }
+    colors
 }
 
 #[cfg(test)]

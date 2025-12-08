@@ -516,6 +516,12 @@ impl Figure {
                         out.push(marker_data);
                     }
                 }
+                PlotElement::Stairs(plot) => {
+                    out.push(plot.render_data());
+                    if let Some(marker_data) = plot.marker_render_data() {
+                        out.push(marker_data);
+                    }
+                }
                 _ => out.push(p.render_data()),
             }
         }

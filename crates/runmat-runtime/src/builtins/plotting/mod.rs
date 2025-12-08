@@ -21,12 +21,22 @@ pub mod web;
 
 #[path = "ops/bar.rs"]
 mod bar;
+#[path = "ops/clf.rs"]
+mod clf;
+#[path = "ops/close.rs"]
+mod close;
 #[path = "ops/contour.rs"]
 mod contour;
 #[path = "ops/contourf.rs"]
 mod contourf;
 #[path = "ops/figure.rs"]
 mod figure;
+#[path = "ops/gca.rs"]
+mod gca;
+#[path = "ops/gcf.rs"]
+mod gcf;
+#[path = "ops/handle_args.rs"]
+mod handle_args;
 #[path = "ops/hist.rs"]
 mod hist;
 #[path = "ops/hold.rs"]
@@ -52,7 +62,8 @@ mod surfc;
 
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{
-    configure_subplot, current_figure_handle, install_figure_observer, new_figure_handle,
-    select_figure, set_hold, FigureHandle, HoldMode,
+    clear_figure, close_figure, configure_subplot, current_axes_state, current_figure_handle,
+    install_figure_observer, new_figure_handle, select_figure, set_hold, FigureAxesState,
+    FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 pub use web::{install_web_renderer, install_web_renderer_for_handle, web_renderer_ready};

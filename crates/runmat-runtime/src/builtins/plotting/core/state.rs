@@ -1,6 +1,7 @@
 use once_cell::sync::OnceCell;
 use runmat_plot::plots::{Figure, LineStyle};
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
+use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::common::default_figure;
@@ -135,8 +136,90 @@ impl Default for PlotRegistry {
 }
 
 static REGISTRY: OnceCell<Mutex<PlotRegistry>> = OnceCell::new();
-type FigureObserver = dyn Fn(u32, &Figure) + Send + Sync + 'static;
+
+const AXES_INDEX_BITS: u32 = 20;
+const AXES_INDEX_MASK: u64 = (1 << AXES_INDEX_BITS) - 1;
+
+#[derive(Clone, Debug)]
+pub enum FigureError {
+    InvalidHandle(u32),
+    InvalidSubplotGrid {
+        rows: usize,
+        cols: usize,
+    },
+    InvalidSubplotIndex {
+        rows: usize,
+        cols: usize,
+        index: usize,
+    },
+    InvalidAxesHandle,
+}
+
+impl fmt::Display for FigureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FigureError::InvalidHandle(handle) => {
+                write!(f, "figure handle {handle} does not exist")
+            }
+            FigureError::InvalidSubplotGrid { rows, cols } => write!(
+                f,
+                "subplot grid dimensions must be positive (rows={rows}, cols={cols})"
+            ),
+            FigureError::InvalidSubplotIndex { rows, cols, index } => write!(
+                f,
+                "subplot index {index} is out of range for a {rows}x{cols} grid"
+            ),
+            FigureError::InvalidAxesHandle => write!(f, "invalid axes handle"),
+        }
+    }
+}
+
+impl std::error::Error for FigureError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FigureEventKind {
+    Created,
+    Updated,
+    Cleared,
+    Closed,
+}
+
+pub struct FigureEventView<'a> {
+    pub handle: FigureHandle,
+    pub kind: FigureEventKind,
+    pub figure: Option<&'a Figure>,
+}
+
+type FigureObserver = dyn for<'a> Fn(FigureEventView<'a>) + Send + Sync + 'static;
 static FIGURE_OBSERVER: OnceCell<Arc<FigureObserver>> = OnceCell::new();
+
+#[derive(Clone, Copy, Debug)]
+pub struct FigureAxesState {
+    pub handle: FigureHandle,
+    pub rows: usize,
+    pub cols: usize,
+    pub active_index: usize,
+}
+
+pub fn encode_axes_handle(handle: FigureHandle, axes_index: usize) -> f64 {
+    let encoded =
+        ((handle.as_u32() as u64) << AXES_INDEX_BITS) | ((axes_index as u64) & AXES_INDEX_MASK);
+    encoded as f64
+}
+
+#[allow(dead_code)]
+pub fn decode_axes_handle(value: f64) -> Result<(FigureHandle, usize), FigureError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(FigureError::InvalidAxesHandle);
+    }
+    let encoded = value.round() as u64;
+    let figure_id = encoded >> AXES_INDEX_BITS;
+    if figure_id == 0 {
+        return Err(FigureError::InvalidAxesHandle);
+    }
+    let axes_index = (encoded & AXES_INDEX_MASK) as usize;
+    Ok((FigureHandle::from(figure_id as u32), axes_index))
+}
 
 fn registry() -> MutexGuard<'static, PlotRegistry> {
     REGISTRY
@@ -158,16 +241,45 @@ pub fn install_figure_observer(observer: Arc<FigureObserver>) -> Result<(), Stri
         .map_err(|_| "figure observer already installed".to_string())
 }
 
-fn notify_figure_observer(handle: FigureHandle, figure: &Figure) {
+fn notify_event<'a>(view: FigureEventView<'a>) {
     if let Some(observer) = FIGURE_OBSERVER.get() {
-        observer(handle.as_u32(), figure);
+        observer(view);
     }
+}
+
+fn notify_with_figure(handle: FigureHandle, figure: &Figure, kind: FigureEventKind) {
+    notify_event(FigureEventView {
+        handle,
+        kind,
+        figure: Some(figure),
+    });
+}
+
+fn notify_without_figure(handle: FigureHandle, kind: FigureEventKind) {
+    notify_event(FigureEventView {
+        handle,
+        kind,
+        figure: None,
+    });
 }
 
 pub fn select_figure(handle: FigureHandle) {
     let mut reg = registry();
     reg.current = handle;
-    get_state_mut(&mut reg, handle);
+    let maybe_new = match reg.figures.entry(handle) {
+        Entry::Occupied(entry) => {
+            let _ = entry.into_mut();
+            None
+        }
+        Entry::Vacant(vacant) => {
+            let state = vacant.insert(FigureState::new(handle));
+            Some(state.figure.clone())
+        }
+    };
+    drop(reg);
+    if let Some(figure_clone) = maybe_new {
+        notify_with_figure(handle, &figure_clone, FigureEventKind::Created);
+    }
 }
 
 pub fn new_figure_handle() -> FigureHandle {
@@ -175,12 +287,82 @@ pub fn new_figure_handle() -> FigureHandle {
     let handle = reg.next_handle;
     reg.next_handle = reg.next_handle.next();
     reg.current = handle;
-    get_state_mut(&mut reg, handle);
+    let figure_clone = {
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.clone()
+    };
+    drop(reg);
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Created);
     handle
 }
 
 pub fn current_figure_handle() -> FigureHandle {
     registry().current
+}
+
+pub fn current_axes_state() -> FigureAxesState {
+    let reg = registry();
+    let handle = reg.current;
+    let state = reg.figures.get(&handle).expect("current figure must exist");
+    FigureAxesState {
+        handle,
+        rows: state.figure.axes_rows.max(1),
+        cols: state.figure.axes_cols.max(1),
+        active_index: state.active_axes,
+    }
+}
+
+pub fn figure_handles() -> Vec<FigureHandle> {
+    let reg = registry();
+    reg.figures.keys().copied().collect()
+}
+
+pub fn clear_figure(target: Option<FigureHandle>) -> Result<FigureHandle, FigureError> {
+    let mut reg = registry();
+    let handle = target.unwrap_or(reg.current);
+    let state = reg
+        .figures
+        .get_mut(&handle)
+        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+    *state = FigureState::new(handle);
+    let figure_clone = state.figure.clone();
+    drop(reg);
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Cleared);
+    Ok(handle)
+}
+
+pub fn close_figure(target: Option<FigureHandle>) -> Result<FigureHandle, FigureError> {
+    let mut reg = registry();
+    let handle = target.unwrap_or(reg.current);
+    let existed = reg.figures.remove(&handle);
+    if existed.is_none() {
+        return Err(FigureError::InvalidHandle(handle.as_u32()));
+    }
+
+    if reg.current == handle {
+        if let Some((&next_handle, _)) = reg.figures.iter().next() {
+            reg.current = next_handle;
+        } else {
+            let default = FigureHandle::default();
+            reg.current = default;
+            reg.next_handle = default.next();
+            reg.figures.insert(default, FigureState::new(default));
+            let figure_clone = reg
+                .figures
+                .get(&default)
+                .expect("default figure inserted")
+                .figure
+                .clone();
+            drop(reg);
+            notify_without_figure(handle, FigureEventKind::Closed);
+            notify_with_figure(default, &figure_clone, FigureEventKind::Created);
+            return Ok(handle);
+        }
+    }
+
+    drop(reg);
+    notify_without_figure(handle, FigureEventKind::Closed);
+    Ok(handle)
 }
 
 #[derive(Clone)]
@@ -224,14 +406,22 @@ pub fn set_hold(mode: HoldMode) -> bool {
     new_value
 }
 
-pub fn configure_subplot(rows: usize, cols: usize, index: usize) {
+pub fn configure_subplot(rows: usize, cols: usize, index: usize) -> Result<(), FigureError> {
+    if rows == 0 || cols == 0 {
+        return Err(FigureError::InvalidSubplotGrid { rows, cols });
+    }
+    let total_axes = rows
+        .checked_mul(cols)
+        .ok_or(FigureError::InvalidSubplotGrid { rows, cols })?;
+    if index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex { rows, cols, index });
+    }
     let mut reg = registry();
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);
     state.figure.set_subplot_grid(rows, cols);
-    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
-    let clamped = index.min(total_axes.saturating_sub(1));
-    state.active_axes = clamped;
+    state.active_axes = index;
+    Ok(())
 }
 
 pub fn render_active_plot<F>(opts: PlotRenderOptions<'_>, mut apply: F) -> Result<String, String>
@@ -260,8 +450,7 @@ where
 
         (handle, state.figure.clone())
     };
-
-    notify_figure_observer(handle, &figure_clone);
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     let rendered = render_figure(handle, figure_clone)?;
     Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
 }

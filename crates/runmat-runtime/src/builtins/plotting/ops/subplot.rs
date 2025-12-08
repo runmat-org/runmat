@@ -41,6 +41,6 @@ pub fn subplot_builtin(rows: Value, cols: Value, position: Value) -> Result<Stri
     let n = scalar_from_value(&cols, "subplot")?;
     let p = scalar_from_value(&position, "subplot")?;
     let zero_based = p.saturating_sub(1);
-    configure_subplot(m, n, zero_based);
+    configure_subplot(m, n, zero_based).map_err(|err| format!("subplot: {err}"))?;
     Ok(format!("subplot({}, {}, {}) selected", m, n, p))
 }
