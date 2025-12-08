@@ -38,7 +38,7 @@ mod gcf;
 #[path = "ops/handle_args.rs"]
 mod handle_args;
 #[path = "ops/hist.rs"]
-mod hist;
+pub mod hist;
 #[path = "ops/hold.rs"]
 mod hold;
 #[path = "ops/mesh.rs"]
@@ -63,7 +63,12 @@ mod surfc;
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{
     clear_figure, close_figure, configure_subplot, current_axes_state, current_figure_handle,
-    install_figure_observer, new_figure_handle, select_figure, set_hold, FigureAxesState,
-    FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    install_figure_observer, new_figure_handle, reset_recent_figures, select_figure, set_hold,
+    take_recent_figures, FigureAxesState, FigureError, FigureEventKind, FigureEventView,
+    FigureHandle, HoldMode,
 };
 pub use web::{install_web_renderer, install_web_renderer_for_handle, web_renderer_ready};
+
+pub mod ops {
+    pub use super::hist;
+}

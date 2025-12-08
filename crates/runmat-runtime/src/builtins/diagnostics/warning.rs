@@ -12,8 +12,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::console::{record_console_output, ConsoleStream};
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
+use crate::warning_store;
 use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 const DEFAULT_IDENTIFIER: &str = "MATLAB:warning";
@@ -271,9 +273,13 @@ fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> Result<Value
         WarningAction::Suppress => Ok(Value::Num(0.0)),
         WarningAction::Display => {
             print_warning(&identifier, &message);
+            warning_store::push(&identifier, &message);
             Ok(Value::Num(0.0))
         }
-        WarningAction::AsError => Err(build_error(&identifier, &message)),
+        WarningAction::AsError => {
+            warning_store::push(&identifier, &message);
+            Err(build_error(&identifier, &message))
+        }
     }
 }
 
@@ -281,9 +287,9 @@ fn print_warning(identifier: &str, message: &str) {
     let (backtrace_enabled, verbose_enabled) =
         with_manager(|mgr| (mgr.backtrace_enabled, mgr.verbose_enabled));
 
-    eprintln!("Warning: {message}");
+    emit_stderr_line(format!("Warning: {message}"));
     if identifier != DEFAULT_IDENTIFIER {
-        eprintln!("identifier: {identifier}");
+        emit_stderr_line(format!("identifier: {identifier}"));
     }
 
     if verbose_enabled {
@@ -292,13 +298,20 @@ fn print_warning(identifier: &str, message: &str) {
         } else {
             identifier.to_string()
         };
-        eprintln!("(Type \"warning('off','{suppression}')\" to suppress this warning.)");
+        emit_stderr_line(format!(
+            "(Type \"warning('off','{suppression}')\" to suppress this warning.)"
+        ));
     }
 
     if backtrace_enabled {
         let bt = std::backtrace::Backtrace::force_capture();
-        eprintln!("{bt}");
+        emit_stderr_line(format!("{bt}"));
     }
+}
+
+fn emit_stderr_line(line: String) {
+    eprintln!("{line}");
+    record_console_output(ConsoleStream::Stderr, line);
 }
 
 fn reissue_exception(mex: &runmat_builtins::MException) -> Result<Value, String> {
@@ -518,7 +531,7 @@ fn status_command(rest: &[Value]) -> Result<Value, String> {
     let value = query_command(&[])?;
     match &value {
         Value::Cell(cell) => {
-            eprintln!("Warning status:");
+            emit_stderr_line("Warning status:".to_string());
             for idx in 0..cell.data.len() {
                 let entry = (*cell.data[idx]).clone();
                 if let Value::Struct(st) = entry {
@@ -532,7 +545,7 @@ fn status_command(rest: &[Value]) -> Result<Value, String> {
                         .get("state")
                         .and_then(|v| value_to_string("warning", v).ok())
                         .unwrap_or_default();
-                    eprintln!("  {identifier}: {state}");
+                    emit_stderr_line(format!("  {identifier}: {state}"));
                 }
             }
         }
@@ -547,7 +560,7 @@ fn status_command(rest: &[Value]) -> Result<Value, String> {
                 .get("state")
                 .and_then(|v| value_to_string("warning", v).ok())
                 .unwrap_or_default();
-            eprintln!("Warning status -> {identifier}: {state}");
+            emit_stderr_line(format!("Warning status -> {identifier}: {state}"));
         }
         _ => {}
     }

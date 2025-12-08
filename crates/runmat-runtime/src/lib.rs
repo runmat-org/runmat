@@ -4,6 +4,10 @@ use runmat_gc_api::GcPtr;
 
 pub mod dispatcher;
 
+pub mod console;
+pub mod interaction;
+pub mod interrupt;
+
 pub mod arrays;
 pub mod builtins;
 pub mod comparison;
@@ -11,6 +15,8 @@ pub mod concatenation;
 pub mod elementwise;
 pub mod indexing;
 pub mod matrix;
+pub mod plotting_hooks;
+pub mod warning_store;
 pub mod workspace;
 
 #[cfg(feature = "blas-lapack")]

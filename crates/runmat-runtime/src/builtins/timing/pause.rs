@@ -3,8 +3,6 @@
 use once_cell::sync::Lazy;
 use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
-#[cfg(not(test))]
-use std::io::{self, IsTerminal, Read};
 use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
@@ -16,7 +14,7 @@ use crate::builtins::common::spec::{
 };
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
-use crate::{register_builtin_fusion_spec, register_builtin_gpu_spec};
+use crate::{interaction, register_builtin_fusion_spec, register_builtin_gpu_spec};
 
 #[cfg(feature = "doc_export")]
 pub const DOC_MD: &str = r#"---
@@ -227,30 +225,14 @@ fn perform_wait(wait: PauseWait) -> Result<(), String> {
     }
 }
 
-#[cfg(test)]
 fn wait_for_key_press() -> Result<(), String> {
-    // During crate-level tests we treat pause as non-interactive so unit tests
-    // never block waiting for a key press on an interactive terminal.
-    Ok(())
-}
-
-#[cfg(not(test))]
-fn wait_for_key_press() -> Result<(), String> {
-    let stdin = io::stdin();
-    if !stdin.is_terminal() {
-        thread::sleep(Duration::from_millis(1));
-        return Ok(());
+    #[cfg(test)]
+    {
+        Ok(())
     }
-
-    let mut handle = stdin.lock();
-    let mut buffer = [0u8; 1];
-    loop {
-        match handle.read(&mut buffer) {
-            Ok(0) => return Ok(()),
-            Ok(_) => return Ok(()),
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) => return Err(format!("pause: failed to read from stdin: {err}")),
-        }
+    #[cfg(not(test))]
+    {
+        interaction::wait_for_key("")
     }
 }
 

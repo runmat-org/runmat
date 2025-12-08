@@ -1,5 +1,7 @@
 use std::cell::RefCell;
-use std::sync::{Arc, OnceLock};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(target_arch = "wasm32")]
 use js_sys::{Array, Reflect};
@@ -12,8 +14,14 @@ use runmat_accelerate_api::ProviderPrecision;
 #[cfg(target_arch = "wasm32")]
 use runmat_accelerate_api::{AccelContextHandle, AccelContextKind};
 use runmat_builtins::{NumericDType, ObjectInstance, StructValue, Value};
-use runmat_core::{ExecutionResult, RunMatSession};
+use runmat_core::{
+    matlab_class_name, value_shape, ExecutionProfiling, ExecutionResult, ExecutionStreamEntry,
+    ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader,
+    FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse, RunMatSession, StdinEvent,
+    StdinEventKind, WorkspaceEntry, WorkspacePreview, WorkspaceSnapshot,
+};
 use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_vertex_budget};
+use runmat_runtime::warning_store::RuntimeWarning;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use wasm_bindgen::prelude::*;
@@ -85,6 +93,13 @@ thread_local! {
 }
 #[cfg(target_arch = "wasm32")]
 static FIGURE_EVENT_OBSERVER: OnceLock<()> = OnceLock::new();
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static JS_STDIN_HANDLER: RefCell<Option<js_sys::Function>> = RefCell::new(None);
+}
+static STDOUT_SUBSCRIBERS: OnceLock<Mutex<HashMap<u32, js_sys::Function>>> = OnceLock::new();
+static STDOUT_FORWARDER: OnceLock<()> = OnceLock::new();
+static STDOUT_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Clone)]
 struct SessionConfig {
@@ -149,15 +164,48 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = resetSession)]
     pub fn reset_session(&self) -> Result<(), JsValue> {
-        let session = RunMatSession::with_snapshot_bytes(
+        let mut session = RunMatSession::with_snapshot_bytes(
             self.config.enable_jit,
             self.config.verbose,
             self.snapshot_seed.as_deref(),
         )
         .map_err(|err| js_error(&format!("Failed to reset session: {err}")))?;
+        configure_session_input_handler(&mut session);
         let mut slot = self.session.borrow_mut();
         *slot = session;
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = cancelExecution)]
+    pub fn cancel_execution(&self) {
+        self.session.borrow().cancel_execution();
+    }
+
+    #[wasm_bindgen(js_name = setInputHandler)]
+    pub fn set_input_handler(&self, handler: JsValue) -> Result<(), JsValue> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if handler.is_null() || handler.is_undefined() {
+                set_js_stdin_handler(None);
+                self.session.borrow_mut().clear_input_handler();
+                return Ok(());
+            }
+            let func = handler
+                .dyn_into::<js_sys::Function>()
+                .map_err(|_| js_error("setInputHandler expects a Function or null"))?;
+            set_js_stdin_handler(Some(func));
+            self.session
+                .borrow_mut()
+                .install_input_handler(js_input_bridge);
+            return Ok(());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = handler;
+            Err(js_error(
+                "setInputHandler is only available when targeting wasm32",
+            ))
+        }
     }
 
     #[wasm_bindgen(js_name = stats)]
@@ -312,6 +360,152 @@ pub fn on_figure_event(callback: JsValue) -> Result<(), JsValue> {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = subscribeStdout)]
+pub fn subscribe_stdout(callback: JsValue) -> Result<u32, JsValue> {
+    init_logging_once();
+    let function = callback
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| js_error("subscribeStdout expects a Function"))?;
+    let subscribers = STDOUT_SUBSCRIBERS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| js_error("failed to install stdout subscriber"))?;
+    drop(subscribers);
+    ensure_stdout_forwarder_installed();
+    let id = STDOUT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let mut guard = STDOUT_SUBSCRIBERS
+        .get()
+        .expect("stdout subscriber registry")
+        .lock()
+        .map_err(|_| js_error("failed to register stdout subscriber"))?;
+    guard.insert(id, function);
+    Ok(id)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = subscribeStdout)]
+pub fn subscribe_stdout(_callback: JsValue) -> Result<u32, JsValue> {
+    Err(js_error(
+        "subscribeStdout is only available when targeting wasm32",
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = unsubscribeStdout)]
+pub fn unsubscribe_stdout(id: u32) {
+    if let Some(lock) = STDOUT_SUBSCRIBERS.get() {
+        if let Ok(mut guard) = lock.lock() {
+            guard.remove(&id);
+            if guard.is_empty() {
+                runmat_runtime::console::install_forwarder(None);
+                let _ = STDOUT_FORWARDER.take();
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen(js_name = unsubscribeStdout)]
+pub fn unsubscribe_stdout(_id: u32) {}
+
+#[cfg(target_arch = "wasm32")]
+fn has_js_stdin_handler() -> bool {
+    JS_STDIN_HANDLER.with(|slot| slot.borrow().is_some())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
+    JS_STDIN_HANDLER.with(|slot| *slot.borrow_mut() = handler);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn invoke_js_stdin_handler(request: &InputRequest) -> Result<InputResponse, String> {
+    let handler = JS_STDIN_HANDLER
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| "stdin input requested but no handler is registered".to_string())?;
+    let js_request = js_sys::Object::new();
+    Reflect::set(
+        &js_request,
+        &JsValue::from_str("prompt"),
+        &JsValue::from_str(&request.prompt),
+    )
+    .map_err(|err| js_value_to_string(err))?;
+    match request.kind {
+        InputRequestKind::Line { echo } => {
+            Reflect::set(
+                &js_request,
+                &JsValue::from_str("kind"),
+                &JsValue::from_str("line"),
+            )
+            .map_err(|err| js_value_to_string(err))?;
+            Reflect::set(
+                &js_request,
+                &JsValue::from_str("echo"),
+                &JsValue::from_bool(echo),
+            )
+            .map_err(|err| js_value_to_string(err))?;
+            let value = handler
+                .call1(&JsValue::NULL, &js_request)
+                .map_err(|err| js_value_to_string(err))?;
+            let line = if let Some(text) = value.as_string() {
+                text
+            } else if value.is_null() || value.is_undefined() {
+                String::new()
+            } else if value.is_object() {
+                let obj = js_sys::Object::from(value);
+                if let Ok(raw) = Reflect::get(&obj, &JsValue::from_str("value")) {
+                    if let Some(text) = raw.as_string() {
+                        text
+                    } else {
+                        return Err("stdin handler must return a string for line input".to_string());
+                    }
+                } else if let Ok(raw) = Reflect::get(&obj, &JsValue::from_str("line")) {
+                    if let Some(text) = raw.as_string() {
+                        text
+                    } else {
+                        return Err("stdin handler must return a string for line input".to_string());
+                    }
+                } else {
+                    return Err("stdin handler must return a string for line input".to_string());
+                }
+            } else {
+                return Err("stdin handler must return a string for line input".to_string());
+            };
+            Ok(InputResponse::Line(line))
+        }
+        InputRequestKind::KeyPress => {
+            Reflect::set(
+                &js_request,
+                &JsValue::from_str("kind"),
+                &JsValue::from_str("keyPress"),
+            )
+            .map_err(|err| js_value_to_string(err))?;
+            let _ = handler
+                .call1(&JsValue::NULL, &js_request)
+                .map_err(|err| js_value_to_string(err))?;
+            Ok(InputResponse::KeyPress)
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn configure_session_input_handler(session: &mut RunMatSession) {
+    if has_js_stdin_handler() {
+        session.install_input_handler(js_input_bridge);
+    } else {
+        session.clear_input_handler();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn configure_session_input_handler(_session: &mut RunMatSession) {}
+
+#[cfg(target_arch = "wasm32")]
+fn js_input_bridge(request: &InputRequest) -> Result<InputResponse, String> {
+    invoke_js_stdin_handler(request)
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn install_canvas_renderer(
     handle: Option<u32>,
     canvas: web_sys::HtmlCanvasElement,
@@ -354,12 +548,13 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     let config = SessionConfig::from_options(&parsed_opts);
     let snapshot_seed = resolve_snapshot_bytes(&parsed_opts).await?;
 
-    let session = RunMatSession::with_snapshot_bytes(
+    let mut session = RunMatSession::with_snapshot_bytes(
         config.enable_jit,
         config.verbose,
         snapshot_seed.as_deref(),
     )
     .map_err(|err| js_error(&format!("Failed to initialize RunMat session: {err}")))?;
+    configure_session_input_handler(&mut session);
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -647,6 +842,33 @@ fn emit_js_figure_event(event: FigureEventView<'_>) {
     });
 }
 
+#[cfg(target_arch = "wasm32")]
+fn ensure_stdout_forwarder_installed() {
+    STDOUT_FORWARDER.get_or_init(|| {
+        let forwarder: Arc<dyn Fn(&runmat_runtime::console::ConsoleEntry) + Send + Sync + 'static> =
+            Arc::new(|entry| dispatch_stdout_entry(entry));
+        runmat_runtime::console::install_forwarder(Some(forwarder));
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dispatch_stdout_entry(entry: &runmat_runtime::console::ConsoleEntry) {
+    if let Some(lock) = STDOUT_SUBSCRIBERS.get() {
+        if let Ok(guard) = lock.lock() {
+            if guard.is_empty() {
+                return;
+            }
+            if let Ok(payload) =
+                serde_wasm_bindgen::to_value(&ConsoleStreamPayload::from_console_entry(entry))
+            {
+                for handler in guard.values() {
+                    let _ = handler.call1(&JsValue::NULL, &payload);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(all(feature = "gpu", target_arch = "wasm32"))]
 async fn initialize_gpu_provider(config: &SessionConfig) -> Result<(), JsValue> {
     use runmat_accelerate::initialize_wgpu_provider_async;
@@ -831,6 +1053,13 @@ struct ExecutionPayload {
     execution_time_ms: u64,
     used_jit: bool,
     error: Option<String>,
+    stdout: Vec<ConsoleStreamPayload>,
+    workspace: WorkspacePayload,
+    figures_touched: Vec<u32>,
+    warnings: Vec<WarningPayload>,
+    stdin_events: Vec<StdinEventPayload>,
+    profiling: Option<ProfilingPayload>,
+    fusion_plan: Option<FusionPlanPayload>,
 }
 
 impl From<ExecutionResult> for ExecutionPayload {
@@ -844,6 +1073,301 @@ impl From<ExecutionResult> for ExecutionPayload {
             execution_time_ms: result.execution_time_ms,
             used_jit: result.used_jit,
             error: result.error,
+            stdout: result
+                .streams
+                .into_iter()
+                .map(ConsoleStreamPayload::from)
+                .collect(),
+            workspace: WorkspacePayload::from(result.workspace),
+            figures_touched: result.figures_touched,
+            warnings: result
+                .warnings
+                .into_iter()
+                .map(WarningPayload::from)
+                .collect(),
+            stdin_events: result
+                .stdin_events
+                .into_iter()
+                .map(StdinEventPayload::from)
+                .collect(),
+            profiling: result.profiling.map(ProfilingPayload::from),
+            fusion_plan: result.fusion_plan.map(FusionPlanPayload::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConsoleStreamPayload {
+    stream: &'static str,
+    text: String,
+    timestamp_ms: u64,
+}
+
+impl From<ExecutionStreamEntry> for ConsoleStreamPayload {
+    fn from(entry: ExecutionStreamEntry) -> Self {
+        let stream = match entry.stream {
+            ExecutionStreamKind::Stdout => "stdout",
+            ExecutionStreamKind::Stderr => "stderr",
+        };
+        Self {
+            stream,
+            text: entry.text,
+            timestamp_ms: entry.timestamp_ms,
+        }
+    }
+}
+
+impl ConsoleStreamPayload {
+    fn from_console_entry(entry: &runmat_runtime::console::ConsoleEntry) -> Self {
+        let stream = match entry.stream {
+            runmat_runtime::console::ConsoleStream::Stdout => "stdout",
+            runmat_runtime::console::ConsoleStream::Stderr => "stderr",
+        };
+        Self {
+            stream,
+            text: entry.text.clone(),
+            timestamp_ms: entry.timestamp_ms,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WarningPayload {
+    identifier: String,
+    message: String,
+}
+
+impl From<RuntimeWarning> for WarningPayload {
+    fn from(warning: RuntimeWarning) -> Self {
+        Self {
+            identifier: warning.identifier,
+            message: warning.message,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StdinEventPayload {
+    prompt: String,
+    kind: &'static str,
+    echo: bool,
+    value: Option<String>,
+    error: Option<String>,
+}
+
+impl From<StdinEvent> for StdinEventPayload {
+    fn from(event: StdinEvent) -> Self {
+        let kind = match event.kind {
+            StdinEventKind::Line => "line",
+            StdinEventKind::KeyPress => "keyPress",
+        };
+        Self {
+            prompt: event.prompt,
+            kind,
+            echo: event.echo,
+            value: event.value,
+            error: event.error,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePayload {
+    full: bool,
+    values: Vec<WorkspaceEntryPayload>,
+}
+
+impl From<WorkspaceSnapshot> for WorkspacePayload {
+    fn from(snapshot: WorkspaceSnapshot) -> Self {
+        Self {
+            full: snapshot.full,
+            values: snapshot
+                .values
+                .into_iter()
+                .map(WorkspaceEntryPayload::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceEntryPayload {
+    name: String,
+    class_name: String,
+    dtype: Option<String>,
+    shape: Vec<usize>,
+    is_gpu: bool,
+    size_bytes: Option<u64>,
+    preview: Option<WorkspacePreviewPayload>,
+}
+
+impl From<WorkspaceEntry> for WorkspaceEntryPayload {
+    fn from(entry: WorkspaceEntry) -> Self {
+        Self {
+            name: entry.name,
+            class_name: entry.class_name,
+            dtype: entry.dtype,
+            shape: entry.shape,
+            is_gpu: entry.is_gpu,
+            size_bytes: entry.size_bytes,
+            preview: entry.preview.map(WorkspacePreviewPayload::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePreviewPayload {
+    values: Vec<f64>,
+    truncated: bool,
+}
+
+impl From<WorkspacePreview> for WorkspacePreviewPayload {
+    fn from(preview: WorkspacePreview) -> Self {
+        Self {
+            values: preview.values,
+            truncated: preview.truncated,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfilingPayload {
+    total_ms: u64,
+    cpu_ms: Option<u64>,
+    gpu_ms: Option<u64>,
+    kernel_count: Option<u32>,
+}
+
+impl From<ExecutionProfiling> for ProfilingPayload {
+    fn from(profiling: ExecutionProfiling) -> Self {
+        Self {
+            total_ms: profiling.total_ms,
+            cpu_ms: profiling.cpu_ms,
+            gpu_ms: profiling.gpu_ms,
+            kernel_count: profiling.kernel_count,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FusionPlanPayload {
+    nodes: Vec<FusionPlanNodePayload>,
+    edges: Vec<FusionPlanEdgePayload>,
+    shaders: Vec<FusionPlanShaderPayload>,
+    decisions: Vec<FusionPlanDecisionPayload>,
+}
+
+impl From<FusionPlanSnapshot> for FusionPlanPayload {
+    fn from(snapshot: FusionPlanSnapshot) -> Self {
+        Self {
+            nodes: snapshot
+                .nodes
+                .into_iter()
+                .map(FusionPlanNodePayload::from)
+                .collect(),
+            edges: snapshot
+                .edges
+                .into_iter()
+                .map(FusionPlanEdgePayload::from)
+                .collect(),
+            shaders: snapshot
+                .shaders
+                .into_iter()
+                .map(FusionPlanShaderPayload::from)
+                .collect(),
+            decisions: snapshot
+                .decisions
+                .into_iter()
+                .map(FusionPlanDecisionPayload::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FusionPlanNodePayload {
+    id: String,
+    kind: String,
+    label: String,
+    shape: Vec<usize>,
+    residency: Option<String>,
+}
+
+impl From<FusionPlanNode> for FusionPlanNodePayload {
+    fn from(node: FusionPlanNode) -> Self {
+        Self {
+            id: node.id,
+            kind: node.kind,
+            label: node.label,
+            shape: node.shape,
+            residency: node.residency,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FusionPlanEdgePayload {
+    from: String,
+    to: String,
+    reason: Option<String>,
+}
+
+impl From<FusionPlanEdge> for FusionPlanEdgePayload {
+    fn from(edge: FusionPlanEdge) -> Self {
+        Self {
+            from: edge.from,
+            to: edge.to,
+            reason: edge.reason,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FusionPlanShaderPayload {
+    name: String,
+    stage: String,
+    workgroup_size: Option<[u32; 3]>,
+    source_hash: Option<String>,
+}
+
+impl From<FusionPlanShader> for FusionPlanShaderPayload {
+    fn from(shader: FusionPlanShader) -> Self {
+        Self {
+            name: shader.name,
+            stage: shader.stage,
+            workgroup_size: shader.workgroup_size,
+            source_hash: shader.source_hash,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FusionPlanDecisionPayload {
+    node_id: String,
+    fused: bool,
+    reason: Option<String>,
+    thresholds: Option<String>,
+}
+
+impl From<FusionPlanDecision> for FusionPlanDecisionPayload {
+    fn from(decision: FusionPlanDecision) -> Self {
+        Self {
+            node_id: decision.node_id,
+            fused: decision.fused,
+            reason: decision.reason,
+            thresholds: decision.thresholds,
         }
     }
 }
@@ -1086,50 +1610,6 @@ fn object_to_json(obj: &ObjectInstance, depth: usize) -> JsonValue {
         "propertyCount": obj.properties.len(),
         "truncated": truncated,
     })
-}
-
-fn matlab_class_name(value: &Value) -> String {
-    match value {
-        Value::Num(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => {
-            "double".to_string()
-        }
-        Value::Int(iv) => iv.class_name().to_string(),
-        Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
-        Value::String(_) | Value::StringArray(_) => "string".to_string(),
-        Value::CharArray(_) => "char".to_string(),
-        Value::Cell(_) => "cell".to_string(),
-        Value::Struct(_) => "struct".to_string(),
-        Value::GpuTensor(_) => "gpuArray".to_string(),
-        Value::FunctionHandle(_) | Value::Closure(_) => "function_handle".to_string(),
-        Value::HandleObject(handle) => {
-            if handle.class_name.is_empty() {
-                "handle".to_string()
-            } else {
-                handle.class_name.clone()
-            }
-        }
-        Value::Listener(_) => "event.listener".to_string(),
-        Value::Object(obj) => obj.class_name.clone(),
-        Value::ClassRef(_) => "meta.class".to_string(),
-        Value::MException(_) => "MException".to_string(),
-    }
-}
-
-fn value_shape(value: &Value) -> Option<Vec<usize>> {
-    match value {
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
-            Some(scalar_shape())
-        }
-        Value::LogicalArray(arr) => Some(arr.shape.clone()),
-        Value::StringArray(sa) => Some(sa.shape.clone()),
-        Value::String(s) => Some(vec![1, s.chars().count()]),
-        Value::CharArray(ca) => Some(vec![ca.rows, ca.cols]),
-        Value::Tensor(t) => Some(t.shape.clone()),
-        Value::ComplexTensor(t) => Some(t.shape.clone()),
-        Value::Cell(ca) => Some(ca.shape.clone()),
-        Value::GpuTensor(handle) => Some(handle.shape.clone()),
-        _ => None,
-    }
 }
 
 fn scalar_shape() -> Vec<usize> {

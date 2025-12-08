@@ -17,6 +17,7 @@ This scratch file preserves the current mental model for the RunMat plotting/WAS
 - Desktop GUI builds now install the same lifecycle observer: `runmat-runtime` notifies `runmat-plot` when a figure closes, the single-window manager keeps a per-handle atomic close flag, and `PlotWindow` checks that flag each frame so MATLAB `close(handle)` tears down the corresponding winit window immediately instead of leaving a stale canvas on screen.
 - The native window manager and GUI thread manager now participate in the shared close-signal path (`gui/native_window.rs`, `gui/thread_manager.rs`). The lifecycle module automatically routes plotting through native windows first, then the GUI thread manager, then the single-window fallback (unless `RUNMAT_PLOT_DESKTOP_BACKEND` overrides the order). Every backend receives the shared close signal, so multi-window shells can keep multiple canvases alive concurrently while still tearing them down instantly when MATLAB code issues `close(handle)`.
 - Parser parity resumed: `stairs` reuses the shared line-style parser end-to-end (marker metadata now feeds both CPU and GPU packers, so dashed/marker-heavy stairs no longer drop to CPU), and `bar`/`hist` accept MATLAB’s `'FaceColor','flat'` syntax by generating per-bar color cycles on the CPU path while automatically skipping the GPU packers when flat colors are requested.
+- Execution payloads now surface structured warnings and stdin event logs; the wasm session exposes `cancelExecution()` for cooperative interrupts and `setInputHandler(handler)` so hosts can satisfy `input`/`pause` directly. Provider telemetry is reset per-run and feeds the new `profiling` block (`totalMs`/`cpuMs`/`gpuMs`/`kernelCount`) so the upcoming UI panes can chart execution costs without scraping console text.
 
 This means our next work streams are:
 1. Zero-copy renderer integration (shared WGPU context, GPU buffer refs, renderer perf work).
@@ -130,6 +131,13 @@ Goal: expose figure handles/axes info to wasm/TS so the Tauri/web UI can display
 ## Current Blocking TODOs (short list)
 - ✅ Promote full MATLAB builtin coverage for `close`, `clf`, `gcf`, and `gca` so scripts (not just the wasm API) can drive the new registry helpers. Follow-up completed: the native GUI window path now listens to figure close events, so desktop canvases release without polling.
 - Parser parity follow-through: `stairs` now renders markers/line styles zero-copy, `bar`/`hist` accept `'FaceColor','flat'`, matrix `bar` inputs ride zero-copy GPU packers (grouped + stacked), scatter marker edges honour `'flat'`, histogram weighting/probability/pdf scaling stay entirely on the GPU, and `hist` exposes MATLAB’s `NumBins`/`BinWidth`/`BinLimits`/`BinMethod` knobs with proper multi-output handling. Remaining work: land the separate `histogram` builtin plus full doc/test coverage for the remaining parser surfaces (per-series style strings, stairs markers, histogram docstrings/tests).
+
+---
+
+## WASM Readiness Tasking
+- Added `docs/wasm/WASM_UP_PLAN.md` to capture the dedicated “ship the wasm runtime” roadmap (session init contract, execution results for UI panes, figure lifecycle, filesystem providers, packaging). That document is now the canonical checklist for this push; update it as each milestone lands.
+- Runtime instrumentation landed: `RunMatSession` captures stdout/stderr events, workspace deltas, and figure handles per execution. `runmat-wasm` serializes that richer payload, and the bindings expose `subscribeStdout`/`unsubscribeStdout` so the UI can stream console output live. Remaining gaps (cancellation, stdin prompts, fusion metadata) stay on the checklist.
+- Immediate next steps come from sections A–E of that file (session bring-up audit, execution response shape, plotting bridge polish, variable/fusion metadata, FS + packaging). Track day-to-day notes here but keep the authoritative task list there so shell teams can follow along.
 
 ## Working Notes
 - Keep this file updated whenever a checklist item is started/completed; it’s our single source of truth when context gets compressed.

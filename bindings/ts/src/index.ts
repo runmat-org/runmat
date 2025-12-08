@@ -78,6 +78,22 @@ export interface FigureEvent {
 export type FigureEventListener = (event: FigureEvent) => void;
 export type HoldMode = "on" | "off" | "toggle" | boolean;
 
+export type StdoutStreamKind = "stdout" | "stderr";
+
+export interface StdoutEntry {
+  stream: StdoutStreamKind;
+  text: string;
+  timestampMs: number;
+}
+
+export type StdoutListener = (entry: StdoutEntry) => void;
+
+export type InputRequest =
+  | { kind: "line"; prompt: string; echo: boolean }
+  | { kind: "keyPress"; prompt: string; echo: boolean };
+
+export type InputHandler = (request: InputRequest) => string | null | undefined;
+
 export interface AxesInfo {
   handle: number;
   axesRows: number;
@@ -93,6 +109,19 @@ export interface FigureBindingError extends Error {
   index?: number;
 }
 
+export interface MatlabWarning {
+  identifier: string;
+  message: string;
+}
+
+export interface StdinEventLog {
+  prompt: string;
+  kind: "line" | "keyPress";
+  echo: boolean;
+  value?: string;
+  error?: string;
+}
+
 export interface ExecuteResult {
   valueText?: string;
   valueJson?: unknown;
@@ -100,6 +129,75 @@ export interface ExecuteResult {
   error?: string;
   executionTimeMs: number;
   usedJit: boolean;
+  stdout: StdoutEntry[];
+  workspace: WorkspaceSnapshot;
+  figuresTouched: number[];
+  warnings: MatlabWarning[];
+  stdinEvents: StdinEventLog[];
+  profiling?: ProfilingSummary;
+  fusionPlan?: FusionPlanSnapshot;
+}
+
+export interface WorkspaceSnapshot {
+  full: boolean;
+  values: WorkspaceEntry[];
+}
+
+export interface WorkspaceEntry {
+  name: string;
+  className: string;
+  dtype?: string;
+  shape: number[];
+  isGpu: boolean;
+  sizeBytes?: number;
+  preview?: WorkspacePreview;
+}
+
+export interface WorkspacePreview {
+  values: number[];
+  truncated: boolean;
+}
+
+export interface ProfilingSummary {
+  totalMs: number;
+  cpuMs?: number;
+  gpuMs?: number;
+  kernelCount?: number;
+}
+
+export interface FusionPlanSnapshot {
+  nodes: FusionPlanNode[];
+  edges: FusionPlanEdge[];
+  shaders: FusionPlanShader[];
+  decisions: FusionPlanDecision[];
+}
+
+export interface FusionPlanNode {
+  id: string;
+  kind: string;
+  label: string;
+  shape: number[];
+  residency?: string;
+}
+
+export interface FusionPlanEdge {
+  from: string;
+  to: string;
+  reason?: string;
+}
+
+export interface FusionPlanShader {
+  name: string;
+  stage: string;
+  workgroupSize?: [number, number, number];
+  sourceHash?: string;
+}
+
+export interface FusionPlanDecision {
+  nodeId: string;
+  fused: boolean;
+  reason?: string;
+  thresholds?: string;
 }
 
 export interface SessionStats {
@@ -133,6 +231,8 @@ export interface RunMatSessionHandle {
   clearWorkspace(): void;
   telemetryConsent(): boolean;
   gpuStatus(): GpuStatus;
+  cancelExecution(): void;
+  setInputHandler(handler: InputHandler | null): Promise<void>;
 }
 
 interface NativeInitOptions {
@@ -156,6 +256,8 @@ interface RunMatNativeSession {
   clearWorkspace(): void;
   telemetryConsent(): boolean;
   gpuStatus(): GpuStatus;
+  cancelExecution?: () => void;
+  setInputHandler?: (handler: InputHandler | null) => void;
 }
 
 interface RunMatNativeModule {
@@ -174,6 +276,8 @@ interface RunMatNativeModule {
   clearFigure?: (handle: number | null) => number;
   closeFigure?: (handle: number | null) => number;
   currentAxesInfo?: () => AxesInfo;
+  subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
+  unsubscribeStdout?: (id: number) => void;
 }
 
 let loadPromise: Promise<RunMatNativeModule> | null = null;
@@ -259,6 +363,18 @@ export async function onFigureEvent(listener: FigureEventListener | null): Promi
     throw new Error("The loaded runmat-wasm module does not expose figure events yet.");
   }
   native.onFigureEvent(listener ? (event: FigureEvent) => listener(event) : null);
+}
+
+export async function subscribeStdout(listener: StdoutListener): Promise<number> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "subscribeStdout");
+  return native.subscribeStdout((entry: StdoutEntry) => listener(entry));
+}
+
+export async function unsubscribeStdout(id: number): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "unsubscribeStdout");
+  native.unsubscribeStdout(id);
 }
 
 export async function figure(handle?: number): Promise<number> {
@@ -365,6 +481,19 @@ class WebRunMatSession implements RunMatSessionHandle {
 
   gpuStatus(): GpuStatus {
     return this.native.gpuStatus();
+  }
+
+  cancelExecution(): void {
+    if (typeof this.native.cancelExecution === "function") {
+      this.native.cancelExecution();
+    }
+  }
+
+  async setInputHandler(handler: InputHandler | null): Promise<void> {
+    if (typeof this.native.setInputHandler !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose setInputHandler yet.");
+    }
+    this.native.setInputHandler(handler ? (request: InputRequest) => handler(request) : null);
   }
 }
 

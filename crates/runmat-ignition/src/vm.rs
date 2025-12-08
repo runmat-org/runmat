@@ -1277,6 +1277,12 @@ pub fn interpret_with_vars(
         set_vm_pc(pc);
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
+        if runmat_runtime::interrupt::is_cancelled() {
+            return Err(mex(
+                "MATLAB:runmat:ExecutionCancelled",
+                "Execution cancelled by user",
+            ));
+        }
         #[cfg(feature = "native-accel")]
         if let (Some(plan), Some(graph)) =
             (active_group_plan_clone(), bytecode.accel_graph.as_ref())

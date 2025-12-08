@@ -1,8 +1,10 @@
 use once_cell::sync::OnceCell;
 use runmat_plot::plots::{Figure, LineStyle};
-use std::collections::{hash_map::Entry, HashMap};
+use std::cell::RefCell;
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread_local;
 
 use super::common::default_figure;
 use super::engine::render_figure;
@@ -229,6 +231,10 @@ impl FigureObserverRegistry {
 
 static FIGURE_OBSERVERS: OnceCell<FigureObserverRegistry> = OnceCell::new();
 
+thread_local! {
+    static RECENT_FIGURES: RefCell<HashSet<FigureHandle>> = RefCell::new(HashSet::new());
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct FigureAxesState {
     pub handle: FigureHandle,
@@ -281,6 +287,7 @@ pub fn install_figure_observer(observer: Arc<FigureObserver>) -> Result<(), Stri
 }
 
 fn notify_event<'a>(view: FigureEventView<'a>) {
+    note_recent_figure(view.handle);
     if let Some(registry) = FIGURE_OBSERVERS.get() {
         if registry.is_empty() {
             return;
@@ -303,6 +310,20 @@ fn notify_without_figure(handle: FigureHandle, kind: FigureEventKind) {
         kind,
         figure: None,
     });
+}
+
+fn note_recent_figure(handle: FigureHandle) {
+    RECENT_FIGURES.with(|set| {
+        set.borrow_mut().insert(handle);
+    });
+}
+
+pub fn reset_recent_figures() {
+    RECENT_FIGURES.with(|set| set.borrow_mut().clear());
+}
+
+pub fn take_recent_figures() -> Vec<FigureHandle> {
+    RECENT_FIGURES.with(|set| set.borrow_mut().drain().collect())
 }
 
 pub fn select_figure(handle: FigureHandle) {

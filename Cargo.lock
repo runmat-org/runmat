@@ -5697,6 +5697,7 @@ dependencies = [
  "anyhow",
  "log",
  "runmat-accelerate",
+ "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",

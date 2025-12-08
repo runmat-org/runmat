@@ -77,6 +77,13 @@ if (gpu.adapter) {
 }
 ```
 
+## Execution streaming & interaction
+
+- `subscribeStdout(listener)` / `unsubscribeStdout(id)` stream stdout/stderr events as they are emitted so hosts can drive an xterm pane without waiting for `execute()` to resolve. Every `ExecuteResult` also includes the buffered `stdout` array for easy logging or replay.
+- `ExecuteResult.warnings` now exposes structured `{ identifier, message }` entries pulled from MATLAB's warning store, and `stdinEvents` captures every prompt/response emitted during the run for transcript panes.
+- Call `session.cancelExecution()` to cooperatively interrupt a long-running script (e.g., when users press the stop button). The runtime raises `MATLAB:runmat:ExecutionCancelled`, matching desktop builds.
+- `session.setInputHandler(handler)` registers a synchronous callback for MATLAB's `input`/`pause` prompts. Handlers receive `{ kind: "line" | "keyPress", prompt, echo }` and should return a string for line prompts (or `undefined` to treat it as empty input). Pass `null` to restore the default behaviour (which raises on wasm targets because stdin is unavailable).
+
 ## Plotting surfaces
 
 RunMat plotting now renders directly into a WebGPU-backed `<canvas>` using the same renderer as the native desktop build. Provide a canvas during initialization:

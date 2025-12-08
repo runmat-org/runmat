@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::io::filetext::registry::{self, FileInfo};
+use crate::console::{record_console_output, ConsoleStream};
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
@@ -445,13 +446,17 @@ impl OutputTarget {
                 let mut stdout = io::stdout().lock();
                 stdout
                     .write_all(bytes)
-                    .map_err(|err| format!("fprintf: failed to write to stdout ({err})"))
+                    .map_err(|err| format!("fprintf: failed to write to stdout ({err})"))?;
+                record_console_chunk(ConsoleStream::Stdout, bytes);
+                Ok(())
             }
             OutputTarget::Stderr => {
                 let mut stderr = io::stderr().lock();
                 stderr
                     .write_all(bytes)
-                    .map_err(|err| format!("fprintf: failed to write to stderr ({err})"))
+                    .map_err(|err| format!("fprintf: failed to write to stderr ({err})"))?;
+                record_console_chunk(ConsoleStream::Stderr, bytes);
+                Ok(())
             }
             OutputTarget::File { handle, .. } => {
                 let mut guard = handle.lock().map_err(|_| {
@@ -463,6 +468,14 @@ impl OutputTarget {
             }
         }
     }
+}
+
+fn record_console_chunk(stream: ConsoleStream, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    let text = String::from_utf8_lossy(bytes).to_string();
+    record_console_output(stream, text);
 }
 
 fn gather_value(value: &Value) -> Result<Value, String> {

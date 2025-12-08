@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::char_row_to_string;
+use crate::console::{record_console_output, ConsoleStream};
 #[cfg(feature = "doc_export")]
 use crate::register_builtin_doc_text;
 use crate::{gather_if_needed, register_builtin_fusion_spec, register_builtin_gpu_spec};
@@ -248,10 +249,12 @@ fn disp_builtin(value: Value, rest: Vec<Value>) -> Result<Value, String> {
     let mut stdout = io::stdout().lock();
     if lines.is_empty() {
         writeln!(&mut stdout).map_err(|err| format!("disp: failed to write to stdout ({err})"))?;
+        record_console_output(ConsoleStream::Stdout, "");
     } else {
         for line in lines {
             writeln!(&mut stdout, "{line}")
                 .map_err(|err| format!("disp: failed to write to stdout ({err})"))?;
+            record_console_output(ConsoleStream::Stdout, line.as_str());
         }
     }
 
